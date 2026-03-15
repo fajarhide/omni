@@ -1,8 +1,8 @@
-# Installing OMNI 🌌
+# Installing OMNI
 
 OMNI is designed to be installed locally and integrated into your MCP environment.
 
-## 🚀 One-Line Installation (Universal)
+## One-Line Installation (Universal)
 
 If you have **Zig 0.15.2** and **Node.js 18+** installed, you can set up OMNI in one step:
 
@@ -18,7 +18,7 @@ Install OMNI via Homebrew:
 brew install fajarhide/tap/omni
 ```
 
-## 🛠 Manual Installation
+## Manual Installation
 
 If you prefer to install manually:
 
@@ -29,10 +29,9 @@ If you prefer to install manually:
    ```
 
 2. **Compile OMNI**:
-   OMNI uses the standard Zig build system.
+   OMNI uses the standard Zig build system. Build native CLI + Wasm Edge.
    ```bash
-   # Build native CLI + Wasm Edge
-   zig build -Doptimize=ReleaseFast -p .
+   zig build -Doptimize=ReleaseFast -p 
    ```
 
 3. **Verify via Native CLI**:
@@ -41,7 +40,7 @@ If you prefer to install manually:
    ./bin/omni setup
    ```
 
-## 🔌 Integration with AI Agents
+## Integration with AI Agents
 
 OMNI is compatible with any tool that supports the **Model Context Protocol (MCP)**.
 
@@ -66,7 +65,7 @@ claude config add mcp omni omni-mcp
 ### Generic MCP Agents
 For any other agent, ensure the `node` environment is available and point the transport to OMNI's entry point: `/path/to/omni/dist/index.js`.
 
-## 📦 Dependencies
+## Dependencies
 
 - **Zig 0.15.2+**: Required for the high-performance core.
 - **Node.js 18+**: Required for the MCP gateway.
