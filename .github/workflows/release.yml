@@ -54,8 +54,8 @@ jobs:
       - name: Package Release
         run: |
           mkdir -p release
-          cp core/omni release/omni-${{ matrix.target }}
-          cp core/omni-wasm.wasm release/
+          cp bin/omni release/omni-${{ matrix.target }}
+          cp bin/omni-wasm.wasm release/
 
           tar -czf omni-${{ matrix.target }}.tar.gz -C release .
 
