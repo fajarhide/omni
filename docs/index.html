@@ -313,18 +313,18 @@ Step 15/15 : CMD ["node", "server.js"]
       <div class="integration-cards reveal-children">
         <div class="integration-card">
           <h3>🔌 Claude Code / Claude CLI</h3>
-          <p>Register OMNI as an MCP server with a single command. Claude will automatically use OMNI's distillation tools.</p>
+          <p>Register OMNI as an MCP server automatically. This command detects your absolute path and registers the server for you.</p>
           <div class="code-block">
-            <button class="code-copy" data-copy="claude mcp add-json omni '{&quot;type&quot;:&quot;stdio&quot;,&quot;command&quot;:&quot;node&quot;,&quot;args&quot;:[&quot;$HOME/.omni/dist/index.js&quot;]}'">Copy</button>
-            claude mcp add-json omni '{"type":"stdio","command":"node","args":["$HOME/.omni/dist/index.js"]}'
+            <button class="code-copy" data-copy='omni generate claude-code'>Copy</button>
+            omni generate claude-code
           </div>
         </div>
         <div class="integration-card">
           <h3>🤖 Antigravity (Google)</h3>
-          <p>Add OMNI to your Antigravity MCP config. Paste this into <code>~/.gemini/antigravity/mcp_config.json</code>:</p>
+          <p>Fully automated setup. Just run the `omni` CLI, and it will safely patch your `mcp_config.json` without deleting other servers.</p>
           <div class="code-block">
-            <button class="code-copy" data-copy='{"mcpServers":{"omni":{"command":"node","args":["$HOME/.omni/dist/index.js"]}}}'>Copy</button>
-            {"mcpServers":{"omni":{"command":"node","args":["$HOME/.omni/dist/index.js"]}}}
+            <button class="code-copy" data-copy='omni generate antigravity'>Copy</button>
+            omni generate antigravity
           </div>
         </div>
         <div class="integration-card">

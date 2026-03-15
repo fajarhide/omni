@@ -180,55 +180,144 @@ fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const
 
 fn handleGenerate(agent: []const u8) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
+    
+    // Get absolute home path for Claude and Antigravity
+    const home = std.posix.getenv("HOME") orelse {
+        try std.fs.File.stderr().deprecatedWriter().print("Error: HOME environment variable not found.\n", .{});
+        return;
+    };
+    
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    
+    const absolute_omni_path = try std.fmt.allocPrint(alloc, "{s}/.omni/dist/index.js", .{home});
+
     if (std.mem.eql(u8, agent, "claude-code")) {
         try stdout.print(
             \\# ─── OMNI MCP Config for Claude Code ───
             \\#
-            \\# Run this command to register OMNI as an MCP server:
+            \\# Registering OMNI as an MCP server with Claude Code...
             \\
-            \\claude mcp add-json omni '{{"type":"stdio","command":"node","args":["$HOME/.omni/dist/index.js"]}}'
+        , .{});
+
+        const command_json = try std.fmt.allocPrint(alloc, "{{\"type\":\"stdio\",\"command\":\"node\",\"args\":[\"{s}\"]}}", .{absolute_omni_path});
+        const argv = [_][]const u8{ "claude", "mcp", "add-json", "omni", command_json };
+        
+        const run_result = std.process.Child.run(.{
+            .allocator = alloc,
+            .argv = &argv,
+        }) catch |err| {
+            try stdout.print("❌ Failed to register with Claude Code: {any}\n", .{err});
+            try stdout.print("\n# Manual fallback command:\nclaude mcp add-json omni '{s}'\n", .{command_json});
+            return;
+        };
+
+        if (run_result.term == .Exited and run_result.term.Exited == 0) {
+            try stdout.print("✅ Successfully registered with Claude Code!\n", .{});
+        } else {
+            try stdout.print("❌ Registration command returned error: {s}\n", .{run_result.stderr});
+            try stdout.print("\n# Manual fallback command:\nclaude mcp add-json omni '{s}'\n", .{command_json});
+        }
+        
+        try stdout.print(
             \\
-            \\# Or if you installed OMNI to a custom path:
-            \\# claude mcp add-json omni '{{"type":"stdio","command":"node","args":["/your/path/to/omni/dist/index.js"]}}'
-            \\#
             \\# Verify:
             \\#   claude mcp list
             \\
         , .{});
     } else if (std.mem.eql(u8, agent, "antigravity")) {
-        try stdout.print(
-            \\# ─── OMNI MCP Config for Antigravity ───
-            \\#
-            \\# Add this to your ~/.gemini/antigravity/mcp_config.json:
-            \\
-            \\{{
-            \\  "mcpServers": {{
-            \\    "omni": {{
-            \\      "command": "node",
-            \\      "args": ["$HOME/.omni/dist/index.js"]
-            \\    }}
-            \\  }}
-            \\}}
-            \\
-            \\# Or if you installed OMNI to a custom path, update the args path accordingly.
-            \\#
-            \\# To apply, restart Antigravity or reload the config.
-            \\
-        , .{});
+        try autoConfigureAntigravity(alloc, home, absolute_omni_path);
     } else {
         try stdout.print(
             \\# ─── OMNI MCP Setup ───
             \\#
             \\# Generate a ready-to-use MCP configuration for your AI agent:
             \\#
-            \\#   omni generate claude-code     → Claude Code / Claude CLI
-            \\#   omni generate antigravity      → Google Antigravity
+            \\#   omni generate claude-code     → Claude Code / Claude CLI (Absolute Path)
+            \\#   omni generate antigravity      → Google Antigravity (Auto-Merge)
             \\#
             \\# Or run the full interactive setup guide:
             \\#   omni setup
             \\
         , .{});
     }
+}
+
+fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute_omni_path: []const u8) !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    const config_path = try std.fmt.allocPrint(alloc, "{s}/.gemini/antigravity/mcp_config.json", .{home});
+    
+    // Ensure parent directories exist
+    if (std.fs.path.dirname(config_path)) |dir| {
+        std.fs.cwd().makePath(dir) catch {};
+    }
+
+    var file_content: []u8 = undefined;
+    var parsed_json: std.json.Parsed(std.json.Value) = undefined;
+    var root_obj: std.json.ObjectMap = undefined;
+    var mcp_servers_obj: std.json.ObjectMap = undefined;
+
+    // Try reading existing config
+    const file_or_err = std.fs.cwd().openFile(config_path, .{});
+    if (file_or_err) |file| {
+        defer file.close();
+        file_content = file.readToEndAlloc(alloc, 1024 * 1024) catch std.fmt.allocPrint(alloc, "{{}}", .{}) catch unreachable;
+        parsed_json = std.json.parseFromSlice(std.json.Value, alloc, file_content, .{}) catch |e| {
+            try stdout.print("❌ Failed to parse existing mcp_config.json: {any}\n", .{e});
+            return;
+        };
+        if (parsed_json.value != .object) {
+            root_obj = std.json.ObjectMap.init(alloc);
+        } else {
+            root_obj = parsed_json.value.object;
+        }
+    } else |_| {
+        root_obj = std.json.ObjectMap.init(alloc);
+    }
+
+    // Get or create "mcpServers"
+    if (root_obj.get("mcpServers")) |mcp_node| {
+        if (mcp_node == .object) {
+            mcp_servers_obj = mcp_node.object;
+        } else {
+            mcp_servers_obj = std.json.ObjectMap.init(alloc);
+        }
+    } else {
+        mcp_servers_obj = std.json.ObjectMap.init(alloc);
+    }
+
+    // Create OMNI server block
+    var omni_obj = std.json.ObjectMap.init(alloc);
+    try omni_obj.put("command", std.json.Value{ .string = "node" });
+    
+    var args_array_val = std.json.Array.init(alloc);
+    try args_array_val.append(std.json.Value{ .string = absolute_omni_path });
+    try omni_obj.put("args", std.json.Value{ .array = args_array_val });
+
+    // Inject into mcpServers and root
+    try mcp_servers_obj.put("omni", std.json.Value{ .object = omni_obj });
+    try root_obj.put("mcpServers", std.json.Value{ .object = mcp_servers_obj });
+
+    // Write back to file
+    const out_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
+    defer out_file.close();
+    
+    var write_buf: [4096]u8 = undefined;
+    var file_writer = out_file.writer(&write_buf);
+    try std.json.Stringify.value(std.json.Value{ .object = root_obj }, .{ .whitespace = .indent_2 }, &file_writer.interface);
+    try file_writer.end();
+
+    try stdout.print(
+        \\# ─── OMNI MCP Config for Antigravity ───
+        \\
+        \\✅ Successfully merged configuration into:
+        \\   {s}
+        \\
+        \\OMNI is now registered as an Antigravity MCP server.
+        \\Please restart Antigravity or reload your configuration to apply changes.
+        \\
+    , .{config_path});
 }
 
 fn handleSetup() !void {

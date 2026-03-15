@@ -60,7 +60,8 @@ OMNI sits between your AI agent and the outside world — silently distilling ch
   ┌──────────────────┐
   │  git diff        │   (noisy, verbose, 600+ tokens)
   │  docker build    │
-  │  npm install     │
+  │  npm install     |
+  |  etc             │
   └────────┬─────────┘
            │ stdin pipe
            ▼
@@ -79,9 +80,9 @@ OMNI sits between your AI agent and the outside world — silently distilling ch
                                        │
                                        ▼
                           ┌────────────────────────┐
-                          │   AI Agent (Claude)     │
-                          │   sees only signal,     │
-                          │   zero noise            │
+                          │   AI Agent (Claude)    │
+                          │   sees only signal,    │
+                          │   zero noise           │
                           └────────────────────────┘
 
 ```
@@ -119,10 +120,11 @@ OMNI is a standard **Model Context Protocol (MCP)** server.
 ### Claude Code & Claude CLI
 The OMNI CLI is for humans, but **`omni-mcp`** is for your AI. It allows Claude or Antigravity to use OMNI's distillation tools automatically.
 
-To register OMNI as an MCP server for Claude Code:
+To register OMNI as an MCP server for Claude Code automatically, run:
 ```bash
-claude mcp add-json omni '{"type":"stdio","command":"node","args":["$HOME/.omni/dist/index.js"]}'
+omni generate claude-code
 ```
+This command will automatically detect your absolute home path and register OMNI with Claude Code.
 
 Verify with:
 ```bash
@@ -130,17 +132,11 @@ claude mcp list
 ```
 
 ### Antigravity (Google)
-Add this to `~/.gemini/antigravity/mcp_config.json`:
-```json
-{
-  "mcpServers": {
-    "omni": {
-      "command": "node",
-      "args": ["$HOME/.omni/dist/index.js"]
-    }
-  }
-}
+Simply run the automatic generator from the terminal:
+```bash
+omni generate antigravity
 ```
+*This command will automatically locate your `~/.gemini/antigravity/mcp_config.json`, safely merge OMNI's configurations into your existing servers without overwriting them, and save the file.*
 
 ### Auto-Generate Config
 Use the CLI to generate ready-to-paste configurations:
