@@ -66,15 +66,21 @@ Verify CLI performance and stability:
 ./bin/omni report
 ```
 
-## 📦 Release
-
-To build the full production distribution (Native + Wasm):
-```bash
-# Production Native CLI (Binary in ./bin/omni)
-zig build -Doptimize=ReleaseFast -p .
-
-# Optimized Wasm Edge (Binary in ./core/omni-wasm.wasm)
-zig build wasm -Doptimize=ReleaseSmall
-```
-
 This will produce a small, optimized `.wasm` binary suitable for edge distribution.
+
+## 🚀 Official Release Workflow
+
+To release a new version of OMNI and update the Homebrew tap:
+
+1.  **Update `CHANGELOG.md`**: Add the new version and its changes.
+2.  **Run the Release Script**:
+    ```bash
+    ./scripts/omni-release.sh 0.2.1
+    ```
+    This script will:
+    - Update the version and SHA256 in `omni.rb`.
+    - Tag and push the current commit.
+    - Fetch the new archive and update the checksum.
+    - Sync the changes to the `homebrew-omni` repository.
+
+3.  **Manual Check**: Verify the release at [GitHub Releases](https://github.com/fajarhide/omni/releases).
