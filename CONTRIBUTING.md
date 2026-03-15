@@ -1,8 +1,8 @@
-# Contributing to OMNI 🌌
+# Contributing to OMNI
 
 We love your contributions! OMNI is built on a mission to make context usage as efficient as possible. Here’s how you can help:
 
-## 🛣 Getting Started
+## Getting Started
 
 1. **Fork the repo** and clone it locally.
 2. **Install dependencies**:
@@ -12,7 +12,7 @@ We love your contributions! OMNI is built on a mission to make context usage as 
    - `core/src/filters/`: Join the mission by adding specialized semantic filters.
    - `src/`: Refine the MCP server or caching logic.
 
-## 🤝 Contribution Workflow
+## Contribution Workflow
 
 1. **Bug Reports & Feature Requests**: Open an issue describing the context and the problem/idea.
 2. **Pull Requests**:
@@ -21,12 +21,12 @@ We love your contributions! OMNI is built on a mission to make context usage as 
    - Write tests for new filters and run `zig build test`.
    - Update `CHANGELOG.md` with your changes.
 
-## 🏛 Architecture
+## Development Core
 
 Before modifying the core, please read:
 - [DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
-## ⚖️ Code of Conduct
+## Code of Conduct
 
 Be kind, respect the semantic integrity of the project, and help us build the most efficient engine for the AI era.
 
