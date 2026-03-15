@@ -16,20 +16,35 @@ pub const BuildFilter = struct {
     }
 
     fn process(_: *anyopaque, allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-        // Simple summarizer: Keep only lines with errors or warnings
         var it = std.mem.splitScalar(u8, input, '\n');
         var result = std.ArrayList(u8).empty;
         errdefer result.deinit(allocator);
 
+        var shown_context: bool = false;
+
         while (it.next()) |line| {
-            if (std.mem.indexOf(u8, line, "error:") != null or std.mem.indexOf(u8, line, "warning:") != null) {
-                try result.appendSlice(allocator, line);
+            const t = std.mem.trim(u8, line, " \t\r");
+            if (t.len == 0) continue;
+
+            const is_issue = std.mem.indexOf(u8, t, "error:") != null or 
+                             std.mem.indexOf(u8, t, "warning:") != null or
+                             std.mem.indexOf(u8, t, "Error:") != null;
+
+            const is_important = std.mem.indexOf(u8, t, "succeeded") != null or
+                                std.mem.indexOf(u8, t, "failed") != null or
+                                std.mem.indexOf(u8, t, "Build Summary") != null;
+
+            if (is_issue or is_important) {
+                try result.appendSlice(allocator, t);
                 try result.append(allocator, '\n');
+                shown_context = true;
+            } else if (std.mem.startsWith(u8, t, "Compiling") or std.mem.startsWith(u8, t, "Building")) {
+                // Ignore individual file compilation lines
             }
         }
 
-        if (result.items.len == 0) {
-            return try allocator.dupe(u8, "[build log with noise omitted]");
+        if (!shown_context) {
+            return try allocator.dupe(u8, "[Build output distilled]");
         }
 
         return try result.toOwnedSlice(allocator);

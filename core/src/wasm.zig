@@ -5,6 +5,7 @@ const GitFilter = @import("filters/git.zig").GitFilter;
 const BuildFilter = @import("filters/build.zig").BuildFilter;
 const DockerFilter = @import("filters/docker.zig").DockerFilter;
 const SqlFilter = @import("filters/sql.zig").SqlFilter;
+const NodeFilter = @import("filters/node.zig").NodeFilter;
 const CustomFilter = @import("filters/custom.zig").CustomFilter;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -28,6 +29,7 @@ export fn init_engine() bool {
     filters.append(allocator, BuildFilter.filter()) catch return false;
     filters.append(allocator, DockerFilter.filter()) catch return false;
     filters.append(allocator, SqlFilter.filter()) catch return false;
+    filters.append(allocator, NodeFilter.filter()) catch return false;
 
     // Optional: Load custom rules if config exists in Wasm environment (might need pre-opened file)
     if (CustomFilter.init(allocator, "omni_config.json")) |custom| {

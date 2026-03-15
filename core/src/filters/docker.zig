@@ -21,19 +21,28 @@ pub const DockerFilter = struct {
         errdefer result.deinit(allocator);
 
         while (it.next()) |line| {
+            const t = std.mem.trim(u8, line, " \t\r");
+            if (t.len == 0) continue;
+
             // Keep Step definitions, CACHED indicators, and actual errors
-            if (std.mem.indexOf(u8, line, "Step ") != null or 
-                std.mem.indexOf(u8, line, "CACHED") != null or
-                std.mem.indexOf(u8, line, "ERROR") != null or
-                std.mem.indexOf(u8, line, "failed") != null) 
+            if (std.mem.startsWith(u8, t, "Step ") or 
+                std.mem.indexOf(u8, t, "CACHED") != null or
+                std.mem.indexOf(u8, t, "ERROR") != null or
+                std.mem.indexOf(u8, t, "failed") != null or
+                std.mem.startsWith(u8, t, "Successfully built") or
+                std.mem.startsWith(u8, t, "Successfully tagged")) 
             {
-                try result.appendSlice(allocator, line);
+                try result.appendSlice(allocator, t);
+                try result.append(allocator, '\n');
+            } else if (std.mem.startsWith(u8, t, " ---> ")) {
+                // Keep intermediate layer IDs as they are short and provide context
+                try result.appendSlice(allocator, t);
                 try result.append(allocator, '\n');
             }
         }
 
         if (result.items.len == 0) {
-            return try allocator.dupe(u8, "[Docker log noise omitted]");
+            return try allocator.dupe(u8, "[Docker noise distilled]");
         }
 
         return try result.toOwnedSlice(allocator);

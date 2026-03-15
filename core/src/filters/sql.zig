@@ -29,13 +29,16 @@ pub const SqlFilter = struct {
             if (word.len == 0) continue;
             
             if (std.mem.startsWith(u8, word, "--")) {
-                // Skip the rest of the line (this simple splitter doesn't handle newlines well, 
-                // but we can refine it). For now, let's just do basic whitespace minification.
-                continue;
+                // Ignore the rest of the input for this line-based distillation
+                break;
             }
 
             if (std.mem.startsWith(u8, word, "/*")) {
                 in_comment = true;
+                if (std.mem.endsWith(u8, word, "*/")) {
+                    in_comment = false;
+                    continue;
+                }
             }
             
             if (!in_comment) {

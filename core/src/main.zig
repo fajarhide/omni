@@ -6,6 +6,7 @@ const GitFilter = @import("filters/git.zig").GitFilter;
 const BuildFilter = @import("filters/build.zig").BuildFilter;
 const DockerFilter = @import("filters/docker.zig").DockerFilter;
 const SqlFilter = @import("filters/sql.zig").SqlFilter;
+const NodeFilter = @import("filters/node.zig").NodeFilter;
 const CustomFilter = @import("filters/custom.zig").CustomFilter;
 
 pub fn main() !void {
@@ -21,6 +22,7 @@ pub fn main() !void {
     try filters.append(allocator, BuildFilter.filter());
     try filters.append(allocator, DockerFilter.filter());
     try filters.append(allocator, SqlFilter.filter());
+    try filters.append(allocator, NodeFilter.filter());
 
     // Load Custom Rules
     var custom_filter_to_deinit: ?*CustomFilter = null;
@@ -137,7 +139,7 @@ fn handleReport(allocator: std.mem.Allocator, filters: []const Filter) !void {
     // 1. System Status
     try stdout.print("\n\x1b[0;34m\x1b[1m🔧 [1/3] SYSTEM STATUS\x1b[0m\n", .{});
     try stdout.print("  Native Engine:   \x1b[0;32mONLINE\x1b[0m (Zig)\n", .{});
-    try stdout.print("  Active Filters:  {d} (Git, Build, Docker, SQL, Custom)\n", .{filters.len});
+    try stdout.print("  Active Filters:  {d} (Git, Build, Docker, SQL, Node, Custom)\n", .{filters.len});
 
     // 2. Sample Performance
     const sample = "Step 1/5 : FROM node:18\n ---> 1234\nCACHED\nStep 2/5 : RUN npm install\n[DEBUG] trace...\nSuccessfully built";
