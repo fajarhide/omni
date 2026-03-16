@@ -2,7 +2,8 @@
   <img src="logo.png" alt="OMNI - The Semantic Core" width="300" />
 </p>
 
-<h1 align="center">OMNI: The Semantic Core for the Agentic AI</h1>
+
+<h1 align="center">The Semantic Core for the Agentic AI</h1>
 
 <p align="center">
   <a href="https://github.com/fajarhide/omni/actions"><img src="https://github.com/fajarhide/omni/workflows/CI/badge.svg" alt="CI"></a>
