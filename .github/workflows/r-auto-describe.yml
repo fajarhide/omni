@@ -1,0 +1,22 @@
+on:
+  pull_request:
+    types: [synchronize, reopened, labeled]
+
+jobs:
+  describe:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PR Auto Describe
+        uses: salehhashemi1992/pr-auto-describe@main
+        with:
+          github-token: ${{ secrets.TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          openai-model: '${{ secrets.MODEL }}'
+          github-api-base-url: '${{ secrets.API_URL }}'
