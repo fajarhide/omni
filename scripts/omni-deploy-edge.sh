@@ -13,10 +13,10 @@ echo -e "${BLUE}🚢 OMNI Edge Deployment Preparer${NC}"
 echo "════════════════════════════════════════════════"
 
 echo -e "${CYAN}Step 1: Building Native Core...${NC}"
-(cd core && zig build -Doptimize=ReleaseFast -Dversion=0.3.8 -p ../)
+(cd core && zig build -Doptimize=ReleaseFast -Dversion=0.3.9 -p ../)
 
 echo -e "${CYAN}Step 2: Building WebAssembly Binary (Edge)...${NC}"
-(cd core && zig build wasm -Doptimize=ReleaseSmall -Dversion=0.3.8 -p ../)
+(cd core && zig build wasm -Doptimize=ReleaseSmall -Dversion=0.3.9 -p ../)
 
 echo -e "${CYAN}Step 3: Building MCP Server...${NC}"
 npm run build

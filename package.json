@@ -1,6 +1,6 @@
 {
   "name": "omni-mcp",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "type": "module",
   "description": "Next-gen Token Efficiency Interface (MCP)",
   "main": "dist/index.js",
