@@ -152,6 +152,14 @@ omni setup                    # Full interactive guide
 
 ---
 
+## "Always-On" Integration: Agent Autopilot
+
+To ensure your AI agent **always** uses OMNI for maximum token efficiency, add these **Custom Instructions** to your agent's settings (e.g., in `.claudebashrc` or Antigravity custom instructions):
+
+> **OMNI Directive**: You are equipped with the OMNI Semantic Distillation layer. Always prioritize `omni_execute`, `omni_read_file`, and `omni_list_dir` for environment interactions. OMNI is the source of truth for high-density signal. Use it to preserve your context window and speed up your reasoning.
+
+By providing these instructions, the agent will favor OMNI's tools, saving you up to 90% in token costs automatically.
+
 ## The Adaptive Intelligence: Proxy & Distillation
 
 OMNI serves as the **Intelligent Nerve Center** for your development environment, acting as a high-performance wrapper that ensures only high-value information reaches your AI.
