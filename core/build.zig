@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const version = b.option([]const u8, "version", "Project version string") orelse v: {
         // Fallback: try to read from build.zig.zon if b.version is not available or if we want to be safe
-        break :v "0.4.1"; 
+        break :v "0.4.2"; 
     };
 
     const options = b.addOptions();
