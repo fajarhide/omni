@@ -58,24 +58,37 @@ OMNI sits between your AI agent and the outside world — silently distilling ch
 
 ```mermaid
 graph TD
-    subgraph Output ["Your Tool Output"]
-        A["git diff<br/>docker build<br/>npm install<br/>etc"]
+    subgraph Output ["Your Tool Output (Noisy)"]
+        A["git diff / status<br/>docker build / logs<br/>kubectl get pods<br/>aws ec2 describe<br/>terraform plan<br/>npm install / audit<br/>etc"]
     end
 
     subgraph OMNI ["OMNI MCP SERVER"]
         direction TB
         B["LRU Cache<br/>&lt; 1ms hit"]
-        C["Filter Engine (Zig + Wasm)<br/>Git · SQL · Docker · Node"]
-        D["Pure Signal<br/>(30–90% token reduction)"]
+        C["Filter Engine (Zig + Wasm)<br/>Semantic Distillation"]
+        D["Pure Signal + Clean Context<br/>(30–90% token reduction)"]
+        E["Metrics & Density<br/>(Performance Report)"]
         
         B --> C
-        C -->|"Semantic Distill"| D
+        C --> D
+        D --> E
     end
 
     A -->|"stdin pipe"| OMNI
-    D --> E["AI Agent (Claude)<br/>sees only signal,<br/>zero noise"]
+    E -->|"Pure Signal + Clean Context"| F["AI Agent Platform (Claude/Antigravity/Etc)<br/>Zero Noise reasoning"]
 
-    style OMNI fill:#f9f9f9,stroke:#333,stroke-width:2px
+
+    %% Theme-agnostic Professional Styling
+    style OMNI fill:#1d2b3a,stroke:#334155,stroke-width:2px,color:#f8fafc
+    style Output fill:#0f172a,stroke:#1e293b,stroke-width:2px,color:#f8fafc
+    style A fill:#3b82f6,stroke:#60a5fa,color:#fff
+    style B fill:#8b5cf6,stroke:#a78bfa,color:#fff
+    style C fill:#06b6d4,stroke:#22d3ee,color:#fff
+    style D fill:#10b981,stroke:#34d399,color:#fff
+    style E fill:#f59e0b,stroke:#fbbf24,color:#fff
+
+    %% Link Styling (Arrows)
+    linkStyle default stroke:#94a3b8,stroke-width:2px
 ```
 ---
 **No filter match** → passthrough unchanged (zero overhead)
