@@ -19,16 +19,22 @@ jobs:
         with:
           version: 0.15.2
 
+      - name: Check Version Consistency
+        run: make check-version
+
       - name: Build Native Core
         run: |
           cd core
           zig build -Doptimize=ReleaseFast -Dversion=CI-BUILD -p ../
           ../bin/omni --version
 
-      - name: Run Tests
+      - name: Run Native Tests
         run: |
           cd core
           zig build test
+
+      - name: Run Semantic Verification
+        run: make test
 
   zig-wasm:
     name: Zig WASM
