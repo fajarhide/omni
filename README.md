@@ -9,7 +9,7 @@
   <a href="https://github.com/fajarhide/omni/actions"><img src="https://github.com/fajarhide/omni/workflows/CI/badge.svg" alt="CI"></a>
   <a href="https://github.com/fajarhide/omni/releases"><img src="https://img.shields.io/github/v/release/fajarhide/omni" alt="Release"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://www.producthunt.com/products/omni-the-semantic-for-the-agentic-ai?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-omni-the-semantic-for-the-agentic-ai" target="_blank" rel="noopener noreferrer"><img alt="OMNI - The Semantic for the Agentic AI - Eliminating 30–90% of token noise with Zero Semantic Loss.  | Product Hunt" width="82" height="20" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1100894&amp;theme=dark&amp;t=1773800758657"></a>
+  <a href="https://www.producthunt.com/products/omni-the-semantic-for-the-agentic-ai?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-omni-the-semantic-for-the-agentic-ai" target="_blank" rel="noopener noreferrer"><img alt="OMNI - The Semantic for the Agentic AI - Eliminating 30–90% of token noise with Zero Semantic Loss.  | Product Hunt" width="82" height="20" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1100894&amp;theme=light&amp;t=1773800758657"></a>
 </p>
 
 <p align="center">
