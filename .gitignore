@@ -5,6 +5,7 @@ node_modules/
 # --- Build Outputs ---
 dist/
 zig-out/
+core/bin/*
 core/omni
 core/omni-wasm.wasm
 core/*.o

@@ -92,6 +92,6 @@ export fn compress(ptr: [*]u8, len: usize) u64 {
         return @as(u64, err_msg.len) << 32 | @as(u32, @truncate(@intFromPtr(err_msg.ptr)));
     };
 
-    return @as(u64, result.len) << 32 | @as(u32, @truncate(@intFromPtr(result.ptr)));
+    return @as(u64, result.output.len) << 32 | @as(u32, @truncate(@intFromPtr(result.output.ptr)));
 }
 pub fn main() void {}

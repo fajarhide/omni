@@ -9,6 +9,7 @@ const DockerFilter = @import("filters/docker.zig").DockerFilter;
 const SqlFilter = @import("filters/sql.zig").SqlFilter;
 const NodeFilter = @import("filters/node.zig").NodeFilter;
 const CustomFilter = @import("filters/custom.zig").CustomFilter;
+const monitor = @import("monitor.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -59,12 +60,32 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, cmd, "density")) {
             try handleDensity(allocator, filters.items);
             return;
-        } else if (std.mem.eql(u8, cmd, "report")) {
-            var filter_agent: ?[]const u8 = null;
-            if (args.len > 2 and std.mem.startsWith(u8, args[2], "--agent=")) {
-                filter_agent = args[2][8..];
+        } else if (std.mem.eql(u8, cmd, "monitor")) {
+            if (args.len > 2 and (std.mem.eql(u8, args[2], "discover") or std.mem.eql(u8, args[2], "discovery"))) {
+                try monitor.handleDiscover(allocator);
+                return;
             }
-            try handleReport(allocator, filter_agent);
+            var opts = monitor.MonitorOptions{};
+            for (args[2..]) |arg| {
+                if (std.mem.startsWith(u8, arg, "--agent=")) {
+                    opts.filter_agent = arg[8..];
+                } else if (std.mem.eql(u8, arg, "--graph")) {
+                    opts.graph = true;
+                } else if (std.mem.eql(u8, arg, "--history")) {
+                    opts.history = true;
+                } else if (std.mem.eql(u8, arg, "--daily")) {
+                    opts.daily = true;
+                } else if (std.mem.eql(u8, arg, "--weekly")) {
+                    opts.weekly = true;
+                } else if (std.mem.eql(u8, arg, "--monthly")) {
+                    opts.monthly = true;
+                } else if (std.mem.eql(u8, arg, "--all")) {
+                    opts.all = true;
+                } else if (std.mem.eql(u8, arg, "--format=json") or std.mem.eql(u8, arg, "--json")) {
+                    opts.format_json = true;
+                }
+            }
+            try monitor.handleMonitor(allocator, opts);
             return;
         } else if (std.mem.eql(u8, cmd, "bench")) {
             var iterations: usize = 100;
@@ -111,7 +132,7 @@ fn printHelp() !void {
         \\Subcommands:
         \\  distill          Distill input from stdin (default)
         \\  density          Analyze context density gain
-        \\  report           Show unified system & performance report
+        \\  monitor          Show unified system & performance metrics
         \\  bench [N]        Benchmark performance (default 100 iterations)
         \\  generate [type]    Generate configurations (agent, config)
         \\  setup            Show detailed setup and usage instructions
@@ -181,16 +202,16 @@ fn handleDistill(allocator: std.mem.Allocator, filters: []const Filter) !void {
     }
 
     var timer = try std.time.Timer.start();
-    const compressed = try compressor.compress(allocator, input, filters);
+    const result = try compressor.compress(allocator, input, filters);
     const elapsed = timer.read() / std.time.ns_per_ms;
-    defer allocator.free(compressed);
-    try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{compressed});
+    defer allocator.free(result.output);
+    try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{result.output});
     
     // Log metrics for native CLI usage
-    logMetrics(allocator, "CLI", input.len, compressed.len, elapsed) catch {};
+    logMetrics(allocator, "CLI", result.filter_name, input.len, result.output.len, elapsed) catch {};
 }
 
-fn logMetrics(allocator: std.mem.Allocator, agent: []const u8, input_len: usize, output_len: usize, ms: u64) !void {
+fn logMetrics(allocator: std.mem.Allocator, agent: []const u8, filter_name: []const u8, input_len: usize, output_len: usize, ms: u64) !void {
     const home = std.posix.getenv("HOME") orelse return;
     const omni_dir = try std.fmt.allocPrint(allocator, "{s}/.omni", .{home});
     defer allocator.free(omni_dir);
@@ -208,7 +229,7 @@ fn logMetrics(allocator: std.mem.Allocator, agent: []const u8, input_len: usize,
 
     try file.seekFromEnd(0);
     const ts = std.time.timestamp();
-    const line = try std.fmt.allocPrint(allocator, "{d},{s},{d},{d},{d}\n", .{ ts, agent, input_len, output_len, ms });
+    const line = try std.fmt.allocPrint(allocator, "{d},{s},{s},{d},{d},{d}\n", .{ ts, agent, filter_name, input_len, output_len, ms });
     defer allocator.free(line);
     try file.writeAll(line);
 }
@@ -228,15 +249,15 @@ fn handleProxy(allocator: std.mem.Allocator, cmd_args: []const [:0]u8, filters: 
     _ = try child.wait();
 
     if (stdout_data.len > 0) {
-        const distilled = try compressor.compress(allocator, stdout_data, filters);
-        defer allocator.free(distilled);
-        try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{distilled});
+        const result = try compressor.compress(allocator, stdout_data, filters);
+        defer allocator.free(result.output);
+        try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{result.output});
     }
 
     if (stderr_data.len > 0) {
-        const distilled_err = try compressor.compress(allocator, stderr_data, filters);
-        defer allocator.free(distilled_err);
-        try std.fs.File.stderr().deprecatedWriter().print("{s}\n", .{distilled_err});
+        const result = try compressor.compress(allocator, stderr_data, filters);
+        defer allocator.free(result.output);
+        try std.fs.File.stderr().deprecatedWriter().print("{s}\n", .{result.output});
     }
 }
 
@@ -244,184 +265,22 @@ fn handleDensity(allocator: std.mem.Allocator, filters: []const Filter) !void {
     const input = try std.fs.File.stdin().readToEndAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(input);
 
-    const compressed = try compressor.compress(allocator, input, filters);
-    defer allocator.free(compressed);
+    const result = try compressor.compress(allocator, input, filters);
+    defer allocator.free(result.output);
 
     const in_len = @as(f64, @floatFromInt(input.len));
-    const out_len = @as(f64, @floatFromInt(compressed.len));
+    const out_len = @as(f64, @floatFromInt(result.output.len));
     const gain = if (out_len > 0) in_len / out_len else 1.0;
 
     const stdout = std.fs.File.stdout().deprecatedWriter();
     try stdout.print("\n\x1b[0;35m🧠 OMNI Context Density Analysis\x1b[0m\n", .{});
     try stdout.print("════════════════════════════════════════\n", .{});
+    try stdout.print("Filter applied:    {s}\n", .{result.filter_name});
     try stdout.print("Original Context:  {d} units\n", .{input.len});
-    try stdout.print("Distilled Context: {d} units\n", .{compressed.len});
+    try stdout.print("Distilled Context: {d} units\n", .{result.output.len});
     try stdout.print("\x1b[0;32mContext Density Gain: {d:.2}x\x1b[0m\n", .{gain});
 }
 
-fn handleReport(allocator: std.mem.Allocator, filter_agent: ?[]const u8) !void {
-    const stdout = std.fs.File.stdout().deprecatedWriter();
-    
-    // Parse Local Metrics Data
-    const home = std.posix.getenv("HOME") orelse return;
-    const file_path = try std.fmt.allocPrint(allocator, "{s}/.omni/metrics.csv", .{home});
-    defer allocator.free(file_path);
-
-    var daily_map = std.StringHashMap(metrics.Stats).init(allocator);
-    var weekly_map = std.StringHashMap(metrics.Stats).init(allocator);
-    var monthly_map = std.StringHashMap(metrics.Stats).init(allocator);
-    defer daily_map.deinit();
-    defer weekly_map.deinit();
-    defer monthly_map.deinit();
-
-    var global_cmds: usize = 0;
-    var global_in: usize = 0;
-    var global_out: usize = 0;
-    var global_saved: usize = 0;
-    var global_ms: u64 = 0;
-
-    if (std.fs.cwd().openFile(file_path, .{})) |file| {
-        defer file.close();
-        
-        const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch return;
-        defer allocator.free(data);
-
-        var it_lines = std.mem.splitSequence(u8, data, "\n");
-        while (it_lines.next()) |line| {
-            if (line.len == 0) continue;
-            const rec = metrics.parseCsvLine(allocator, line) catch continue;
-            defer allocator.free(rec.agent);
-
-            if (filter_agent != null and !std.mem.eql(u8, rec.agent, filter_agent.?)) {
-                continue;
-            }
-
-            global_cmds += 1;
-            global_in += rec.input_bytes;
-            global_out += rec.output_bytes;
-            if (rec.input_bytes > rec.output_bytes) global_saved += (rec.input_bytes - rec.output_bytes);
-            global_ms += rec.ms;
-
-            const d_lbl = try metrics.toDailyLabel(allocator, rec.timestamp);
-            const w_lbl = try metrics.toWeeklyLabel(allocator, rec.timestamp);
-            const m_lbl = try metrics.toMonthlyLabel(allocator, rec.timestamp);
-            defer allocator.free(d_lbl);
-            defer allocator.free(w_lbl);
-            defer allocator.free(m_lbl);
-
-            var d_res = try daily_map.getOrPut(d_lbl);
-            if (!d_res.found_existing) {
-                d_res.value_ptr.* = .{};
-                d_res.key_ptr.* = try allocator.dupe(u8, d_lbl);
-            }
-            d_res.value_ptr.add(rec);
-
-            var w_res = try weekly_map.getOrPut(w_lbl);
-            if (!w_res.found_existing) {
-                w_res.value_ptr.* = .{};
-                w_res.key_ptr.* = try allocator.dupe(u8, w_lbl);
-            }
-            w_res.value_ptr.add(rec);
-
-            var m_res = try monthly_map.getOrPut(m_lbl);
-            if (!m_res.found_existing) {
-                m_res.value_ptr.* = .{};
-                m_res.key_ptr.* = try allocator.dupe(u8, m_lbl);
-            }
-            m_res.value_ptr.add(rec);
-        }
-    } else |_| {}
-
-    // Function to render a single table
-    const renderTable = struct {
-        fn do(alloc: std.mem.Allocator, map: *std.StringHashMap(metrics.Stats), title: []const u8, out: anytype, rowTitle: []const u8, g_cmds: usize, g_in: usize, g_out: usize, g_s: usize, g_ms: u64) !void {
-            try out.print("\n\x1b[1m📅 {s} ({d} entries)\x1b[0m\n", .{ title, map.count() });
-            try out.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", .{});
-            try out.print("{s:<15} {s:>6} {s:>10} {s:>10} {s:>10} {s:>7} {s:>7}\n", .{ rowTitle, "Cmds", "Input", "Output", "Saved", "Save%", "Time" });
-            try out.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", .{});
-
-            var iter = map.iterator();
-            // Collect and sort
-            var rows: std.ArrayList(metrics.GroupedStats) = .empty;
-            defer rows.deinit(alloc);
-            while (iter.next()) |entry| {
-                try rows.append(alloc, .{ .label = entry.key_ptr.*, .stats = entry.value_ptr.* });
-            }
-
-            // Simple bubble sort for demonstration based on label logic (assume string sort matches chronologically here)
-            for (0..rows.items.len) |i| {
-                for (0..rows.items.len - i - 1) |j| {
-                    if (std.mem.order(u8, rows.items[j].label, rows.items[j + 1].label) == .gt) {
-                        const temp = rows.items[j];
-                        rows.items[j] = rows.items[j + 1];
-                        rows.items[j + 1] = temp;
-                    }
-                }
-            }
-
-            for (rows.items) |row| {
-                const s = row.stats;
-                const in_str = try metrics.formatBytes(alloc, s.input);
-                const out_str = try metrics.formatBytes(alloc, s.output);
-                const s_str = try metrics.formatBytes(alloc, s.saved);
-                const ms_str = try metrics.formatMs(alloc, s.ms, s.cmds);
-                defer alloc.free(in_str);
-                defer alloc.free(out_str);
-                defer alloc.free(s_str);
-                defer alloc.free(ms_str);
-
-                const save_pct = if (s.input > 0)
-                    (@as(f64, @floatFromInt(s.saved)) / @as(f64, @floatFromInt(s.input))) * 100.0
-                else
-                    0.0;
-
-                try out.print("{s:<15} {d:>6} {s:>10} {s:>10} {s:>10} {d:>5.1}% {s:>7}\n", .{
-                    row.label, s.cmds, in_str, out_str, s_str, save_pct, ms_str,
-                });
-            }
-
-            try out.print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n", .{});
-            
-            const gin_str = try metrics.formatBytes(alloc, g_in);
-            const gout_str = try metrics.formatBytes(alloc, g_out);
-            const gs_str = try metrics.formatBytes(alloc, g_s);
-            const gms_str = try metrics.formatMs(alloc, g_ms, g_cmds);
-            defer alloc.free(gin_str);
-            defer alloc.free(gout_str);
-            defer alloc.free(gs_str);
-            defer alloc.free(gms_str);
-            
-            const g_pct = if (g_in > 0)
-                    (@as(f64, @floatFromInt(g_s)) / @as(f64, @floatFromInt(g_in))) * 100.0
-                else
-                    0.0;
-
-            try out.print("\x1b[1m{s:<15} {d:>6} {s:>10} {s:>10} {s:>10} {d:>5.1}% {s:>7}\x1b[0m\n", .{
-                "TOTAL", g_cmds, gin_str, gout_str, gs_str, g_pct, gms_str,
-            });
-        }
-    }.do;
-
-    try stdout.print("\n\x1b[0;35m\x1b[1mOMNI Local Metrics Report\x1b[0m\n", .{});
-    if (filter_agent) |ag| {
-        try stdout.print("Filtering by Agent: \x1b[0;32m{s}\x1b[0m\n", .{ag});
-    } else {
-        try stdout.print("Aggregate across all agents and CLI usages\n", .{});
-    }
-
-    try renderTable(allocator, &daily_map, "Daily Breakdown", stdout, "Date", global_cmds, global_in, global_out, global_saved, global_ms);
-    try renderTable(allocator, &weekly_map, "Weekly Breakdown", stdout, "Week", global_cmds, global_in, global_out, global_saved, global_ms);
-    try renderTable(allocator, &monthly_map, "Monthly Breakdown", stdout, "Month", global_cmds, global_in, global_out, global_saved, global_ms);
-    try stdout.print("\n", .{});
-
-    // Cleanup keys
-    var it = daily_map.keyIterator();
-    while (it.next()) |k| allocator.free(k.*);
-    var wit = weekly_map.keyIterator();
-    while (wit.next()) |k| allocator.free(k.*);
-    var mit = monthly_map.keyIterator();
-    while (mit.next()) |k| allocator.free(k.*);
-}
 
 fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const Filter) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
@@ -433,7 +292,7 @@ fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const
     var timer = try std.time.Timer.start();
     for (0..iterations) |_| {
         const res = try compressor.compress(allocator, sample, filters);
-        allocator.free(res);
+        allocator.free(res.output);
     }
     const elapsed = timer.read();
     
@@ -721,7 +580,7 @@ fn handleSetup() !void {
         \\
         \\📍 Step 1: Verify Installation
         \\   omni --version              # Should print OMNI Core vX.X.X
-        \\   omni report                 # Check engine status
+        \\   omni monitor                # Check engine status
         \\
         \\📍 Step 2: Choose Your Agent
         \\

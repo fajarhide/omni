@@ -6,6 +6,7 @@ const std = @import("std");
 pub const Record = struct {
     timestamp: i64,
     agent: []const u8,
+    filter_name: []const u8,
     input_bytes: usize,
     output_bytes: usize,
     ms: u64,
@@ -39,13 +40,28 @@ pub fn parseCsvLine(allocator: std.mem.Allocator, line: []const u8) !Record {
     
     const ts_str = it.next() orelse return error.InvalidFormat;
     const agent_str = it.next() orelse return error.InvalidFormat;
-    const in_str = it.next() orelse return error.InvalidFormat;
+    const filter_str = it.next() orelse "unknown"; // Fallback for old metrics
+    
+    // For old metrics where filter_name is missing, the third part might be input_bytes
+    // So we need to handle potential legacy formats gracefully.
+    // If filter_str.len > 0 and it parses to an integer, it's an old format.
+    var in_str: []const u8 = undefined;
+    var actual_filter: []const u8 = filter_str;
+    
+    if (std.fmt.parseInt(usize, filter_str, 10)) |_| {
+        actual_filter = "unknown";
+        in_str = filter_str;
+    } else |_| {
+        in_str = it.next() orelse return error.InvalidFormat;
+    }
+
     const out_str = it.next() orelse return error.InvalidFormat;
     const ms_str = it.next() orelse return error.InvalidFormat;
 
     return Record{
         .timestamp = try std.fmt.parseInt(i64, ts_str, 10),
         .agent = try allocator.dupe(u8, agent_str),
+        .filter_name = try allocator.dupe(u8, actual_filter),
         .input_bytes = try std.fmt.parseInt(usize, in_str, 10),
         .output_bytes = try std.fmt.parseInt(usize, out_str, 10),
         .ms = try std.fmt.parseInt(u64, ms_str, 10),
@@ -105,31 +121,27 @@ pub fn toMonthlyLabel(allocator: std.mem.Allocator, ts: i64) ![]u8 {
     });
 }
 
-// Returns the starting day of the week (Monday)
+// Returns "MM-DD ~ MM-DD" week range (Monday to Sunday)
 pub fn toWeeklyLabel(allocator: std.mem.Allocator, ts: i64) ![]u8 {
     const epoch_seconds = @as(u64, @intCast(ts));
     const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_seconds };
     const day = epoch.getEpochDay();
-    
-    // 1970-01-01 was Thursday (day 3 if Mon=0)
-    // Calculate days since a known Monday
-    const days_since_epoch = day.day;
-    const day_of_week = (days_since_epoch + 3) % 7; // 0=Mon, 6=Sun
-    
-    const start_of_week_days = days_since_epoch - day_of_week;
-    const end_of_week_days = start_of_week_days + 6;
-    
-    const start_ep: std.time.epoch.EpochDay = .{ .day = start_of_week_days };
-    const start_yd = start_ep.calculateYearDay();
-    const start_md = start_yd.calculateMonthDay();
-    const end_ep: std.time.epoch.EpochDay = .{ .day = end_of_week_days };
-    const end_yd = end_ep.calculateYearDay();
-    const end_md = end_yd.calculateMonthDay();
-    
-    return std.fmt.allocPrint(allocator, "{d:0>2}-{d:0>2} -> {d:0>2}-{d:0>2}", .{
-        start_md.month.numeric(),
-        start_md.day_index + 1,
-        end_md.month.numeric(),
-        end_md.day_index + 1,
+
+    // 1970-01-01 was Thursday. day_of_week: 0=Mon..6=Sun
+    const dow = (day.day + 3) % 7;
+    const monday_day = day.day - dow;
+    const sunday_day = monday_day + 6;
+
+    const mon_epoch: std.time.epoch.EpochDay = .{ .day = monday_day };
+    const mon_yd = mon_epoch.calculateYearDay();
+    const mon_md = mon_yd.calculateMonthDay();
+
+    const sun_epoch: std.time.epoch.EpochDay = .{ .day = sunday_day };
+    const sun_yd = sun_epoch.calculateYearDay();
+    const sun_md = sun_yd.calculateMonthDay();
+
+    return std.fmt.allocPrint(allocator, "{d:0>2}-{d:0>2} ~ {d:0>2}-{d:0>2}", .{
+        mon_md.month.numeric(), mon_md.day_index + 1,
+        sun_md.month.numeric(), sun_md.day_index + 1,
     });
 }
