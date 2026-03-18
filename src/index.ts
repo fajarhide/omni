@@ -345,6 +345,53 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["template"],
         },
+      },
+      {
+        name: "Bash",
+        description: "[OMNI AUTOPILOT] Execute a shell command. Automatically distills output to save massive tokens. (Replaces Claude's default Bash tool)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: { type: "string" }
+          },
+          required: ["command"],
+        },
+      },
+      {
+        name: "ReadFile",
+        description: "[OMNI AUTOPILOT] Read a local file and automatically distill its contents through OMNI. (Replaces Claude's default ReadFile tool)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            file_path: { type: "string" }
+          },
+          required: ["file_path"],
+        },
+      },
+      {
+        name: "run_command",
+        description: "[OMNI AUTOPILOT] Execute a terminal command. Automatically distills output to save huge tokens. (Replaces Antigravity's default run_command tool)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            CommandLine: { type: "string" },
+            Cwd: { type: "string" }
+          },
+          required: ["CommandLine"],
+        },
+      },
+      {
+        name: "view_file",
+        description: "[OMNI AUTOPILOT] View the contents of a file and compress it via OMNI. (Replaces Antigravity's default view_file tool)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            AbsolutePath: { type: "string" },
+            StartLine: { type: "number" },
+            EndLine: { type: "number" }
+          },
+          required: ["AbsolutePath"],
+        },
       }
     ],
   };
@@ -551,6 +598,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: `Template '${templateName}' applied successfully to ${targetPath}.` }] };
         } catch (e: any) {
           return { content: [{ type: "text", text: `Error applying template: ${e.message}` }], isError: true };
+        }
+      }
+
+      // --- OMNI AUTOPILOT ALIASES ---
+      // Claude Native Aliases
+      case "Bash": {
+        const command = (request.params.arguments as any).command;
+        let resultOutput = "";
+        try {
+          const { stdout, stderr } = await execAsync(command);
+          resultOutput = String(stdout) + (stderr ? "\nSTDERR:\n" + String(stderr) : "");
+        } catch (e: any) {
+          resultOutput = String(e.stdout || "") + (e.stderr ? "\nSTDERR:\n" + String(e.stderr) : "") + `\nExit code: ${e.code}`;
+        }
+        const distilled = await distillText(resultOutput);
+        return { content: [{ type: "text", text: distilled }] };
+      }
+
+      case "ReadFile": {
+        const filePath = (request.params.arguments as any).file_path;
+        try {
+          const rawContent = await fs.promises.readFile(filePath, "utf-8");
+          const distilled = await distillText(rawContent);
+          return { content: [{ type: "text", text: distilled }] };
+        } catch (e: any) {
+           return { content: [{ type: "text", text: `Error reading file: ${e.message}` }], isError: true };
+        }
+      }
+
+      // Antigravity Native Aliases
+      case "run_command": {
+        const args = request.params.arguments as any;
+        const command = args.CommandLine;
+        const opts = args.Cwd ? { cwd: args.Cwd } : {};
+        let resultOutput = "";
+        try {
+          const { stdout, stderr } = await execAsync(command, opts);
+          resultOutput = String(stdout) + (stderr ? "\nSTDERR:\n" + String(stderr) : "");
+        } catch (e: any) {
+          resultOutput = String(e.stdout || "") + (e.stderr ? "\nSTDERR:\n" + String(e.stderr) : "") + `\nExit code: ${e.code}`;
+        }
+        const distilled = await distillText(resultOutput);
+        return { content: [{ type: "text", text: distilled }] };
+      }
+
+      case "view_file": {
+        const args = request.params.arguments as any;
+        const filePath = args.AbsolutePath;
+        const startLine = args.StartLine ? Math.max(1, args.StartLine) : 1;
+        const endLine = args.EndLine ? Math.max(startLine, args.EndLine) : Infinity;
+
+        try {
+          const rawContent = await fs.promises.readFile(filePath, "utf-8");
+          const lines = rawContent.split("\n");
+          const targetLines = lines.slice(startLine - 1, endLine === Infinity ? undefined : endLine);
+          let chunk = targetLines.join("\n");
+          if (startLine > 1 || endLine < lines.length) {
+             chunk = `[Showing lines ${startLine}-${Math.min(endLine, lines.length)} of ${filePath}]\n${chunk}`;
+          }
+          const distilled = await distillText(chunk);
+          return { content: [{ type: "text", text: distilled }] };
+        } catch (e: any) {
+           return { content: [{ type: "text", text: `Error reading file: ${e.message}` }], isError: true };
         }
       }
 
