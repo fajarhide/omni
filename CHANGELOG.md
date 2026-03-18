@@ -8,19 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.2] - 2026-03-18
 
 ### Added
-- **Custom DSL Rules**: Activated and fully integrated custom token-reduction DSL rules in the main semantic engine.
+- **`omni uninstall`**: Clean removal of `~/.omni` directory and automatic cleanup of MCP configs from Antigravity, Claude Code CLI, and Claude Desktop.
+- **Custom DSL Rules**: Activated and fully integrated custom token-reduction DSL rules configurable via `omni_config.json`.
+- **Semantic Confidence Scoring**: Dynamic compression strategies based on filter confidence.
+- **Agent Autopilot**: Dedicated UI and documentation to guide AI agent integration.
+- **AI PR Describer**: Added `.github/workflows/ai-pr-describer.yml` for automated pull request descriptions.
 
 ### Fixed
 - **DSL Engine Stability**: Fixed a critical `use-after-free` segmentation fault in the JSON config parser by explicitly allocating memory for config string slices.
 - **Filter Precedence**: Ensured user-defined rules from `omni_config.json` correctly take priority over built-in internal core filters.
 - **CLI Output Cleanliness**: Removed stray debug prints in the compressor pipeline.
 
-## [0.3.9] - 2026-03-16
+## [0.4.1] - 2026-03-17
+
+### Added
+- **`omni examples`**: Display real-world study cases and examples.
+- **Proxy Command (`--`)**: Proxy and distill output from other commands (e.g., `omni -- git log`).
+- **Antigravity Filter**: Integrated filter for Google Antigravity AI agent.
+- **MCP Tools**: Implemented file system exploration and declarative filtering tools.
+
+## [0.4.0] - 2026-03-16
 
 ### Added
 - **`omni update`**: Check for the latest release from GitHub and get smart update instructions (auto-detects Homebrew vs installer).
-- **`omni uninstall`**: Clean removal of `~/.omni` directory and automatic cleanup of MCP configs from Antigravity, Claude Code CLI, and Claude Desktop.
-- **AI PR Describer**: Added `.github/workflows/ai-pr-describer.yml` for automated pull request descriptions.
+- **New Landing Page**: Introduced a redesigned OMNI landing page.
+- **FUNDING**: Added `FUNDING.yml`.
 
 ### Fixed
 - **Homebrew Upgrade Stability**: `omni setup` now uses stable `/opt/omni` paths instead of versioned `/Cellar/omni/X.X.X` paths, preventing broken symlinks after `brew upgrade`.
@@ -30,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Release script**: Now synchronizes **9 locations** (added `core/build.zig` default version).
 - Simplified `.github/pull_request_template.md` to checklist-only format.
+
+## [0.3.9] - 2026-03-16
 
 ## [0.3.8] - 2026-03-16
 
