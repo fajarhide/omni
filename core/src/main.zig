@@ -19,12 +19,6 @@ pub fn main() !void {
     var filters = std.ArrayList(Filter).empty;
     defer filters.deinit(allocator);
 
-    try filters.append(allocator, GitFilter.filter());
-    try filters.append(allocator, BuildFilter.filter());
-    try filters.append(allocator, DockerFilter.filter());
-    try filters.append(allocator, SqlFilter.filter());
-    try filters.append(allocator, NodeFilter.filter());
-
     // Load Custom Rules (Hierarchy: ~/.omni/omni_config.json + ./omni_config.json)
     const custom_filter = try CustomFilter.init(allocator);
     defer custom_filter.deinit();
@@ -42,8 +36,14 @@ pub fn main() !void {
     // 2. Try Local Config (./omni_config.json)
     custom_filter.loadFromFile("omni_config.json") catch {};
 
-    // Add to registry (even if empty, it's safer)
+    // Add CustomFilter first so user rules take precedence over built-ins
     try filters.append(allocator, custom_filter.filter());
+
+    try filters.append(allocator, GitFilter.filter());
+    try filters.append(allocator, BuildFilter.filter());
+    try filters.append(allocator, DockerFilter.filter());
+    try filters.append(allocator, SqlFilter.filter());
+    try filters.append(allocator, NodeFilter.filter());
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);

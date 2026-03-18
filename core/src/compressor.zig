@@ -6,6 +6,7 @@ pub fn compress(allocator: std.mem.Allocator, input: []const u8, filters: []cons
     var max_score: f32 = -1.0;
 
     for (filters) |filter| {
+        // std.debug.print("Checking filter {d}: {s}\n", .{ i, filter.name });
         if (filter.match(input)) {
             const s = filter.score(input);
             if (s > max_score) {

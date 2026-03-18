@@ -1,5 +1,6 @@
 const std = @import("std");
 const Filter = @import("interface.zig").Filter;
+const dsl = @import("dsl_engine.zig");
 
 pub const Action = enum {
     remove,
@@ -14,11 +15,13 @@ pub const Rule = struct {
 
 pub const Config = struct {
     rules: []Rule,
+    dsl_filters: ?[]dsl.DslFilterConfig = null,
 };
 
 pub const CustomFilter = struct {
     allocator: std.mem.Allocator,
     rules: std.ArrayList(Rule),
+    dsl_engines: std.ArrayList(*dsl.DslEngine),
     parsed_configs: std.ArrayList(std.json.Parsed(Config)),
 
     pub fn init(allocator: std.mem.Allocator) !*CustomFilter {
@@ -26,6 +29,7 @@ pub const CustomFilter = struct {
         self.* = .{
             .allocator = allocator,
             .rules = std.ArrayList(Rule).empty,
+            .dsl_engines = std.ArrayList(*dsl.DslEngine).empty,
             .parsed_configs = std.ArrayList(std.json.Parsed(Config)).empty,
         };
         return self;
@@ -42,12 +46,17 @@ pub const CustomFilter = struct {
     }
 
     pub fn loadFromContent(self: *CustomFilter, content: []const u8) !void {
-        const parsed = std.json.parseFromSlice(Config, self.allocator, content, .{ .ignore_unknown_fields = true }) catch return;
+        const parsed = std.json.parseFromSlice(Config, self.allocator, content, .{ .ignore_unknown_fields = true, .allocate = .alloc_always }) catch return;
         errdefer parsed.deinit();
 
         try self.parsed_configs.append(self.allocator, parsed);
         for (parsed.value.rules) |rule| {
             try self.rules.append(self.allocator, rule);
+        }
+
+        if (parsed.value.dsl_filters) |dsl_configs| {
+            const engine = try dsl.DslEngine.init(self.allocator, dsl_configs);
+            try self.dsl_engines.append(self.allocator, engine);
         }
     }
 
@@ -55,6 +64,10 @@ pub const CustomFilter = struct {
         for (self.parsed_configs.items) |*pc| {
             pc.deinit();
         }
+        for (self.dsl_engines.items) |engine| {
+            engine.deinit();
+        }
+        self.dsl_engines.deinit(self.allocator);
         self.parsed_configs.deinit(self.allocator);
         self.rules.deinit(self.allocator);
         self.allocator.destroy(self);
@@ -70,23 +83,30 @@ pub const CustomFilter = struct {
         };
     }
 
-    fn score(_: *anyopaque, _: []const u8) f32 {
-        return 1.0; // User-defined rules are high-signal
-    }
-
-    fn match(ptr: *anyopaque, input: []const u8) bool {
+    pub fn match(ptr: *anyopaque, input: []const u8) bool {
         const self: *CustomFilter = @ptrCast(@alignCast(ptr));
         for (self.rules.items) |rule| {
             if (std.mem.indexOf(u8, input, rule.match) != null) return true;
         }
+        for (self.dsl_engines.items) |engine| {
+            for (engine.filters) |config| {
+                if (std.mem.indexOf(u8, input, config.trigger) != null) return true;
+            }
+        }
         return false;
     }
 
-    fn process(ptr: *anyopaque, allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    pub fn score(ptr: *anyopaque, _: []const u8) f32 {
+        _ = ptr;
+        return 1.0; 
+    }
+
+    pub fn process(ptr: *anyopaque, allocator: std.mem.Allocator, input: []const u8) ![]u8 {
         const self: *CustomFilter = @ptrCast(@alignCast(ptr));
         var current_output = try allocator.dupe(u8, input);
         errdefer allocator.free(current_output);
 
+        // 1. Run Simple Rules (Remove/Mask)
         for (self.rules.items) |rule| {
             if (std.mem.indexOf(u8, current_output, rule.match)) |_| {
                 const next_output = switch (rule.action) {
@@ -97,6 +117,23 @@ pub const CustomFilter = struct {
                 current_output = next_output;
             }
         }
+
+        // 2. Run Semantic DSL Engines
+        var dsl_filters = std.ArrayList(Filter).empty;
+        defer dsl_filters.deinit(allocator);
+
+        for (self.dsl_engines.items) |engine| {
+            try engine.getFilters(&dsl_filters);
+        }
+
+        for (dsl_filters.items) |f| {
+            if (f.matchFn(f.ptr, current_output)) {
+                const next_output = try f.processFn(f.ptr, allocator, current_output);
+                allocator.free(current_output);
+                current_output = next_output;
+            }
+        }
+
         return current_output;
     }
 
