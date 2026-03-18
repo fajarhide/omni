@@ -59,9 +59,17 @@ pub fn main() !void {
             try std.fs.File.stdout().deprecatedWriter().print("OMNI Core {s} (Zig)\n", .{build_options.version});
             return;
         } else if (std.mem.eql(u8, cmd, "density")) {
+            if (args.len > 2 and (std.mem.eql(u8, args[2], "--help") or std.mem.eql(u8, args[2], "-h"))) {
+                try printDensityHelp();
+                return;
+            }
             try handleDensity(allocator, filters.items);
             return;
         } else if (std.mem.eql(u8, cmd, "monitor")) {
+            if (args.len > 2 and (std.mem.eql(u8, args[2], "--help") or std.mem.eql(u8, args[2], "-h"))) {
+                try printMonitorHelp();
+                return;
+            }
             if (args.len > 2 and (std.mem.eql(u8, args[2], "discover") or std.mem.eql(u8, args[2], "discovery"))) {
                 try monitor.handleDiscover(allocator);
                 return;
@@ -91,6 +99,10 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, cmd, "bench")) {
             var iterations: usize = 100;
             if (args.len > 2) {
+                if (std.mem.eql(u8, args[2], "--help") or std.mem.eql(u8, args[2], "-h")) {
+                    try handleBench(allocator, 0, filters.items); // 0 as help sentinel
+                    return;
+                }
                 iterations = std.fmt.parseInt(usize, args[2], 10) catch 100;
             }
             try handleBench(allocator, iterations, filters.items);
@@ -116,6 +128,11 @@ pub fn main() !void {
                 try handleProxy(allocator, args[2..], filters.items);
                 return;
             }
+        } else {
+            const stderr = std.fs.File.stderr().deprecatedWriter();
+            try stderr.print(ui.RED ++ " ⓧ " ++ ui.RESET ++ "Error: Unknown subcommand " ++ ui.BOLD ++ "{s}" ++ ui.RESET ++ "\n", .{cmd});
+            try printHelp();
+            return;
         }
     }
 
@@ -308,6 +325,18 @@ fn handleDensity(allocator: std.mem.Allocator, filters: []const Filter) !void {
 
 fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const Filter) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
+    
+    if (iterations == 0) { // Sentinel for help
+        try ui.printHeader(stdout, "⚡ OMNI BENCHMARK HELP");
+        try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
+        try ui.row(stdout, "  omni bench [iterations]");
+        try ui.row(stdout, "");
+        try ui.row(stdout, "Measures the latency and throughput of the OMNI engine.");
+        try ui.row(stdout, "Example: " ++ ui.CYAN ++ "omni bench 1000" ++ ui.RESET);
+        try ui.printFooter(stdout);
+        return;
+    }
+
     try stdout.print("\n", .{});
     try ui.printHeader(stdout, "⚡ OMNI Performance Benchmark");
     
@@ -370,13 +399,26 @@ fn handleGenerate(agent: []const u8) !void {
     
     const absolute_omni_path = try std.fmt.allocPrint(alloc, "{s}/.omni/dist/index.js", .{home});
 
+    if (std.mem.eql(u8, agent, "--help") or std.mem.eql(u8, agent, "-h")) {
+        try ui.printHeader(stdout, "📦 OMNI GENERATE HELP");
+        try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
+        try ui.row(stdout, "  omni generate [agent|config]");
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Arguments:" ++ ui.RESET);
+        try ui.row(stdout, ui.CYAN ++ "  claude-code " ++ ui.RESET ++ "Auto-register OMNI with Claude Code");
+        try ui.row(stdout, ui.CYAN ++ "  antigravity " ++ ui.RESET ++ "Auto-register OMNI with Antigravity");
+        try ui.row(stdout, ui.CYAN ++ "  config      " ++ ui.RESET ++ "Generate a template omni_config.json");
+        try ui.printFooter(stdout);
+        return;
+    }
+
     if (std.mem.eql(u8, agent, "claude-code")) {
-        try stdout.print(
-            \\# ─── OMNI MCP Config for Claude Code ───
-            \\#
-            \\# Registering OMNI as an MCP server with Claude Code...
-            \\
-        , .{});
+        try stdout.print("\n", .{});
+        try ui.printHeader(stdout, "🤖 OMNI MCP CLAUDE INTEGRATION");
+        try ui.row(stdout, ui.BOLD ++ "Target: " ++ ui.RESET ++ "Claude Code / Claude CLI");
+        try ui.row(stdout, "");
+        try ui.row(stdout, "Registering OMNI as an MCP server...");
+        try ui.row(stdout, "");
 
         const command_json = try std.fmt.allocPrint(alloc, "{{\"type\":\"stdio\",\"command\":\"node\",\"args\":[\"{s}\", \"--agent=claude-code\"]}}", .{absolute_omni_path});
         const argv = [_][]const u8{ "claude", "mcp", "add-json", "omni", command_json };
@@ -391,46 +433,56 @@ fn handleGenerate(agent: []const u8) !void {
         };
 
         if (run_result.term == .Exited and run_result.term.Exited == 0) {
-            try stdout.print("✅ Successfully registered with Claude Code!\n", .{});
+            try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Successfully registered with Claude Code!");
         } else {
-            try stdout.print("❌ Registration command returned error: {s}\n", .{run_result.stderr});
-            try stdout.print("\n# Manual fallback command:\nclaude mcp add-json omni '{s}'\n", .{command_json});
+            try ui.row(stdout, ui.RED ++ " ⓧ " ++ ui.RESET ++ "Failed to register with Claude Code.");
+            const err_msg = try std.fmt.allocPrint(alloc, "Error: {s}", .{run_result.stderr});
+            defer alloc.free(err_msg);
+            if (err_msg.len > 0) try ui.row(stdout, err_msg);
+            try ui.row(stdout, "");
+            try ui.row(stdout, ui.DIM ++ "# Manual fallback command:" ++ ui.RESET);
+            const fb = try std.fmt.allocPrint(alloc, "claude mcp add-json omni '{s}'", .{command_json});
+            defer alloc.free(fb);
+            try ui.row(stdout, fb);
         }
         
-        try stdout.print(
-            \\
-            \\# Verify:
-            \\#   claude mcp list
-            \\
-        , .{});
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "To Verify:" ++ ui.RESET);
+        try ui.row(stdout, "  claude mcp list");
+        try ui.printFooter(stdout);
+        try stdout.print("\n", .{});
     } else if (std.mem.eql(u8, agent, "antigravity")) {
         try autoConfigureAntigravity(alloc, home, absolute_omni_path);
     } else if (std.mem.eql(u8, agent, "config")) {
         try handleGenerateConfig();
     } else {
-        try stdout.print(
-            \\# ─── OMNI MCP Setup ───
-            \\#
-            \\# Generate a ready-to-use MCP configuration for your AI agent:
-            \\#
-            \\#   omni generate claude-code     → Claude Code / Claude CLI (Absolute Path)
-            \\#   omni generate antigravity      → Google Antigravity (Auto-Merge)
-            \\#   omni generate config           → Starter omni_config.json template
-            \\#
-            \\# Or run the full interactive setup guide:
-            \\#   omni setup
-            \\
-        , .{});
+        try stdout.print("\n", .{});
+        try ui.printHeader(stdout, "\xf0\x9f\x93\xa6 OMNI GENERATE");
+        try ui.row(stdout, "Generate a ready-to-use MCP configuration for your AI agent.");
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
+        try ui.row(stdout, "  omni generate [agent|config]");
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Available Targets:" ++ ui.RESET);
+        try ui.row(stdout, ui.CYAN ++ "  claude-code  " ++ ui.RESET ++ "Auto-register with Claude Code / CLI");
+        try ui.row(stdout, ui.CYAN ++ "  antigravity  " ++ ui.RESET ++ "Auto-register with Google Antigravity");
+        try ui.row(stdout, ui.CYAN ++ "  config       " ++ ui.RESET ++ "Generate a template omni_config.json");
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.DIM ++ "Or run the full interactive setup guide: omni setup" ++ ui.RESET);
+        try ui.printFooter(stdout);
+        try stdout.print("\n", .{});
     }
 }
 
 fn handleGenerateConfig() !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
+    try stdout.print("\n", .{});
+    try ui.printHeader(stdout, "\xe2\x9a\x99\xef\xb8\x8f  OMNI CONFIGURATION TEMPLATE");
+    try ui.row(stdout, ui.DIM ++ "Save to ~/.omni/omni_config.json (Global)" ++ ui.RESET);
+    try ui.row(stdout, ui.DIM ++ "or ./omni_config.json (Local, higher priority)" ++ ui.RESET);
+    try ui.row(stdout, "");
     try stdout.print(
         \\{{
-        \\  "//": "OMNI Configuration Template",
-        \\  "//": "Place this in ~/.omni/omni_config.json (Global) or ./omni_config.json (Local)",
-        \\  
         \\  "rules": [
         \\    {{
         \\      "name": "mask-passwords",
@@ -443,7 +495,6 @@ fn handleGenerateConfig() !void {
         \\      "action": "remove"
         \\    }}
         \\  ],
-        \\  
         \\  "dsl_filters": [
         \\    {{
         \\      "name": "git-status",
@@ -458,6 +509,50 @@ fn handleGenerateConfig() !void {
         \\}}
         \\
     , .{});
+    try stdout.print("\n", .{});
+    try ui.row(stdout, ui.DIM ++ "Redirect to file: omni generate config > omni_config.json" ++ ui.RESET);
+    try ui.printFooter(stdout);
+    try stdout.print("\n", .{});
+}
+
+fn printDensityHelp() !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    try ui.printHeader(stdout, "\xf0\x9f\xa7\xa0 OMNI DENSITY HELP");
+    try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
+    try ui.row(stdout, "  omni density < input.txt");
+    try ui.row(stdout, "  cat file.log | omni density");
+    try ui.row(stdout, "");
+    try ui.row(stdout, "Analyzes input from stdin and shows the context density");
+    try ui.row(stdout, "gain — how many tokens OMNI saves.");
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Output Includes:" ++ ui.RESET);
+    try ui.row(stdout, "  " ++ ui.CYAN ++ "\xe2\x97\x8f" ++ ui.RESET ++ " Original vs Distilled size");
+    try ui.row(stdout, "  " ++ ui.CYAN ++ "\xe2\x97\x8f" ++ ui.RESET ++ " Token saving percentage bar");
+    try ui.row(stdout, "  " ++ ui.CYAN ++ "\xe2\x97\x8f" ++ ui.RESET ++ " Density gain multiplier (e.g. 2.5x)");
+    try ui.printFooter(stdout);
+}
+
+fn printMonitorHelp() !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    try ui.printHeader(stdout, "\xf0\x9f\x93\x8a OMNI MONITOR HELP");
+    try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
+    try ui.row(stdout, "  omni monitor [options]");
+    try ui.row(stdout, "");
+    try ui.row(stdout, "Shows unified system & performance metrics.");
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Options:" ++ ui.RESET);
+    try ui.row(stdout, ui.CYAN ++ "  --agent=<name>  " ++ ui.RESET ++ "Filter metrics by agent");
+    try ui.row(stdout, ui.CYAN ++ "  --graph         " ++ ui.RESET ++ "Show ASCII sparkline graphs");
+    try ui.row(stdout, ui.CYAN ++ "  --history       " ++ ui.RESET ++ "Show session history");
+    try ui.row(stdout, ui.CYAN ++ "  --daily         " ++ ui.RESET ++ "Show daily summary");
+    try ui.row(stdout, ui.CYAN ++ "  --weekly        " ++ ui.RESET ++ "Show weekly summary");
+    try ui.row(stdout, ui.CYAN ++ "  --monthly       " ++ ui.RESET ++ "Show monthly summary");
+    try ui.row(stdout, ui.CYAN ++ "  --all           " ++ ui.RESET ++ "Show all time ranges");
+    try ui.row(stdout, ui.CYAN ++ "  --json          " ++ ui.RESET ++ "Output in JSON format");
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Subcommands:" ++ ui.RESET);
+    try ui.row(stdout, ui.CYAN ++ "  discover        " ++ ui.RESET ++ "Discover active agents");
+    try ui.printFooter(stdout);
 }
 
 fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute_omni_path: []const u8) !void {
@@ -516,6 +611,10 @@ fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute
     try mcp_servers_obj.put("omni", std.json.Value{ .object = omni_obj });
     try root_obj.put("mcpServers", std.json.Value{ .object = mcp_servers_obj });
 
+    try ui.printHeader(stdout, "🤖 OMNI MCP ANTIGRAVITY INTEGRATION");
+    try ui.row(stdout, ui.BOLD ++ "Target: " ++ ui.RESET ++ "Google Antigravity");
+    try ui.row(stdout, "");
+    
     // Write back to file
     const out_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
     defer out_file.close();
@@ -525,16 +624,16 @@ fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute
     try std.json.Stringify.value(std.json.Value{ .object = root_obj }, .{ .whitespace = .indent_2 }, &file_writer.interface);
     try file_writer.end();
 
-    try stdout.print(
-        \\# ─── OMNI MCP Config for Antigravity ───
-        \\
-        \\✅ Successfully merged configuration into:
-        \\   {s}
-        \\
-        \\OMNI is now registered as an Antigravity MCP server.
-        \\Please restart Antigravity or reload your configuration to apply changes.
-        \\
-    , .{config_path});
+    try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Successfully merged configuration.");
+    {
+        const l = try std.fmt.allocPrint(alloc, "   Path: " ++ ui.DIM ++ "{s}" ++ ui.RESET, .{config_path});
+        defer alloc.free(l); try ui.row(stdout, l);
+    }
+    try ui.row(stdout, "");
+    try ui.row(stdout, "OMNI is now registered as an Antigravity MCP server.");
+    try ui.row(stdout, ui.CYAN ++ "▸" ++ ui.RESET ++ " Please restart Antigravity to apply changes.");
+    try ui.printFooter(stdout);
+    try stdout.print("\n", .{});
 }
 
 fn handleSetup() !void {
