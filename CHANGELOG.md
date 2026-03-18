@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-03-18
+
+### Added
+- **Custom DSL Rules**: Activated and fully integrated custom token-reduction DSL rules in the main semantic engine.
+
+### Fixed
+- **DSL Engine Stability**: Fixed a critical `use-after-free` segmentation fault in the JSON config parser by explicitly allocating memory for config string slices.
+- **Filter Precedence**: Ensured user-defined rules from `omni_config.json` correctly take priority over built-in internal core filters.
+- **CLI Output Cleanliness**: Removed stray debug prints in the compressor pipeline.
+
 ## [0.3.9] - 2026-03-16
 
 ### Added
