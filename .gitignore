@@ -31,3 +31,4 @@ Thumbs.db
 
 # --- Private Internal ---
 .internal/
+tmp/
