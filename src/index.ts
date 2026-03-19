@@ -198,27 +198,32 @@ async function distillText(text: string): Promise<string> {
   
   if (!inputPtr) throw new Error("Wasm allocation failed");
 
-  const memView = new Uint8Array(memory.buffer);
-  memView.set(inputBytes, inputPtr);
+  let resultPtr = 0;
+  let resultLen = 0;
 
-  // Call compress: returns struct { ptr, len }
-  const resultRaw = exports.compress(inputPtr, inputBytes.length);
-  const resultPtr = Number(BigInt(resultRaw) & 0xFFFFFFFFn);
-  const resultLen = Number(BigInt(resultRaw) >> 32n);
+  try {
+    const memView = new Uint8Array(memory.buffer);
+    memView.set(inputBytes, inputPtr);
 
-  const outputBytes = new Uint8Array(memory.buffer, resultPtr, resultLen);
-  const output = decoder.decode(outputBytes);
+    // Call compress: returns struct { ptr, len }
+    const resultRaw = exports.compress(inputPtr, inputBytes.length);
+    resultPtr = Number(BigInt(resultRaw) & 0xFFFFFFFFn);
+    resultLen = Number(BigInt(resultRaw) >> 32n);
 
-  exports.free(inputPtr, inputBytes.length);
-  exports.free(resultPtr, resultLen);
+    const outputBytes = new Uint8Array(memory.buffer, resultPtr, resultLen);
+    const output = decoder.decode(outputBytes);
 
-  const trimmed = output.trim();
-  cache.set(text, trimmed);
-  
-  const elapsed = performance.now() - startTime;
-  await logMetrics(text.length, trimmed.length, elapsed);
-  
-  return trimmed;
+    const trimmed = output.trim();
+    cache.set(text, trimmed);
+    
+    const elapsed = performance.now() - startTime;
+    await logMetrics(text.length, trimmed.length, elapsed);
+    
+    return trimmed;
+  } finally {
+    exports.free(inputPtr, inputBytes.length);
+    if (resultPtr) exports.free(resultPtr, resultLen);
+  }
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
