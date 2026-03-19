@@ -1,18 +1,11 @@
 ## Checklist
+* [ ] **Build**
+  * Version sync `make check-version`, Zig/Wasm build `make build-wasm`, TS build `make build-ts` OK
+* [ ] **Test**
+  * All tests pass `make test` + `omni report` verified 
+* [ ] **Release Ready**
+  * No telemetry, data local, docs updated, `make verify` passed
 
-- [ ] **Infrastructure & Integrity**:
-    - [ ] Versions are consistent across all project files (`make check-version`).
-    - [ ] Native Core (Zig) and Wasm build successfully (`make build-wasm`).
-    - [ ] TypeScript MCP Server compiles successfully (`make build-ts`).
-- [ ] **Functionality & Testing**:
-    - [ ] All Zig core unit tests pass (`cd core && zig build test`).
-    - [ ] Semantic routing verification suite passes (`make test`).
-    - [ ] `omni report` branding and metrics generation verified (`make report`).
-- [ ] **Security & Privacy**:
-    - [ ] **Zero Telemetry**: Confirmed no external network calls or data exfiltration.
-    - [ ] Data is stored locally and securely in `~/.omni/metrics.csv`.
-- [ ] **Verification**:
-    - [ ] Full pre-release suite passed: `make verify`.
+## Output / Proof
 
-## Screenshots / CLI Output
-<!-- Paste command output or screenshots demonstrating the change below -->
+<!-- Paste CLI output or screenshots here -->
