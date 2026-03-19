@@ -16,7 +16,7 @@ This file provides guidance to Claude Code when working in the **OMNI** reposito
 - `./scripts/omni-release.sh <v>` - Run full release & Homebrew sync
 
 ### OMNI CLI
-- `omni report` - Unified system metrics and status
+- `omni monitor` - Unified system metrics and status
 - `omni density` - Analyze context gain (stdin)
 - `omni bench` - Run performance benchmark
 - `omni generate` - Output agent templates
@@ -25,10 +25,10 @@ This file provides guidance to Claude Code when working in the **OMNI** reposito
 - `omni uninstall` - Remove OMNI and clean up all MCP configs
 
 ### Unified Interface (Makefile)
-- `make` or `make verify` - Full suite: version check + build + test + report
+- `make` or `make verify` - Full suite: version check + build + test + monitor
 - `make build` - Build Wasm core + TypeScript server
 - `make test` - Run semantic verification tests
-- `make report` - Generate system & performance report
+- `make monitor` - Generate system & performance monitor
 - `make check-version` - Verify version consistency
 - `make clean` - Remove build artifacts
 

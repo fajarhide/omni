@@ -12,8 +12,13 @@ pub const SqlFilter = struct {
         };
     }
 
-    fn score(_: *anyopaque, _: []const u8) f32 {
-        return 1.0;
+    fn score(_: *anyopaque, input: []const u8) f32 {
+        var count: f32 = 0.0;
+        if (std.mem.indexOf(u8, input, "SELECT") != null) count += 2.0;
+        if (std.mem.indexOf(u8, input, "INSERT") != null) count += 2.0;
+        if (std.mem.indexOf(u8, input, "CREATE") != null) count += 2.0;
+        if (std.mem.indexOf(u8, input, "rows returned") != null) count += 2.0;
+        return @min(1.0, count / 4.0);
     }
 
     fn match(_: *anyopaque, input: []const u8) bool {

@@ -30,4 +30,4 @@ else
 fi
 
 echo -e "\n${GREEN} OMNI is ready for Edge Deployment!${NC}"
-echo "Run 'bin/omni report' to verify system health."
+echo "Run 'bin/omni monitor' to verify system health."

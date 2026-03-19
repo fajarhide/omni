@@ -7,7 +7,7 @@ Follow these steps to ensure a complete and consistent release of OMNI:
 1. **Verify Build & Stability**:
    Ensure everything is clean and working locally.
    ```bash
-   cd core && zig build -Doptimize=ReleaseFast -p ../ && ../bin/omni report
+   cd core && zig build -Doptimize=ReleaseFast -p ../ && ../bin/omni monitor
    ```
 
 2. **Update Version**:

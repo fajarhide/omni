@@ -1,5 +1,5 @@
 // OMNI Local Metrics Subsystem
-// Tracks your session stats locally for 'omni report' — no data ever leaves your machine.
+// Tracks your session stats locally for 'omni monitor' — no data ever leaves your machine.
 
 const std = @import("std");
 

@@ -12,8 +12,14 @@ pub const NodeFilter = struct {
         };
     }
 
-    fn score(_: *anyopaque, _: []const u8) f32 {
-        return 1.0;
+    fn score(_: *anyopaque, input: []const u8) f32 {
+        var count: f32 = 0.0;
+        if (std.mem.indexOf(u8, input, "added") != null) count += 2.0;
+        if (std.mem.indexOf(u8, input, "removed") != null) count += 2.0;
+        if (std.mem.indexOf(u8, input, "updated") != null) count += 2.0;
+        if (std.mem.indexOf(u8, input, "vulnerabilities") != null) count += 3.0;
+        if (std.mem.indexOf(u8, input, "Done in") != null) count += 2.0;
+        return @min(1.0, count / 5.0);
     }
 
     fn match(_: *anyopaque, input: []const u8) bool {

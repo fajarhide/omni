@@ -1,4 +1,4 @@
-.PHONY: all build build-wasm build-ts test verify clean report check-version help
+.PHONY: all build build-wasm build-ts test verify clean monitor check-version help
 
 # Default target: Verify everything
 all: verify
@@ -8,8 +8,8 @@ help:
 	@echo "----------------------"
 	@echo "make build       - Build Wasm core + TypeScript server"
 	@echo "make test        - Run semantic routing verification tests"
-	@echo "make report      - Run system integrity & performance report"
-	@echo "make verify      - Full suite: version check + build + test + report"
+	@echo "make monitor      - Run system integrity & performance monitor"
+	@echo "make verify      - Full suite: version check + build + test + monitor"
 	@echo "make clean       - Remove build artifacts"
 	@echo "make check-version - Verify version consistency across all files"
 
@@ -57,13 +57,13 @@ test:
 	@node test-semantic.mjs || { echo "✗ Semantic testing failed"; exit 1; }
 	@echo "✓ Semantic routing logic verified."
 
-# Phase 3: System Reporting
-report:
-	@echo "Generating System Report..."
-	@core/zig-out/bin/omni report || { echo "✗ System report failed"; exit 1; }
+# Phase 3: System monitoring
+monitor:
+	@echo "Generating System monitor..."
+	@core/zig-out/bin/omni monitor || { echo "✗ System monitor failed"; exit 1; }
 
 # Phase 4: Integrity Verification (Full Suite)
-verify: check-version build test report
+verify: check-version build test monitor
 	@echo "========================================"
 	@echo "🏆 OMNI SYSTEM INTEGRITY: VERIFIED"
 	@echo "========================================"
