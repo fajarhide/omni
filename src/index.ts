@@ -7,13 +7,14 @@ import {
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { fileURLToPath } from "url";
 import { WASI } from "wasi";
 import { LRUCache } from "./cache.js";
 import os from "os";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Parse Agent Argument (--agent=claude-code)
@@ -497,7 +498,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
          if (isRegex) flags.push("-E");
 
          try {
-            const { stdout, stderr } = await execAsync(`grep ${flags.join(" ")} "${query.replace(/"/g, '\\"')}" "${targetPath}"`);
+            const { stdout, stderr } = await execFileAsync('grep', [...flags, query, targetPath]);
             let resultOutput = String(stdout);
             if (!resultOutput.trim()) resultOutput = "No matches found.";
             
@@ -519,7 +520,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
          
          try {
              // Basic find command
-             const { stdout } = await execAsync(`find "${dir}" -name "${pattern.replace(/"/g, '\\"')}"`);
+             const { stdout } = await execFileAsync('find', [dir, '-name', pattern]);
              const files = String(stdout).split("\n").filter(Boolean);
              const resultOutput = files.join(", ");
              const distilled = await distillText(resultOutput || "No files found.");
