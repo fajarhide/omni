@@ -5,7 +5,7 @@ import { WASI } from 'wasi';
 import { argv, env } from 'process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const wasmPath = join(__dirname, 'core/zig-out/bin/omni-wasm.wasm');
+const wasmPath = join(__dirname, '../core/zig-out/bin/omni-wasm.wasm');
 const wasmBuffer = fs.readFileSync(wasmPath);
 
 async function runTest() {
