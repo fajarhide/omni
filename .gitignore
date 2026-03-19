@@ -16,7 +16,6 @@ bin/*
 # --- Logs & Temporary Files ---
 *.log
 actual_stdout.txt
-test-*.js
 core/*.bak
 # --- Environment & Configuration ---
 .env
@@ -27,7 +26,6 @@ core/*.bak
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/
 *.sublime-project
 *.sublime-workspace
 

@@ -2,8 +2,7 @@
   <img src="logo.png" alt="OMNI - The Semantic Core" width="300" />
 </p>
 
-
-<h1 align="center">The Semantic Core for the Agentic AI</h1>
+<h1 align="center">The Semantic Core for Agentic AI</h1>
 
 <p align="center">
   <a href="https://github.com/fajarhide/omni/actions"><img src="https://github.com/fajarhide/omni/workflows/CI/badge.svg" alt="CI"></a>
@@ -27,7 +26,7 @@ AI agents running on **Model Context Protocol (MCP)** are limited by the quality
 **OMNI is the Semantic Core.** It sits between your agent and its tools, refining chaotic streams into high-density intelligence. Our goal isn't just to send *fewer* tokens, but to ensure every token sent is *high-signal*.
 
 - **Zero Semantic Loss** — We don't just truncate; we distill. Your AI gets the full context, without the fluff.
-- **80% - 99% Token Efficiency** — Achieve massive context savings while improving reasoning signal.
+- **30% – 90% Token Efficiency** — Achieve massive context savings while improving reasoning signal.
 - **Semantic Confidence Scoring** — Every token is analyzed and routed: Keep, Compress (Summarize), or Drop.
 - **Cleaner Signal, Better Reasoning** — Benchmarks prove LLMs perform better with 50 pure tokens than 500 noisy ones.
 - **< 1ms Engine Latency** — Zero-overhead distillation powered by Zig 0.15.2.
@@ -98,7 +97,7 @@ graph TD
 ## The OMNI Effect
 
 **Before OMNI** (LLM sees 600+ tokens of noise):
-```
+```text
 $ docker build .
 Step 1/15 : FROM node:18
  ---> 4567f123
@@ -107,8 +106,8 @@ Step 2/15 : RUN npm install
 Successfully built 1234abcd
 ```
 
-**After OMNI Distillation** (LLM sees 15 tokens of signal):
-```
+**After OMNI Distillation** (LLM sees 15 tokens of pure signal):
+```text
 Step 1/15 : FROM node:18
 Step 2/15 : RUN npm install (CACHED)
 Step 3/15 : COPY . .
@@ -137,8 +136,7 @@ Verify with:
 claude mcp list
 ```
 
-### Antigravity (Google)
-Simply run the automatic generator from the terminal:
+### 2. Antigravity (Google)
 ```bash
 omni generate antigravity
 ```
@@ -344,6 +342,20 @@ For manual build instructions, see **[INSTALL.md](INSTALL.md)**.
 omni update       # Check for the latest version
 omni uninstall    # Remove OMNI and clean up all configs
 ```
+
+---
+
+## 🗺️ Documentation Map
+
+Explore the full potential of OMNI with these specialized guides:
+
+| Document | Purpose | Audience |
+| :--- | :--- | :--- |
+| **[QUICKSTART](#installation)** | Install and run OMNI in 60 seconds. | Everyone |
+| **[CLAUDE.md](CLAUDE.md)** | Full development guide & repo standards. | Developers |
+| **[TESTS.md](tests/README.md)** | Infrastructure details & how to add tests. | QA & Contributors |
+| **[DSL_GUIDE.md](docs/DSL_GUIDE.md)** | Create custom semantic rules without coding. | Power Users / Agents |
+| **[INSTALL.md](INSTALL.md)** | Manual build and edge deployment instructions. | SysAdmins |
 
 ---
 

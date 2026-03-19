@@ -1,0 +1,12 @@
+diff --git a/core/src/main.zig b/core/src/main.zig
+index 1ea518f..9785243 100644
+--- a/core/src/main.zig
++++ b/core/src/main.zig
+@@ -4,6 +4,7 @@ const compressor = @import("compressor.zig");
+ const metrics = @import("local_metrics.zig");
+ const Filter = @import("filters/interface.zig").Filter;
+ const GitFilter = @import("filters/git.zig").GitFilter;
++const GitLogFilter = @import("filters/git_log.zig").GitLogFilter;
+ const BuildFilter = @import("filters/build.zig").BuildFilter;
+ const DockerFilter = @import("filters/docker.zig").DockerFilter;
+ const SqlFilter = @import("filters/sql.zig").SqlFilter;

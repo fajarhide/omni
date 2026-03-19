@@ -27,7 +27,7 @@ This file provides guidance to Claude Code when working in the **OMNI** reposito
 ### Unified Interface (Makefile)
 - `make` or `make verify` - Full suite: version check + build + test + monitor
 - `make build` - Build Wasm core + TypeScript server
-- `make test` - Run semantic verification tests
+- `make test` - Run all tests (Filter units, MCP integration, and Semantic suite)
 - `make monitor` - Generate system & performance monitor
 - `make check-version` - Verify version consistency
 - `make clean` - Remove build artifacts

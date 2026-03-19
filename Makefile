@@ -53,9 +53,11 @@ build-ts:
 
 # Phase 2: Functional Testing
 test:
+	@echo "Running Filter Unit Tests..."
+	@npm test || { echo "✗ Filter testing failed"; exit 1; }
 	@echo "Running Semantic Core Verification Suite..."
 	@node tests/test-semantic.mjs || { echo "✗ Semantic testing failed"; exit 1; }
-	@echo "✓ Semantic routing logic verified."
+	@echo "✓ All test suites verified."
 
 # Phase 3: System monitoring
 monitor:

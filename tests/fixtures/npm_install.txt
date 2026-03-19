@@ -1,0 +1,9 @@
+added 154 packages, and audited 155 packages in 2s
+
+found 0 vulnerabilities
+
+npm notice 
+npm notice New major version of npm available! 8.1.0 -> 10.1.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v10.1.0
+npm notice Run npm install -g npm@10.1.0 to update!
+npm notice 

@@ -1,0 +1,12 @@
+Sending build context to Docker daemon  2.048kB
+Step 1/5 : FROM alpine:latest
+ ---> a1d017b48325
+Step 2/5 : RUN apk add --no-cache zig
+ ---> Using cache
+ ---> f8a3b8d1b60b
+Step 3/5 : COPY . /app
+ ---> 4c9e2c71c4c5
+Step 4/5 : WORKDIR /app
+ ---> Running in b4c9e2c71c4c
+Successfully built b4c9e2c71c4c
+Successfully tagged omni-core:latest

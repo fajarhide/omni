@@ -1,0 +1,5 @@
+a1b2c3d fix git log distillation
+b2c3d4e docs: update changelog
+c3d4e5f feat: consolidate git filters
+d4e5f6a chore: bump version
+e5f6a7b Merge branch 'main'
