@@ -1,0 +1,6 @@
+error TS2307: Cannot find module './utils' in 'src/app.ts'
+error TS2339: Property 'map' does not exist on type 'undefined' in 'src/helpers.ts'
+error TS2552: Cannot find name 'config' in 'src/index.ts'
+src/components/Button.tsx(10,5): error TS2741: Property 'onClick' is missing
+src/utils/api.ts(25,10): error TS2769: No overload matches this call
+Found 5 errors

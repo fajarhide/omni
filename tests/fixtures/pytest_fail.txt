@@ -1,0 +1,6 @@
+========================= test session starts ==========================
+collected 50 items
+
+src/test_auth.py::test_login FAILED                                    [ 2%]
+src/test_api.py::test_create_user FAILED                                [ 4%]
+3 failed, 42 passed in 3.15s

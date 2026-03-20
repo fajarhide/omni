@@ -1,0 +1,3 @@
+Progress: resolved 156, reused 142, downloaded 14, added 28, done
+Lockfile is up to date, "$ yarn install" can be omitted
+Done in 1m 30s

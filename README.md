@@ -21,6 +21,16 @@
 
 ## Why OMNI
 
+### Supported AI Agents
+OMNI integrates seamlessly with popular AI coding assistants:
+
+| Agent | Command | Filters |
+| :--- | :--- | :--- |
+| **Claude Code** | `omni generate claude-code` | Git, Docker, npm |
+| **Codex CLI** | `omni generate codex` | 25 polyglot filters |
+| **Antigravity** | `omni generate antigravity` | Google Cloud, k8s |
+| **OpenCode AI** | `omni generate opencode` | 67 AI coding filters |
+
 AI agents running on **Model Context Protocol (MCP)** are limited by the quality of the signal they receive. When Claude runs `git diff`, `docker build`, or `npm install`, it is often flooded with "noise"—redundant lines that dilute its reasoning capacity and bloat your context window.
 
 **OMNI is the Semantic Core.** It sits between your agent and its tools, refining chaotic streams into high-density intelligence. Our goal isn't just to send *fewer* tokens, but to ensure every token sent is *high-signal*.
@@ -45,7 +55,7 @@ OMNI provides a powerful, multi-purpose CLI that consolidates all diagnostic and
 | **`density`** | Analyzes context gain and "Information per Token" metrics. |
 | **`monitor`** | Unified dashboard for system status, savings trend, and opportunity scanner. |
 | **`bench`** | High-speed benchmark for semantic throughput. |
-| **`generate`** | Outputs templates for Claude Code, Antigravity, and others. |
+| **`generate`** | Outputs templates for Claude Code, Codex, Antigravity, OpenCode. |
 | **`setup`** | Interactive guide for integration and standard aliasing. |
 | **`update`** | Check for the latest version from GitHub Releases. |
 | **`uninstall`** | Remove OMNI and clean up all MCP configurations. |
@@ -75,7 +85,7 @@ graph TD
     end
 
     A -->|"stdin pipe"| B
-    E -->|"Pure Signal<br/>Refined Context"| F["AI Agent Platform (Claude/Antigravity/Etc)<br/>Zero Noise reasoning"]
+    E -->|"Pure Signal<br/>Refined Context"| F["AI Agent Platform (Claude/Codex/Antigravity/OpenCode)<br/>Zero Noise reasoning"]
 
     %% Theme-agnostic Professional Styling
     style OMNI fill:#1d2b3a,stroke:#334155,stroke-width:2px,color:#f8fafc
@@ -129,36 +139,126 @@ To register OMNI as an MCP server for Claude Code automatically, run:
 ```bash
 omni generate claude-code
 ```
-This command will automatically detect your absolute home path and register OMNI with Claude Code.
+This command will automatically detect your absolute home path, register OMNI with Claude Code, and merge the polyglot coding filter bundle into your global `~/.omni/omni_config.json`.
 
 Verify with:
 ```bash
 claude mcp list
 ```
 
+### Codex CLI
+To register OMNI as an MCP server for Codex automatically, run:
+```bash
+omni generate codex
+```
+This command uses the local Codex CLI integration flow, registers OMNI with `codex mcp add`, and automatically merges the `codex-polyglot` filter bundle into your global `~/.omni/omni_config.json`.
+
+Verify with:
+```bash
+codex mcp list
+```
+
 ### 2. Antigravity (Google)
 ```bash
 omni generate antigravity
 ```
-*This command will automatically locate your `~/.gemini/antigravity/mcp_config.json`, safely merge OMNI's configurations into your existing servers without overwriting them, and save the file.*
+*This command will automatically locate your `~/.gemini/antigravity/mcp_config.json`, safely merge OMNI's configurations into your existing servers without overwriting them, save the file, and add cloud-native filters for Kubernetes, Terraform, and Docker layers into your global `~/.omni/omni_config.json`.*
+
+### 3. OpenCode AI
+```bash
+omni generate opencode
+```
+This command:
+- Registers OMNI as an MCP server in `~/.config/opencode/opencode.json`
+- Installs **67 AI Coding filters** for maximum token efficiency
+- Supports: npm, yarn, pnpm, bun, tsc, eslint, prettier, vite, webpack, next.js, jest, vitest, pytest, ruff, mypy, cargo, go, docker, kubectl, terraform, gradle, and 50+ more tools
+
+**Token-Efficient AI Coding Setup:**
+```bash
+# Setup OpenCode integration
+omni generate opencode
+
+# Then restart OpenCode and verify
+opencode mcp list
+
+# Test distillation
+git diff | omni
+npm run build 2>&1 | omni
+```
 
 ### Auto-Generate Config
 Use the CLI to generate ready-to-paste configurations:
 ```bash
 omni generate claude-code    # For Claude Code / Claude CLI
-omni generate antigravity     # For Google Antigravity
-omni setup                    # Full interactive guide
+omni generate codex         # For Codex CLI
+omni generate antigravity    # For Google Antigravity
+omni generate opencode       # For OpenCode AI
+omni setup                   # Full interactive guide
 ```
 
 ---
 
 ## "Always-On" Integration: Agent Autopilot
 
-To ensure your AI agent **always** uses OMNI for maximum token efficiency, add these **Custom Instructions** to your agent's settings (e.g., in `.claudebashrc` or Antigravity custom instructions):
+To ensure your AI agent **always** uses OMNI for maximum token efficiency, add these **Custom Instructions** to your agent's settings (e.g., in `.claudebashrc`, Codex workflow notes, or Antigravity custom instructions):
 
 > **OMNI Directive**: You are equipped with the OMNI Semantic Distillation layer. Always prioritize `omni_execute`, `omni_read_file`, and `omni_list_dir` for environment interactions. OMNI is the source of truth for high-density signal. Use it to preserve your context window and speed up your reasoning.
 
 By providing these instructions, the agent will favor OMNI's tools, saving you up to 90% in token costs automatically.
+
+---
+
+## OpenCode AI Integration
+
+OMNI provides **67 specialized filters** for OpenCode AI coding workflows, maximizing token efficiency across all development tools.
+
+### Quick Setup
+```bash
+omni generate opencode
+```
+
+### Supported Tools & Filters
+
+| Category | Tools | Example Output |
+| :--- | :--- | :--- |
+| **Package Managers** | npm, yarn, pnpm, bun, pip, poetry, composer, bundle | `npm: 42 packages added \| 3.2s` |
+| **TypeScript/JS** | tsc, eslint, prettier, vite, webpack, next.js | `tsc: 0 errors` |
+| **Testing** | jest, vitest, pytest, cypress, playwright | `jest: 25/25 passed` |
+| **Python** | ruff, mypy, black, isort | `ruff: all checks passed` |
+| **Systems** | cargo, go, zig, dotnet | `cargo: finished \| 4.2s` |
+| **Containers** | docker, docker-compose, kubectl, helm | `docker: built abc123` |
+| **Infrastructure** | terraform, ansible, packer, skaffold | `terraform: 3 add \| 1 change` |
+| **Mobile** | gradle, android, flutter, react-native | `gradle: BUILD SUCCESSFUL` |
+| **Security** | trivy, semgrep, gitleaks, snyk | `trivy: 5 vulnerabilities` |
+
+### Example Distillation
+
+**Before OMNI (600+ tokens):**
+```
+$ npm install
+added 156 packages in 8s
+78 packages are looking for funding
+  run `npm fund` for details
+npm warn deprecated
+npm warn invalid
+...
+```
+
+**After OMNI (15 tokens):**
+```
+npm: 156 packages added | 8s
+```
+
+### Custom OpenCode Instructions
+Add to your OpenCode configuration for maximum efficiency:
+```json
+{
+  "instructions": [
+    "Always pipe tool output through OMNI for distillation",
+    "Use: command | omni for git, docker, npm, pytest outputs"
+  ]
+}
+```
 
 ## The Adaptive Intelligence: Proxy & Distillation
 
@@ -197,7 +297,7 @@ OMNI exposes high-density tools that replace standard agent context commands:
 | **`omni_grep_search`** | High-density semantic search results. | High |
 | **`omni_find_by_name`** | Recursive flat file discovery. | Medium |
 | **`omni_add_filter`** | Add declarative rules without coding. | N/A |
-| **`omni_apply_template`** | Apply pre-defined bundles (K8s, TF, Node). | N/A |
+| **`omni_apply_template`** | Apply pre-defined bundles (K8s, TF, Node, Codex, Polyglot). | N/A |
 | **`omni_execute`** | Run ANY command and distill its output. | Massive (30-90%) |
 | **`omni_read_file`** | Full file distillation (great for logs/SQL/json). | Massive |
 | **`omni_density`** | Measure gain and reduction metrics. | N/A |
@@ -215,7 +315,11 @@ The agent will use `omni_add_filter` to update your configuration instantly. It 
 ### 2. Apply Technology Templates
 Apply bundles of pre-defined rules for your stack via MCP tool:
 - **`omni_apply_template(template="terraform")`**
-- Supported templates: `kubernetes`, `terraform`, `node-verbose`, `docker-layers`.
+- **`omni_apply_template(template="codex-advanced")`** for `tsc`, `eslint`, `jest`, and `vitest` summaries commonly produced in Codex-driven workflows.
+- **`omni_apply_template(template="codex-polyglot")`** to cover mixed-language Codex loops across JS/TS, Python, Rust, Go, Zig, and pnpm install logs.
+- **`omni_apply_template(template="opencode-advanced")`** for comprehensive AI coding tools (npm, yarn, pnpm, tsc, eslint, jest, vitest, docker, kubectl, and 60+ more)
+- Language templates: `pytest-advanced`, `ruff-advanced`, `cargo-test-advanced`, `pnpm-advanced`, `zig-advanced`, `go-test-advanced`.
+- Supported templates: `kubernetes`, `terraform`, `node-verbose`, `docker-layers`, `security-audit`, `aws-cloud`, `codex-advanced`, `pytest-advanced`, `ruff-advanced`, `cargo-test-advanced`, `pnpm-advanced`, `zig-advanced`, `go-test-advanced`, `codex-polyglot`, `opencode-advanced`.
 
 See the **[DSL_GUIDE.md](docs/DSL_GUIDE.md)** for full documentation and examples.
 

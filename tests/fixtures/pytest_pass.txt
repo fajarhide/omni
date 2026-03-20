@@ -1,0 +1,10 @@
+========================= test session starts ==========================
+collected 45 items
+
+src/test_math.py::test_add PASSED                                      [ 2%]
+src/test_math.py::test_subtract PASSED                                 [ 4%]
+src/test_api.py::test_get_user PASSED                                  [ 7%]
+src/test_api.py::test_create_user PASSED                               [10%]
+src/test_utils.py::test_parse_json PASSED                              [13%]
+...
+42 passed in 2.35s

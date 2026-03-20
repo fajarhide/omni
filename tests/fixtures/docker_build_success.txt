@@ -1,0 +1,2 @@
+Successfully built abc123def
+Successfully tagged myapp:latest

@@ -1,0 +1,8 @@
+ PASS  src/components/Button.test.tsx
+ PASS  src/utils/math.test.ts
+ PASS  src/hooks/useAuth.test.ts
+ PASS  src/services/api.test.ts
+ PASS  src/hooks/useTheme.test.ts
+ PASS  src/utils/string.test.ts
+Tests:       6 passed, 48 passed, 54 total
+Suites:      6 passed, 6 total

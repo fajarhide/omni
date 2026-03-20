@@ -1,0 +1,1 @@
+Ran 25 rules and found 8 issues

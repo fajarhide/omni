@@ -1,0 +1,3 @@
+ok  	github.com/user/project/pkg1	0.523s
+ok  	github.com/user/project/pkg2	0.312s
+ok  	github.com/user/project/pkg3	0.187s
