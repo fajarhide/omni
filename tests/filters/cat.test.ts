@@ -66,6 +66,13 @@ describe('CatFilter', () => {
         expect(output).toMatch(/cat distilled|distilled|lines/i);
     });
 
+    test('large plain text is distilled directly without a manifest wrapper', () => {
+        const input = readFixture('cat_plain.txt');
+        const output = engine.distill(input);
+        expect(output).not.toContain('[OMNI Context Manifest');
+        expect(output).toContain('cat distilled');
+    });
+
     // Test 8: List item extraction
     test('extracts list items from markdown', () => {
         const input = '# My Doc\n- Item one\n- Item two\n* Star item\nSome paragraph text here that is not a list.';

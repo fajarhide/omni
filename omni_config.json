@@ -56,6 +56,100 @@
         { "capture": "Tests {tests} passed", "action": "keep" }
       ],
       "output": "vitest: {files} files passed | {tests} tests passed"
+    },
+    {
+      "name": "codex-docker-build-summary",
+      "trigger": "Successfully tagged ",
+      "confidence": 0.995,
+      "rules": [
+        { "capture": "Step {step}/{total} : {instruction}", "action": "count", "as": "steps" },
+        { "capture": "Successfully tagged {image}", "action": "keep" }
+      ],
+      "output": "docker build: {steps} steps | image {image}"
+    },
+    {
+      "name": "codex-git-diff-summary",
+      "trigger": "diff --git ",
+      "confidence": 0.995,
+      "rules": [
+        { "capture": "diff --git a/{from} b/{to}", "action": "keep" },
+        { "capture": "@@ {hunk}", "action": "count", "as": "hunks" }
+      ],
+      "output": "git diff: {from} -> {to} | {hunks} hunks"
+    },
+    {
+      "name": "codex-pytest-summary-fail",
+      "trigger": " failed, ",
+      "confidence": 0.995,
+      "rules": [
+        { "capture": "collected {collected} items", "action": "keep" },
+        { "capture": "{failed} failed, {passed} passed in {duration}", "action": "keep" }
+      ],
+      "output": "pytest: {passed} passed | {failed} failed | collected {collected} | {duration}"
+    },
+    {
+      "name": "codex-jest-summary-rich-fail",
+      "trigger": "Tests:       ",
+      "confidence": 0.995,
+      "rules": [
+        { "capture": "Tests:       {failed} failed, {passed} passed, {total} total", "action": "keep" },
+        { "capture": "Suites:      {suite_failed} failed, {suite_passed} passed, {suite_total} total", "action": "keep" }
+      ],
+      "output": "jest: {passed} passed | {failed} failed | {total} total | suites {suite_passed} passed/{suite_failed} failed"
+    },
+    {
+      "name": "codex-npm-install-funding",
+      "trigger": "packages are looking for funding",
+      "confidence": 0.996,
+      "rules": [
+        { "capture": "added {packages} packages in {duration}", "action": "keep" },
+        { "capture": "added {packages} packages, and audited {audited} packages in {duration}", "action": "keep" },
+        { "capture": "{funding} packages are looking for funding", "action": "keep" },
+        { "capture": "npm warn deprecated {deprecated} deprecated packages", "action": "keep" }
+      ],
+      "output": "npm: {packages} packages added | {duration} | {funding} funding | {deprecated} deprecated"
+    },
+    {
+      "name": "codex-npm-install-vulns",
+      "trigger": "vulnerabilities",
+      "confidence": 0.996,
+      "rules": [
+        { "capture": "added {packages} packages in {duration}", "action": "keep" },
+        { "capture": "added {packages} packages, and audited {audited} packages in {duration}", "action": "keep" },
+        { "capture": "found {vulns} vulnerabilities ({moderate} moderate, {high} high)", "action": "keep" },
+        { "capture": "found {vulns} vulnerabilities", "action": "keep" }
+      ],
+      "output": "npm: {packages} packages added | {duration} | {vulns} vulnerabilities"
+    },
+    {
+      "name": "codex-npm-install-error",
+      "trigger": "error ERESOLVE",
+      "confidence": 0.996,
+      "rules": [
+        { "capture": "added {packages} packages in {duration}", "action": "keep" },
+        { "capture": "error {code} {message}", "action": "keep" }
+      ],
+      "output": "npm: {packages} packages added | {duration} | error {code}"
+    },
+    {
+      "name": "codex-vite-build-rich",
+      "trigger": "building for production...",
+      "confidence": 0.995,
+      "rules": [
+        { "capture": "✓ {modules} modules transformed.", "action": "keep" },
+        { "capture": "✓ built in {duration}", "action": "keep" }
+      ],
+      "output": "vite: {modules} modules transformed | built in {duration}"
+    },
+    {
+      "name": "codex-docker-build-error",
+      "trigger": "failed to build",
+      "confidence": 0.995,
+      "rules": [
+        { "capture": "ERROR: {message}", "action": "keep" },
+        { "capture": "failed to {detail}", "action": "keep" }
+      ],
+      "output": "docker build: ERROR {message} | failed to {detail}"
     }
   ]
 }
