@@ -9,6 +9,7 @@ const NodeFilter = @import("filters/node.zig").NodeFilter;
 const CustomFilter = @import("filters/custom.zig").CustomFilter;
 const DslEngine = @import("filters/dsl_engine.zig").DslEngine;
 const DslFilterConfig = @import("filters/dsl_engine.zig").DslFilterConfig;
+const CatFilter = @import("filters/cat.zig").CatFilter;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
@@ -40,6 +41,7 @@ export fn init_engine_with_config(config_ptr: ?[*]u8, config_len: usize) bool {
     filters.append(allocator, DockerFilter.filter()) catch return false;
     filters.append(allocator, SqlFilter.filter()) catch return false;
     filters.append(allocator, NodeFilter.filter()) catch return false;
+    filters.append(allocator, CatFilter.filter()) catch return false;
 
     var config_content: ?[]const u8 = null;
 
@@ -82,6 +84,59 @@ export fn free(ptr: [*]u8, len: usize) void {
     allocator.free(ptr[0..len]);
 }
 
+var last_filter_name_ptr: [*]const u8 = "";
+var last_filter_name_len: usize = 0;
+
+export fn get_last_filter_name_ptr() [*]const u8 {
+    return last_filter_name_ptr;
+}
+
+export fn get_last_filter_name_len() usize {
+    return last_filter_name_len;
+}
+
+const auto_learn = @import("filters/auto_learn.zig");
+
+export fn discover(ptr: [*]u8, len: usize) u64 {
+    const input = ptr[0..len];
+    const candidates = auto_learn.discoverCandidates(allocator, input) catch |err| {
+        const err_msg = std.fmt.allocPrint(allocator, "Discovery Error: {any}", .{err}) catch "Discovery Error";
+        return @as(u64, err_msg.len) << 32 | @as(u32, @truncate(@intFromPtr(err_msg.ptr)));
+    };
+    defer auto_learn.freeCandidates(allocator, candidates);
+
+    if (candidates.len == 0) {
+        const empty = allocator.dupe(u8, "[]") catch "[]";
+        return @as(u64, empty.len) << 32 | @as(u32, @truncate(@intFromPtr(empty.ptr)));
+    }
+
+    var list = std.ArrayList(u8).empty;
+    defer list.deinit(allocator);
+
+    list.appendSlice(allocator, "[") catch {};
+    for (candidates, 0..) |c, i| {
+        const action_str = if (c.action == .count) "count" else "keep";
+        const entry = std.fmt.allocPrint(allocator,
+            \\{{"name":"{s}","trigger":"{s}","pattern":"{s}","action":"{s}","output":"{s}","confidence":{d:.2}}}
+        , .{
+            c.name,
+            c.trigger,
+            c.pattern,
+            action_str,
+            c.output_template,
+            c.confidence,
+        }) catch "";
+        defer allocator.free(entry);
+        
+        list.appendSlice(allocator, entry) catch {};
+        if (i < candidates.len - 1) list.appendSlice(allocator, ",") catch {};
+    }
+    list.appendSlice(allocator, "]") catch {};
+
+    const result = list.toOwnedSlice(allocator) catch "[]";
+    return @as(u64, result.len) << 32 | @as(u32, @truncate(@intFromPtr(result.ptr)));
+}
+
 export fn compress(ptr: [*]u8, len: usize) u64 {
     const input = ptr[0..len];
     _ = init_engine(); // Ensure it's init
@@ -89,8 +144,13 @@ export fn compress(ptr: [*]u8, len: usize) u64 {
     const filters = if (global_filters) |f| f.items else &[_]Filter{};
     const result = compressor.compress(allocator, input, filters) catch |err| {
         const err_msg = std.fmt.allocPrint(allocator, "Error: {any}", .{err}) catch "Critical Error";
+        last_filter_name_ptr = "error";
+        last_filter_name_len = 5;
         return @as(u64, err_msg.len) << 32 | @as(u32, @truncate(@intFromPtr(err_msg.ptr)));
     };
+
+    last_filter_name_ptr = result.filter_name.ptr;
+    last_filter_name_len = result.filter_name.len;
 
     return @as(u64, result.output.len) << 32 | @as(u32, @truncate(@intFromPtr(result.output.ptr)));
 }

@@ -49,7 +49,7 @@ pub fn parseCsvLine(allocator: std.mem.Allocator, line: []const u8) !Record {
     var actual_filter: []const u8 = filter_str;
     
     if (std.fmt.parseInt(usize, filter_str, 10)) |_| {
-        actual_filter = "unknown";
+        actual_filter = "legacy";
         in_str = filter_str;
     } else |_| {
         in_str = it.next() orelse return error.InvalidFormat;

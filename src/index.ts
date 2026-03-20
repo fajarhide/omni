@@ -29,10 +29,10 @@ for (const arg of process.argv) {
 // Local Metrics Logic
 const METRICS_FILE = path.join(os.homedir(), ".omni", "metrics.csv");
 
-async function logMetrics(inputLen: number, outputLen: number, ms: number) {
+async function logMetrics(filterName: string, inputLen: number, outputLen: number, ms: number) {
   try {
     const timestamp = Math.floor(Date.now() / 1000);
-    const line = `${timestamp},${currentAgent},${inputLen},${outputLen},${Math.round(ms)}\n`;
+    const line = `${timestamp},${currentAgent},${filterName},${inputLen},${outputLen},${Math.round(ms)}\n`;
     
     // Ensure .omni directory exists
     const dir = path.dirname(METRICS_FILE);
@@ -60,7 +60,9 @@ const CACHE_CAPACITY = 100;
 const CACHE_TTL = 3600000; // 1 hour
 const cache = new LRUCache<string, string>(CACHE_CAPACITY, CACHE_TTL);
 
-const WASM_PATH = path.join(__dirname, "..", "core", "omni-wasm.wasm");
+const WASM_PATH_DEFAULT = path.join(__dirname, "..", "core", "omni-wasm.wasm");
+const WASM_PATH_BUILD = path.join(__dirname, "..", "core", "zig-out", "bin", "omni-wasm.wasm");
+const WASM_PATH = fs.existsSync(WASM_PATH_BUILD) ? WASM_PATH_BUILD : WASM_PATH_DEFAULT;
 
 // Config Discovery: Global & Local
 const GLOBAL_CONFIG_DIR = path.join(os.homedir(), ".omni");
@@ -235,7 +237,8 @@ async function distillText(text: string): Promise<string> {
   const startTime = performance.now();
   const cached = cache.get(text);
   if (cached) {
-    await logMetrics(text.length, cached.length, performance.now() - startTime);
+    // We don't store filter name in cache for now, so we use 'cache' as name
+    await logMetrics("cache", text.length, cached.length, performance.now() - startTime);
     return cached;
   }
 
@@ -266,13 +269,57 @@ async function distillText(text: string): Promise<string> {
     const outputBytes = new Uint8Array(memory.buffer, resultPtr, resultLen);
     const output = decoder.decode(outputBytes);
 
+    // Retrieve Filter Name
+    const namePtr = exports.get_last_filter_name_ptr();
+    const nameLen = exports.get_last_filter_name_len();
+    const nameBytes = new Uint8Array(memory.buffer, namePtr, nameLen);
+    const filterName = decoder.decode(nameBytes);
+
     const trimmed = output.trim();
     cache.set(text, trimmed);
     
     const elapsed = performance.now() - startTime;
-    await logMetrics(text.length, trimmed.length, elapsed);
+    await logMetrics(filterName, text.length, trimmed.length, elapsed);
     
     return trimmed;
+  } finally {
+    exports.free(inputPtr, inputBytes.length);
+    if (resultPtr) exports.free(resultPtr, resultLen);
+  }
+}
+
+async function discoverFilters(text: string): Promise<any[]> {
+  const instance = await getWasmInstance();
+  const exports = instance.exports as any;
+  const memory = exports.memory as WebAssembly.Memory;
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  
+  const inputBytes = encoder.encode(text);
+  const inputPtr = exports.alloc(inputBytes.length);
+  
+  if (!inputPtr) throw new Error("Wasm allocation failed");
+
+  let resultPtr = 0;
+  let resultLen = 0;
+
+  try {
+    const memView = new Uint8Array(memory.buffer);
+    memView.set(inputBytes, inputPtr);
+
+    // Call discover
+    const resultRaw = exports.discover(inputPtr, inputBytes.length);
+    resultPtr = Number(BigInt(resultRaw) & 0xFFFFFFFFn);
+    resultLen = Number(BigInt(resultRaw) >> 32n);
+
+    const outputBytes = new Uint8Array(memory.buffer, resultPtr, resultLen);
+    const jsonStr = decoder.decode(outputBytes);
+    
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error("Discovery failed:", e);
+    return [];
   } finally {
     exports.free(inputPtr, inputBytes.length);
     if (resultPtr) exports.free(resultPtr, resultLen);
@@ -459,6 +506,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {},
           required: [],
+        },
+      },
+      {
+        name: "omni_learn",
+        description: "Analyze raw tool output to discover repetitive noise patterns and suggest new OMNI filters. Use this to 'teach' OMNI about new types of noise.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "The raw output to analyze (e.g. from a build or log)" },
+            apply: { type: "boolean", description: "If true, automatically apply the suggested filters (use with caution!)" }
+          },
+          required: ["text"],
         },
       }
     ],
@@ -789,6 +848,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } catch (e: any) {
           return { content: [{ type: "text", text: `Error updating trusted hashes: ${e.message}` }], isError: true };
         }
+      }
+
+      case "omni_learn": {
+        const args = request.params.arguments as any;
+        const candidates = await discoverFilters(args.text);
+        
+        if (candidates.length === 0) {
+          return { content: [{ type: "text", text: "No significant noise patterns discovered. Context is already high-signal!" }] };
+        }
+
+        let report = `🧠 OMNI LEARN — Discovered ${candidates.length} potential filters:\n\n`;
+        for (const c of candidates) {
+          report += `  - [${c.action.toUpperCase()}] ${c.name} (Conf: ${Math.round(c.confidence * 100)}%)\n`;
+          report += `    Trigger: "${c.trigger}"\n`;
+          report += `    Template: "${c.output}"\n\n`;
+        }
+
+        if (args.apply) {
+          const targetPath = fs.existsSync(LOCAL_CONFIG_PATH) ? LOCAL_CONFIG_PATH : GLOBAL_CONFIG_PATH;
+          let config: any = { rules: [], dsl_filters: [] };
+          if (fs.existsSync(targetPath)) {
+            config = JSON.parse(await fs.promises.readFile(targetPath, "utf-8"));
+          }
+          if (!config.dsl_filters) config.dsl_filters = [];
+          
+          let added = 0;
+          for (const c of candidates) {
+            // Avoid duplicates by trigger
+            if (!config.dsl_filters.find((f: any) => f.trigger === c.trigger)) {
+               config.dsl_filters.push({
+                 name: c.name,
+                 trigger: c.trigger,
+                 confidence: c.confidence,
+                 rules: [{ capture: c.pattern, action: c.action, as: "value_count" }],
+                 output: c.output
+               });
+               added++;
+            }
+          }
+          
+          await fs.promises.writeFile(targetPath, JSON.stringify(config, null, 2));
+          wasmInstance = null; // Reload engine
+          report += `✅ Successfully applied ${added} new filters to ${targetPath}.`;
+        } else {
+          report += `💡 Recommendations:\n`;
+          report += `To apply these filters, call 'omni_add_filter' for individual control, or re-run 'omni_learn' with { "apply": true }.`;
+        }
+
+        return { content: [{ type: "text", text: report }] };
       }
 
       default:

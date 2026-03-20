@@ -9,6 +9,8 @@ const DockerFilter = @import("filters/docker.zig").DockerFilter;
 const SqlFilter = @import("filters/sql.zig").SqlFilter;
 const NodeFilter = @import("filters/node.zig").NodeFilter;
 const CustomFilter = @import("filters/custom.zig").CustomFilter;
+const CatFilter = @import("filters/cat.zig").CatFilter;
+const auto_learn = @import("filters/auto_learn.zig");
 const monitor = @import("monitor.zig");
 const ui = @import("ui.zig");
 
@@ -46,6 +48,7 @@ pub fn main() !void {
     try filters.append(allocator, DockerFilter.filter());
     try filters.append(allocator, SqlFilter.filter());
     try filters.append(allocator, NodeFilter.filter());
+    try filters.append(allocator, CatFilter.filter());
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -109,6 +112,24 @@ pub fn main() !void {
             }
             try handleBench(allocator, iterations, filters.items);
             return;
+        } else if (std.mem.eql(u8, cmd, "learn") or std.mem.eql(u8, cmd, "discover")) {
+            if (args.len > 2 and (std.mem.eql(u8, args[2], "--help") or std.mem.eql(u8, args[2], "-h"))) {
+                try printLearnHelp();
+                return;
+            }
+            const local_exists = if (std.fs.cwd().access("omni_config.json", .{})) |_| true else |_| false;
+            if (local_exists) {
+                try handleLearn(allocator, "omni_config.json", false);
+            } else {
+                const home = std.posix.getenv("HOME") orelse {
+                    try handleLearn(allocator, "omni_config.json", false);
+                    return;
+                };
+                const global_path = try std.fmt.allocPrint(allocator, "{s}/.omni/omni_config.json", .{home});
+                defer allocator.free(global_path);
+                try handleLearn(allocator, global_path, false);
+            }
+            return;
         } else if (std.mem.eql(u8, cmd, "generate")) {
             const agent = if (args.len > 2) args[2] else "general";
             try handleGenerate(agent);
@@ -121,6 +142,23 @@ pub fn main() !void {
             return;
         } else if (std.mem.eql(u8, cmd, "uninstall")) {
             try handleUninstall(allocator);
+            return;
+        } else if (std.mem.eql(u8, cmd, "learn")) {
+            if (args.len > 2 and (std.mem.eql(u8, args[2], "--help") or std.mem.eql(u8, args[2], "-h"))) {
+                try printLearnHelp();
+                return;
+            }
+            // Optional: --config=path override
+            var config_path: []const u8 = "omni_config.json";
+            var dry_run = false;
+            for (args[2..]) |arg| {
+                if (std.mem.startsWith(u8, arg, "--config=")) {
+                    config_path = arg[9..];
+                } else if (std.mem.eql(u8, arg, "--dry-run")) {
+                    dry_run = true;
+                }
+            }
+            try handleLearn(allocator, config_path, dry_run);
             return;
         } else if (std.mem.eql(u8, cmd, "examples")) {
             try handleExamples();
@@ -154,6 +192,7 @@ fn printHelp() !void {
     try ui.row(stdout, ui.CYAN ++ "  density   " ++ ui.RESET ++ "Analyze context density gain");
     try ui.row(stdout, ui.CYAN ++ "  monitor   " ++ ui.RESET ++ "Show unified system & performance metrics");
     try ui.row(stdout, ui.CYAN ++ "  bench     " ++ ui.RESET ++ "Benchmark performance (e.g. omni bench 100)");
+    try ui.row(stdout, ui.CYAN ++ "  learn     " ++ ui.RESET ++ "Auto-detect noise patterns and add filters to config");
     try ui.row(stdout, ui.CYAN ++ "  generate  " ++ ui.RESET ++ "Generate configurations (agent, config)");
     try ui.row(stdout, ui.CYAN ++ "  setup     " ++ ui.RESET ++ "Show detailed setup and usage instructions");
     try ui.row(stdout, ui.CYAN ++ "  update    " ++ ui.RESET ++ "Check for the latest version from GitHub");
@@ -167,6 +206,173 @@ fn printHelp() !void {
     try ui.row(stdout, "  omni generate claude-code > .omni-input");
     try ui.row(stdout, "");
     try ui.row(stdout, ui.DIM ++ "OMNI is designed to be used as a filter in your agentic pipelines." ++ ui.RESET);
+    try ui.printFooter(stdout);
+    try stdout.print("\n", .{});
+}
+
+fn printLearnHelp() !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    try stdout.print("\n", .{});
+    try ui.printHeader(stdout, "🧠 OMNI LEARN — Autonomous Filter Discovery");
+    try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
+    try ui.row(stdout, "  <tool-output> | omni learn [options]");
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Options:" ++ ui.RESET);
+    try ui.row(stdout, ui.CYAN ++ "  --config=<path>  " ++ ui.RESET ++ "Target config file (default: ./omni_config.json)");
+    try ui.row(stdout, ui.CYAN ++ "  --dry-run        " ++ ui.RESET ++ "Show candidates without writing to disk");
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Examples:" ++ ui.RESET);
+    try ui.row(stdout, ui.DIM ++ "  docker build . | omni learn" ++ ui.RESET);
+    try ui.row(stdout, ui.DIM ++ "  npm install 2>&1 | omni learn --dry-run" ++ ui.RESET);
+    try ui.row(stdout, ui.DIM ++ "  kubectl get pods | omni learn --config=~/.omni/omni_config.json" ++ ui.RESET);
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.GRAY ++ "OMNI will analyze repetitive patterns, generate DSL filters," ++ ui.RESET);
+    try ui.row(stdout, ui.GRAY ++ "and write directly to omni_config.json automatically." ++ ui.RESET);
+    try ui.printFooter(stdout);
+}
+
+fn handleLearn(allocator: std.mem.Allocator, config_path: []const u8, dry_run: bool) !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    const stderr_w = std.fs.File.stderr().deprecatedWriter();
+
+    // Read input from stdin
+    const input = std.fs.File.stdin().readToEndAlloc(allocator, 10 * 1024 * 1024) catch |err| {
+        try stderr_w.print(ui.RED ++ " ⓧ " ++ ui.RESET ++ "Failed to read stdin: {any}\n", .{err});
+        std.process.exit(1);
+    };
+    defer allocator.free(input);
+
+    if (input.len == 0) {
+        try stderr_w.print(ui.RED ++ " ⓧ " ++ ui.RESET ++ "No input provided. Pipe tool output to omni learn.\n", .{});
+        try stderr_w.print(ui.DIM ++ "   Example: docker build . | omni learn\n" ++ ui.RESET, .{});
+        std.process.exit(1);
+    }
+
+    try stdout.print("\n", .{});
+    try ui.printHeader(stdout, "🧠 OMNI LEARN — Autonomous Filter Discovery");
+
+    // Discover candidates
+    const candidates = auto_learn.discoverCandidates(allocator, input) catch |err| {
+        switch (err) {
+            auto_learn.LearnError.InsufficientInput => {
+                try ui.row(stdout, ui.YELLOW ++ " ⚠ " ++ ui.RESET ++ "Input too short for analysis (min 5 lines).");
+            },
+            auto_learn.LearnError.NoPatternsFound => {
+                try ui.row(stdout, ui.GREEN ++ " ✓ " ++ ui.RESET ++ "No noise patterns discovered — context is already clean!");
+            },
+            else => {
+                try ui.row(stdout, ui.RED ++ " ⓧ " ++ ui.RESET ++ "Analysis failed.");
+            },
+        }
+        try ui.printFooter(stdout);
+        return;
+    };
+    defer auto_learn.freeCandidates(allocator, candidates);
+
+    if (candidates.len == 0) {
+        try ui.row(stdout, ui.GREEN ++ " ✓ " ++ ui.RESET ++ "No repetitive noise patterns discovered.");
+        try ui.printFooter(stdout);
+        return;
+    }
+
+    // Tampilkan kandidat yang ditemukan
+    {
+        const header = try std.fmt.allocPrint(
+            allocator,
+            ui.BOLD ++ "Found {d} filter candidate(s):" ++ ui.RESET,
+            .{candidates.len},
+        );
+        defer allocator.free(header);
+        try ui.row(stdout, header);
+    }
+    try ui.row(stdout, "");
+
+    for (candidates, 0..) |c, idx| {
+        const action_label = switch (c.action) {
+            .count => ui.YELLOW ++ "count" ++ ui.RESET,
+            .keep  => ui.CYAN   ++ "keep " ++ ui.RESET,
+        };
+        const conf_color = if (c.confidence >= 0.8) ui.GREEN else ui.YELLOW;
+
+        const line = try std.fmt.allocPrint(
+            allocator,
+            "  {d:>2}. {s}[{s}]{s}  trigger={s}\"{s}\"{s}  conf={s}{d:.0}%{s}",
+            .{
+                idx + 1,
+                ui.BOLD, action_label, ui.RESET,
+                ui.CYAN, c.trigger, ui.RESET,
+                conf_color, c.confidence * 100.0, ui.RESET,
+            },
+        );
+        defer allocator.free(line);
+        try ui.row(stdout, line);
+
+        const output_line = try std.fmt.allocPrint(
+            allocator,
+            "      " ++ ui.DIM ++ "→ {s}" ++ ui.RESET,
+            .{c.output_template},
+        );
+        defer allocator.free(output_line);
+        try ui.row(stdout, output_line);
+    }
+
+    try ui.row(stdout, "");
+
+    if (dry_run) {
+        try ui.row(stdout, ui.YELLOW ++ " ◆ " ++ ui.RESET ++ "Dry-run mode: nothing written to disk.");
+        try ui.printFooter(stdout);
+        try stdout.print("\n", .{});
+        return;
+    }
+
+    // Write to config
+    const added = auto_learn.writeToConfig(allocator, config_path, candidates) catch |err| {
+        const err_msg = try std.fmt.allocPrint(
+            allocator,
+            ui.RED ++ " ⓧ " ++ ui.RESET ++ "Failed to write to {s}: {any}",
+            .{ config_path, err },
+        );
+        defer allocator.free(err_msg);
+        try ui.row(stdout, err_msg);
+        try ui.printFooter(stdout);
+        return;
+    };
+
+    const skipped = candidates.len - added;
+
+    // Ringkasan hasil
+    try ui.divider(stdout);
+
+    if (added > 0) {
+        const summary = try std.fmt.allocPrint(
+            allocator,
+            ui.GREEN ++ " ✓ " ++ ui.RESET ++ "{d} new filter(s) added to " ++ ui.CYAN ++ "{s}" ++ ui.RESET,
+            .{ added, config_path },
+        );
+        defer allocator.free(summary);
+        try ui.row(stdout, summary);
+    }
+
+    if (skipped > 0) {
+        const skip_msg = try std.fmt.allocPrint(
+            allocator,
+            ui.GRAY ++ "   {d} filter(s) skipped (trigger already exists in config)" ++ ui.RESET,
+            .{skipped},
+        );
+        defer allocator.free(skip_msg);
+        try ui.row(stdout, skip_msg);
+    }
+
+    if (added == 0 and skipped == candidates.len) {
+        try ui.row(stdout, ui.GREEN ++ " ✓ " ++ ui.RESET ++ "All patterns already exist in config — no duplicates.");
+    } else {
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.DIM ++ "Filters will be active on the next distillation." ++ ui.RESET);
+        const vmsg = try std.fmt.allocPrint(allocator, ui.DIM ++ "Verification: cat " ++ ui.RESET ++ "{s}", .{config_path});
+        defer allocator.free(vmsg);
+        try ui.row(stdout, vmsg);
+    }
+
     try ui.printFooter(stdout);
     try stdout.print("\n", .{});
 }
@@ -236,15 +442,16 @@ fn logMetrics(allocator: std.mem.Allocator, agent: []const u8, filter_name: []co
     const omni_dir = try std.fmt.allocPrint(allocator, "{s}/.omni", .{home});
     defer allocator.free(omni_dir);
     
-    std.fs.cwd().makeDir(omni_dir) catch {};
+    std.fs.makeDirAbsolute(omni_dir) catch |err| {
+        if (err != error.PathAlreadyExists) return;
+    };
     
     const file_path = try std.fmt.allocPrint(allocator, "{s}/metrics.csv", .{omni_dir});
     defer allocator.free(file_path);
 
-    const file = std.fs.cwd().openFile(file_path, .{ .mode = .read_write }) catch |err| switch (err) {
-        error.FileNotFound => try std.fs.cwd().createFile(file_path, .{}),
-        else => return,
-    };
+    const file = std.fs.openFileAbsolute(file_path, .{ .mode = .read_write }) catch |err| if (err == error.FileNotFound) blk: {
+        break :blk try std.fs.createFileAbsolute(file_path, .{});
+    } else return;
     defer file.close();
 
     try file.seekFromEnd(0);
@@ -269,15 +476,21 @@ fn handleProxy(allocator: std.mem.Allocator, cmd_args: []const [:0]u8, filters: 
     _ = try child.wait();
 
     if (stdout_data.len > 0) {
+        var timer = try std.time.Timer.start();
         const result = try compressor.compress(allocator, stdout_data, filters);
+        const elapsed = timer.read() / std.time.ns_per_ms;
         defer allocator.free(result.output);
         try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{result.output});
+        logMetrics(allocator, "CLI", result.filter_name, stdout_data.len, result.output.len, elapsed) catch {};
     }
 
     if (stderr_data.len > 0) {
+        var timer = try std.time.Timer.start();
         const result = try compressor.compress(allocator, stderr_data, filters);
+        const elapsed = timer.read() / std.time.ns_per_ms;
         defer allocator.free(result.output);
         try std.fs.File.stderr().deprecatedWriter().print("{s}\n", .{result.output});
+        logMetrics(allocator, "CLI", result.filter_name, stderr_data.len, result.output.len, elapsed) catch {};
     }
 }
 
@@ -285,8 +498,12 @@ fn handleDensity(allocator: std.mem.Allocator, filters: []const Filter) !void {
     const input = try std.fs.File.stdin().readToEndAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(input);
 
+    var timer = try std.time.Timer.start();
     const result = try compressor.compress(allocator, input, filters);
+    const elapsed = timer.read() / std.time.ns_per_ms;
     defer allocator.free(result.output);
+
+    logMetrics(allocator, "CLI", result.filter_name, input.len, result.output.len, elapsed) catch {};
 
     const in_len = @as(f64, @floatFromInt(input.len));
     const out_len = @as(f64, @floatFromInt(result.output.len));

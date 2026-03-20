@@ -55,6 +55,8 @@ build-ts:
 test:
 	@echo "Running Filter Unit Tests..."
 	@npm test || { echo "✗ Filter testing failed"; exit 1; }
+	@echo "Running Learning Discovery Tests..."
+	@node tests/test-learn.mjs || { echo "✗ Learning discovery testing failed"; exit 1; }
 	@echo "Running Semantic Core Verification Suite..."
 	@node tests/test-semantic.mjs || { echo "✗ Semantic testing failed"; exit 1; }
 	@echo "✓ All test suites verified."

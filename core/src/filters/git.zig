@@ -47,7 +47,7 @@ pub const GitFilter = struct {
         while (it.next()) |line| {
             if (isCommitLine(line)) log_count += 1.0;
         }
-        signals += @min(5.0, log_count * 0.5);
+        signals += @min(5.0, log_count * 1.0);
 
         return @min(1.0, signals / 6.0);
     }

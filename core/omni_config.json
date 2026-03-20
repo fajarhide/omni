@@ -16,5 +16,16 @@
       ],
       "output": "GIT_REPORT: branch={branch} total_modified={mod}"
     }
+  ,
+
+    {
+      "name": "auto-p-align-center",
+      "trigger": "<p align=\"center\">",
+      "confidence": 0.99,
+      "rules": [
+        { "capture": "<p align=\"center\"> {value}", "action": "count", "as": "value_count" }
+      ],
+      "output": "[auto-filtered] <p align=\"center\">: {value_count}x suppressed"
+    }
   ]
 }
