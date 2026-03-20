@@ -25,6 +25,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Install Dependencies
         run: npm install
 

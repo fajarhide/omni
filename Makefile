@@ -60,6 +60,8 @@ build-ts: node_modules
 test: node_modules
 	@echo "Running Filter Unit Tests..."
 	@npm test || { echo "✗ Filter testing failed"; exit 1; }
+	@echo "Running MCP Integration Tests..."
+	@npm run test:mcp || { echo "✗ MCP testing failed"; exit 1; }
 	@echo "Running Learning Discovery Tests..."
 	@node tests/test-learn.mjs || { echo "✗ Learning discovery testing failed"; exit 1; }
 	@echo "Running Semantic Core Verification Suite..."

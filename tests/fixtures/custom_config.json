@@ -1,0 +1,7 @@
+{
+  "rules": [
+    { "name": "remove_debug", "match": "DEBUG:", "action": "remove" },
+    { "name": "mask_secret", "match": "SECRET_KEY=", "action": "mask" }
+  ],
+  "dsl_filters": []
+}

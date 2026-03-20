@@ -1,0 +1,11 @@
+Compiling src/main.c
+Compiling src/utils.c
+Compiling src/parser.c
+Compiling src/config.c
+Compiling src/logger.c
+Compiling src/network.c
+Compiling src/database.c
+Compiling src/auth.c
+Linking myapp
+Build Summary: 8 files compiled
+Build succeeded in 4.2s

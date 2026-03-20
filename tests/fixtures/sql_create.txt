@@ -1,0 +1,15 @@
+-- Create the main projects table
+-- This stores all registered projects
+/* Multi-line comment
+   describing the schema
+   version: v2.1 */
+CREATE TABLE projects (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    version VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+-- Insert initial data
+INSERT INTO projects (name, version) VALUES ('OMNI', '0.4.4');
+INSERT INTO projects (name, version) VALUES ('ForgePod', '1.2.0');

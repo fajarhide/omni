@@ -1,0 +1,10 @@
+Creating network "myapp_default" with the default driver
+Creating myapp_redis_1  ... done
+Creating myapp_db_1     ... done
+Creating myapp_api_1    ... done
+Creating myapp_web_1    ... done
+Attaching to myapp_redis_1, myapp_db_1, myapp_api_1, myapp_web_1
+redis_1  | Ready to accept connections
+db_1     | PostgreSQL init process complete; ready for start up.
+api_1    | Server running on port 3000
+web_1    | Compiled successfully!

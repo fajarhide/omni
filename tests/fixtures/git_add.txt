@@ -1,0 +1,6 @@
+add 'src/index.ts'
+add 'src/cache.ts'
+add 'tests/filters/git.test.ts'
+add 'tests/filters/docker.test.ts'
+add 'tests/filters/sql.test.ts'
+add 'package.json'

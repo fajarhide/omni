@@ -1,0 +1,16 @@
+Compiling src/main.c
+Compiling src/utils.c
+Compiling src/parser.c
+src/parser.c:42:5: error: use of undeclared identifier 'result'
+    result = parse_token(input);
+    ^
+src/parser.c:87:12: warning: comparison of integers of different signs: 'int' and 'unsigned long'
+    if (len == sizeof(buffer)) {
+        ~~~ ^  ~~~~~~~~~~~~~~~
+src/utils.c:15:8: error: incompatible pointer types passing 'char *' to parameter of type 'int *'
+    process(name);
+           ^~~~
+Compiling src/config.c
+Compiling src/logger.c
+2 errors generated.
+Build failed with 2 errors and 1 warning.
