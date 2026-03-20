@@ -2,6 +2,209 @@ const std = @import("std");
 const metrics = @import("local_metrics.zig");
 const ui = @import("ui.zig");
 
+fn truncateLabel(allocator: std.mem.Allocator, label: []const u8, max_chars: usize) ![]u8 {
+    if (ui.visibleLen(label) <= max_chars) return allocator.dupe(u8, label);
+    if (max_chars <= 3) return allocator.dupe(u8, "...");
+
+    var out = std.ArrayListUnmanaged(u8){};
+    errdefer out.deinit(allocator);
+
+    var visible: usize = 0;
+    var i: usize = 0;
+    while (i < label.len and visible < max_chars - 3) {
+        const start = i;
+        const c = label[i];
+        if ((c & 0x80) == 0) {
+            i += 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            i += 4;
+        } else {
+            i += 1;
+        }
+        try out.appendSlice(allocator, label[start..i]);
+        visible += 1;
+    }
+
+    try out.appendSlice(allocator, "...");
+    return out.toOwnedSlice(allocator);
+}
+
+fn joinTokens(allocator: std.mem.Allocator, tokens: []const []const u8, separator: []const u8) ![]u8 {
+    var out = std.ArrayListUnmanaged(u8){};
+    errdefer out.deinit(allocator);
+
+    for (tokens, 0..) |token, idx| {
+        if (idx > 0) try out.appendSlice(allocator, separator);
+        try out.appendSlice(allocator, token);
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
+fn compactFilterLabel(allocator: std.mem.Allocator, label: []const u8, max_chars: usize) ![]u8 {
+    if (std.mem.indexOfScalar(u8, label, '-')) |_| {
+        var parts = std.ArrayListUnmanaged([]const u8){};
+        defer parts.deinit(allocator);
+
+        var it = std.mem.splitScalar(u8, label, '-');
+        while (it.next()) |part| {
+            if (part.len > 0) try parts.append(allocator, part);
+        }
+
+        if (parts.items.len >= 2) {
+            var prefix: []const u8 = "";
+            var start_index: usize = 0;
+            if (std.mem.eql(u8, parts.items[0], "codex")) {
+                prefix = "codex/";
+                start_index = 1;
+            }
+
+            if (start_index < parts.items.len) {
+                const mergeable = [_][]const u8{ "build", "diff", "install" };
+                var base_end = start_index + 1;
+                if (base_end < parts.items.len) {
+                    for (mergeable) |merge_token| {
+                        if (std.mem.eql(u8, parts.items[base_end], merge_token)) {
+                            base_end += 1;
+                            break;
+                        }
+                    }
+                }
+
+                const base = try joinTokens(allocator, parts.items[start_index..base_end], "-");
+                defer allocator.free(base);
+
+                var qualifiers = std.ArrayListUnmanaged([]const u8){};
+                defer qualifiers.deinit(allocator);
+                for (parts.items[base_end..]) |part| {
+                    if (std.mem.eql(u8, part, "summary") or std.mem.eql(u8, part, "rich")) continue;
+                    try qualifiers.append(allocator, part);
+                }
+
+                const qualifiers_joined = if (qualifiers.items.len > 0)
+                    try joinTokens(allocator, qualifiers.items, "-")
+                else
+                    try allocator.dupe(u8, "");
+                defer allocator.free(qualifiers_joined);
+
+                const compact = if (qualifiers.items.len > 0)
+                    try std.fmt.allocPrint(allocator, "{s}{s}:{s}", .{ prefix, base, qualifiers_joined })
+                else
+                    try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, base });
+                defer allocator.free(compact);
+
+                if (ui.visibleLen(compact) <= max_chars) return allocator.dupe(u8, compact);
+            }
+        }
+    }
+
+    return truncateLabel(allocator, label, max_chars);
+}
+
+fn normalizeAgentLabel(agent: []const u8) []const u8 {
+    if (std.mem.eql(u8, agent, "CLI")) return "native-cli";
+    return agent;
+}
+
+fn deriveProfileName(filter_name: []const u8) []const u8 {
+    if (std.mem.eql(u8, filter_name, "cache")) return "cache";
+    if (std.mem.eql(u8, filter_name, "custom")) return "custom";
+    if (std.mem.eql(u8, filter_name, "cat")) return "cat";
+    if (std.mem.eql(u8, filter_name, "build")) return "build";
+    if (std.mem.eql(u8, filter_name, "docker")) return "docker";
+    if (std.mem.eql(u8, filter_name, "git")) return "git";
+    if (std.mem.eql(u8, filter_name, "node")) return "node";
+    if (std.mem.eql(u8, filter_name, "sql")) return "sql";
+
+    if (std.mem.startsWith(u8, filter_name, "codex-") or std.mem.startsWith(u8, filter_name, "codex/")) return "codex";
+    if (std.mem.startsWith(u8, filter_name, "claude-") or std.mem.startsWith(u8, filter_name, "claude/")) return "claude";
+    if (std.mem.startsWith(u8, filter_name, "opencode-") or std.mem.startsWith(u8, filter_name, "opencode/")) return "opencode";
+    if (std.mem.startsWith(u8, filter_name, "antigravity-") or std.mem.startsWith(u8, filter_name, "antigravity/")) return "antigravity";
+
+    if (std.mem.indexOfAny(u8, filter_name, "-/")) |idx| {
+        return filter_name[0..idx];
+    }
+
+    return filter_name;
+}
+
+fn isNoiseFilterName(filter_name: []const u8) bool {
+    if (filter_name.len == 0) return true;
+    for (filter_name) |c| {
+        if (std.mem.eql(u8, filter_name, "")) return true;
+        if (c == '-' or c == '/' or c == ':' or c == '_' or c == '.') continue;
+        if (std.ascii.isAlphanumeric(c)) continue;
+        return true;
+    }
+    return false;
+}
+const AGENT_FILTER_SUMMARY_LIMIT: usize = 4;
+
+fn renderAgentFilterBreakdown(
+    allocator: std.mem.Allocator,
+    stdout: anytype,
+    records: []metrics.Record,
+    agent_label: []const u8,
+) !void {
+    var filter_map = std.StringHashMap(metrics.Stats).init(allocator);
+    defer filter_map.deinit();
+
+    for (records) |rec| {
+        if (!std.mem.eql(u8, rec.agent, agent_label)) continue;
+        var entry = try filter_map.getOrPut(rec.filter_name);
+        if (!entry.found_existing) entry.value_ptr.* = .{};
+        entry.value_ptr.add(rec);
+    }
+
+    if (filter_map.count() == 0) {
+        try ui.row(stdout, "  Filters: " ++ ui.DIM ++ "none recorded" ++ ui.RESET);
+        return;
+    }
+
+    var rows = std.ArrayListUnmanaged(metrics.GroupedStats){};
+    defer rows.deinit(allocator);
+    var it = filter_map.iterator();
+    while (it.next()) |entry| try rows.append(allocator, .{ .label = entry.key_ptr.*, .stats = entry.value_ptr.* });
+
+    for (0..rows.items.len) |i| {
+        for (0..rows.items.len - i - 1) |j| {
+            if (rows.items[j].stats.saved < rows.items[j + 1].stats.saved) {
+                const temp = rows.items[j];
+                rows.items[j] = rows.items[j + 1];
+                rows.items[j + 1] = temp;
+            }
+        }
+    }
+
+    const limit = if (rows.items.len <= AGENT_FILTER_SUMMARY_LIMIT) rows.items.len else AGENT_FILTER_SUMMARY_LIMIT;
+    try ui.row(stdout, "  Filters:");
+
+    for (rows.items[0..limit], 0..) |row, idx| {
+        const short_label = try compactFilterLabel(allocator, row.label, 24);
+        defer allocator.free(short_label);
+        const saved_str = try metrics.formatBytes(allocator, row.stats.saved);
+        defer allocator.free(saved_str);
+        const line = try std.fmt.allocPrint(
+            allocator,
+            "    {d}. " ++ ui.CYAN ++ "{s}" ++ ui.RESET ++ "  {d} runs  {s} saved",
+            .{ idx + 1, short_label, row.stats.cmds, saved_str },
+        );
+        defer allocator.free(line);
+        try ui.row(stdout, line);
+    }
+
+    if (rows.items.len > limit) {
+        const remaining = rows.items.len - limit;
+        const more = try std.fmt.allocPrint(allocator, "    ... and {d} more filter(s)", .{ remaining });
+        defer allocator.free(more);
+        try ui.row(stdout, more);
+    }
+}
+
 pub const MonitorOptions = struct {
     filter_agent: ?[]const u8 = null,
     graph: bool = false,
@@ -11,6 +214,7 @@ pub const MonitorOptions = struct {
     monthly: bool = false,
     all: bool = false,
     format_json: bool = false,
+    prune_noise: bool = false,
 };
 
 pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
@@ -32,6 +236,9 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
     var agent_map = std.StringHashMap(metrics.Stats).init(allocator);
     defer agent_map.deinit();
 
+    var profile_map = std.StringHashMap(metrics.Stats).init(allocator);
+    defer profile_map.deinit();
+
     var all_records = std.ArrayListUnmanaged(metrics.Record){};
     defer {
         for (all_records.items) |rec| {
@@ -49,12 +256,25 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
         var it_lines = std.mem.splitSequence(u8, data, "\n");
         while (it_lines.next()) |ln| {
             if (ln.len == 0) continue;
-            const rec = metrics.parseCsvLine(allocator, ln) catch continue;
+            var rec = metrics.parseCsvLine(allocator, ln) catch continue;
 
-            if (opts.filter_agent != null and !std.mem.eql(u8, rec.agent, opts.filter_agent.?)) {
+            const agent_label = normalizeAgentLabel(rec.agent);
+
+            if (opts.filter_agent != null and !std.mem.eql(u8, agent_label, opts.filter_agent.?)) {
                 allocator.free(rec.agent);
                 allocator.free(rec.filter_name);
                 continue;
+            }
+
+            if (opts.prune_noise and isNoiseFilterName(rec.filter_name)) {
+                allocator.free(rec.agent);
+                allocator.free(rec.filter_name);
+                continue;
+            }
+
+            if (!std.mem.eql(u8, rec.agent, agent_label)) {
+                allocator.free(rec.agent);
+                rec.agent = try allocator.dupe(u8, agent_label);
             }
 
             try all_records.append(allocator, rec);
@@ -71,6 +291,10 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
             var a_res = try agent_map.getOrPut(rec.agent);
             if (!a_res.found_existing) a_res.value_ptr.* = .{};
             a_res.value_ptr.add(rec);
+
+            var p_res = try profile_map.getOrPut(deriveProfileName(rec.filter_name));
+            if (!p_res.found_existing) p_res.value_ptr.* = .{};
+            p_res.value_ptr.add(rec);
         }
     } else |_| {
         try stdout.print(ui.DIM ++ "  No tracking data yet.\n" ++ ui.RESET, .{});
@@ -131,16 +355,54 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
             for (rows.items, 0..) |r, idx| {
                 const s = r.stats;
                 const fs = try metrics.formatBytes(allocator, s.saved);
+                const display_label = try compactFilterLabel(allocator, r.label, 24);
                 defer allocator.free(fs);
+                defer allocator.free(display_label);
                 const fp = if (s.input > 0) (@as(f64, @floatFromInt(s.saved)) / @as(f64, @floatFromInt(s.input))) * 100.0 else 0.0;
                 
                 const bar_str = try ui.progressBar(allocator, "", fp, 20);
                 defer allocator.free(bar_str);
                 
-                const rl = try std.fmt.allocPrint(allocator, "{d:>2}. " ++ ui.CYAN ++ "{s:<16}" ++ ui.RESET ++ "{d:>5}x  " ++ ui.WHITE ++ "{s:>8} saved" ++ ui.RESET ++ "  {s}", .{
-                    idx + 1, r.label, s.cmds, fs, bar_str,
+                const rl = try std.fmt.allocPrint(allocator, "{d:>2}. " ++ ui.CYAN ++ "{s:<24}" ++ ui.RESET ++ "{d:>5}x  " ++ ui.WHITE ++ "{s:>8} saved" ++ ui.RESET ++ "  {s}", .{
+                    idx + 1, display_label, s.cmds, fs, bar_str,
                 });
                 defer allocator.free(rl); try ui.row(stdout, rl);
+            }
+            try stdout.print("\n", .{});
+            try ui.divider(stdout);
+        }
+
+        if (profile_map.count() > 0) {
+            try ui.printHeader(stdout, "PROFILE BREAKDOWN");
+
+            var rows = std.ArrayListUnmanaged(metrics.GroupedStats){};
+            defer rows.deinit(allocator);
+            var it = profile_map.iterator();
+            while (it.next()) |entry| try rows.append(allocator, .{ .label = entry.key_ptr.*, .stats = entry.value_ptr.* });
+
+            for (0..rows.items.len) |i| {
+                for (0..rows.items.len - i - 1) |j| {
+                    if (rows.items[j].stats.saved < rows.items[j + 1].stats.saved) {
+                        const temp = rows.items[j]; rows.items[j] = rows.items[j + 1]; rows.items[j + 1] = temp;
+                    }
+                }
+            }
+
+            try stdout.print("\n", .{});
+            for (rows.items, 0..) |r, idx| {
+                const s = r.stats;
+                const fs = try metrics.formatBytes(allocator, s.saved);
+                defer allocator.free(fs);
+                const fp = if (s.input > 0) (@as(f64, @floatFromInt(s.saved)) / @as(f64, @floatFromInt(s.input))) * 100.0 else 0.0;
+
+                const bar_str = try ui.progressBar(allocator, "", fp, 20);
+                defer allocator.free(bar_str);
+
+                const rl = try std.fmt.allocPrint(allocator, "{d:>2}. " ++ ui.CYAN ++ "{s:<24}" ++ ui.RESET ++ "{d:>5}x  " ++ ui.WHITE ++ "{s:>8} saved" ++ ui.RESET ++ "  {s}", .{
+                    idx + 1, r.label, s.cmds, fs, bar_str,
+                });
+                defer allocator.free(rl);
+                try ui.row(stdout, rl);
             }
             try stdout.print("\n", .{});
             try ui.divider(stdout);
@@ -166,28 +428,8 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
                     const l = try std.fmt.allocPrint(allocator, "  Runs: {d}  Input: {s}  Saved: {s} ({s}{d:.1}%" ++ ui.RESET ++ ")", .{ as.cmds, ain, asv, c, ap });
                     defer allocator.free(l); try ui.row(stdout, l);
                 }
-                var flb = std.ArrayListUnmanaged(u8){};
-                defer flb.deinit(allocator);
-                const flw = flb.writer(allocator);
-                try flw.print("  Filters: ", .{});
-                
-                var count_f: usize = 0;
-                for (all_records.items, 0..) |rec, ri| {
-                    if (std.mem.eql(u8, rec.agent, an)) {
-                        var already = false;
-                        for (0..ri) |pi| {
-                            if (std.mem.eql(u8, all_records.items[pi].agent, an) and std.mem.eql(u8, all_records.items[pi].filter_name, rec.filter_name)) {
-                                already = true; break;
-                            }
-                        }
-                        if (!already) {
-                            if (count_f > 0) try flw.print(ui.GRAY ++ ", " ++ ui.RESET, .{});
-                            try flw.print(ui.CYAN ++ "{s}" ++ ui.RESET, .{rec.filter_name});
-                            count_f += 1;
-                        }
-                    }
-                }
-                try ui.row(stdout, flb.items); try ui.row(stdout, "");
+                try renderAgentFilterBreakdown(allocator, stdout, all_records.items, an);
+                try ui.row(stdout, "");
             }
             try ui.divider(stdout);
         }
@@ -199,6 +441,13 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
         });
         var it = filter_map.iterator(); var first = true;
         while (it.next()) |e| {
+            if (!first) try stdout.print(",\n", .{});
+            try stdout.print("    {{ \"name\": \"{s}\", \"cmds\": {d}, \"saved\": {d} }}", .{ e.key_ptr.*, e.value_ptr.cmds, e.value_ptr.saved });
+            first = false;
+        }
+        try stdout.print("\n  ],\n  \"profiles\": [\n", .{});
+        var pit = profile_map.iterator(); first = true;
+        while (pit.next()) |e| {
             if (!first) try stdout.print(",\n", .{});
             try stdout.print("    {{ \"name\": \"{s}\", \"cmds\": {d}, \"saved\": {d} }}", .{ e.key_ptr.*, e.value_ptr.cmds, e.value_ptr.saved });
             first = false;
@@ -237,9 +486,9 @@ pub fn handleMonitor(allocator: std.mem.Allocator, opts: MonitorOptions) !void {
                 }
             }
             for (rows.items) |r| {
-                const s = r.stats; const in_s = try metrics.formatBytes(alloc, s.input); const out_s = try metrics.formatBytes(alloc, s.output); const sv_s = try metrics.formatBytes(alloc, s.saved); const ms_s = try metrics.formatMs(alloc, s.ms, s.cmds); defer { alloc.free(in_s); alloc.free(out_s); alloc.free(sv_s); alloc.free(ms_s); }
+                const s = r.stats; const in_s = try metrics.formatBytes(alloc, s.input); const out_s = try metrics.formatBytes(alloc, s.output); const sv_s = try metrics.formatBytes(alloc, s.saved); const ms_s = try metrics.formatMs(alloc, s.ms, s.cmds); const display_label = try compactFilterLabel(alloc, r.label, 15); defer { alloc.free(in_s); alloc.free(out_s); alloc.free(sv_s); alloc.free(ms_s); alloc.free(display_label); }
                 const sp = if (s.input > 0) (@as(f64, @floatFromInt(s.saved)) / @as(f64, @floatFromInt(s.input))) * 100.0 else 0.0; const c = ui.colorForPct(sp);
-                const rl = try std.fmt.allocPrint(alloc, "  " ++ ui.CYAN ++ "{s:<15}" ++ ui.RESET ++ " {d:>5}  {s:>8}  {s:>8}  {s:>8}  {s}{d:>5.1}%" ++ ui.RESET ++ "  {s:>7} ", .{ r.label, s.cmds, in_s, out_s, sv_s, c, sp, ms_s });
+                const rl = try std.fmt.allocPrint(alloc, "  " ++ ui.CYAN ++ "{s:<15}" ++ ui.RESET ++ " {d:>5}  {s:>8}  {s:>8}  {s:>8}  {s}{d:>5.1}%" ++ ui.RESET ++ "  {s:>7} ", .{ display_label, s.cmds, in_s, out_s, sv_s, c, sp, ms_s });
                 defer alloc.free(rl); try ui.row(out, rl);
             }
             try ui.dividerSolid(out);

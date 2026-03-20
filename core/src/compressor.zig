@@ -82,17 +82,20 @@ pub fn compress(allocator: std.mem.Allocator, input: []const u8, filters: []cons
         if (max_score >= 0.8) {
             // Path A: High Confidence -> Primary Distillation (High Density Signal)
             const processed = try filter.process(allocator, input);
-            return CompressResult{ .output = processed, .filter_name = filter.name };
+            const filter_label = filter.label();
+            return CompressResult{ .output = processed, .filter_name = filter_label };
         } else if (max_score >= 0.3) {
             // Path B: Grey Area -> Soft Compression (Context Manifest)
             const processed = try filter.process(allocator, input);
+            const filter_label = filter.label();
             defer allocator.free(processed);
             const manifest = try std.fmt.allocPrint(allocator, "[OMNI Context Manifest: {s} (Confidence: {d:.2})]\n{s}", .{filter.name, max_score, processed});
-            return CompressResult{ .output = manifest, .filter_name = filter.name };
+            return CompressResult{ .output = manifest, .filter_name = filter_label };
         } else {
             // Path C: Low Confidence/Noise -> Drop
+            const filter_label = filter.label();
             const dropped = try std.fmt.allocPrint(allocator, "[OMNI: Dropped noisy {s} output (Confidence: {d:.2})]", .{filter.name, max_score});
-            return CompressResult{ .output = dropped, .filter_name = filter.name };
+            return CompressResult{ .output = dropped, .filter_name = filter_label };
         }
     }
     

@@ -10,7 +10,10 @@
     "dev": "ts-node-dev --respawn src/index.ts",
     "test": "bun test tests/filters/",
     "test:mcp": "node --test tests/mcp/*.test.js",
-    "test:semantic": "node tests/test-semantic.mjs"
+    "test:semantic": "node tests/test-semantic.mjs",
+    "bench:fixtures": "node tests/folded/benchmark-fixtures.mjs",
+    "bench:fixtures:strict": "node tests/folded/benchmark-fixtures.mjs --strict",
+    "bench:fixtures:baseline": "node tests/folded/benchmark-fixtures.mjs --write-baseline"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

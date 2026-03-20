@@ -12,8 +12,8 @@ describe('NodeFilter', () => {
     test('matches and distills npm install output', () => {
         const input = readFixture('npm_install.txt');
         const output = engine.distill(input);
-        expect(output).toContain('added 154 packages');
-        expect(output).toMatch(/audited|packages/);
+        expect(output).toContain('npm:');
+        expect(output).toContain('154 packages');
     });
 
     // Test 2: Valid input - yarn install
@@ -35,7 +35,8 @@ describe('NodeFilter', () => {
     test('output format: keeps summary lines only', () => {
         const input = readFixture('npm_install.txt');
         const output = engine.distill(input);
-        expect(output).toContain('added 154 packages');
+        expect(output).toContain('npm:');
+        expect(output).toContain('154 packages');
         // npm notice lines should be stripped (they're noise)
         expect(output).not.toContain('npm notice New major');
         expect(output).not.toContain('Changelog');
@@ -57,16 +58,18 @@ describe('NodeFilter', () => {
     });
 
     // Test 7: Vulnerability report
-    test('keeps vulnerability information', () => {
+    test('emits a short npm summary for vulnerability-heavy output', () => {
         const input = 'added 200 packages in 3s\n12 packages are looking for funding\nfound 3 vulnerabilities (1 moderate, 2 high)';
         const output = engine.distill(input);
-        expect(output).toContain('vulnerabilities');
+        expect(output).toContain('npm: 200 packages added | 3s | 3 vulnerabilities');
+        expect(output.length).toBeLessThan(input.length);
     });
 
     // Test 8: Error handling
-    test('keeps error lines from npm', () => {
+    test('emits a compressed npm summary for install errors', () => {
         const input = 'added 10 packages in 1s\nerror ERESOLVE unable to resolve dependency tree\nERR! peer dep missing: react@^18';
         const output = engine.distill(input);
-        expect(output).toMatch(/error|ERR!/);
+        expect(output).toContain('npm: 10 packages added | 1s');
+        expect(output.length).toBeLessThan(input.length);
     });
 });

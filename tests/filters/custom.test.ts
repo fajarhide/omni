@@ -58,4 +58,80 @@ describe('CustomFilter', () => {
         const output = engine.distill(k8sInput);
         expect(output.length).toBeGreaterThan(0);
     });
+
+    test('higher-confidence DSL filter wins over generic auto-filter', async () => {
+        const customEngine = await createOmniEngine({
+            rules: [],
+            dsl_filters: [
+                {
+                    name: 'generic-auto',
+                    trigger: '---',
+                    confidence: 0.6,
+                    rules: [
+                        { capture: '--- {value}', action: 'count', as: 'value_count' }
+                    ],
+                    output: '[auto-filtered] ---: {value_count}x suppressed'
+                },
+                {
+                    name: 'specific-report',
+                    trigger: 'SPECIAL_SUMMARY:',
+                    confidence: 0.99,
+                    rules: [
+                        { capture: 'SPECIAL_SUMMARY: {status}', action: 'keep' }
+                    ],
+                    output: 'report: {status}'
+                }
+            ]
+        });
+
+        const input = [
+            'SECTION A',
+            '--- repeated noise',
+            'SPECIAL_SUMMARY: deployment blocked',
+        ].join('\n');
+        const output = customEngine.distill(input);
+        expect(output).toContain('report: deployment blocked');
+        expect(output).not.toContain('[auto-filtered]');
+    });
+
+    test('supports default values for missing placeholders', async () => {
+        const customEngine = await createOmniEngine({
+            rules: [],
+            dsl_filters: [
+                {
+                    name: 'defaults',
+                    trigger: 'SUMMARY:',
+                    confidence: 0.99,
+                    rules: [
+                        { capture: 'SUMMARY: {value}', action: 'keep' }
+                    ],
+                    output: 'summary: {value} | {missing?none}'
+                }
+            ]
+        });
+
+        const output = customEngine.distill('SUMMARY: healthy');
+        expect(output).toBe('summary: healthy | none');
+    });
+
+    test('omits unresolved placeholders without leaking template markers', async () => {
+        const customEngine = await createOmniEngine({
+            rules: [],
+            dsl_filters: [
+                {
+                    name: 'optional-placeholder',
+                    trigger: 'STATUS:',
+                    confidence: 0.99,
+                    rules: [
+                        { capture: 'STATUS: {value}', action: 'keep' }
+                    ],
+                    output: 'status:{value}{missing}'
+                }
+            ]
+        });
+
+        const output = customEngine.distill('STATUS: ok');
+        expect(output).toBe('status:ok');
+        expect(output).not.toContain('{missing}');
+    });
 });

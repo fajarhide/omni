@@ -23,6 +23,7 @@ pub const CustomFilter = struct {
     rules: std.ArrayList(Rule),
     dsl_engines: std.ArrayList(*dsl.DslEngine),
     parsed_configs: std.ArrayList(std.json.Parsed(Config)),
+    last_metric_label: []const u8,
 
     pub fn init(allocator: std.mem.Allocator) !*CustomFilter {
         const self = try allocator.create(CustomFilter);
@@ -31,6 +32,7 @@ pub const CustomFilter = struct {
             .rules = std.ArrayList(Rule).empty,
             .dsl_engines = std.ArrayList(*dsl.DslEngine).empty,
             .parsed_configs = std.ArrayList(std.json.Parsed(Config)).empty,
+            .last_metric_label = "custom",
         };
         return self;
     }
@@ -80,7 +82,13 @@ pub const CustomFilter = struct {
             .matchFn = match,
             .scoreFn = score,
             .processFn = process,
+            .labelFn = metricLabel,
         };
+    }
+
+    fn metricLabel(ptr: *anyopaque) []const u8 {
+        const self: *CustomFilter = @ptrCast(@alignCast(ptr));
+        return self.last_metric_label;
     }
 
     pub fn match(ptr: *anyopaque, input: []const u8) bool {
@@ -96,19 +104,38 @@ pub const CustomFilter = struct {
         return false;
     }
 
-    pub fn score(ptr: *anyopaque, _: []const u8) f32 {
-        _ = ptr;
-        return 1.0; 
+    pub fn score(ptr: *anyopaque, input: []const u8) f32 {
+        const self: *CustomFilter = @ptrCast(@alignCast(ptr));
+        var max_score: f32 = -1.0;
+
+        for (self.rules.items) |rule| {
+            if (std.mem.indexOf(u8, input, rule.match) != null) {
+                max_score = @max(max_score, 1.05);
+            }
+        }
+
+        for (self.dsl_engines.items) |engine| {
+            for (engine.filters) |config| {
+                if (std.mem.indexOf(u8, input, config.trigger) != null) {
+                    max_score = @max(max_score, config.confidence + 0.1);
+                }
+            }
+        }
+
+        return if (max_score > 0.0) max_score else 0.0;
     }
 
     pub fn process(ptr: *anyopaque, allocator: std.mem.Allocator, input: []const u8) ![]u8 {
         const self: *CustomFilter = @ptrCast(@alignCast(ptr));
         var current_output = try allocator.dupe(u8, input);
         errdefer allocator.free(current_output);
+        self.last_metric_label = "custom";
+        var simple_rule_label: ?[]const u8 = null;
 
         // 1. Run Simple Rules (Remove/Mask)
         for (self.rules.items) |rule| {
             if (std.mem.indexOf(u8, current_output, rule.match)) |_| {
+                if (simple_rule_label == null) simple_rule_label = rule.name;
                 const next_output = switch (rule.action) {
                     .remove => try removeAll(allocator, current_output, rule.match),
                     .mask => try maskAll(allocator, current_output, rule.match),
@@ -126,12 +153,26 @@ pub const CustomFilter = struct {
             try engine.getFilters(&dsl_filters);
         }
 
+        var best_filter: ?Filter = null;
+        var max_score: f32 = -1.0;
+
         for (dsl_filters.items) |f| {
             if (f.matchFn(f.ptr, current_output)) {
-                const next_output = try f.processFn(f.ptr, allocator, current_output);
-                allocator.free(current_output);
-                current_output = next_output;
+                const filter_score = f.scoreFn(f.ptr, current_output);
+                if (filter_score >= max_score) {
+                    max_score = filter_score;
+                    best_filter = f;
+                }
             }
+        }
+
+        if (best_filter) |f| {
+            self.last_metric_label = f.name;
+            const next_output = try f.processFn(f.ptr, allocator, current_output);
+            allocator.free(current_output);
+            current_output = next_output;
+        } else if (simple_rule_label) |rule_name| {
+            self.last_metric_label = rule_name;
         }
 
         return current_output;

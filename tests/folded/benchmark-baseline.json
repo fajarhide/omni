@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "generated_at": "2026-03-20T10:43:41.047Z",
+  "omni_bin": "/Users/fajarhide/project/developer/hiroshigodev/omni/core/zig-out/bin/omni",
+  "average_saved_fraction": 0.818567,
+  "cases": [
+    {
+      "name": "npm-install",
+      "fixture_path": "tests/fixtures/npm_install_full.txt",
+      "raw_chars": 243,
+      "raw_lines": 7,
+      "omni_chars": 60,
+      "omni_lines": 1,
+      "saved_fraction": 0.753086,
+      "quality": "good",
+      "preview": "npm: 42 packages added | 3.2s | 14 funding | 100 deprecated"
+    },
+    {
+      "name": "docker-build",
+      "fixture_path": "tests/fixtures/docker_build.txt",
+      "raw_chars": 337,
+      "raw_lines": 12,
+      "omni_chars": 47,
+      "omni_lines": 1,
+      "saved_fraction": 0.860534,
+      "quality": "good",
+      "preview": "docker build: 4 steps | image omni-core:latest"
+    },
+    {
+      "name": "git-diff",
+      "fixture_path": "tests/fixtures/git_diff.txt",
+      "raw_chars": 605,
+      "raw_lines": 12,
+      "omni_chars": 59,
+      "omni_lines": 1,
+      "saved_fraction": 0.902479,
+      "quality": "good",
+      "preview": "git diff: core/src/main.zig -> core/src/main.zig | 1 hunks"
+    },
+    {
+      "name": "pytest-fail",
+      "fixture_path": "tests/fixtures/pytest_fail.txt",
+      "raw_chars": 277,
+      "raw_lines": 6,
+      "omni_chars": 52,
+      "omni_lines": 1,
+      "saved_fraction": 0.812274,
+      "quality": "good",
+      "preview": "pytest: 42 passed | 3 failed | collected 50 | 3.15s"
+    },
+    {
+      "name": "tsc-errors",
+      "fixture_path": "tests/fixtures/tsc_errors.txt",
+      "raw_chars": 362,
+      "raw_lines": 6,
+      "omni_chars": 64,
+      "omni_lines": 1,
+      "saved_fraction": 0.823204,
+      "quality": "good",
+      "preview": "tsc: 2 diagnostics | last TS2769: No overload matches this call"
+    },
+    {
+      "name": "cat-plain",
+      "fixture_path": "tests/fixtures/cat_plain.txt",
+      "raw_chars": 1344,
+      "raw_lines": 24,
+      "omni_chars": 97,
+      "omni_lines": 1,
+      "saved_fraction": 0.927827,
+      "quality": "good",
+      "preview": "[cat distilled 24 lines of raw content] Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+    },
+    {
+      "name": "jest-fail",
+      "fixture_path": "tests/fixtures/jest_fail.txt",
+      "raw_chars": 184,
+      "raw_lines": 5,
+      "omni_chars": 65,
+      "omni_lines": 1,
+      "saved_fraction": 0.646739,
+      "quality": "good",
+      "preview": "jest: 51 passed | 3 failed | 54 total | suites 6 passed/3 failed"
+    },
+    {
+      "name": "vite-build",
+      "fixture_path": "tests/fixtures/vite_build.txt",
+      "raw_chars": 259,
+      "raw_lines": 6,
+      "omni_chars": 46,
+      "omni_lines": 1,
+      "saved_fraction": 0.822394,
+      "quality": "good",
+      "preview": "vite: 32 modules transformed | built in 1.23s"
+    }
+  ]
+}

@@ -95,11 +95,13 @@ pub fn main() !void {
                     // next arg will be day/week/month, handled above
                 } else if (std.mem.eql(u8, arg, "--all")) {
                     opts.all = true;
-                } else if (std.mem.eql(u8, arg, "--format=json") or std.mem.eql(u8, arg, "--json")) {
-                    opts.format_json = true;
-                }
+            } else if (std.mem.eql(u8, arg, "--format=json") or std.mem.eql(u8, arg, "--json")) {
+                opts.format_json = true;
+            } else if (std.mem.eql(u8, arg, "--prune-noise")) {
+                opts.prune_noise = true;
             }
-            try monitor.handleMonitor(allocator, opts);
+        }
+        try monitor.handleMonitor(allocator, opts);
             return;
         } else if (std.mem.eql(u8, cmd, "bench")) {
             var iterations: usize = 100;
@@ -136,10 +138,12 @@ pub fn main() !void {
             return;
         } else if (std.mem.eql(u8, cmd, "doctor")) {
             var fix = false;
+            var strict = false;
             for (args[2..]) |arg| {
                 if (std.mem.eql(u8, arg, "--fix")) fix = true;
+                if (std.mem.eql(u8, arg, "--strict")) strict = true;
             }
-            try handleDoctor(allocator, fix);
+            try handleDoctor(allocator, fix, strict);
             return;
         } else if (std.mem.eql(u8, cmd, "setup")) {
             try handleSetup();
@@ -220,7 +224,7 @@ fn printHelp() !void {
     try stdout.print("\n", .{});
 }
 
-fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
+fn handleDoctor(allocator: std.mem.Allocator, fix: bool, strict: bool) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const home = std.posix.getenv("HOME") orelse {
         try std.fs.File.stderr().deprecatedWriter().print("Error: HOME environment variable not found.\n", .{});
@@ -236,6 +240,7 @@ fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
     defer allocator.free(omni_dist);
     const omni_config = try std.fmt.allocPrint(allocator, "{s}/.omni/omni_config.json", .{home});
     defer allocator.free(omni_config);
+    const local_config = "omni_config.json";
     const claude_config = try std.fmt.allocPrint(allocator, "{s}/.claude.json", .{home});
     defer allocator.free(claude_config);
     const codex_config = try std.fmt.allocPrint(allocator, "{s}/.codex/config.toml", .{home});
@@ -250,6 +255,12 @@ fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
 
     const dist_ok = if (std.fs.cwd().access(omni_dist, .{})) |_| true else |_| false;
     try printDoctorCheck(allocator, stdout, dist_ok, "OMNI MCP entrypoint", omni_dist);
+
+    var doctor_warnings = std.ArrayList([]u8).empty;
+    defer {
+        for (doctor_warnings.items) |line| allocator.free(line);
+        doctor_warnings.deinit(allocator);
+    }
 
     var config_rules: usize = 0;
     var config_filters: usize = 0;
@@ -267,6 +278,7 @@ fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
         if (parsed.value.object.get("dsl_filters")) |filters_node| {
             if (filters_node == .array) config_filters = filters_node.array.items.len;
         }
+        try collectDoctorDslWarnings(allocator, omni_config, parsed.value, &doctor_warnings);
         break :blk true;
     };
     if (config_ok) {
@@ -275,6 +287,33 @@ fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
         try printDoctorCheck(allocator, stdout, true, "Global OMNI config", detail);
     } else {
         try printDoctorCheck(allocator, stdout, false, "Global OMNI config", omni_config);
+    }
+
+    var local_rules: usize = 0;
+    var local_filters: usize = 0;
+    const local_config_ok = blk: {
+        const file = std.fs.cwd().openFile(local_config, .{}) catch break :blk false;
+        defer file.close();
+        const content = file.readToEndAlloc(allocator, 1024 * 1024) catch break :blk false;
+        defer allocator.free(content);
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, content, .{}) catch break :blk false;
+        defer parsed.deinit();
+        if (parsed.value != .object) break :blk false;
+        if (parsed.value.object.get("rules")) |rules_node| {
+            if (rules_node == .array) local_rules = rules_node.array.items.len;
+        }
+        if (parsed.value.object.get("dsl_filters")) |filters_node| {
+            if (filters_node == .array) local_filters = filters_node.array.items.len;
+        }
+        try collectDoctorDslWarnings(allocator, local_config, parsed.value, &doctor_warnings);
+        break :blk true;
+    };
+    if (local_config_ok) {
+        const detail = try std.fmt.allocPrint(allocator, "{s} ({d} rules, {d} filters)", .{ local_config, local_rules, local_filters });
+        defer allocator.free(detail);
+        try printDoctorCheck(allocator, stdout, true, "Local OMNI config", detail);
+    } else {
+        try printDoctorCheck(allocator, stdout, false, "Local OMNI config", local_config);
     }
 
     var claude_ok = fileContains(allocator, claude_config, "\"omni\"");
@@ -286,6 +325,21 @@ fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
     try printDoctorCheck(allocator, stdout, codex_ok, "Codex", codex_config);
     try printDoctorCheck(allocator, stdout, opencode_ok, "OpenCode", opencode_config);
     try printDoctorCheck(allocator, stdout, antigravity_ok, "Antigravity", antigravity_config);
+
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Filter Diagnostics:" ++ ui.RESET);
+    if (doctor_warnings.items.len == 0) {
+        try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "No overly generic DSL triggers detected.");
+    } else {
+        for (doctor_warnings.items) |line| {
+            try ui.row(stdout, line);
+        }
+        if (strict) {
+            try ui.row(stdout, "");
+            try ui.row(stdout, ui.RED ++ " ⓧ " ++ ui.RESET ++ "Strict mode failed because DSL filter diagnostics reported warnings.");
+            std.process.exit(1);
+        }
+    }
 
     if (fix) {
         try ui.row(stdout, "");
@@ -369,6 +423,68 @@ fn fileContains(allocator: std.mem.Allocator, path: []const u8, needle: []const 
         }
         break :blk std.mem.indexOf(u8, content, needle) != null;
     };
+}
+
+fn collectDoctorDslWarnings(allocator: std.mem.Allocator, config_path: []const u8, root: std.json.Value, warnings: *std.ArrayList([]u8)) !void {
+    if (root != .object) return;
+    const filters_node = root.object.get("dsl_filters") orelse return;
+    if (filters_node != .array) return;
+
+    for (filters_node.array.items, 0..) |filter_node, idx| {
+        if (filter_node != .object) continue;
+
+        const name = if (filter_node.object.get("name")) |node|
+            if (node == .string) node.string else "unnamed"
+        else
+            "unnamed";
+        const trigger = if (filter_node.object.get("trigger")) |node|
+            if (node == .string) node.string else ""
+        else
+            "";
+
+        if (doctorGenericTriggerReason(trigger)) |reason| {
+            const line = try std.fmt.allocPrint(
+                allocator,
+                ui.YELLOW ++ " ⚠ " ++ ui.RESET ++ "{s} #" ++ ui.BOLD ++ "{d}" ++ ui.RESET ++ " `{s}` trigger " ++ ui.DIM ++ "\"{s}\"" ++ ui.RESET ++ " — {s}",
+                .{ config_path, idx + 1, name, trigger, reason },
+            );
+            try warnings.append(allocator, line);
+        }
+    }
+}
+
+fn doctorGenericTriggerReason(trigger: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, trigger, " \t\r\n");
+    if (trimmed.len == 0) return "empty trigger";
+    if (trimmed.len < 4) return "too short; likely to match unrelated output";
+    if (std.mem.indexOfAny(u8, trimmed, "{}") != null) return "contains placeholder syntax; triggers should be concrete text";
+
+    var alnum_count: usize = 0;
+    for (trimmed) |c| {
+        if (std.ascii.isAlphanumeric(c)) alnum_count += 1;
+    }
+    if (alnum_count < 3) return "mostly punctuation; likely too broad";
+
+    const generic_triggers = [_][]const u8{
+        "failed",
+        "passed",
+        "error",
+        "ERROR",
+        "Done in",
+        "Tests:",
+        "added ",
+        "found ",
+        "src/",
+        "---",
+        "```",
+    };
+    for (generic_triggers) |generic| {
+        if (std.mem.eql(u8, trimmed, generic)) {
+            return "too generic; prefer a more specific multi-token trigger";
+        }
+    }
+
+    return null;
 }
 
 fn printLearnHelp() !void {
@@ -601,7 +717,7 @@ fn handleDistill(allocator: std.mem.Allocator, filters: []const Filter) !void {
     try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{result.output});
 
     // Log metrics for native CLI usage
-    logMetrics(allocator, "CLI", result.filter_name, input.len, result.output.len, elapsed) catch {};
+    logMetrics(allocator, "native-cli", result.filter_name, input.len, result.output.len, elapsed) catch {};
 }
 
 fn logMetrics(allocator: std.mem.Allocator, agent: []const u8, filter_name: []const u8, input_len: usize, output_len: usize, ms: u64) !void {
@@ -648,7 +764,7 @@ fn handleProxy(allocator: std.mem.Allocator, cmd_args: []const [:0]u8, filters: 
         const elapsed = timer.read() / std.time.ns_per_ms;
         defer allocator.free(result.output);
         try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{result.output});
-        logMetrics(allocator, "CLI", result.filter_name, stdout_data.len, result.output.len, elapsed) catch {};
+        logMetrics(allocator, "native-cli", result.filter_name, stdout_data.len, result.output.len, elapsed) catch {};
     }
 
     if (stderr_data.len > 0) {
@@ -657,7 +773,7 @@ fn handleProxy(allocator: std.mem.Allocator, cmd_args: []const [:0]u8, filters: 
         const elapsed = timer.read() / std.time.ns_per_ms;
         defer allocator.free(result.output);
         try std.fs.File.stderr().deprecatedWriter().print("{s}\n", .{result.output});
-        logMetrics(allocator, "CLI", result.filter_name, stderr_data.len, result.output.len, elapsed) catch {};
+        logMetrics(allocator, "native-cli", result.filter_name, stderr_data.len, result.output.len, elapsed) catch {};
     }
 }
 
@@ -670,7 +786,7 @@ fn handleDensity(allocator: std.mem.Allocator, filters: []const Filter) !void {
     const elapsed = timer.read() / std.time.ns_per_ms;
     defer allocator.free(result.output);
 
-    logMetrics(allocator, "CLI", result.filter_name, input.len, result.output.len, elapsed) catch {};
+    logMetrics(allocator, "native-cli", result.filter_name, input.len, result.output.len, elapsed) catch {};
 
     const in_len = @as(f64, @floatFromInt(input.len));
     const out_len = @as(f64, @floatFromInt(result.output.len));
@@ -1079,6 +1195,7 @@ fn printMonitorHelp() !void {
     try ui.row(stdout, ui.CYAN ++ "  --by month      " ++ ui.RESET ++ "Breakdown by month");
     try ui.row(stdout, ui.CYAN ++ "  --all           " ++ ui.RESET ++ "Show all time ranges");
     try ui.row(stdout, ui.CYAN ++ "  --json          " ++ ui.RESET ++ "Output in JSON format");
+    try ui.row(stdout, ui.CYAN ++ "  --prune-noise   " ++ ui.RESET ++ "Hide noisy shorthand filters");
     try ui.row(stdout, "");
     try ui.row(stdout, ui.BOLD ++ "Subcommands:" ++ ui.RESET);
     try ui.row(stdout, ui.CYAN ++ "  scan            " ++ ui.RESET ++ "Scan for missed savings opportunities");
@@ -2314,41 +2431,25 @@ fn handleSetup() !void {
     }
 
     try stdout.print("\n", .{});
-    try ui.printHeader(stdout, "🌌 OMNI SETUP & INTEGRATION GUIDE");
+    try ui.printHeader(stdout, "🌌 OMNI QUICKSTART");
 
     try ui.row(stdout, ui.BOLD ++ "Step 1: Verify Installation" ++ ui.RESET);
     try ui.row(stdout, "  omni --version              " ++ ui.DIM ++ "# Should print OMNI Core vX.X.X" ++ ui.RESET);
     try ui.row(stdout, "  omni monitor                " ++ ui.DIM ++ "# Check engine status" ++ ui.RESET);
     try ui.row(stdout, "");
 
-    try ui.row(stdout, ui.BOLD ++ "Step 2: Choose Your Agent" ++ ui.RESET);
-    try ui.row(stdout, "");
-    try ui.row(stdout, ui.CYAN ++ "  CLAUDE CODE / CLAUDE CLI" ++ ui.RESET);
-    try ui.row(stdout, "  Run: claude mcp add-json omni \\");
-    try ui.row(stdout, "    '{\"type\":\"stdio\",\"command\":\"node\",");
-    try ui.row(stdout, "     \"args\":[\"$HOME/.omni/dist/index.js\"]}'");
-    try ui.row(stdout, "");
-    try ui.row(stdout, ui.CYAN ++ "  CODEX CLI" ++ ui.RESET);
-    try ui.row(stdout, "  Run: codex mcp add omni -- node $HOME/.omni/dist/index.js --agent=codex");
-    try ui.row(stdout, "");
-    try ui.row(stdout, ui.CYAN ++ "  ANTIGRAVITY (Google)" ++ ui.RESET);
-    try ui.row(stdout, "  Add to ~/.gemini/antigravity/mcp_config.json:");
-    try ui.row(stdout, "  { \"mcpServers\": { \"omni\": { \"command\": \"node\",");
-    try ui.row(stdout, "    \"args\": [\"$HOME/.omni/dist/index.js\"] } } }");
-    try ui.row(stdout, "");
-
-    try ui.row(stdout, ui.BOLD ++ "Step 3: Generate Config Automatically" ++ ui.RESET);
+    try ui.row(stdout, ui.BOLD ++ "Step 2: Generate Config Automatically" ++ ui.RESET);
     try ui.row(stdout, "  omni generate claude-code   " ++ ui.DIM ++ "# Auto-config for Claude" ++ ui.RESET);
     try ui.row(stdout, "  omni generate codex         " ++ ui.DIM ++ "# Auto-config for Codex" ++ ui.RESET);
     try ui.row(stdout, "  omni generate antigravity   " ++ ui.DIM ++ "# Auto-config for Antigravity" ++ ui.RESET);
     try ui.row(stdout, "  omni generate opencode      " ++ ui.DIM ++ "# Auto-config for OpenCode" ++ ui.RESET);
     try ui.row(stdout, "");
 
-    try ui.row(stdout, ui.BOLD ++ "Step 4: Use OMNI Everywhere" ++ ui.RESET);
+    try ui.row(stdout, ui.BOLD ++ "Step 3: Use OMNI Everywhere" ++ ui.RESET);
     try ui.row(stdout, "  git diff | omni                     " ++ ui.DIM ++ "# Distill git output" ++ ui.RESET);
     try ui.row(stdout, "  docker build . 2>&1 | omni          " ++ ui.DIM ++ "# Distill docker output" ++ ui.RESET);
-    try ui.row(stdout, "  omni_apply_template(\"codex-advanced\") " ++ ui.DIM ++ "# Compact tsc/eslint/jest/vitest output" ++ ui.RESET);
-    try ui.row(stdout, "  omni_apply_template(\"codex-polyglot\") " ++ ui.DIM ++ "# Add pytest/ruff/cargo/go/zig/pnpm summaries" ++ ui.RESET);
+    try ui.row(stdout, "  omni_apply_template(\"node-verbose\")  " ++ ui.DIM ++ "# Compact tsc/eslint/jest output" ++ ui.RESET);
+    try ui.row(stdout, "  omni_apply_template(\"codex-polyglot\")" ++ ui.DIM ++ "# Add summaries (30+ languages)" ++ ui.RESET);
     try ui.row(stdout, "  omni density < logs.txt             " ++ ui.DIM ++ "# Analyze token density" ++ ui.RESET);
     try ui.row(stdout, "");
 

@@ -138,16 +138,17 @@ pub const DslEngine = struct {
             if (template[i] == '{') {
                 if (std.mem.indexOf(u8, template[i..], "}")) |end_rel| {
                     const end_idx = i + end_rel;
-                    const key = template[i + 1 .. end_idx];
-                    
-                    if (vars.get(key)) |val| {
+                    const raw_key = template[i + 1 .. end_idx];
+                    const parsed = parsePlaceholder(raw_key);
+
+                    if (vars.get(parsed.key)) |val| {
                         try result.appendSlice(allocator, val);
-                    } else if (counters.get(key)) |count| {
+                    } else if (counters.get(parsed.key)) |count| {
                         var buf: [32]u8 = undefined;
                         const s = std.fmt.bufPrint(&buf, "{d}", .{count}) catch "???";
                         try result.appendSlice(allocator, s);
-                    } else {
-                        try result.appendSlice(allocator, template[i .. end_idx + 1]);
+                    } else if (parsed.default_value) |default_value| {
+                        try result.appendSlice(allocator, default_value);
                     }
                     i = end_idx + 1;
                     continue;
@@ -157,5 +158,24 @@ pub const DslEngine = struct {
             i += 1;
         }
         return try result.toOwnedSlice(allocator);
+    }
+
+    const ParsedPlaceholder = struct {
+        key: []const u8,
+        default_value: ?[]const u8,
+    };
+
+    fn parsePlaceholder(raw: []const u8) ParsedPlaceholder {
+        if (std.mem.indexOfScalar(u8, raw, '?')) |sep| {
+            return .{
+                .key = raw[0..sep],
+                .default_value = raw[sep + 1 ..],
+            };
+        }
+
+        return .{
+            .key = raw,
+            .default_value = null,
+        };
     }
 };

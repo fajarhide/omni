@@ -22,7 +22,7 @@ describe('Compressor Routing', () => {
         const input = readFixture('git_diff.txt');
         const output = engine.distill(input);
         expect(output).not.toContain('[OMNI Context Manifest');
-        expect(output).toContain('diff --git');
+        expect(output).toContain('git diff:');
     });
 
     // Test 3: Passthrough for unknown input
@@ -47,7 +47,7 @@ describe('Compressor Routing', () => {
         const input = readFixture('git_diff.txt');
         const output = engine.distill(input);
         // Git filter should win over cat filter
-        expect(output).toContain('diff --git');
+        expect(output).toContain('git diff:');
         expect(output).not.toContain('cat distilled');
     });
 

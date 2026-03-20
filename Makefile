@@ -1,4 +1,4 @@
-.PHONY: all build build-wasm build-ts test verify clean monitor check-version help
+.PHONY: all build build-wasm build-ts test benchmark verify clean monitor check-version help
 
 # Default target: Verify everything
 all: verify
@@ -13,6 +13,8 @@ help:
 	@echo "----------------------"
 	@echo "make build       - Build Wasm core + TypeScript server"
 	@echo "make test        - Run semantic routing verification tests"
+	@echo "make benchmark   - Run strict fixture benchmark regression gate"
+	@echo "make baseline    - Refresh benchmark baseline snapshot"
 	@echo "make monitor      - Run system integrity & performance monitor"
 	@echo "make verify      - Full suite: version check + build + test + monitor"
 	@echo "make clean       - Remove build artifacts"
@@ -57,7 +59,7 @@ build-ts: node_modules
 	fi
 
 # Phase 2: Functional Testing
-test: node_modules
+test: node_modules build-wasm
 	@echo "Running Filter Unit Tests..."
 	@npm test || { echo "✗ Filter testing failed"; exit 1; }
 	@echo "Running MCP Integration Tests..."
@@ -66,7 +68,16 @@ test: node_modules
 	@node tests/test-learn.mjs || { echo "✗ Learning discovery testing failed"; exit 1; }
 	@echo "Running Semantic Core Verification Suite..."
 	@node tests/test-semantic.mjs || { echo "✗ Semantic testing failed"; exit 1; }
+	@make benchmark
 	@echo "✓ All test suites verified."
+
+benchmark: build-wasm
+	@echo "Running Fixture Benchmarks..."
+	@node tests/folded/benchmark-fixtures.mjs --strict || { echo "✗ Benchmark regression failed"; exit 1; }
+
+baseline: build-wasm
+	@echo "Refreshing benchmark baseline..."
+	@node tests/folded/benchmark-fixtures.mjs --write-baseline || { echo "✗ Baseline refresh failed"; exit 1; }
 
 # Phase 3: System monitoring
 monitor:

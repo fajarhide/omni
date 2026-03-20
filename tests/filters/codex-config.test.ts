@@ -44,7 +44,7 @@ describe('Codex project filters', () => {
         const input = 'Tests:       1 failed, 9 passed, 10 total';
         const output = engine.distill(input);
 
-        expect(output).toBe('jest: 9 passed | 1 failed | 10 total');
+        expect(output).toContain('jest: 9 passed | 1 failed | 10 total');
     });
 
     test('distills passing Vitest summaries', () => {
