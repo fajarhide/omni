@@ -1,0 +1,2 @@
+FAIL	github.com/user/project/pkg1	0.123s
+FAIL	github.com/user/project/pkg2	0.456s

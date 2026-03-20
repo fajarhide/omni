@@ -1,4 +1,61 @@
 {
   "rules": [],
-  "dsl_filters": []
+  "dsl_filters": [
+    {
+      "name": "codex-tsc-summary",
+      "trigger": "error TS",
+      "confidence": 0.98,
+      "rules": [
+        { "capture": "{location}: error TS{code}: {message}", "action": "keep" },
+        { "capture": "{ts_location}: error TS{ts_code}: {ts_message}", "action": "count", "as": "diagnostics" }
+      ],
+      "output": "tsc: {diagnostics} diagnostics | last TS{code}: {message}"
+    },
+    {
+      "name": "codex-eslint-summary-plural",
+      "trigger": "problems (",
+      "confidence": 0.97,
+      "rules": [
+        { "capture": "✖ {problems} problems ({errors} errors, {warnings} warnings)", "action": "keep" }
+      ],
+      "output": "eslint: {problems} problems | {errors} errors | {warnings} warnings"
+    },
+    {
+      "name": "codex-eslint-summary-singular",
+      "trigger": "problem (",
+      "confidence": 0.97,
+      "rules": [
+        { "capture": "✖ {problems} problem ({errors} error, {warnings} warning)", "action": "keep" }
+      ],
+      "output": "eslint: {problems} problem | {errors} error | {warnings} warning"
+    },
+    {
+      "name": "codex-jest-summary-fail",
+      "trigger": "failed, ",
+      "confidence": 0.96,
+      "rules": [
+        { "capture": "Tests:       {failed} failed, {passed} passed, {total} total", "action": "keep" }
+      ],
+      "output": "jest: {passed} passed | {failed} failed | {total} total"
+    },
+    {
+      "name": "codex-jest-summary-pass",
+      "trigger": "Tests:",
+      "confidence": 0.95,
+      "rules": [
+        { "capture": "Tests:       {passed} passed, {total} total", "action": "keep" }
+      ],
+      "output": "jest: {passed} passed | {total} total"
+    },
+    {
+      "name": "codex-vitest-summary",
+      "trigger": "Test Files",
+      "confidence": 0.95,
+      "rules": [
+        { "capture": "Test Files {files} passed", "action": "keep" },
+        { "capture": "Tests {tests} passed", "action": "keep" }
+      ],
+      "output": "vitest: {files} files passed | {tests} tests passed"
+    }
+  ]
 }

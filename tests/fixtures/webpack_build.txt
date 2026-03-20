@@ -1,0 +1,9 @@
+Hash: abc123def456
+Version: webpack 5.89.0
+Time: 2340ms
+Built at: 2024-01-15 10:30:45
+                   Asset       Size  Chunks
+             index.html  245 bytes    [emitted]
+          bundle.js    1.45 MiB    main
+         runtime.js    22.6 KiB    runtime
+Compiled successfully in 2340ms

@@ -1,0 +1,5 @@
+Checking formatted files...
+✖ 3 problems (2 errors, 1 warning)
+  src/index.ts:10:15 error Unexpected console statement @typescript-eslint/no-console
+  src/utils.ts:25:8 error Missing return type on function @typescript-eslint/explicit-module-boundary-types
+  src/app.ts:5:1 warning File ignored because it matches "exclude" in .eslintrc

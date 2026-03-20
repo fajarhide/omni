@@ -134,6 +134,13 @@ pub fn main() !void {
             const agent = if (args.len > 2) args[2] else "general";
             try handleGenerate(agent);
             return;
+        } else if (std.mem.eql(u8, cmd, "doctor")) {
+            var fix = false;
+            for (args[2..]) |arg| {
+                if (std.mem.eql(u8, arg, "--fix")) fix = true;
+            }
+            try handleDoctor(allocator, fix);
+            return;
         } else if (std.mem.eql(u8, cmd, "setup")) {
             try handleSetup();
             return;
@@ -194,6 +201,7 @@ fn printHelp() !void {
     try ui.row(stdout, ui.CYAN ++ "  bench     " ++ ui.RESET ++ "Benchmark performance (e.g. omni bench 100)");
     try ui.row(stdout, ui.CYAN ++ "  learn     " ++ ui.RESET ++ "Auto-detect noise patterns and add filters to config");
     try ui.row(stdout, ui.CYAN ++ "  generate  " ++ ui.RESET ++ "Generate configurations (agent, config)");
+    try ui.row(stdout, ui.CYAN ++ "  doctor    " ++ ui.RESET ++ "Audit MCP integrations and OMNI filter config");
     try ui.row(stdout, ui.CYAN ++ "  setup     " ++ ui.RESET ++ "Show detailed setup and usage instructions");
     try ui.row(stdout, ui.CYAN ++ "  update    " ++ ui.RESET ++ "Check for the latest version from GitHub");
     try ui.row(stdout, ui.CYAN ++ "  uninstall " ++ ui.RESET ++ "Remove OMNI and clean up all configurations");
@@ -204,10 +212,163 @@ fn printHelp() !void {
     try ui.row(stdout, "  omni density < draft.txt");
     try ui.row(stdout, "  omni generate config     > omni_config.json");
     try ui.row(stdout, "  omni generate claude-code > .omni-input");
+    try ui.row(stdout, "  omni generate codex");
+    try ui.row(stdout, "  omni doctor --fix");
     try ui.row(stdout, "");
     try ui.row(stdout, ui.DIM ++ "OMNI is designed to be used as a filter in your agentic pipelines." ++ ui.RESET);
     try ui.printFooter(stdout);
     try stdout.print("\n", .{});
+}
+
+fn handleDoctor(allocator: std.mem.Allocator, fix: bool) !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    const home = std.posix.getenv("HOME") orelse {
+        try std.fs.File.stderr().deprecatedWriter().print("Error: HOME environment variable not found.\n", .{});
+        return;
+    };
+
+    try stdout.print("\n", .{});
+    try ui.printHeader(stdout, "🩺 OMNI DOCTOR");
+    try ui.row(stdout, "Audit MCP registrations and OMNI filter readiness.");
+    try ui.row(stdout, "");
+
+    const omni_dist = try std.fmt.allocPrint(allocator, "{s}/.omni/dist/index.js", .{home});
+    defer allocator.free(omni_dist);
+    const omni_config = try std.fmt.allocPrint(allocator, "{s}/.omni/omni_config.json", .{home});
+    defer allocator.free(omni_config);
+    const claude_config = try std.fmt.allocPrint(allocator, "{s}/.claude.json", .{home});
+    defer allocator.free(claude_config);
+    const codex_config = try std.fmt.allocPrint(allocator, "{s}/.codex/config.toml", .{home});
+    defer allocator.free(codex_config);
+    const opencode_config = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
+    defer allocator.free(opencode_config);
+    const antigravity_config = try std.fmt.allocPrint(allocator, "{s}/.gemini/antigravity/mcp_config.json", .{home});
+    defer allocator.free(antigravity_config);
+
+    const absolute_omni_path = try std.fmt.allocPrint(allocator, "{s}/.omni/dist/index.js", .{home});
+    defer allocator.free(absolute_omni_path);
+
+    const dist_ok = if (std.fs.cwd().access(omni_dist, .{})) |_| true else |_| false;
+    try printDoctorCheck(allocator, stdout, dist_ok, "OMNI MCP entrypoint", omni_dist);
+
+    var config_rules: usize = 0;
+    var config_filters: usize = 0;
+    const config_ok = blk: {
+        const file = std.fs.cwd().openFile(omni_config, .{}) catch break :blk false;
+        defer file.close();
+        const content = file.readToEndAlloc(allocator, 1024 * 1024) catch break :blk false;
+        defer allocator.free(content);
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, content, .{}) catch break :blk false;
+        defer parsed.deinit();
+        if (parsed.value != .object) break :blk false;
+        if (parsed.value.object.get("rules")) |rules_node| {
+            if (rules_node == .array) config_rules = rules_node.array.items.len;
+        }
+        if (parsed.value.object.get("dsl_filters")) |filters_node| {
+            if (filters_node == .array) config_filters = filters_node.array.items.len;
+        }
+        break :blk true;
+    };
+    if (config_ok) {
+        const detail = try std.fmt.allocPrint(allocator, "{s} ({d} rules, {d} filters)", .{ omni_config, config_rules, config_filters });
+        defer allocator.free(detail);
+        try printDoctorCheck(allocator, stdout, true, "Global OMNI config", detail);
+    } else {
+        try printDoctorCheck(allocator, stdout, false, "Global OMNI config", omni_config);
+    }
+
+    var claude_ok = fileContains(allocator, claude_config, "\"omni\"");
+    var codex_ok = fileContains(allocator, codex_config, "[mcp_servers.omni]");
+    var opencode_ok = fileContains(allocator, opencode_config, "\"omni\"");
+    var antigravity_ok = fileContains(allocator, antigravity_config, "\"omni\"");
+
+    try printDoctorCheck(allocator, stdout, claude_ok, "Claude Code", claude_config);
+    try printDoctorCheck(allocator, stdout, codex_ok, "Codex", codex_config);
+    try printDoctorCheck(allocator, stdout, opencode_ok, "OpenCode", opencode_config);
+    try printDoctorCheck(allocator, stdout, antigravity_ok, "Antigravity", antigravity_config);
+
+    if (fix) {
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Auto Fix:" ++ ui.RESET);
+        var changed = false;
+
+        if (!config_ok) {
+            const merge_result = try ensureGlobalCodexPolyglotConfig(allocator, home);
+            const msg = try std.fmt.allocPrint(allocator, "  Seeded global OMNI config: {s} ({d} rules, {d} filters added)", .{ merge_result.path, merge_result.added_rules, merge_result.added_filters });
+            defer allocator.free(msg);
+            try ui.row(stdout, msg);
+            changed = true;
+        }
+        if (!claude_ok) {
+            try ui.row(stdout, "  Repairing Claude Code integration...");
+            try handleGenerate("claude-code");
+            claude_ok = true;
+            changed = true;
+        }
+        if (!codex_ok) {
+            try ui.row(stdout, "  Repairing Codex integration...");
+            try handleGenerate("codex");
+            codex_ok = true;
+            changed = true;
+        }
+        if (!opencode_ok) {
+            try ui.row(stdout, "  Repairing OpenCode integration...");
+            try autoConfigureOpencode(allocator, home, absolute_omni_path);
+            opencode_ok = true;
+            changed = true;
+        }
+        if (!antigravity_ok) {
+            try ui.row(stdout, "  Repairing Antigravity integration...");
+            try autoConfigureAntigravity(allocator, home, absolute_omni_path);
+            antigravity_ok = true;
+            changed = true;
+        }
+
+        if (!changed) {
+            try ui.row(stdout, "  No fixes needed. All tracked integrations are already healthy.");
+        }
+
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Post-Fix Hint:" ++ ui.RESET);
+        try ui.row(stdout, "  Re-run `omni doctor` to confirm all integrations are healthy.");
+    }
+
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Suggested Fixes:" ++ ui.RESET);
+    try ui.row(stdout, "  omni generate claude-code");
+    try ui.row(stdout, "  omni generate codex");
+    try ui.row(stdout, "  omni generate opencode");
+    try ui.row(stdout, "  omni generate antigravity");
+    try ui.row(stdout, "  omni_trust    " ++ ui.DIM ++ "# For repos with local omni_config.json" ++ ui.RESET);
+    try ui.printFooter(stdout);
+    try stdout.print("\n", .{});
+}
+
+fn printDoctorCheck(allocator: std.mem.Allocator, stdout: anytype, ok: bool, label: []const u8, detail: []const u8) !void {
+    const icon = if (ok) ui.GREEN ++ " ● " ++ ui.RESET else ui.RED ++ " ⓧ " ++ ui.RESET;
+    const status = if (ok) "OK" else "Missing";
+    const line = try std.fmt.allocPrint(allocator, "{s}{s}: {s}  " ++ ui.DIM ++ "({s})" ++ ui.RESET, .{ icon, label, status, detail });
+    defer allocator.free(line);
+    try ui.row(stdout, line);
+}
+
+fn printDoctorTextMatch(allocator: std.mem.Allocator, stdout: anytype, label: []const u8, path: []const u8, needle: []const u8) !void {
+    const ok = fileContains(allocator, path, needle);
+    try printDoctorCheck(allocator, stdout, ok, label, path);
+}
+
+fn fileContains(allocator: std.mem.Allocator, path: []const u8, needle: []const u8) bool {
+    return blk: {
+        const file = std.fs.cwd().openFile(path, .{}) catch break :blk false;
+        defer file.close();
+        const content = file.readToEndAlloc(allocator, 1024 * 1024) catch break :blk false;
+        defer allocator.free(content);
+        if (std.mem.endsWith(u8, path, ".json")) {
+            const parsed = std.json.parseFromSlice(std.json.Value, allocator, content, .{}) catch break :blk std.mem.indexOf(u8, content, needle) != null;
+            defer parsed.deinit();
+        }
+        break :blk std.mem.indexOf(u8, content, needle) != null;
+    };
 }
 
 fn printLearnHelp() !void {
@@ -290,7 +451,7 @@ fn handleLearn(allocator: std.mem.Allocator, config_path: []const u8, dry_run: b
     for (candidates, 0..) |c, idx| {
         const action_label = switch (c.action) {
             .count => ui.YELLOW ++ "count" ++ ui.RESET,
-            .keep  => ui.CYAN   ++ "keep " ++ ui.RESET,
+            .keep => ui.CYAN ++ "keep " ++ ui.RESET,
         };
         const conf_color = if (c.confidence >= 0.8) ui.GREEN else ui.YELLOW;
 
@@ -299,9 +460,15 @@ fn handleLearn(allocator: std.mem.Allocator, config_path: []const u8, dry_run: b
             "  {d:>2}. {s}[{s}]{s}  trigger={s}\"{s}\"{s}  conf={s}{d:.0}%{s}",
             .{
                 idx + 1,
-                ui.BOLD, action_label, ui.RESET,
-                ui.CYAN, c.trigger, ui.RESET,
-                conf_color, c.confidence * 100.0, ui.RESET,
+                ui.BOLD,
+                action_label,
+                ui.RESET,
+                ui.CYAN,
+                c.trigger,
+                ui.RESET,
+                conf_color,
+                c.confidence * 100.0,
+                ui.RESET,
             },
         );
         defer allocator.free(line);
@@ -381,13 +548,13 @@ fn handleExamples() !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     try stdout.print("\n", .{});
     try ui.printHeader(stdout, "📚 OMNI STUDY CASES & EXAMPLES");
-    
+
     try ui.row(stdout, ui.BOLD ++ "1. Git & Code Review" ++ ui.RESET);
     try ui.row(stdout, "   git diff | omni                     " ++ ui.DIM ++ "# Clean diff for LLM" ++ ui.RESET);
     try ui.row(stdout, "   git log -n 5 | omni                 " ++ ui.DIM ++ "# Dense commit history" ++ ui.RESET);
     try ui.row(stdout, "   git show HEAD | omni                " ++ ui.DIM ++ "# Distill single commit" ++ ui.RESET);
     try ui.row(stdout, "");
-    
+
     try ui.row(stdout, ui.BOLD ++ "2. Containers & Infrastructure" ++ ui.RESET);
     try ui.row(stdout, "   docker build . 2>&1 | omni          " ++ ui.DIM ++ "# Distill layer cache" ++ ui.RESET);
     try ui.row(stdout, "   docker logs <id> | omni             " ++ ui.DIM ++ "# Semantic log summary" ++ ui.RESET);
@@ -432,7 +599,7 @@ fn handleDistill(allocator: std.mem.Allocator, filters: []const Filter) !void {
     const elapsed = timer.read() / std.time.ns_per_ms;
     defer allocator.free(result.output);
     try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{result.output});
-    
+
     // Log metrics for native CLI usage
     logMetrics(allocator, "CLI", result.filter_name, input.len, result.output.len, elapsed) catch {};
 }
@@ -441,11 +608,11 @@ fn logMetrics(allocator: std.mem.Allocator, agent: []const u8, filter_name: []co
     const home = std.posix.getenv("HOME") orelse return;
     const omni_dir = try std.fmt.allocPrint(allocator, "{s}/.omni", .{home});
     defer allocator.free(omni_dir);
-    
+
     std.fs.makeDirAbsolute(omni_dir) catch |err| {
         if (err != error.PathAlreadyExists) return;
     };
-    
+
     const file_path = try std.fmt.allocPrint(allocator, "{s}/metrics.csv", .{omni_dir});
     defer allocator.free(file_path);
 
@@ -513,38 +680,41 @@ fn handleDensity(allocator: std.mem.Allocator, filters: []const Filter) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     try stdout.print("\n", .{});
     try ui.printHeader(stdout, "🧠 OMNI Context Density Analysis");
-    
+
     {
         const l = try std.fmt.allocPrint(allocator, ui.GRAY ++ "Filter applied:    " ++ ui.CYAN ++ "{s}" ++ ui.RESET, .{result.filter_name});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
     {
         const l = try std.fmt.allocPrint(allocator, ui.GRAY ++ "Original Context:  " ++ ui.WHITE ++ "{d} units" ++ ui.RESET, .{input.len});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
     {
         const l = try std.fmt.allocPrint(allocator, ui.GRAY ++ "Distilled Context: " ++ ui.WHITE ++ "{d} units" ++ ui.RESET, .{result.output.len});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
     try ui.row(stdout, "");
 
     const bar = try ui.progressBar(allocator, "Density Gain", saving_pct, 30);
     defer allocator.free(bar);
     try ui.row(stdout, bar);
-    
+
     {
         const l = try std.fmt.allocPrint(allocator, ui.GREEN ++ "Result: {d:.2}x more token-efficient" ++ ui.RESET, .{gain});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
 
     try ui.printFooter(stdout);
     try stdout.print("\n", .{});
 }
 
-
 fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const Filter) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
-    
+
     if (iterations == 0) { // Sentinel for help
         try ui.printHeader(stdout, "⚡ OMNI BENCHMARK HELP");
         try ui.row(stdout, ui.BOLD ++ "Usage:" ++ ui.RESET);
@@ -558,36 +728,38 @@ fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const
 
     try stdout.print("\n", .{});
     try ui.printHeader(stdout, "⚡ OMNI Performance Benchmark");
-    
+
     const status = try std.fmt.allocPrint(allocator, "Running {d} iterations...", .{iterations});
     defer allocator.free(status);
     try ui.row(stdout, status);
     try ui.row(stdout, "");
 
     const sample = "git status\nOn branch main\nChanges not staged for commit:\n  (use \"git add <file>...\" to update what will be committed)";
-    
+
     var timer = try std.time.Timer.start();
     for (0..iterations) |_| {
         const res = try compressor.compress(allocator, sample, filters);
         allocator.free(res.output);
     }
     const elapsed = timer.read();
-    
+
     const total_ms = @as(f64, @floatFromInt(elapsed)) / 1_000_000.0;
     const avg_ms = total_ms / @as(f64, @floatFromInt(iterations));
     const ops_sec = 1000.0 / avg_ms;
 
     {
         const l = try std.fmt.allocPrint(allocator, ui.GRAY ++ "Total Time:   " ++ ui.WHITE ++ "{d:.2}ms" ++ ui.RESET, .{total_ms});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
     {
         const l = try std.fmt.allocPrint(allocator, ui.GRAY ++ "Avg Latency:  " ++ ui.WHITE ++ "{d:.4}ms per request" ++ ui.RESET, .{avg_ms});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
-    
+
     try ui.row(stdout, "");
-    
+
     // Throughput bar (Cap at 100,000 ops/sec for visual 100%)
     const tp_pct = @min((ops_sec / 100000.0) * 100.0, 100.0);
     const bar = try ui.progressBar(allocator, "Throughput", tp_pct, 30);
@@ -596,7 +768,8 @@ fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const
 
     {
         const l = try std.fmt.allocPrint(allocator, ui.GREEN ++ "Benchmark Result: {d:.0} ops/sec" ++ ui.RESET, .{ops_sec});
-        defer allocator.free(l); try ui.row(stdout, l);
+        defer allocator.free(l);
+        try ui.row(stdout, l);
     }
 
     try ui.printFooter(stdout);
@@ -605,17 +778,17 @@ fn handleBench(allocator: std.mem.Allocator, iterations: usize, filters: []const
 
 fn handleGenerate(agent: []const u8) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
-    
+
     // Get absolute home path for Claude and Antigravity
     const home = std.posix.getenv("HOME") orelse {
         try std.fs.File.stderr().deprecatedWriter().print("Error: HOME environment variable not found.\n", .{});
         return;
     };
-    
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
-    
+
     const absolute_omni_path = try std.fmt.allocPrint(alloc, "{s}/.omni/dist/index.js", .{home});
 
     if (std.mem.eql(u8, agent, "--help") or std.mem.eql(u8, agent, "-h")) {
@@ -625,7 +798,9 @@ fn handleGenerate(agent: []const u8) !void {
         try ui.row(stdout, "");
         try ui.row(stdout, ui.BOLD ++ "Arguments:" ++ ui.RESET);
         try ui.row(stdout, ui.CYAN ++ "  claude-code " ++ ui.RESET ++ "Auto-register OMNI with Claude Code");
+        try ui.row(stdout, ui.CYAN ++ "  codex       " ++ ui.RESET ++ "Auto-register OMNI with Codex CLI");
         try ui.row(stdout, ui.CYAN ++ "  antigravity " ++ ui.RESET ++ "Auto-register OMNI with Antigravity");
+        try ui.row(stdout, ui.CYAN ++ "  opencode    " ++ ui.RESET ++ "Auto-register OMNI with OpenCode AI");
         try ui.row(stdout, ui.CYAN ++ "  config      " ++ ui.RESET ++ "Generate a template omni_config.json");
         try ui.printFooter(stdout);
         return;
@@ -641,7 +816,7 @@ fn handleGenerate(agent: []const u8) !void {
 
         const command_json = try std.fmt.allocPrint(alloc, "{{\"type\":\"stdio\",\"command\":\"node\",\"args\":[\"{s}\", \"--agent=claude-code\"]}}", .{absolute_omni_path});
         const argv = [_][]const u8{ "claude", "mcp", "add-json", "omni", command_json };
-        
+
         const run_result = std.process.Child.run(.{
             .allocator = alloc,
             .argv = &argv,
@@ -652,7 +827,18 @@ fn handleGenerate(agent: []const u8) !void {
         };
 
         if (run_result.term == .Exited and run_result.term.Exited == 0) {
+            const merge_result = try ensureGlobalCodexPolyglotConfig(alloc, home);
             try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Successfully registered with Claude Code!");
+            {
+                const l = try std.fmt.allocPrint(alloc, "   MCP: " ++ ui.DIM ++ "claude mcp add-json omni ..." ++ ui.RESET, .{});
+                defer alloc.free(l);
+                try ui.row(stdout, l);
+            }
+            {
+                const l = try std.fmt.allocPrint(alloc, "   Filters: " ++ ui.DIM ++ "{s}" ++ ui.RESET ++ " ({d} rules, {d} filters added)", .{ merge_result.path, merge_result.added_rules, merge_result.added_filters });
+                defer alloc.free(l);
+                try ui.row(stdout, l);
+            }
         } else {
             try ui.row(stdout, ui.RED ++ " ⓧ " ++ ui.RESET ++ "Failed to register with Claude Code.");
             const err_msg = try std.fmt.allocPrint(alloc, "Error: {s}", .{run_result.stderr});
@@ -664,16 +850,139 @@ fn handleGenerate(agent: []const u8) !void {
             defer alloc.free(fb);
             try ui.row(stdout, fb);
         }
-        
+
         try ui.row(stdout, "");
         try ui.row(stdout, ui.BOLD ++ "To Verify:" ++ ui.RESET);
         try ui.row(stdout, "  claude mcp list");
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Recommended Next Steps:" ++ ui.RESET);
+        try ui.row(stdout, "  1. Use `omni_execute`, `omni_read_file`, and `omni_list_dir` when Claude would otherwise read noisy output.");
+        try ui.row(stdout, "  2. OMNI already merged the polyglot coding filter bundle into your global config.");
+        try ui.row(stdout, "  3. Run `omni_trust` in repos with a local omni_config.json.");
+        try ui.printFooter(stdout);
+        try stdout.print("\n", .{});
+    } else if (std.mem.eql(u8, agent, "codex")) {
+        try stdout.print("\n", .{});
+        try ui.printHeader(stdout, "🤖 OMNI MCP CODEX INTEGRATION");
+        try ui.row(stdout, ui.BOLD ++ "Target: " ++ ui.RESET ++ "Codex CLI");
+        try ui.row(stdout, "");
+        try ui.row(stdout, "Registering OMNI as an MCP server...");
+        try ui.row(stdout, "");
+
+        const expected_path = absolute_omni_path;
+        const expected_agent_flag = "--agent=codex";
+
+        const get_argv = [_][]const u8{ "codex", "mcp", "get", "omni", "--json" };
+        const get_result = std.process.Child.run(.{
+            .allocator = alloc,
+            .argv = &get_argv,
+        }) catch |err| {
+            try stdout.print("❌ Failed to inspect Codex MCP config: {any}\n", .{err});
+            try stdout.print("\n# Manual fallback command:\ncodex mcp add omni -- node {s} --agent=codex\n", .{absolute_omni_path});
+            return;
+        };
+
+        if (get_result.term == .Exited and get_result.term.Exited == 0) {
+            const already_matches =
+                std.mem.indexOf(u8, get_result.stdout, expected_path) != null and
+                std.mem.indexOf(u8, get_result.stdout, expected_agent_flag) != null;
+
+            if (already_matches) {
+                const merge_result = try ensureGlobalCodexPolyglotConfig(alloc, home);
+                try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Codex is already configured to use OMNI.");
+                {
+                    const msg = try std.fmt.allocPrint(alloc, " ● Global OMNI config ready at {s} ({d} filters added)", .{ merge_result.path, merge_result.added_filters });
+                    defer alloc.free(msg);
+                    try ui.row(stdout, msg);
+                }
+                try ui.row(stdout, "");
+                try ui.row(stdout, ui.BOLD ++ "To Verify:" ++ ui.RESET);
+                try ui.row(stdout, "  codex mcp list");
+                try ui.row(stdout, "");
+                try ui.row(stdout, ui.BOLD ++ "Recommended Next Steps:" ++ ui.RESET);
+                try ui.row(stdout, "  1. In Codex, use the OMNI MCP tools instead of raw shell/file reads when possible.");
+                try ui.row(stdout, "  2. Apply `codex-polyglot` or `codex-advanced` in your OMNI config for denser test/build summaries.");
+                try ui.row(stdout, "  3. If this repo uses local config, run `omni_trust` so Codex can benefit from project filters.");
+                try ui.printFooter(stdout);
+                try stdout.print("\n", .{});
+                return;
+            }
+
+            try ui.row(stdout, ui.YELLOW ++ " ○ " ++ ui.RESET ++ "Existing Codex MCP entry found. Updating it...");
+            const remove_argv = [_][]const u8{ "codex", "mcp", "remove", "omni" };
+            const remove_result = std.process.Child.run(.{
+                .allocator = alloc,
+                .argv = &remove_argv,
+            }) catch |err| {
+                try stdout.print("❌ Failed to remove existing Codex MCP server: {any}\n", .{err});
+                try stdout.print("\n# Manual fallback commands:\ncodex mcp remove omni\ncodex mcp add omni -- node {s} --agent=codex\n", .{absolute_omni_path});
+                return;
+            };
+
+            if (!(remove_result.term == .Exited and remove_result.term.Exited == 0)) {
+                try ui.row(stdout, ui.RED ++ " ⓧ " ++ ui.RESET ++ "Failed to remove existing Codex MCP server.");
+                const remove_err = try std.fmt.allocPrint(alloc, "Error: {s}", .{remove_result.stderr});
+                defer alloc.free(remove_err);
+                if (remove_err.len > 0) try ui.row(stdout, remove_err);
+                try ui.row(stdout, "");
+                try ui.row(stdout, ui.DIM ++ "# Manual fallback commands:" ++ ui.RESET);
+                const fb = try std.fmt.allocPrint(alloc, "codex mcp remove omni\ncodex mcp add omni -- node {s} --agent=codex", .{absolute_omni_path});
+                defer alloc.free(fb);
+                try ui.row(stdout, fb);
+                try ui.printFooter(stdout);
+                try stdout.print("\n", .{});
+                return;
+            }
+        }
+
+        const argv = [_][]const u8{ "codex", "mcp", "add", "omni", "--", "node", absolute_omni_path, expected_agent_flag };
+
+        const run_result = std.process.Child.run(.{
+            .allocator = alloc,
+            .argv = &argv,
+        }) catch |err| {
+            try stdout.print("❌ Failed to register with Codex: {any}\n", .{err});
+            try stdout.print("\n# Manual fallback command:\ncodex mcp add omni -- node {s} --agent=codex\n", .{absolute_omni_path});
+            return;
+        };
+
+        if (run_result.term == .Exited and run_result.term.Exited == 0) {
+            const merge_result = try ensureGlobalCodexPolyglotConfig(alloc, home);
+            try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Successfully registered with Codex!");
+            {
+                const msg = try std.fmt.allocPrint(alloc, " ● Global OMNI config ready at {s} ({d} filters added)", .{ merge_result.path, merge_result.added_filters });
+                defer alloc.free(msg);
+                try ui.row(stdout, msg);
+            }
+        } else {
+            try ui.row(stdout, ui.RED ++ " ⓧ " ++ ui.RESET ++ "Failed to register with Codex.");
+            const err_msg = try std.fmt.allocPrint(alloc, "Error: {s}", .{run_result.stderr});
+            defer alloc.free(err_msg);
+            if (err_msg.len > 0) try ui.row(stdout, err_msg);
+            try ui.row(stdout, "");
+            try ui.row(stdout, ui.DIM ++ "# Manual fallback command:" ++ ui.RESET);
+            const fb = try std.fmt.allocPrint(alloc, "codex mcp add omni -- node {s} --agent=codex", .{absolute_omni_path});
+            defer alloc.free(fb);
+            try ui.row(stdout, fb);
+        }
+
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "To Verify:" ++ ui.RESET);
+        try ui.row(stdout, "  codex mcp list");
+        try ui.row(stdout, "");
+        try ui.row(stdout, ui.BOLD ++ "Recommended Next Steps:" ++ ui.RESET);
+        try ui.row(stdout, "  1. Open Codex and prefer `omni_execute`, `omni_read_file`, and `omni_list_dir` for noisy context.");
+        try ui.row(stdout, "  2. Apply `codex-polyglot` for JS/TS, Python, Rust, Go, Zig, and pnpm workflows.");
+        try ui.row(stdout, "  3. If you only need TS/JS summaries, use `codex-advanced` instead.");
+        try ui.row(stdout, "  4. Run `omni_trust` inside project repos that have a local omni_config.json.");
         try ui.printFooter(stdout);
         try stdout.print("\n", .{});
     } else if (std.mem.eql(u8, agent, "antigravity")) {
         try autoConfigureAntigravity(alloc, home, absolute_omni_path);
     } else if (std.mem.eql(u8, agent, "config")) {
         try handleGenerateConfig();
+    } else if (std.mem.eql(u8, agent, "opencode")) {
+        try autoConfigureOpencode(alloc, home, absolute_omni_path);
     } else {
         try stdout.print("\n", .{});
         try ui.printHeader(stdout, "\xf0\x9f\x93\xa6 OMNI GENERATE");
@@ -684,7 +993,9 @@ fn handleGenerate(agent: []const u8) !void {
         try ui.row(stdout, "");
         try ui.row(stdout, ui.BOLD ++ "Available Targets:" ++ ui.RESET);
         try ui.row(stdout, ui.CYAN ++ "  claude-code  " ++ ui.RESET ++ "Auto-register with Claude Code / CLI");
+        try ui.row(stdout, ui.CYAN ++ "  codex        " ++ ui.RESET ++ "Auto-register with Codex CLI");
         try ui.row(stdout, ui.CYAN ++ "  antigravity  " ++ ui.RESET ++ "Auto-register with Google Antigravity");
+        try ui.row(stdout, ui.CYAN ++ "  opencode     " ++ ui.RESET ++ "Auto-register with OpenCode AI");
         try ui.row(stdout, ui.CYAN ++ "  config       " ++ ui.RESET ++ "Generate a template omni_config.json");
         try ui.row(stdout, "");
         try ui.row(stdout, ui.DIM ++ "Or run the full interactive setup guide: omni setup" ++ ui.RESET);
@@ -774,10 +1085,1060 @@ fn printMonitorHelp() !void {
     try ui.printFooter(stdout);
 }
 
+const CODEX_POLYGLOT_TEMPLATE_JSON =
+    \\{
+    \\  "rules": [],
+    \\  "dsl_filters": [
+    \\    {
+    \\      "name": "codex-tsc-summary",
+    \\      "trigger": "error TS",
+    \\      "confidence": 0.98,
+    \\      "rules": [
+    \\        { "capture": "{location}: error TS{code}: {message}", "action": "keep" },
+    \\        { "capture": "{ts_location}: error TS{ts_code}: {ts_message}", "action": "count", "as": "diagnostics" }
+    \\      ],
+    \\      "output": "tsc: {diagnostics} diagnostics | last TS{code}: {message}"
+    \\    },
+    \\    {
+    \\      "name": "codex-eslint-summary-plural",
+    \\      "trigger": "problems (",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "✖ {problems} problems ({errors} errors, {warnings} warnings)", "action": "keep" }
+    \\      ],
+    \\      "output": "eslint: {problems} problems | {errors} errors | {warnings} warnings"
+    \\    },
+    \\    {
+    \\      "name": "codex-eslint-summary-singular",
+    \\      "trigger": "problem (",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "✖ {problems} problem ({errors} error, {warnings} warning)", "action": "keep" }
+    \\      ],
+    \\      "output": "eslint: {problems} problem | {errors} error | {warnings} warning"
+    \\    },
+    \\    {
+    \\      "name": "codex-jest-summary-fail",
+    \\      "trigger": "failed, ",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Tests:       {failed} failed, {passed} passed, {total} total", "action": "keep" }
+    \\      ],
+    \\      "output": "jest: {passed} passed | {failed} failed | {total} total"
+    \\    },
+    \\    {
+    \\      "name": "codex-jest-summary-pass",
+    \\      "trigger": "Tests:",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Tests:       {passed} passed, {total} total", "action": "keep" }
+    \\      ],
+    \\      "output": "jest: {passed} passed | {total} total"
+    \\    },
+    \\    {
+    \\      "name": "codex-vitest-summary",
+    \\      "trigger": "Test Files",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Test Files {files} passed", "action": "keep" },
+    \\        { "capture": "Tests {tests} passed", "action": "keep" }
+    \\      ],
+    \\      "output": "vitest: {files} files passed | {tests} tests passed"
+    \\    },
+    \\    {
+    \\      "name": "pytest-summary-fail",
+    \\      "trigger": " failed, ",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "{failed} failed, {passed} passed in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "pytest: {passed} passed | {failed} failed | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "pytest-summary-pass",
+    \\      "trigger": " passed in ",
+    \\      "confidence": 0.94,
+    \\      "rules": [
+    \\        { "capture": "{passed} passed in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "pytest: {passed} passed | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "ruff-summary-pass",
+    \\      "trigger": "All checks passed!",
+    \\      "confidence": 0.99,
+    \\      "rules": [],
+    \\      "output": "ruff: all checks passed"
+    \\    },
+    \\    {
+    \\      "name": "ruff-summary-errors-plural",
+    \\      "trigger": "Found ",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Found {errors} errors.", "action": "keep" }
+    \\      ],
+    \\      "output": "ruff: {errors} errors"
+    \\    },
+    \\    {
+    \\      "name": "ruff-summary-errors-singular",
+    \\      "trigger": "Found 1 error.",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Found {error} error.", "action": "keep" }
+    \\      ],
+    \\      "output": "ruff: {error} error"
+    \\    },
+    \\    {
+    \\      "name": "cargo-test-summary-pass",
+    \\      "trigger": "test result: ok.",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "test result: ok. {passed} passed; {failed} failed; {ignored} ignored; {measured} measured; {filtered} filtered out; finished in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "cargo test: {passed} passed | {failed} failed | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "cargo-test-summary-fail",
+    \\      "trigger": "test result: FAILED.",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "test result: FAILED. {passed} passed; {failed} failed; {ignored} ignored; {measured} measured; {filtered} filtered out; finished in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "cargo test: {passed} passed | {failed} failed | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "pnpm-install-summary",
+    \\      "trigger": "Progress: resolved",
+    \\      "confidence": 0.93,
+    \\      "rules": [
+    \\        { "capture": "Progress: resolved {resolved}, reused {reused}, downloaded {downloaded}, added {added}, done", "action": "keep" },
+    \\        { "capture": "Done in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "pnpm: resolved {resolved} | reused {reused} | downloaded {downloaded} | added {added} | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "zig-test-summary-pass",
+    \\      "trigger": "tests passed.",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "All {passed} tests passed.", "action": "keep" }
+    \\      ],
+    \\      "output": "zig test: {passed} passed"
+    \\    },
+    \\    {
+    \\      "name": "go-test-summary-pass",
+    \\      "trigger": "ok\t",
+    \\      "confidence": 0.9,
+    \\      "rules": [
+    \\        { "capture": "ok\t{pkg}\t{duration}", "action": "keep" },
+    \\        { "capture": "ok\t{counted_pkg}\t{counted_duration}", "action": "count", "as": "passed_packages" }
+    \\      ],
+    \\      "output": "go test: {passed_packages} packages passed | last {pkg} | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "go-test-summary-fail",
+    \\      "trigger": "FAIL\t",
+    \\      "confidence": 0.9,
+    \\      "rules": [
+    \\        { "capture": "FAIL\t{failed_pkg}\t{failed_duration}", "action": "keep" },
+    \\        { "capture": "FAIL\t{counted_failed_pkg}\t{counted_failed_duration}", "action": "count", "as": "failed_packages" }
+    \\      ],
+    \\      "output": "go test: {failed_packages} packages failed | last {failed_pkg} | {failed_duration}"
+    \\    },
+    \\    { "name": "codex-tsc-success", "trigger": "Found 0 errors", "confidence": 0.99, "rules": [], "output": "tsc: 0 errors" },
+    \\    { "name": "codex-eslint-fix", "trigger": "Fixed {count} files", "confidence": 0.96, "rules": [{ "capture": "Fixed {count} files", "action": "keep" }], "output": "eslint: fixed {count} files" },
+    \\    { "name": "codex-bun-test", "trigger": " bun v", "confidence": 0.95, "rules": [{ "capture": "{passed} passed | {failed} failed", "action": "keep" }], "output": "bun test: {passed}/{failed}" },
+    \\    { "name": "codex-cypress", "trigger": "Running:", "confidence": 0.95, "rules": [{ "capture": "{specs} specs {passed} passed {failed} failed", "action": "keep" }], "output": "cypress: {passed}/{specs}" },
+    \\    { "name": "codex-playwright", "trigger": "Test Suites:", "confidence": 0.95, "rules": [{ "capture": "Test Suites: {suites} passed, {failed} failed", "action": "keep" }], "output": "playwright: {suites} suites" },
+    \\    { "name": "codex-npm-install", "trigger": "added {d} packages", "confidence": 0.95, "rules": [{ "capture": "added {d} packages in {duration}", "action": "keep" }], "output": "npm: {d} packages" },
+    \\    { "name": "codex-yarn-install", "trigger": "Done in", "confidence": 0.94, "rules": [{ "capture": "Done in {duration}", "action": "keep" }], "output": "yarn: {duration}" },
+    \\    { "name": "codex-pnpm-summary", "trigger": "Done in", "confidence": 0.93, "rules": [{ "capture": "Done in {duration}", "action": "keep" }], "output": "pnpm: {duration}" },
+    \\    { "name": "codex-bun-install", "trigger": "built @", "confidence": 0.93, "rules": [{ "capture": "bun install v{version}", "action": "keep" }], "output": "bun: v{version}" },
+    \\    { "name": "codex-vite-build", "trigger": "built in", "confidence": 0.95, "rules": [{ "capture": "built in {duration}", "action": "keep" }], "output": "vite: {duration}" },
+    \\    { "name": "codex-webpack", "trigger": "compiled successfully", "confidence": 0.97, "rules": [{ "capture": "compiled successfully in {duration}ms", "action": "keep" }], "output": "webpack: {duration}ms" },
+    \\    { "name": "codex-webpack-errors", "trigger": "ERROR in", "confidence": 0.98, "rules": [{ "capture": "ERROR in {file}", "action": "keep" }], "output": "webpack: ERROR" },
+    \\    { "name": "codex-nextjs", "trigger": "Route (app)", "confidence": 0.96, "rules": [], "output": "next.js: build complete" },
+    \\    { "name": "codex-mypy", "trigger": "Success: no issues", "confidence": 0.98, "rules": [], "output": "mypy: no issues" },
+    \\    { "name": "codex-mypy-errors", "trigger": "error:", "confidence": 0.97, "rules": [{ "capture": "Found {count} errors", "action": "keep" }], "output": "mypy: {count} errors" },
+    \\    { "name": "codex-black", "trigger": "reformatted", "confidence": 0.90, "rules": [{ "capture": "reformatted {files} file", "action": "keep" }], "output": "black: reformatted" },
+    \\    { "name": "codex-cargo-build", "trigger": "Finished", "confidence": 0.97, "rules": [{ "capture": "Finished dev target(s) in {duration}", "action": "keep" }], "output": "cargo: {duration}" },
+    \\    { "name": "codex-rustfmt", "trigger": "Rustfiles unchanged", "confidence": 0.95, "rules": [], "output": "rustfmt: unchanged" },
+    \\    { "name": "codex-clippy", "trigger": "Checks passed", "confidence": 0.97, "rules": [], "output": "clippy: passed" },
+    \\    { "name": "codex-go-build", "trigger": "go build", "confidence": 0.95, "rules": [], "output": "go build: success" },
+    \\    { "name": "codex-zig-build", "trigger": "Build Summary", "confidence": 0.96, "rules": [], "output": "zig build: success" },
+    \\    { "name": "codex-docker-build", "trigger": "Successfully built", "confidence": 0.97, "rules": [{ "capture": "Successfully built {hash}", "action": "keep" }], "output": "docker: {hash}" },
+    \\    { "name": "codex-docker-compose", "trigger": "Container started", "confidence": 0.93, "rules": [{ "capture": "Container {name} started", "action": "keep" }], "output": "docker-compose: {name}" },
+    \\    { "name": "codex-kubectl", "trigger": "kubectl", "confidence": 0.85, "rules": [{ "capture": "pod/{name} {status}", "action": "keep" }], "output": "kubectl: {name} {status}" },
+    \\    { "name": "codex-terraform-plan", "trigger": "Plan:", "confidence": 0.95, "rules": [{ "capture": "Plan: {to_add} to add, {to_change} to change, {to_destroy} to destroy", "action": "keep" }], "output": "terraform: +{to_add} ~{to_change} -{to_destroy}" },
+    \\    { "name": "codex-terraform-apply", "trigger": "Apply complete", "confidence": 0.97, "rules": [], "output": "terraform: apply complete" },
+    \\    { "name": "codex-helm", "trigger": "release", "confidence": 0.92, "rules": [{ "capture": "release {name} upgraded", "action": "keep" }], "output": "helm: {name}" },
+    \\    { "name": "codex-gradle", "trigger": "BUILD SUCCESSFUL", "confidence": 0.97, "rules": [{ "capture": "BUILD SUCCESSFUL in {duration}", "action": "keep" }], "output": "gradle: {duration}" },
+    \\    { "name": "codex-semgrep", "trigger": "Scan complete", "confidence": 0.95, "rules": [{ "capture": "Ran {rules} rules and found {issues} issues", "action": "keep" }], "output": "semgrep: {issues} issues" },
+    \\    { "name": "codex-trivy", "trigger": "Total:", "confidence": 0.92, "rules": [{ "capture": "Total: {count}", "action": "keep" }], "output": "trivy: {count} vulns" },
+    \\    { "name": "codex-gitleaks", "trigger": "no leaks", "confidence": 0.95, "rules": [], "output": "gitleaks: no leaks" },
+    \\    { "name": "codex-nx", "trigger": "NX   Running target", "confidence": 0.94, "rules": [{ "capture": "NX   Successfully ran target {target}", "action": "keep" }], "output": "nx: {target}" },
+    \\    { "name": "codex-make", "trigger": "make:", "confidence": 0.85, "rules": [{ "capture": "make `{target}`", "action": "keep" }], "output": "make: {target}" }
+    \\  ]
+    \\}
+;
+
+const ANTIGRAVITY_TEMPLATE_JSON =
+    \\{
+    \\  "rules": [
+    \\    {
+    \\      "name": "k8s_uid",
+    \\      "match": "uid:",
+    \\      "action": "mask"
+    \\    },
+    \\    {
+    \\      "name": "k8s_managed_fields",
+    \\      "match": "managedFields:",
+    \\      "action": "remove"
+    \\    },
+    \\    {
+    \\      "name": "tf_refresh",
+    \\      "match": "Refreshing state...",
+    \\      "action": "remove"
+    \\    },
+    \\    {
+    \\      "name": "tf_no_changes",
+    \\      "match": "No changes. Your infrastructure matches the configuration.",
+    \\      "action": "mask"
+    \\    },
+    \\    {
+    \\      "name": "docker_hash",
+    \\      "match": "sha256:",
+    \\      "action": "mask"
+    \\    }
+    \\  ],
+    \\  "dsl_filters": []
+    \\}
+;
+
+const OPENCODE_COMPLETE_TEMPLATE_JSON =
+    \\{
+    \\  "rules": [],
+    \\  "dsl_filters": [
+    \\    {
+    \\      "name": "opencode-npm-install-summary",
+    \\      "trigger": "added {d} packages",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "added {d} packages in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "npm: {d} packages added | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-npm-audit-summary",
+    \\      "trigger": "found {d} vulnerabilities",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "found {vulns} vulnerabilities ({high} high, {medium} moderate)", "action": "keep" }
+    \\      ],
+    \\      "output": "npm audit: {vulns} vulnerabilities | {high} high | {medium} moderate"
+    \\    },
+    \\    {
+    \\      "name": "opencode-yarn-install-summary",
+    \\      "trigger": "Done in",
+    \\      "confidence": 0.94,
+    \\      "rules": [
+    \\        { "capture": "Done in {duration}", "action": "keep" },
+    \\        { "capture": "{count} packages added", "action": "keep" }
+    \\      ],
+    \\      "output": "yarn: {count} packages | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-pnpm-install-summary",
+    \\      "trigger": "Done in",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Done in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "pnpm: {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-bun-install-summary",
+    \\      "trigger": "built @",
+    \\      "confidence": 0.93,
+    \\      "rules": [
+    \\        { "capture": "bun install v{version}", "action": "keep" }
+    \\      ],
+    \\      "output": "bun: {version}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-tsc-errors",
+    \\      "trigger": "error TS",
+    \\      "confidence": 0.98,
+    \\      "rules": [
+    \\        { "capture": "error TS{code}: {msg} ({file}:{line}:{col})", "action": "keep" },
+    \\        { "capture": "Found {count} errors.", "action": "keep" }
+    \\      ],
+    \\      "output": "tsc: {count} errors | last: TS{code} {msg}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-tsc-success",
+    \\      "trigger": "Found 0 errors",
+    \\      "confidence": 0.99,
+    \\      "rules": [],
+    \\      "output": "tsc: 0 errors"
+    \\    },
+    \\    {
+    \\      "name": "opencode-eslint-errors",
+    \\      "trigger": "problems",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "{problems} problems ({errors} errors, {warnings} warnings)", "action": "keep" }
+    \\      ],
+    \\      "output": "eslint: {problems} problems | {errors} errors | {warnings} warnings"
+    \\    },
+    \\    {
+    \\      "name": "opencode-prettier-format",
+    \\      "trigger": "src/",
+    \\      "confidence": 0.80,
+    \\      "rules": [
+    \\        { "capture": "Formatting {files} files", "action": "keep" }
+    \\      ],
+    \\      "output": "prettier: formatted"
+    \\    },
+    \\    {
+    \\      "name": "opencode-nextjs-build",
+    \\      "trigger": "Route (app)",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Route {route} {size} {first_load}", "action": "keep" }
+    \\      ],
+    \\      "output": "next.js build complete"
+    \\    },
+    \\    {
+    \\      "name": "opencode-nextjs-error",
+    \\      "trigger": "Error: ",
+    \\      "confidence": 0.98,
+    \\      "rules": [
+    \\        { "capture": "Error: {message}", "action": "keep" }
+    \\      ],
+    \\      "output": "next.js error: {message}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-vite-build",
+    \\      "trigger": "built in",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "built in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "vite: built in {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-webpack-build",
+    \\      "trigger": "compiled successfully",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "compiled successfully in {duration}ms", "action": "keep" }
+    \\      ],
+    \\      "output": "webpack: compiled in {duration}ms"
+    \\    },
+    \\    {
+    \\      "name": "opencode-webpack-errors",
+    \\      "trigger": "ERROR in",
+    \\      "confidence": 0.98,
+    \\      "rules": [
+    \\        { "capture": "ERROR in {file}", "action": "keep" },
+    \\        { "capture": "Module not found: {module}", "action": "keep" }
+    \\      ],
+    \\      "output": "webpack: module error"
+    \\    },
+    \\    {
+    \\      "name": "opencode-jest-pass",
+    \\      "trigger": "Tests:",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Tests: {passed} passed, {total} total", "action": "keep" }
+    \\      ],
+    \\      "output": "jest: {passed}/{total} passed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-jest-fail",
+    \\      "trigger": "failed",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "Tests: {failed} failed, {passed} passed", "action": "keep" }
+    \\      ],
+    \\      "output": "jest: {failed} failed | {passed} passed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-vitest-pass",
+    \\      "trigger": "passed",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Test Files  {passed}", "action": "keep" }
+    \\      ],
+    \\      "output": "vitest: {passed} passed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-cypress-run",
+    \\      "trigger": "Running:",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "{specs} specs {passed} passed {failed} failed", "action": "keep" }
+    \\      ],
+    \\      "output": "cypress: {passed}/{specs} passed | {failed} failed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-playwright",
+    \\      "trigger": "Test Suites:",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Test Suites: {suites} passed, {failed} failed", "action": "keep" }
+    \\      ],
+    \\      "output": "playwright: {suites} suites | {failed} failed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-pytest-pass",
+    \\      "trigger": " passed",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "{passed} passed in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "pytest: {passed} passed | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-pytest-fail",
+    \\      "trigger": " failed",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "{failed} failed, {passed} passed", "action": "keep" }
+    \\      ],
+    \\      "output": "pytest: {passed} passed | {failed} failed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-mypy-check",
+    \\      "trigger": "Success: no issues",
+    \\      "confidence": 0.98,
+    \\      "rules": [],
+    \\      "output": "mypy: no issues"
+    \\    },
+    \\    {
+    \\      "name": "opencode-mypy-errors",
+    \\      "trigger": "error:",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "Found {count} errors", "action": "keep" }
+    \\      ],
+    \\      "output": "mypy: {count} errors"
+    \\    },
+    \\    {
+    \\      "name": "opencode-black-format",
+    \\      "trigger": "reformatted",
+    \\      "confidence": 0.90,
+    \\      "rules": [
+    \\        { "capture": "reformatted {files} file", "action": "keep" }
+    \\      ],
+    \\      "output": "black: reformatted {files} file"
+    \\    },
+    \\    {
+    \\      "name": "opencode-isort",
+    \\      "trigger": "ERROR",
+    \\      "confidence": 0.85,
+    \\      "rules": [
+    \\        { "capture": "ERROR: {message}", "action": "keep" }
+    \\      ],
+    \\      "output": "isort: error - {message}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-pip-install",
+    \\      "trigger": "Successfully installed",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Successfully installed {packages}", "action": "keep" }
+    \\      ],
+    \\      "output": "pip: {packages}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-poetry-install",
+    \\      "trigger": "Installing dependencies",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "Installing dependencies from lock file", "action": "keep" }
+    \\      ],
+    \\      "output": "poetry: installing dependencies"
+    \\    },
+    \\    {
+    \\      "name": "opencode-cargo-build",
+    \\      "trigger": "Finished",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "Finished dev [optimized + debuginfo] target(s) in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "cargo: finished | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-cargo-test",
+    \\      "trigger": "test result:",
+    \\      "confidence": 0.98,
+    \\      "rules": [
+    \\        { "capture": "test result: {result}. {passed} passed; {failed} failed", "action": "keep" }
+    \\      ],
+    \\      "output": "cargo test: {passed} passed | {failed} failed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-go-build",
+    \\      "trigger": "go build",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "go build -o {binary} {pkg}", "action": "keep" }
+    \\      ],
+    \\      "output": "go build: {binary}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-go-test",
+    \\      "trigger": "ok  ",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "ok  {pkg}  {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "go test: {pkg} ok"
+    \\    },
+    \\    {
+    \\      "name": "opencode-zig-build",
+    \\      "trigger": "Build Summary",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "success", "action": "keep" }
+    \\      ],
+    \\      "output": "zig build: success"
+    \\    },
+    \\    {
+    \\      "name": "opencode-docker-build",
+    \\      "trigger": "Successfully built",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "Successfully built {hash}", "action": "keep" }
+    \\      ],
+    \\      "output": "docker: built {hash}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-docker-compose",
+    \\      "trigger": "Container started",
+    \\      "confidence": 0.93,
+    \\      "rules": [
+    \\        { "capture": "Container {name} started", "action": "keep" }
+    \\      ],
+    \\      "output": "docker-compose: {name} started"
+    \\    },
+    \\    {
+    \\      "name": "opencode-kubectl",
+    \\      "trigger": "kubectl",
+    \\      "confidence": 0.85,
+    \\      "rules": [
+    \\        { "capture": "pod/{name} {status}", "action": "keep" }
+    \\      ],
+    \\      "output": "kubectl: {name} {status}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-terraform-plan",
+    \\      "trigger": "Plan:",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Plan: {to_add} to add, {to_change} to change, {to_destroy} to destroy", "action": "keep" }
+    \\      ],
+    \\      "output": "terraform: {to_add} add | {to_change} change | {to_destroy} destroy"
+    \\    },
+    \\    {
+    \\      "name": "opencode-terraform-apply",
+    \\      "trigger": "Apply complete",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "Apply complete! Resources: {count} added", "action": "keep" }
+    \\      ],
+    \\      "output": "terraform: apply complete"
+    \\    },
+    \\    {
+    \\      "name": "opencode-ansible",
+    \\      "trigger": "PLAY RECAP",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "ok={ok} changed={changed} unreachable={unreachable} failed={failed}", "action": "keep" }
+    \\      ],
+    \\      "output": "ansible: ok={ok} changed={changed} failed={failed}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-gradle-build",
+    \\      "trigger": "BUILD SUCCESSFUL",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "BUILD SUCCESSFUL in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "gradle: BUILD SUCCESSFUL | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-gradle-fail",
+    \\      "trigger": "BUILD FAILED",
+    \\      "confidence": 0.98,
+    \\      "rules": [
+    \\        { "capture": "FAILURE: {message}", "action": "keep" }
+    \\      ],
+    \\      "output": "gradle: BUILD FAILED"
+    \\    },
+    \\    {
+    \\      "name": "opencode-android-build",
+    \\      "trigger": "BUILD SUCCESSFUL",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "BUILD SUCCESSFUL", "action": "keep" }
+    \\      ],
+    \\      "output": "android: BUILD SUCCESSFUL"
+    \\    },
+    \\    {
+    \\      "name": "opencode-flutter-build",
+    \\      "trigger": "Running Gradle",
+    \\      "confidence": 0.90,
+    \\      "rules": [
+    \\        { "capture": "Built build/app/outputs/flutter-apk/{apk}", "action": "keep" }
+    \\      ],
+    \\      "output": "flutter: built {apk}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-react-native",
+    \\      "trigger": "BUILD SUCCESSFUL",
+    \\      "confidence": 0.95,
+    \\      "rules": [],
+    \\      "output": "react-native: BUILD SUCCESSFUL"
+    \\    },
+    \\    {
+    \\      "name": "opencode-composer-install",
+    \\      "trigger": "Installing from cache",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "Installing {count} packages", "action": "keep" }
+    \\      ],
+    \\      "output": "composer: {count} packages"
+    \\    },
+    \\    {
+    \\      "name": "opencode-bundle-install",
+    \\      "trigger": "Bundle complete",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Bundle complete! {count} Gemfile dependencies", "action": "keep" }
+    \\      ],
+    \\      "output": "bundle: {count} gems"
+    \\    },
+    \\    {
+    \\      "name": "opencode-dotnet-build",
+    \\      "trigger": "Build succeeded",
+    \\      "confidence": 0.97,
+    \\      "rules": [
+    \\        { "capture": "Build succeeded. {warnings} Warning(s)", "action": "keep" }
+    \\      ],
+    \\      "output": "dotnet: Build succeeded | {warnings} warnings"
+    \\    },
+    \\    {
+    \\      "name": "opencode-dotnet-test",
+    \\      "trigger": "Passed!  - Failed",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Passed!  - Failed:     0, Passed: {passed}, Skipped: {skipped}", "action": "keep" }
+    \\      ],
+    \\      "output": "dotnet test: {passed} passed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-helm",
+    \\      "trigger": "release my-chart",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "release my-chart {version} has been upgraded", "action": "keep" }
+    \\      ],
+    \\      "output": "helm: my-chart upgraded"
+    \\    },
+    \\    {
+    \\      "name": "opencode-packer",
+    \\      "trigger": "Build finished",
+    \\      "confidence": 0.93,
+    \\      "rules": [
+    \\        { "capture": "Build 'template' finished", "action": "keep" }
+    \\      ],
+    \\      "output": "packer: build finished"
+    \\    },
+    \\    {
+    \\      "name": "opencode-terragrunt",
+    \\      "trigger": "Running tgfmt",
+    \\      "confidence": 0.88,
+    \\      "rules": [
+    \\        { "capture": "Terraform initialized", "action": "keep" }
+    \\      ],
+    \\      "output": "terragrunt: initialized"
+    \\    },
+    \\    {
+    \\      "name": "opencode-make",
+    \\      "trigger": "make:",
+    \\      "confidence": 0.85,
+    \\      "rules": [
+    \\        { "capture": "make `{target}`", "action": "keep" }
+    \\      ],
+    \\      "output": "make: {target}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-eslint-fix",
+    \\      "trigger": "Fixed {count} files",
+    \\      "confidence": 0.96,
+    \\      "rules": [
+    \\        { "capture": "Fixed {count} files", "action": "keep" }
+    \\      ],
+    \\      "output": "eslint: fixed {count} files"
+    \\    },
+    \\    {
+    \\      "name": "opencode-prettier-check",
+    \\      "trigger": "Checking format...",
+    \\      "confidence": 0.90,
+    \\      "rules": [
+    \\        { "capture": "Matched {count} files", "action": "keep" }
+    \\      ],
+    \\      "output": "prettier: {count} files checked"
+    \\    },
+    \\    {
+    \\      "name": "opencode-nx-build",
+    \\      "trigger": "NX   Running target build",
+    \\      "confidence": 0.94,
+    \\      "rules": [
+    \\        { "capture": "NX   Successfully ran target build", "action": "keep" }
+    \\      ],
+    \\      "output": "nx: build complete"
+    \\    },
+    \\    {
+    \\      "name": "opencode-nx-affected",
+    \\      "trigger": "NX   Affected criteria changed",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "NX   Ran {count} tasks", "action": "keep" }
+    \\      ],
+    \\      "output": "nx: {count} tasks affected"
+    \\    },
+    \\    {
+    \\      "name": "opencode-bun-test",
+    \\      "trigger": " bun v",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "{passed} passed | {failed} failed", "action": "keep" }
+    \\      ],
+    \\      "output": "bun test: {passed} passed | {failed} failed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-rustfmt",
+    \\      "trigger": "Rustfiles unchanged",
+    \\      "confidence": 0.95,
+    \\      "rules": [],
+    \\      "output": "rustfmt: unchanged"
+    \\    },
+    \\    {
+    \\      "name": "opencode-clippy",
+    \\      "trigger": "Checks passed",
+    \\      "confidence": 0.97,
+    \\      "rules": [],
+    \\      "output": "clippy: checks passed"
+    \\    },
+    \\    {
+    \\      "name": "opencode-gitleaks",
+    \\      "trigger": "no leaks",
+    \\      "confidence": 0.95,
+    \\      "rules": [],
+    \\      "output": "gitleaks: no leaks detected"
+    \\    },
+    \\    {
+    \\      "name": "opencode-semgrep",
+    \\      "trigger": "Scan complete",
+    \\      "confidence": 0.95,
+    \\      "rules": [
+    \\        { "capture": "Ran {rules} rules and found {issues} issues", "action": "keep" }
+    \\      ],
+    \\      "output": "semgrep: {issues} issues | {rules} rules"
+    \\    },
+    \\    {
+    \\      "name": "opencode-snyk",
+    \\      "trigger": "Snyk policy report",
+    \\      "confidence": 0.93,
+    \\      "rules": [
+    \\        { "capture": "Package manager:  {pm}", "action": "keep" }
+    \\      ],
+    \\      "output": "snyk: scan complete"
+    \\    },
+    \\    {
+    \\      "name": "opencode-trivy",
+    \\      "trigger": "Total: {count}",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "Total: {count} (UNKNOWN:{unknown}, LOW:{low}, MEDIUM:{medium}, HIGH:{high}, CRITICAL:{critical})", "action": "keep" }
+    \\      ],
+    \\      "output": "trivy: {count} vulnerabilities | {critical} critical"
+    \\    },
+    \\    {
+    \\      "name": "opencode-hadolint",
+    \\      "trigger": "hadolint",
+    \\      "confidence": 0.90,
+    \\      "rules": [
+    \\        { "capture": "Dockerfile parsed successfully", "action": "keep" }
+    \\      ],
+    \\      "output": "hadolint: Dockerfile OK"
+    \\    },
+    \\    {
+    \\      "name": "opencode-kubesec",
+    \\      "trigger": "kubesec",
+    \\      "confidence": 0.88,
+    \\      "rules": [
+    \\        { "capture": "Failed to score", "action": "keep" }
+    \\      ],
+    \\      "output": "kubesec: scan complete"
+    \\    },
+    \\    {
+    \\      "name": "opencode-skaffold",
+    \\      "trigger": "Deployments stabilized",
+    \\      "confidence": 0.92,
+    \\      "rules": [
+    \\        { "capture": "deployments stabilized in {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "skaffold: deployed | {duration}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-argocd",
+    \\      "trigger": "ArgoCD",
+    \\      "confidence": 0.88,
+    \\      "rules": [
+    \\        { "capture": "health status = {status}", "action": "keep" }
+    \\      ],
+    \\      "output": "argocd: {status}"
+    \\    },
+    \\    {
+    \\      "name": "opencode-dagger",
+    \\      "trigger": "✔",
+    \\      "confidence": 0.85,
+    \\      "rules": [
+    \\        { "capture": "{step}  {duration}", "action": "keep" }
+    \\      ],
+    \\      "output": "dagger: {step}"
+    \\    }
+    \\  ]
+    \\}
+;
+
+const ConfigMergeResult = struct {
+    path: []const u8,
+    added_rules: usize,
+    added_filters: usize,
+};
+
+fn ensureGlobalConfigFromTemplate(alloc: std.mem.Allocator, home: []const u8, template_json: []const u8) !ConfigMergeResult {
+    const omni_dir = try std.fmt.allocPrint(alloc, "{s}/.omni", .{home});
+    std.fs.cwd().makePath(omni_dir) catch {};
+
+    const config_path = try std.fmt.allocPrint(alloc, "{s}/omni_config.json", .{omni_dir});
+
+    var root_obj = std.json.ObjectMap.init(alloc);
+    const file_or_err = std.fs.cwd().openFile(config_path, .{});
+    if (file_or_err) |file| {
+        defer file.close();
+        const content = try file.readToEndAlloc(alloc, 1024 * 1024);
+        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, content, .{});
+        if (parsed.value == .object) {
+            root_obj = parsed.value.object;
+        }
+    } else |_| {}
+
+    var rules_array = if (root_obj.get("rules")) |node|
+        if (node == .array) node.array else std.json.Array.init(alloc)
+    else
+        std.json.Array.init(alloc);
+
+    var dsl_filters_array = if (root_obj.get("dsl_filters")) |node|
+        if (node == .array) node.array else std.json.Array.init(alloc)
+    else
+        std.json.Array.init(alloc);
+
+    const template_parsed = try std.json.parseFromSlice(std.json.Value, alloc, template_json, .{});
+    var added_rules: usize = 0;
+    var added_filters: usize = 0;
+
+    if (template_parsed.value == .object) {
+        if (template_parsed.value.object.get("rules")) |template_rules_node| {
+            if (template_rules_node == .array) {
+                for (template_rules_node.array.items) |rule_node| {
+                    if (rule_node != .object) continue;
+                    const name_node = rule_node.object.get("name") orelse continue;
+                    if (name_node != .string) continue;
+
+                    var exists = false;
+                    for (rules_array.items) |existing_node| {
+                        if (existing_node != .object) continue;
+                        const existing_name_node = existing_node.object.get("name") orelse continue;
+                        if (existing_name_node != .string) continue;
+                        if (std.mem.eql(u8, existing_name_node.string, name_node.string)) {
+                            exists = true;
+                            break;
+                        }
+                    }
+
+                    if (!exists) {
+                        try rules_array.append(rule_node);
+                        added_rules += 1;
+                    }
+                }
+            }
+        }
+
+        if (template_parsed.value.object.get("dsl_filters")) |template_filters_node| {
+            if (template_filters_node == .array) {
+                for (template_filters_node.array.items) |filter_node| {
+                    if (filter_node != .object) continue;
+                    const name_node = filter_node.object.get("name") orelse continue;
+                    if (name_node != .string) continue;
+
+                    var exists = false;
+                    for (dsl_filters_array.items) |existing_node| {
+                        if (existing_node != .object) continue;
+                        const existing_name_node = existing_node.object.get("name") orelse continue;
+                        if (existing_name_node != .string) continue;
+                        if (std.mem.eql(u8, existing_name_node.string, name_node.string)) {
+                            exists = true;
+                            break;
+                        }
+                    }
+
+                    if (!exists) {
+                        try dsl_filters_array.append(filter_node);
+                        added_filters += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    try root_obj.put("rules", std.json.Value{ .array = rules_array });
+    try root_obj.put("dsl_filters", std.json.Value{ .array = dsl_filters_array });
+
+    const out_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
+    defer out_file.close();
+
+    var write_buf: [4096]u8 = undefined;
+    var file_writer = out_file.writer(&write_buf);
+    try std.json.Stringify.value(std.json.Value{ .object = root_obj }, .{ .whitespace = .indent_2 }, &file_writer.interface);
+    try file_writer.end();
+
+    return .{ .path = config_path, .added_rules = added_rules, .added_filters = added_filters };
+}
+
+fn ensureGlobalCodexPolyglotConfig(alloc: std.mem.Allocator, home: []const u8) !ConfigMergeResult {
+    return ensureGlobalConfigFromTemplate(alloc, home, CODEX_POLYGLOT_TEMPLATE_JSON);
+}
+
+fn ensureGlobalOpencodeFiltersConfig(alloc: std.mem.Allocator, home: []const u8) !ConfigMergeResult {
+    return ensureGlobalConfigFromTemplate(alloc, home, OPENCODE_COMPLETE_TEMPLATE_JSON);
+}
+
+fn ensureGlobalAntigravityConfig(alloc: std.mem.Allocator, home: []const u8) !ConfigMergeResult {
+    return ensureGlobalConfigFromTemplate(alloc, home, ANTIGRAVITY_TEMPLATE_JSON);
+}
+
+fn autoConfigureOpencode(alloc: std.mem.Allocator, home: []const u8, absolute_omni_path: []const u8) !void {
+    const stdout = std.fs.File.stdout().deprecatedWriter();
+    const config_path = try std.fmt.allocPrint(alloc, "{s}/.config/opencode/opencode.json", .{home});
+
+    if (std.fs.path.dirname(config_path)) |dir| {
+        std.fs.cwd().makePath(dir) catch {};
+    }
+
+    var root_obj: std.json.ObjectMap = undefined;
+    var mcp_obj: std.json.ObjectMap = undefined;
+
+    const file_or_err = std.fs.cwd().openFile(config_path, .{});
+    if (file_or_err) |file| {
+        defer file.close();
+        const content = try file.readToEndAlloc(alloc, 1024 * 1024);
+        const parsed_json = std.json.parseFromSlice(std.json.Value, alloc, content, .{}) catch |e| {
+            try stdout.print("Failed to parse existing opencode.json: {any}\n", .{e});
+            root_obj = std.json.ObjectMap.init(alloc);
+            mcp_obj = std.json.ObjectMap.init(alloc);
+            return;
+        };
+        if (parsed_json.value == .object) {
+            root_obj = parsed_json.value.object;
+        } else {
+            root_obj = std.json.ObjectMap.init(alloc);
+        }
+    } else |_| {
+        root_obj = std.json.ObjectMap.init(alloc);
+    }
+
+    if (root_obj.get("mcp")) |mcp_node| {
+        if (mcp_node == .object) {
+            mcp_obj = mcp_node.object;
+        } else {
+            mcp_obj = std.json.ObjectMap.init(alloc);
+        }
+    } else {
+        mcp_obj = std.json.ObjectMap.init(alloc);
+    }
+
+    var omni_server_obj = std.json.ObjectMap.init(alloc);
+    try omni_server_obj.put("type", std.json.Value{ .string = "local" });
+
+    var command_array = std.json.Array.init(alloc);
+    try command_array.append(std.json.Value{ .string = "node" });
+    try command_array.append(std.json.Value{ .string = absolute_omni_path });
+    try command_array.append(std.json.Value{ .string = "--agent=opencode" });
+    try omni_server_obj.put("command", std.json.Value{ .array = command_array });
+
+    try omni_server_obj.put("enabled", std.json.Value{ .bool = true });
+
+    try mcp_obj.put("omni", std.json.Value{ .object = omni_server_obj });
+    try root_obj.put("mcp", std.json.Value{ .object = mcp_obj });
+
+    try ui.printHeader(stdout, "🤖 OMNI MCP OPENCODE INTEGRATION");
+    try ui.row(stdout, ui.BOLD ++ "Target: " ++ ui.RESET ++ "OpenCode AI");
+    try ui.row(stdout, "");
+
+    const out_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
+    defer out_file.close();
+
+    var write_buf: [4096]u8 = undefined;
+    var file_writer = out_file.writer(&write_buf);
+    try std.json.Stringify.value(std.json.Value{ .object = root_obj }, .{ .whitespace = .indent_2 }, &file_writer.interface);
+    try file_writer.end();
+
+    try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Successfully configured OMNI for OpenCode.");
+    {
+        const l = try std.fmt.allocPrint(alloc, "   Path: " ++ ui.DIM ++ "{s}" ++ ui.RESET, .{config_path});
+        defer alloc.free(l);
+        try ui.row(stdout, l);
+    }
+
+    const omni_config_result = try ensureGlobalOpencodeFiltersConfig(alloc, home);
+
+    try ui.row(stdout, "");
+    {
+        const l = try std.fmt.allocPrint(alloc, ui.GREEN ++ " ● " ++ ui.RESET ++ "Added {d} AI Coding filters to omni config.", .{omni_config_result.added_filters});
+        defer alloc.free(l);
+        try ui.row(stdout, l);
+    }
+    {
+        const l = try std.fmt.allocPrint(alloc, "   Filters: " ++ ui.DIM ++ "{s}" ++ ui.RESET, .{omni_config_result.path});
+        defer alloc.free(l);
+        try ui.row(stdout, l);
+    }
+
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.BOLD ++ "Token-Efficient AI Coding Setup Complete!" ++ ui.RESET);
+    try ui.row(stdout, "");
+    try ui.row(stdout, "  " ++ ui.CYAN ++ "1." ++ ui.RESET ++ " Restart OpenCode to use OMNI MCP");
+    try ui.row(stdout, "  " ++ ui.CYAN ++ "2." ++ ui.RESET ++ " Run: opencode mcp list  " ++ ui.DIM ++ "# Verify OMNI is registered" ++ ui.RESET);
+    try ui.row(stdout, "  " ++ ui.CYAN ++ "3." ++ ui.RESET ++ " Use: git diff | omni   " ++ ui.DIM ++ "# Test distillation" ++ ui.RESET);
+    try ui.row(stdout, "");
+    try ui.row(stdout, ui.DIM ++ "Supported: npm, yarn, pnpm, tsc, eslint, jest, vitest," ++ ui.RESET);
+    try ui.row(stdout, ui.DIM ++ "          pytest, ruff, mypy, cargo, go, docker," ++ ui.RESET);
+    try ui.row(stdout, ui.DIM ++ "          kubectl, terraform, gradle, and 50+ more!" ++ ui.RESET);
+    try ui.printFooter(stdout);
+    try stdout.print("\n", .{});
+}
+
 fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute_omni_path: []const u8) !void {
     const stdout = std.fs.File.stdout().deprecatedWriter();
     const config_path = try std.fmt.allocPrint(alloc, "{s}/.gemini/antigravity/mcp_config.json", .{home});
-    
+
     // Ensure parent directories exist
     if (std.fs.path.dirname(config_path)) |dir| {
         std.fs.cwd().makePath(dir) catch {};
@@ -820,7 +2181,7 @@ fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute
     // Create OMNI server block
     var omni_obj = std.json.ObjectMap.init(alloc);
     try omni_obj.put("command", std.json.Value{ .string = "node" });
-    
+
     var args_array_val = std.json.Array.init(alloc);
     try args_array_val.append(std.json.Value{ .string = absolute_omni_path });
     try args_array_val.append(std.json.Value{ .string = "--agent=antigravity" });
@@ -833,24 +2194,33 @@ fn autoConfigureAntigravity(alloc: std.mem.Allocator, home: []const u8, absolute
     try ui.printHeader(stdout, "🤖 OMNI MCP ANTIGRAVITY INTEGRATION");
     try ui.row(stdout, ui.BOLD ++ "Target: " ++ ui.RESET ++ "Google Antigravity");
     try ui.row(stdout, "");
-    
+
     // Write back to file
     const out_file = try std.fs.cwd().createFile(config_path, .{ .truncate = true });
     defer out_file.close();
-    
+
     var write_buf: [4096]u8 = undefined;
     var file_writer = out_file.writer(&write_buf);
     try std.json.Stringify.value(std.json.Value{ .object = root_obj }, .{ .whitespace = .indent_2 }, &file_writer.interface);
     try file_writer.end();
 
+    const merge_result = try ensureGlobalAntigravityConfig(alloc, home);
+
     try ui.row(stdout, ui.GREEN ++ " ● " ++ ui.RESET ++ "Successfully merged configuration.");
     {
         const l = try std.fmt.allocPrint(alloc, "   Path: " ++ ui.DIM ++ "{s}" ++ ui.RESET, .{config_path});
-        defer alloc.free(l); try ui.row(stdout, l);
+        defer alloc.free(l);
+        try ui.row(stdout, l);
+    }
+    {
+        const l = try std.fmt.allocPrint(alloc, "   Filters: " ++ ui.DIM ++ "{s}" ++ ui.RESET ++ " ({d} rules, {d} filters added)", .{ merge_result.path, merge_result.added_rules, merge_result.added_filters });
+        defer alloc.free(l);
+        try ui.row(stdout, l);
     }
     try ui.row(stdout, "");
     try ui.row(stdout, "OMNI is now registered as an Antigravity MCP server.");
     try ui.row(stdout, ui.CYAN ++ "▸" ++ ui.RESET ++ " Please restart Antigravity to apply changes.");
+    try ui.row(stdout, ui.CYAN ++ "▸" ++ ui.RESET ++ " Cloud-native filters for Kubernetes, Terraform, and Docker layers are now in your global OMNI config.");
     try ui.printFooter(stdout);
     try stdout.print("\n", .{});
 }
@@ -864,7 +2234,7 @@ fn handleSetup() !void {
 
         const omni_dir = std.fmt.allocPrint(alloc, "{s}/.omni", .{home}) catch null;
         const omni_dist_dir = std.fmt.allocPrint(alloc, "{s}/.omni/dist", .{home}) catch null;
-        
+
         if (omni_dir != null and omni_dist_dir != null) {
             std.fs.cwd().makeDir(omni_dir.?) catch {};
             std.fs.cwd().makeDir(omni_dist_dir.?) catch {};
@@ -872,7 +2242,7 @@ fn handleSetup() !void {
             var buffer: [std.fs.max_path_bytes]u8 = undefined;
             if (std.fs.selfExeDirPath(&buffer)) |exe_dir_raw| {
                 var exe_dir = exe_dir_raw;
-                
+
                 // --- HOMEBREW STABILITY FIX ---
                 // If running from Cellar (e.g., /opt/homebrew/Cellar/omni/0.3.9/bin),
                 // transform to stable opt path (e.g., /opt/homebrew/opt/omni/bin)
@@ -882,11 +2252,11 @@ fn handleSetup() !void {
                     const prefix = exe_dir[0..cellar_idx];
                     const suffix_start = std.mem.indexOfPos(u8, exe_dir, cellar_idx + cellar_marker.len, std.fs.path.sep_str) orelse exe_dir.len;
                     const suffix = exe_dir[suffix_start..];
-                    
-                    exe_dir = std.fmt.allocPrint(alloc, "{s}" ++ std.fs.path.sep_str ++ "opt" ++ std.fs.path.sep_str ++ "omni{s}", .{prefix, suffix}) catch exe_dir;
+
+                    exe_dir = std.fmt.allocPrint(alloc, "{s}" ++ std.fs.path.sep_str ++ "opt" ++ std.fs.path.sep_str ++ "omni{s}", .{ prefix, suffix }) catch exe_dir;
                     // Note: We don't free prefix/suffix as they are slices of exe_dir_raw (stack-based buffer)
                 }
-                
+
                 // Search candidate paths for index.js
                 const candidates = [_]?[]const u8{
                     std.fs.path.join(alloc, &.{ exe_dir, "..", "dist", "index.js" }) catch null,
@@ -894,7 +2264,7 @@ fn handleSetup() !void {
                     std.fs.path.join(alloc, &.{ exe_dir, "..", "libexec", "src", "index.js" }) catch null,
                     std.fs.path.join(alloc, &.{ exe_dir, "..", "src", "index.js" }) catch null,
                 };
-                
+
                 var real_src_dist: ?[]const u8 = null;
                 for (&candidates) |candidate| {
                     if (candidate) |c| {
@@ -925,7 +2295,7 @@ fn handleSetup() !void {
                         file.close();
                     } else |_| {
                         // Create default config
-                        const default_config = 
+                        const default_config =
                             \\{
                             \\  "rules": [],
                             \\  "dsl_filters": []
@@ -958,6 +2328,9 @@ fn handleSetup() !void {
     try ui.row(stdout, "    '{\"type\":\"stdio\",\"command\":\"node\",");
     try ui.row(stdout, "     \"args\":[\"$HOME/.omni/dist/index.js\"]}'");
     try ui.row(stdout, "");
+    try ui.row(stdout, ui.CYAN ++ "  CODEX CLI" ++ ui.RESET);
+    try ui.row(stdout, "  Run: codex mcp add omni -- node $HOME/.omni/dist/index.js --agent=codex");
+    try ui.row(stdout, "");
     try ui.row(stdout, ui.CYAN ++ "  ANTIGRAVITY (Google)" ++ ui.RESET);
     try ui.row(stdout, "  Add to ~/.gemini/antigravity/mcp_config.json:");
     try ui.row(stdout, "  { \"mcpServers\": { \"omni\": { \"command\": \"node\",");
@@ -966,12 +2339,16 @@ fn handleSetup() !void {
 
     try ui.row(stdout, ui.BOLD ++ "Step 3: Generate Config Automatically" ++ ui.RESET);
     try ui.row(stdout, "  omni generate claude-code   " ++ ui.DIM ++ "# Auto-config for Claude" ++ ui.RESET);
+    try ui.row(stdout, "  omni generate codex         " ++ ui.DIM ++ "# Auto-config for Codex" ++ ui.RESET);
     try ui.row(stdout, "  omni generate antigravity   " ++ ui.DIM ++ "# Auto-config for Antigravity" ++ ui.RESET);
+    try ui.row(stdout, "  omni generate opencode      " ++ ui.DIM ++ "# Auto-config for OpenCode" ++ ui.RESET);
     try ui.row(stdout, "");
 
     try ui.row(stdout, ui.BOLD ++ "Step 4: Use OMNI Everywhere" ++ ui.RESET);
     try ui.row(stdout, "  git diff | omni                     " ++ ui.DIM ++ "# Distill git output" ++ ui.RESET);
     try ui.row(stdout, "  docker build . 2>&1 | omni          " ++ ui.DIM ++ "# Distill docker output" ++ ui.RESET);
+    try ui.row(stdout, "  omni_apply_template(\"codex-advanced\") " ++ ui.DIM ++ "# Compact tsc/eslint/jest/vitest output" ++ ui.RESET);
+    try ui.row(stdout, "  omni_apply_template(\"codex-polyglot\") " ++ ui.DIM ++ "# Add pytest/ruff/cargo/go/zig/pnpm summaries" ++ ui.RESET);
     try ui.row(stdout, "  omni density < logs.txt             " ++ ui.DIM ++ "# Analyze token density" ++ ui.RESET);
     try ui.row(stdout, "");
 
@@ -1096,7 +2473,6 @@ fn handleUninstall(allocator: std.mem.Allocator) !void {
     try std.fs.File.stdout().deprecatedWriter().print("\n" ++ ui.GREEN ++ " ● " ++ ui.RESET ++ "OMNI has been successfully uninstalled.\n", .{});
     try std.fs.File.stdout().deprecatedWriter().print(ui.DIM ++ "Note: If you installed via Homebrew, also run: brew uninstall omni" ++ ui.RESET ++ "\n", .{});
 }
-
 
 test "compressor integration" {
     const gpa = std.testing.allocator;

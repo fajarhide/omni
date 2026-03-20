@@ -1,0 +1,7 @@
+added 42 packages in 3.2s
+14 packages are looking for funding
+  run `npm fund` for details
+npm warn deprecated package-a@1.0.0
+npm warn deprecated package-b@2.1.0
+npm warn deprecated package-c@3.0.0
+npm warn deprecated 100 deprecated packages

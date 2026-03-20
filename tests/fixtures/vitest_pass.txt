@@ -1,0 +1,3 @@
+Test Files  3 passed
+Tests  25 passed (25ms)
+Duration  124ms

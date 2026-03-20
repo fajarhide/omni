@@ -256,35 +256,278 @@ function getMergedConfig(): any {
   return config;
 }
 
-const TEMPLATES: Record<string, any[]> = {
-  "kubernetes": [
-    { name: "k8s_uid", match: "uid:", action: "mask" },
-    { name: "k8s_managed_fields", match: "managedFields:", action: "remove" }
-  ],
-  "terraform": [
-    { name: "tf_refresh", match: "Refreshing state...", action: "remove" },
-    { name: "tf_no_changes", match: "No changes. Your infrastructure matches the configuration.", action: "mask" }
-  ],
-  "node-verbose": [
-    { name: "npm_notice", match: "npm notice", action: "remove" },
-    { name: "node_modules_path", match: "node_modules/", action: "mask" }
-  ],
-  "docker-layers": [
-    { name: "docker_hash", match: "sha256:", action: "mask" }
-  ],
-  "security-audit": [
-    { name: "ip_mask", match: "192.168.", action: "mask" },
-    { name: "password_remove", match: "password:", action: "remove" },
-    { name: "key_mask", match: "PRIVATE KEY", action: "mask" }
-  ],
-  "aws-cloud": [
-    { name: "aws_request_id", match: "RequestId:", action: "remove" },
-    { name: "aws_arn_mask", match: "arn:aws:", action: "mask" }
-  ]
+type TemplateBundle = {
+  rules?: any[];
+  dsl_filters?: any[];
+};
+
+const CODEX_ADVANCED_FILTERS = [
+  {
+    name: "codex-tsc-summary",
+    trigger: "error TS",
+    confidence: 0.98,
+    rules: [
+      { capture: "{location}: error TS{code}: {message}", action: "keep" },
+      { capture: "{ts_location}: error TS{ts_code}: {ts_message}", action: "count", as: "diagnostics" }
+    ],
+    output: "tsc: {diagnostics} diagnostics | last TS{code}: {message}"
+  },
+  {
+    name: "codex-eslint-summary-plural",
+    trigger: "problems (",
+    confidence: 0.97,
+    rules: [
+      { capture: "✖ {problems} problems ({errors} errors, {warnings} warnings)", action: "keep" }
+    ],
+    output: "eslint: {problems} problems | {errors} errors | {warnings} warnings"
+  },
+  {
+    name: "codex-eslint-summary-singular",
+    trigger: "problem (",
+    confidence: 0.97,
+    rules: [
+      { capture: "✖ {problems} problem ({errors} error, {warnings} warning)", action: "keep" }
+    ],
+    output: "eslint: {problems} problem | {errors} error | {warnings} warning"
+  },
+  {
+    name: "codex-jest-summary-fail",
+    trigger: "failed, ",
+    confidence: 0.96,
+    rules: [
+      { capture: "Tests:       {failed} failed, {passed} passed, {total} total", action: "keep" }
+    ],
+    output: "jest: {passed} passed | {failed} failed | {total} total"
+  },
+  {
+    name: "codex-jest-summary-pass",
+    trigger: "Tests:",
+    confidence: 0.95,
+    rules: [
+      { capture: "Tests:       {passed} passed, {total} total", action: "keep" }
+    ],
+    output: "jest: {passed} passed | {total} total"
+  },
+  {
+    name: "codex-vitest-summary",
+    trigger: "Test Files",
+    confidence: 0.95,
+    rules: [
+      { capture: "Test Files {files} passed", action: "keep" },
+      { capture: "Tests {tests} passed", action: "keep" }
+    ],
+    output: "vitest: {files} files passed | {tests} tests passed"
+  }
+];
+
+const PYTEST_ADVANCED_FILTERS = [
+  {
+    name: "pytest-summary-fail",
+    trigger: " failed, ",
+    confidence: 0.95,
+    rules: [
+      { capture: "{failed} failed, {passed} passed in {duration}", action: "keep" }
+    ],
+    output: "pytest: {passed} passed | {failed} failed | {duration}"
+  },
+  {
+    name: "pytest-summary-pass",
+    trigger: " passed in ",
+    confidence: 0.94,
+    rules: [
+      { capture: "{passed} passed in {duration}", action: "keep" }
+    ],
+    output: "pytest: {passed} passed | {duration}"
+  }
+];
+
+const RUFF_ADVANCED_FILTERS = [
+  {
+    name: "ruff-summary-pass",
+    trigger: "All checks passed!",
+    confidence: 0.99,
+    rules: [],
+    output: "ruff: all checks passed"
+  },
+  {
+    name: "ruff-summary-errors-plural",
+    trigger: "Found ",
+    confidence: 0.96,
+    rules: [
+      { capture: "Found {errors} errors.", action: "keep" }
+    ],
+    output: "ruff: {errors} errors"
+  },
+  {
+    name: "ruff-summary-errors-singular",
+    trigger: "Found 1 error.",
+    confidence: 0.96,
+    rules: [
+      { capture: "Found {error} error.", action: "keep" }
+    ],
+    output: "ruff: {error} error"
+  }
+];
+
+const CARGO_TEST_ADVANCED_FILTERS = [
+  {
+    name: "cargo-test-summary-pass",
+    trigger: "test result: ok.",
+    confidence: 0.97,
+    rules: [
+      { capture: "test result: ok. {passed} passed; {failed} failed; {ignored} ignored; {measured} measured; {filtered} filtered out; finished in {duration}", action: "keep" }
+    ],
+    output: "cargo test: {passed} passed | {failed} failed | {duration}"
+  },
+  {
+    name: "cargo-test-summary-fail",
+    trigger: "test result: FAILED.",
+    confidence: 0.97,
+    rules: [
+      { capture: "test result: FAILED. {passed} passed; {failed} failed; {ignored} ignored; {measured} measured; {filtered} filtered out; finished in {duration}", action: "keep" }
+    ],
+    output: "cargo test: {passed} passed | {failed} failed | {duration}"
+  }
+];
+
+const PNPM_ADVANCED_FILTERS = [
+  {
+    name: "pnpm-install-summary",
+    trigger: "Progress: resolved",
+    confidence: 0.93,
+    rules: [
+      { capture: "Progress: resolved {resolved}, reused {reused}, downloaded {downloaded}, added {added}, done", action: "keep" },
+      { capture: "Done in {duration}", action: "keep" }
+    ],
+    output: "pnpm: resolved {resolved} | reused {reused} | downloaded {downloaded} | added {added} | {duration}"
+  }
+];
+
+const ZIG_ADVANCED_FILTERS = [
+  {
+    name: "zig-test-summary-pass",
+    trigger: "tests passed.",
+    confidence: 0.92,
+    rules: [
+      { capture: "All {passed} tests passed.", action: "keep" }
+    ],
+    output: "zig test: {passed} passed"
+  }
+];
+
+const GO_TEST_ADVANCED_FILTERS = [
+  {
+    name: "go-test-summary-pass",
+    trigger: "ok\t",
+    confidence: 0.9,
+    rules: [
+      { capture: "ok\t{pkg}\t{duration}", action: "keep" },
+      { capture: "ok\t{counted_pkg}\t{counted_duration}", action: "count", as: "passed_packages" }
+    ],
+    output: "go test: {passed_packages} packages passed | last {pkg} | {duration}"
+  },
+  {
+    name: "go-test-summary-fail",
+    trigger: "FAIL\t",
+    confidence: 0.9,
+    rules: [
+      { capture: "FAIL\t{failed_pkg}\t{failed_duration}", action: "keep" },
+      { capture: "FAIL\t{counted_failed_pkg}\t{counted_failed_duration}", action: "count", as: "failed_packages" }
+    ],
+    output: "go test: {failed_packages} packages failed | last {failed_pkg} | {failed_duration}"
+  }
+];
+
+const TEMPLATES: Record<string, TemplateBundle> = {
+  "kubernetes": {
+    rules: [
+      { name: "k8s_uid", match: "uid:", action: "mask" },
+      { name: "k8s_managed_fields", match: "managedFields:", action: "remove" }
+    ]
+  },
+  "terraform": {
+    rules: [
+      { name: "tf_refresh", match: "Refreshing state...", action: "remove" },
+      { name: "tf_no_changes", match: "No changes. Your infrastructure matches the configuration.", action: "mask" }
+    ]
+  },
+  "node-verbose": {
+    rules: [
+      { name: "npm_notice", match: "npm notice", action: "remove" },
+      { name: "node_modules_path", match: "node_modules/", action: "mask" }
+    ]
+  },
+  "docker-layers": {
+    rules: [
+      { name: "docker_hash", match: "sha256:", action: "mask" }
+    ]
+  },
+  "security-audit": {
+    rules: [
+      { name: "ip_mask", match: "192.168.", action: "mask" },
+      { name: "password_remove", match: "password:", action: "remove" },
+      { name: "key_mask", match: "PRIVATE KEY", action: "mask" }
+    ]
+  },
+  "aws-cloud": {
+    rules: [
+      { name: "aws_request_id", match: "RequestId:", action: "remove" },
+      { name: "aws_arn_mask", match: "arn:aws:", action: "mask" }
+    ]
+  },
+  "codex-advanced": {
+    dsl_filters: CODEX_ADVANCED_FILTERS
+  },
+  "pytest-advanced": {
+    dsl_filters: PYTEST_ADVANCED_FILTERS
+  },
+  "ruff-advanced": {
+    dsl_filters: RUFF_ADVANCED_FILTERS
+  },
+  "cargo-test-advanced": {
+    dsl_filters: CARGO_TEST_ADVANCED_FILTERS
+  },
+  "pnpm-advanced": {
+    dsl_filters: PNPM_ADVANCED_FILTERS
+  },
+  "zig-advanced": {
+    dsl_filters: ZIG_ADVANCED_FILTERS
+  },
+  "go-test-advanced": {
+    dsl_filters: GO_TEST_ADVANCED_FILTERS
+  },
+  "codex-polyglot": {
+    dsl_filters: [
+      ...CODEX_ADVANCED_FILTERS,
+      ...PYTEST_ADVANCED_FILTERS,
+      ...RUFF_ADVANCED_FILTERS,
+      ...CARGO_TEST_ADVANCED_FILTERS,
+      ...PNPM_ADVANCED_FILTERS,
+      ...ZIG_ADVANCED_FILTERS,
+      ...GO_TEST_ADVANCED_FILTERS
+    ]
+  }
 };
 
 let wasmInstance: WebAssembly.Instance | null = null;
 let wasi: WASI | null = null;
+
+function mergeTemplate(config: any, template: TemplateBundle) {
+  if (!config.rules) config.rules = [];
+  if (!config.dsl_filters) config.dsl_filters = [];
+
+  for (const rule of template.rules ?? []) {
+    if (!config.rules.find((existing: any) => existing.name === rule.name)) {
+      config.rules.push(rule);
+    }
+  }
+
+  for (const filter of template.dsl_filters ?? []) {
+    if (!config.dsl_filters.find((existing: any) => existing.name === filter.name)) {
+      config.dsl_filters.push(filter);
+    }
+  }
+}
 
 async function getWasmInstance() {
   if (wasmInstance) return wasmInstance;
@@ -549,7 +792,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             template: { 
               type: "string", 
-              enum: ["kubernetes", "terraform", "node-verbose", "docker-layers"],
+              enum: ["kubernetes", "terraform", "node-verbose", "docker-layers", "security-audit", "aws-cloud", "codex-advanced", "pytest-advanced", "ruff-advanced", "cargo-test-advanced", "pnpm-advanced", "zig-advanced", "go-test-advanced", "codex-polyglot"],
               description: "The template to apply" 
             }
           },
@@ -829,8 +1072,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "omni_apply_template": {
         const templateName = (request.params.arguments as any).template;
-        const templateRules = TEMPLATES[templateName];
-        if (!templateRules) throw new Error(`Template not found: ${templateName}`);
+        const template = TEMPLATES[templateName];
+        if (!template) throw new Error(`Template not found: ${templateName}`);
 
         try {
           const targetPath = fs.existsSync(LOCAL_CONFIG_PATH) ? LOCAL_CONFIG_PATH : GLOBAL_CONFIG_PATH;
@@ -845,14 +1088,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           }
           
-          if (!config.rules) config.rules = [];
-          
-          // Merge rules, avoid duplicates by name
-          for (const rule of templateRules) {
-            if (!config.rules.find((r: any) => r.name === rule.name)) {
-              config.rules.push(rule);
-            }
-          }
+          mergeTemplate(config, template);
 
           await fs.promises.writeFile(targetPath, JSON.stringify(config, null, 2));
           

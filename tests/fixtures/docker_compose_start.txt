@@ -1,0 +1,3 @@
+Container myapp-db-1 started
+Container myapp-api-1 started
+Container myapp-nginx-1 started
