@@ -183,7 +183,7 @@ fn renderAgentFilterBreakdown(
     const limit = if (rows.items.len <= AGENT_FILTER_SUMMARY_LIMIT) rows.items.len else AGENT_FILTER_SUMMARY_LIMIT;
     try ui.row(stdout, "  Filters:");
 
-    for (rows.items[0..limit]) |row, idx| {
+    for (rows.items[0..limit], 0..) |row, idx| {
         const short_label = try compactFilterLabel(allocator, row.label, 24);
         defer allocator.free(short_label);
         const saved_str = try metrics.formatBytes(allocator, row.stats.saved);
