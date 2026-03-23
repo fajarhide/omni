@@ -163,7 +163,10 @@ mod tests {
     fn get_store() -> (Arc<Store>, tempfile::TempDir) {
         let dir = tempdir().expect("must succeed");
         let db_path = dir.path().join("omni.db");
-        (Arc::new(Store::open_path(&db_path).expect("must succeed")), dir)
+        (
+            Arc::new(Store::open_path(&db_path).expect("must succeed")),
+            dir,
+        )
     }
 
     fn default_config() -> SessionConfig {
@@ -235,7 +238,8 @@ mod tests {
         let out = process_payload(&input.to_string(), store.clone(), cfg);
         assert!(out.is_some());
 
-        let parsed: HookOutput = serde_json::from_str(&out.expect("must succeed")).expect("must succeed");
+        let parsed: HookOutput =
+            serde_json::from_str(&out.expect("must succeed")).expect("must succeed");
         let summary_len = parsed.hook_specific_output.system_prompt_addition.len();
         assert!(summary_len <= 300, "Length was {}", summary_len);
     }

@@ -1,9 +1,7 @@
 <div align="center">
   <img src="logo.png" alt="OMNI Semantic Signal Engine" width="250" />
 
-  # OMNI
-  
-  **Less noise. More signal. Right signal.**
+  **Less noise. More signal. Right signal. Reduce AI token consumption by up to 90%.**
 
   [![CI](https://github.com/fajarhide/omni/actions/workflows/ci.yml/badge.svg)](https://github.com/fajarhide/omni/actions/workflows/ci.yml)
   [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
@@ -13,8 +11,8 @@
 
 <br/>
 
-> **The Semantic Signal Engine for AI-Assisted Development.**<br/>
-> OMNI intercepts noisy terminal output in real-time and distills it into high-density intelligence—so your AI agents work with **meaning**, instead of drowning in text.
+> **The Semantic Signal Engine that cuts AI token consumption by up to 90%.**<br/>
+> OMNI acts as a context-aware terminal interceptor—distilling noisy command outputs in real-time into high-density intelligence, ensuring your LLM agents work with **meaning**, not text waste.
 
 ---
 
@@ -228,10 +226,17 @@ flowchart TB
 
 ## Development
 
+To ensure your code meets all quality standards before pushing to the repository, run the comprehensive CI pipeline locally:
+
 ```bash
-cargo build          # Build
+make ci              # Run fmt, clippy, tests, security audit, and binary size checks
+```
+
+For individual checks during development:
+```bash
+cargo build          # Build the binary
 cargo test           # Run all 147 tests
-cargo insta review   # Review snapshot tests
+cargo insta review   # Review and accept snapshot changes
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the full contributor guide.

@@ -146,7 +146,10 @@ mod tests {
     fn get_store() -> (Arc<Store>, tempfile::TempDir) {
         let dir = tempdir().expect("must succeed");
         let db_path = dir.path().join("omni.db");
-        (Arc::new(Store::open_path(&db_path).expect("must succeed")), dir)
+        (
+            Arc::new(Store::open_path(&db_path).expect("must succeed")),
+            dir,
+        )
     }
 
     #[test]
