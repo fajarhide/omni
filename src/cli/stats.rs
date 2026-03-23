@@ -78,7 +78,10 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
     use colored::*;
 
-    println!("\n{}", "─────────────────────────────────────────────────".bright_black());
+    println!(
+        "\n{}",
+        "─────────────────────────────────────────────────".bright_black()
+    );
     println!(
         " {}",
         format!("OMNI Signal Report — {}", period_label)
@@ -193,10 +196,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     if show_session || !show_passthrough {
         let hot_files = store.hot_files_global(since)?;
         if !hot_files.is_empty() {
-            println!(
-                "\n {}",
-                "Session Insights:".bold().bright_white()
-            );
+            println!("\n {}", "Session Insights:".bold().bright_white());
             let files_str: Vec<String> = hot_files
                 .iter()
                 .take(3)
