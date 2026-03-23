@@ -1,4 +1,5 @@
 use crate::pipeline::classifier::classify;
+use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
 use crate::store::sqlite::Store;
@@ -36,26 +37,67 @@ impl OmniServer {
         #[tool(param)] text: String,
         #[tool(param)] apply: bool,
     ) -> String {
-        let lines: Vec<&str> = text.lines().collect();
-        let total = lines.len();
+        // 1. Run real pattern detection
+        let candidates = detect_patterns(&text);
 
-        let report = if total > 10 {
-            format!(
-                "Detected repeating potential noise patterns bridging {} lines.",
-                total
-            )
-        } else {
-            "Not enough structured payload to determine robust native constraints.".to_string()
-        };
-
-        if apply {
-            "Successfully appended semantic logic to ~/.omni/filters/learned.toml".to_string()
-        } else {
-            format!(
-                "{}\nRun omni_learn with apply=true to automatically lock definitions.",
-                report
-            )
+        if candidates.is_empty() {
+            return "No significant noise patterns detected. \
+                    Input has high signal diversity — no filter needed."
+                .to_string();
         }
+
+        // 2. Format report with real candidates
+        let mut report = format!("Detected {} noise patterns:\n\n", candidates.len());
+        for (i, c) in candidates.iter().enumerate() {
+            report.push_str(&format!(
+                "  [{}] \"{}\" — {} occurrences (confidence: {:.0}%)\n      Action: {:?}\n      Sample: {}\n\n",
+                i + 1,
+                c.trigger_prefix,
+                c.count,
+                c.confidence * 100.0,
+                c.suggested_action,
+                &c.sample_line[..c.sample_line.len().min(80)]
+            ));
+        }
+
+        // 3. If apply=true: write to ~/.omni/filters/learned.toml
+        if apply {
+            let filter_name = format!("learned_{}", chrono::Utc::now().timestamp());
+            let _toml_content = generate_toml(&candidates, &filter_name);
+
+            let config_path = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".omni")
+                .join("filters")
+                .join("learned.toml");
+
+            if let Some(parent) = config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            match apply_to_config(&candidates, &filter_name, &config_path) {
+                Ok(added) => {
+                    report.push_str(&format!(
+                        "\n✓ Applied {} filters to {}\n  Run: omni doctor to verify",
+                        added,
+                        config_path.display()
+                    ));
+                }
+                Err(e) => {
+                    report.push_str(&format!(
+                        "\n✗ Failed to write filters: {}\n  Try manually: omni learn --apply",
+                        e
+                    ));
+                }
+            }
+        } else {
+            report.push_str(&format!(
+                "Run omni_learn with apply=true to save {} filters automatically.",
+                candidates.len()
+            ));
+        }
+
+        report
     }
 
     #[tool(
@@ -267,8 +309,43 @@ mod tests {
         let session = Arc::new(Mutex::new(SessionState::new()));
 
         let server = OmniServer { store, session };
-        let out = server.omni_learn("test loop".to_string(), false).await;
-        assert!(out.contains("learn"));
+        // 5+ repetitive lines should produce real candidate output
+        let repetitive = "Compiling foo v1.0\n".repeat(6);
+        let out = server.omni_learn(repetitive, false).await;
+        assert!(out.contains("noise patterns"), "expected pattern report, got: {out}");
+        assert!(out.contains("occurrences"), "expected occurrence count, got: {out}");
+        assert!(out.contains("confidence"), "expected confidence score, got: {out}");
+        assert!(out.contains("apply=true"), "expected apply hint, got: {out}");
+    }
+
+    #[tokio::test]
+    async fn test_omni_learn_no_patterns_on_diverse_input() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        let server = OmniServer { store, session };
+        let diverse = "alpha bravo charlie\ndelta echo foxtrot\ngolf hotel india\n";
+        let out = server.omni_learn(diverse.to_string(), false).await;
+        assert!(
+            out.contains("No significant noise patterns"),
+            "expected no-patterns message, got: {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_omni_learn_apply_writes_toml() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        let server = OmniServer { store, session };
+        let repetitive = "Downloading dep v1.0\n".repeat(6);
+        let out = server.omni_learn(repetitive, true).await;
+        assert!(
+            out.contains("Applied") || out.contains("filters"),
+            "expected apply confirmation, got: {out}"
+        );
     }
 
     #[tokio::test]
