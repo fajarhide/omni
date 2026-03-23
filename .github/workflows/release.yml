@@ -3,66 +3,104 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Build Release Binaries
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
-
+  build:
+    name: Build ${{ matrix.target }}
     strategy:
       matrix:
-        target:
-          - x86_64-linux
-          - aarch64-linux
-          - x86_64-macos
-          - aarch64-macos
-
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            binary: omni
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            binary: omni
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            binary: omni
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            binary: omni
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          version: 0.15.2
+          targets: ${{ matrix.target }}
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Install musl tools (Linux)
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+            echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          fi
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          node-version: 20
+          key: ${{ matrix.target }}
 
-      - name: Build Native Binary
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
         run: |
-          cd core
-          zig build \
-            -Dtarget=${{ matrix.target }} \
-            -Doptimize=ReleaseFast \
-            -Dversion=${{ github.ref_name }} \
-            -p ../
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
+          cd dist
+          tar czf omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
+          shasum -a 256 omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
 
-      - name: Build WASM
-        run: |
-          cd core
-          zig build wasm \
-            -Doptimize=ReleaseSmall \
-            -Dversion=${{ github.ref_name }} \
-            -p ../
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omni-${{ matrix.target }}
+          path: dist/omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz*
 
-      - name: Package Release
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
         run: |
           mkdir -p release
-          cp bin/omni release/omni-${{ matrix.target }}
-          cp bin/omni-wasm.wasm release/
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.sha256' \) -exec cp {} release/ \;
 
-          tar -czf omni-${{ matrix.target }}.tar.gz -C release .
+          echo "=== Release files ==="
+          ls -la release/
 
-      - name: Upload Release
+          # Generate combined SHA256SUMS
+          cd release
+          cat *.sha256 > SHA256SUMS
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            omni-${{ matrix.target }}.tar.gz
-            core/omni-wasm.wasm
           generate_release_notes: true
+          files: |
+            release/*.tar.gz
+            release/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

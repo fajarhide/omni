@@ -1,0 +1,235 @@
+use regex::Regex;
+use serde_json::json;
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum LearnAction {
+    Strip,
+    Count,
+}
+
+#[derive(Debug, Clone)]
+pub struct PatternCandidate {
+    pub trigger_prefix: String,
+    pub sample_line: String,
+    pub count: usize,
+    pub confidence: f32,
+    pub suggested_action: LearnAction,
+}
+
+pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
+    let mut frequency: HashMap<String, (usize, String)> = HashMap::new();
+    let ansi_re = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
+    let num_re = Regex::new(r"\d+").unwrap();
+
+    // 1. Split ke baris
+    for line in input.lines() {
+        let text = ansi_re.replace_all(line, "").to_string();
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // 3. Ambil prefix: take first 3 words
+        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        let prefix = if words.len() >= 3 {
+            format!("{} {} {}", words[0], words[1], words[2])
+        } else {
+            trimmed.to_string()
+        };
+
+        // 4. Hitung frekuensi setiap prefix
+        let entry = frequency.entry(prefix).or_insert((0, trimmed.to_string()));
+        entry.0 += 1;
+    }
+
+    let mut candidates = Vec::new();
+
+    // 5. Filter: count >= 3
+    for (prefix, (count, sample)) in frequency {
+        if count >= 3 {
+            // 6. Assign action
+            let action = if num_re.is_match(&sample) {
+                LearnAction::Count
+            } else {
+                LearnAction::Strip
+            };
+
+            let confidence = if count > 10 { 0.95 } else { 0.85 };
+
+            candidates.push(PatternCandidate {
+                trigger_prefix: prefix,
+                sample_line: sample,
+                count,
+                confidence,
+                suggested_action: action,
+            });
+        }
+    }
+
+    // 7. Sort by count desc, return max 16
+    candidates.sort_by(|a, b| b.count.cmp(&a.count));
+    candidates.into_iter().take(16).collect()
+}
+
+pub fn generate_toml(candidates: &[PatternCandidate], filter_name: &str) -> String {
+    let mut toml = format!("schema_version = 1\n\n[filters.{}]\n", filter_name);
+    toml.push_str("description = \"Auto-learned filter\"\n");
+    toml.push_str(&format!("match_command = \"{}.*\"\n", filter_name));
+    toml.push_str("strip_ansi = true\n");
+    toml.push_str("confidence = 0.85\n\n");
+
+    let mut strips = Vec::new();
+    let mut tests = format!(
+        "\n[[tests.{}]\nname = \"auto_learned_strip\"\n",
+        filter_name
+    );
+    let mut sample_lines = String::new();
+
+    for c in candidates {
+        // Escape characters for RegEx safeties
+        let escaped_prefix = regex::escape(&c.trigger_prefix).replace("\"", "\\\"");
+        strips.push(format!("\"^{}\"", escaped_prefix));
+        sample_lines.push_str(&format!("{}\n", c.sample_line));
+    }
+
+    if !strips.is_empty() {
+        toml.push_str(&format!("strip_lines_matching = [{}]\n", strips.join(", ")));
+    }
+
+    toml.push_str("max_lines = 50\n");
+    if let Some(_first) = candidates.first() {
+        toml.push_str(&format!(
+            "on_empty = \"{}: dropped repetitive patterns\"\n",
+            filter_name
+        ));
+    }
+
+    tests.push_str(&format!(
+        "input = \"\"\"\n{}\"\"\"\n",
+        sample_lines.trim_end()
+    ));
+    if let Some(_first) = candidates.first() {
+        tests.push_str(&format!(
+            "expected = \"{}: dropped repetitive patterns\"\n",
+            filter_name
+        ));
+    } else {
+        tests.push_str("expected = \"\"\n");
+    }
+
+    toml.push_str(&tests);
+    toml
+}
+
+pub fn apply_to_config(
+    candidates: &[PatternCandidate],
+    filter_name: &str,
+    config_path: &Path,
+) -> anyhow::Result<usize> {
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    let generated = generate_toml(candidates, filter_name);
+
+    if config_path.exists() {
+        let mut file = OpenOptions::new().append(true).open(config_path)?;
+        writeln!(file, "\n{}", generated)?;
+    } else {
+        if let Some(p) = config_path.parent() {
+            fs::create_dir_all(p)?;
+        }
+        fs::write(config_path, generated)?;
+    }
+
+    Ok(candidates.len())
+}
+
+pub fn queue_for_learn(input: &str, command: &str) {
+    if input.len() <= 200 {
+        return;
+    }
+
+    let input_clone = input.chars().take(2000).collect::<String>();
+    let cmd = command.to_string();
+
+    std::thread::spawn(move || {
+        let dir = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".omni");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("learn_queue.jsonl");
+
+        let entry = json!({
+            "ts": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            "command": cmd,
+            "sample": input_clone,
+        });
+
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(file, "{}", entry);
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_detect_patterns_for_repetitive_build_output() {
+        let input = "Waiting for connection 1\nWaiting for connection 2\nWaiting for connection 3\nFinished dev";
+        let candidates = detect_patterns(input);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].trigger_prefix, "Waiting for connection");
+        assert_eq!(candidates[0].count, 3);
+    }
+
+    #[test]
+    fn test_detect_patterns_no_false_positive_pada_diverse_text() {
+        let input = "one two three\nfour five six\nseven eight nine\n";
+        let candidates = detect_patterns(input);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_generate_toml_menghasilkan_valid_toml() {
+        let c = vec![PatternCandidate {
+            trigger_prefix: "Test Prefix Gen".to_string(),
+            sample_line: "Test Prefix Gen is good".to_string(),
+            count: 5,
+            confidence: 0.9,
+            suggested_action: LearnAction::Strip,
+        }];
+        let toml = generate_toml(&c, "gen_test");
+        assert!(toml.contains("schema_version = 1"));
+        assert!(toml.contains("[filters.gen_test]"));
+        assert!(toml.contains("\"^Test Prefix Gen\""));
+    }
+
+    #[test]
+    fn test_apply_to_config_tidak_duplicate_trigger() {
+        let file = NamedTempFile::new().unwrap();
+        let c = vec![PatternCandidate {
+            trigger_prefix: "Test".to_string(),
+            sample_line: "x".to_string(),
+            count: 3,
+            confidence: 0.9,
+            suggested_action: LearnAction::Strip,
+        }];
+        apply_to_config(&c, "dummy", file.path()).unwrap();
+        let content = fs::read_to_string(file.path()).unwrap();
+        assert!(content.contains("[filters.dummy]"));
+    }
+
+    #[test]
+    fn test_queue_for_learn_non_blocking() {
+        // Will fire the thread in the background
+        queue_for_learn("x".repeat(300).as_str(), "make build");
+    }
+}

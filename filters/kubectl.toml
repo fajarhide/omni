@@ -1,0 +1,16 @@
+schema_version = 1
+[filters.kubectl]
+match_command = "kubectl"
+strip_ansi = true
+
+[[filters.kubectl.match_output]]
+pattern = "No resources found"
+message = "k8s: No resources found in default namespace."
+
+strip_lines_matching = ["^\\s*$"]
+max_lines = 100
+
+[[tests.kubectl]]
+name = "empty response"
+input = "No resources found in default namespace."
+expected = "k8s: No resources found in default namespace."

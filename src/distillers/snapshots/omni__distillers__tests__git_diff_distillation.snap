@@ -1,0 +1,12 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+git diff: 2 files changed, 2+, 1-
+b/src/main.rs
+@@ -1,5 +1,6 @@
++    println!("Added line");
+b/src/lib.rs
+@@ -10,3 +10,2 @@
+-    println!("Old line");
++    println!("New line");

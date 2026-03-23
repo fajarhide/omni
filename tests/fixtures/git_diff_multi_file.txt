@@ -1,0 +1,19 @@
+diff --git a/src/main.rs b/src/main.rs
+index f112b32..e4d65a2 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,5 +1,6 @@
+ fn main() {
+     println!("Hello, world!");
++    println!("Added line");
+ }
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index abc1234..def5678 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -10,3 +10,2 @@
+ fn do_something() {
+-    println!("Old line");
++    println!("New line");
+ }

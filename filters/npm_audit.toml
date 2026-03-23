@@ -1,0 +1,24 @@
+schema_version = 1
+
+[filters.npm_audit]
+match_command = "npm audit"
+strip_ansi = true
+
+[[filters.npm_audit.match_output]]
+pattern = "found 0 vulnerabilities"
+message = "npm-audit: 0 vulnerabilities"
+
+[[filters.npm_audit.match_output]]
+pattern = "found (\\d+) vulnerabilities"
+message = "npm-audit: $1 vulnerabilities found"
+
+strip_lines_matching = ["^npm notice", "^$"]
+max_lines = 100
+
+[[tests.npm_audit]]
+name = "0 vulnerabilities"
+input = """
+npm notice
+found 0 vulnerabilities
+"""
+expected = "npm-audit: 0 vulnerabilities"

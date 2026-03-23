@@ -1,48 +1,50 @@
 class Omni < Formula
-  desc "Semantic Distillation Engine for the Agentic AI"
+  desc "Semantic Signal Engine — Less noise. More signal. Right signal."
   homepage "https://github.com/fajarhide/omni"
-  url "https://github.com/fajarhide/omni/archive/refs/tags/v0.4.5.tar.gz"
-  sha256 "235a521ec85d033eab1be5b0f756f8406a8c718e720f25b908ae1e1191316648"
+  version "0.5.0"
   license "MIT"
 
-  depends_on "zig" => :build
-  depends_on "node"
+  on_macos do
+    on_arm do
+      url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-aarch64-apple-darwin.tar.gz"
+      sha256 "PLACEHOLDER_AARCH64_MACOS"
+    end
+    on_intel do
+      url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-x86_64-apple-darwin.tar.gz"
+      sha256 "PLACEHOLDER_X86_64_MACOS"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "PLACEHOLDER_AARCH64_LINUX"
+    end
+    on_intel do
+      url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "PLACEHOLDER_X86_64_LINUX"
+    end
+  end
 
   def install
-    # Run builds from the 'core' directory
-    Dir.chdir("core") do
-      # Native binary -> bin/omni
-      system "zig", "build", "-Doptimize=ReleaseFast", "-Dversion=#{version}", "-p", "../"
-      # Wasm binary -> bin/omni-wasm.wasm
-      system "zig", "build", "wasm", "-Doptimize=ReleaseSmall", "-Dversion=#{version}", "-p", "../"
-    end
-
-    # Install Native Binary
-    bin.install "bin/omni"
-
-    # Install MCP Server to libexec
-    libexec.install "package.json", "package-lock.json", "tsconfig.json", "src"
-    cd libexec do
-      system "npm", "install"
-      system "./node_modules/.bin/tsc"
-      system "npm", "prune", "--omit=dev"
-    end
-
-    # Install Wasm Binary alongside MCP Server so __dirname paths work correctly
-    (libexec/"core").install "bin/omni-wasm.wasm"
+    bin.install "omni"
   end
 
   def caveats
     <<~EOS
-      OMNI SETUP & INTEGRATION GUIDE
-      ══════════════════════════════════════════════════════════
+      Quick start:
+        omni init --hook   # Activate PostToolUse hook for Claude Code
+        omni doctor        # Verify installation
+        omni stats         # View token savings
 
-      To complete the setup and configure the MCP server, run:
-        omni setup
+      OMNI works automatically — no configuration needed.
+      Hooks intercept Claude Code tool outputs and distill them in real-time.
     EOS
   end
 
   test do
-    assert_match "omni", shell_output("#{bin}/omni --help")
+    assert_match "omni", shell_output("#{bin}/omni version")
+    assert_match "Signal Report", shell_output("#{bin}/omni stats 2>&1", 0)
+    assert_match "OMNI Doctor", shell_output("#{bin}/omni doctor 2>&1", 0)
   end
 end

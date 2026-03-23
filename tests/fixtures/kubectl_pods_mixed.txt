@@ -1,0 +1,5 @@
+NAME                                READY   STATUS             RESTARTS   AGE
+nginx-deployment-7fb96c846b-f4jnm   1/1     Running            0          5d
+api-deployment-86d88f9855-abcde     0/1     CrashLoopBackOff   5          2h
+db-deployment-55d89f899-xyz12       1/1     Running            0          8d
+worker-deployment-99c8f99-pqr34     0/1     Pending            0          5m

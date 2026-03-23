@@ -2,36 +2,128 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
 jobs:
-  verify:
-    name: Full Verification Suite
+  fmt:
+    name: Rustfmt
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          version: 0.15.2
+          components: rustfmt
+      - run: cargo fmt --check
 
-      - name: Setup Node
-        uses: actions/setup-node@v6
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: 20
-          cache: npm
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+  test:
+    name: Test (${{ matrix.os }})
+    needs: clippy
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Install Dependencies
-        run: npm install
+      - name: Run all tests
+        run: cargo test --all
 
-      - name: Run Full Verification (Makefile)
-        run: make verify
+      - name: Install cargo-insta
+        run: cargo install cargo-insta
+
+      - name: Verify snapshots
+        run: cargo insta test
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    needs: clippy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit
+
+      - name: Check for dangerous patterns in hooks
+        run: |
+          echo "=== Checking for dangerous patterns ==="
+          FAIL=0
+
+          # No Command::new("sh") in hooks (should use sanitized env)
+          if grep -rn 'Command::new("sh")' src/hooks/; then
+            echo "WARNING: Command::new(\"sh\") found in hooks"
+            FAIL=1
+          fi
+
+          # No LD_PRELOAD references (should be in denylist only)
+          if grep -rn 'LD_PRELOAD' src/ --include='*.rs' | grep -v 'guard/env.rs' | grep -v 'DENYLIST'; then
+            echo "WARNING: LD_PRELOAD referenced outside guard/env.rs"
+            FAIL=1
+          fi
+
+          # No unwrap() in src/hooks/ (should use graceful error handling)
+          UNWRAP_COUNT=$(grep -rn '\.unwrap()' src/hooks/ --include='*.rs' | grep -v '#\[test\]' | grep -v 'mod tests' | grep -v '// safe:' | wc -l | tr -d ' ')
+          if [ "$UNWRAP_COUNT" -gt 5 ]; then
+            echo "WARNING: $UNWRAP_COUNT unwrap() calls in src/hooks/ (max 5 allowed)"
+            grep -rn '\.unwrap()' src/hooks/ --include='*.rs' | grep -v '#\[test\]' | grep -v 'mod tests'
+            FAIL=1
+          fi
+
+          if [ $FAIL -eq 1 ]; then
+            echo "Security checks found issues. Review above."
+            exit 1
+          fi
+          echo "All security pattern checks passed ✓"
+
+  binary-check:
+    name: Binary Size & Smoke
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Check binary size (< 15MB)
+        run: |
+          SIZE=$(stat -c%s target/release/omni 2>/dev/null || stat -f%z target/release/omni)
+          SIZE_MB=$((SIZE / 1048576))
+          echo "Binary size: ${SIZE_MB}MB (${SIZE} bytes)"
+          if [ $SIZE -gt 15728640 ]; then
+            echo "ERROR: Binary exceeds 15MB limit"
+            exit 1
+          fi
+          echo "Binary size check passed ✓"
+
+      - name: Run smoke tests
+        run: |
+          chmod +x tests/smoke_test.sh
+          tests/smoke_test.sh ./target/release/omni

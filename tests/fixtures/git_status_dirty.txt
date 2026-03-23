@@ -1,0 +1,15 @@
+On branch feature/omni
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+        modified:   src/main.rs
+        new file:   src/lib.rs
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   Cargo.toml
+        modified:   README.md
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        tests/fixtures/

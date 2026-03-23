@@ -1,0 +1,82 @@
+[package]
+name = "omni"
+version = "0.5.0"
+edition = "2024"
+authors = ["Fajar Hidayat"]
+description = "Semantic Signal Engine that cuts AI token consumption by up to 90%."
+license = "MIT"
+homepage = "https://omni.weekndlabs.com"
+repository = "https://github.com/fajarhide/omni"
+readme = "README.md"
+keywords = ["cli", "ai", "mcp", "terminal", "agent"]
+categories = ["command-line-utilities", "development-tools", "text-processing"]
+
+[lib]
+name = "omni"
+path = "src/lib.rs"
+
+[[bin]]
+name = "omni"
+path = "src/main.rs"
+
+[dependencies]
+# Core
+anyhow = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# MCP Server  
+rmcp = { version = "0.1", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
+# Database (SQLite bundled — no system dep)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Pattern matching
+regex = "1"
+lazy_static = "1.4"
+
+# Security & hashing
+sha2 = "0.10"
+hex = "0.4"
+
+# Time & analytics
+chrono = "0.4"
+
+# File system
+dirs = "5"
+glob = "0.3"
+walkdir = "2"
+
+# Output formatting
+colored = "2"
+indicatif = "0.17"   # progress bars for heavy operations
+
+# Config (TOML DSL filters)
+toml = "0.8"
+
+# Terminal detection
+is-terminal = "0.4"
+
+# Misc
+tempfile = "3"
+ureq = { version = "2", features = ["json"] }
+
+[dev-dependencies]
+insta = "1"  # snapshot testing
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "pipeline"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

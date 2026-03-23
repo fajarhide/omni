@@ -1,0 +1,16 @@
+schema_version = 1
+
+[filters.make]
+match_command = "make\\b"
+strip_ansi = true
+
+[[filters.make.match_output]]
+pattern = "make: Nothing to be done for"
+message = "make: nothing to be done"
+
+strip_lines_matching = ["^gcc -c", "^\\s*$"]
+
+[[tests.make]]
+name = "nothing"
+input = "make: Nothing to be done for 'all'."
+expected = "make: nothing to be done"

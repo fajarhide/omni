@@ -1,0 +1,16 @@
+schema_version = 1
+
+[filters.ansible]
+match_command = "ansible-playbook"
+strip_ansi = true
+
+[[filters.ansible.match_output]]
+pattern = "PLAY RECAP \\*+"
+message = "ansible: Play recap reached"
+
+strip_lines_matching = ["^TASK \\[Gathering Facts", "^ok: \\["]
+
+[[tests.ansible]]
+name = "recap"
+input = "TASK [Gathering Facts]\nok: [server1]\nPLAY RECAP *********************"
+expected = "ansible: Play recap reached"

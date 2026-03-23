@@ -1,0 +1,12 @@
+Step 1/5 : FROM debian:buster
+ ---> 49f356fa4eb1
+Step 2/5 : RUN apt-get update && apt-get install -y curl
+ ---> Using cache
+ ---> 8a4be4vna332
+Step 3/5 : COPY src /app
+ ---> ba299c898399
+Step 4/5 : WORKDIR /app
+ ---> ef8a09bca323
+Step 5/5 : CMD ["./run.sh"]
+ ---> 9b9c9d09a123
+Successfully built 9b9c9d09a123

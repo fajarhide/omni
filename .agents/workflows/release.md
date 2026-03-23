@@ -2,43 +2,53 @@
 description: how to release a new version of OMNI (Git, GitHub, and Homebrew Tap)
 ---
 
-Follow these steps to ensure a complete and consistent release of OMNI:
+# Release Workflow
 
-1. **Verify Build & Stability**:
-   Ensure everything is clean and working locally.
+// turbo-all
+
+## Steps
+
+1. **Determine the new version** (e.g., `0.5.1`).
+
+2. **Run the release script**:
    ```bash
-   cd core && zig build -Doptimize=ReleaseFast -p ../ && ../bin/omni monitor
+   ./scripts/omni-release.sh 0.5.1
    ```
 
-2. **Update Version**:
-   Determine the new version (e.g., `0.3.1`). Update it in `core/build.zig.zon`.
+   This will automatically:
+   - Update `Cargo.toml` version
+   - Build release binary
+   - Commit and push to main
+   - Create/push git tag `v0.5.1`
+   - Wait for GitHub Actions to build 4 cross-platform binaries
+   - Fetch SHA256SUMS from the release
+   - Update `omni.rb` formula with new SHA hashes
+   - Sync with Homebrew tap
+
+3. **Verify the release**:
    ```bash
-   # In core/build.zig.zon
-   .version = "0.3.1",
+   brew update
+   brew upgrade omni
+   omni version    # Should show new version
+   omni doctor     # Full health check
    ```
 
-3. **Run Release Script**:
-   Use the master release script to handle tagging and local formula updates.
-   // turbo
-   ```bash
-   ./scripts/omni-release.sh <version>
-   ```
-   *Note: If this script warns "Tap repository not found", proceed to step 4.*
+4. **Check the GitHub Release page**:
+   https://github.com/fajarhide/omni/releases
 
-4. **Sync Homebrew Tap (If Manual Update Needed)**:
-   Ensure the `fajarhide/omni` tap is updated with the new version and SHA256.
-   - Locate the tap path: `brew --repository fajarhide/omni`
-   - Update `omni.rb` in the tap repository.
-   - Commit and push the tap update.
+## Manual Version Bump (without release)
 
-5. **Verify GitHub Release**:
-   Check that the GitHub Action has created the release entry and uploaded assets.
-   ```bash
-   gh release list
-   ```
+```bash
+./scripts/bump_version.sh 0.5.1
+```
 
-6. **Post-Release Check**:
-   Wait a few minutes and verify the installation:
-   ```bash
-   brew update && brew upgrade fajarhide/tap/omni && omni version
-   ```
+This updates `Cargo.toml`, builds, and commits — but does NOT tag or release.
+
+## Release Targets
+
+| Target | Platform |
+|---|---|
+| `aarch64-apple-darwin` | macOS Apple Silicon |
+| `x86_64-apple-darwin` | macOS Intel |
+| `x86_64-unknown-linux-musl` | Linux x86_64 (static) |
+| `aarch64-unknown-linux-musl` | Linux ARM64 (static) |

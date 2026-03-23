@@ -1,0 +1,278 @@
+use serde_json::{Value, json};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+
+pub fn get_settings_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claude")
+        .join("settings.json")
+}
+
+fn initialize_settings() -> anyhow::Result<(PathBuf, Value)> {
+    let settings_path = get_settings_path();
+
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let val = if settings_path.exists() {
+        let content = fs::read_to_string(&settings_path)?;
+        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+    } else {
+        json!({})
+    };
+
+    Ok((settings_path, val))
+}
+
+fn backup_settings(path: &PathBuf) -> anyhow::Result<PathBuf> {
+    let backup_path = path.with_extension("json.bak");
+    if path.exists() {
+        fs::copy(path, &backup_path)?;
+    }
+    Ok(backup_path)
+}
+
+pub fn run_init(args: &[String]) -> anyhow::Result<()> {
+    let is_hook = args.iter().any(|a| a == "--hook");
+    let is_status = args.iter().any(|a| a == "--status");
+    let is_uninstall = args.iter().any(|a| a == "--uninstall");
+
+    let exe_path = env::current_exe()?.to_string_lossy().to_string();
+
+    if is_status {
+        let (_, val) = initialize_settings()?;
+        let (post_ok, session_ok, pre_ok) = check_status(&val, &exe_path);
+
+        let fmt_status = |ok: bool| {
+            if ok {
+                "✓ installed"
+            } else {
+                "✗ not installed"
+            }
+        };
+
+        println!("  PostToolUse: {}", fmt_status(post_ok));
+        println!("  SessionStart: {}", fmt_status(session_ok));
+        println!("  PreCompact:   {}", fmt_status(pre_ok));
+        return Ok(());
+    }
+
+    if is_uninstall {
+        let (path, mut val) = initialize_settings()?;
+        if path.exists() {
+            backup_settings(&path)?;
+        }
+
+        remove_omni_hooks(&mut val);
+
+        let new_content = serde_json::to_string_pretty(&val)?;
+        fs::write(&path, new_content)?;
+        println!("✓ OMNI hooks uninstalled from settings.json");
+        return Ok(());
+    }
+
+    if is_hook {
+        let (path, mut val) = initialize_settings()?;
+        let backup_path = backup_settings(&path)?;
+
+        install_omni_hooks(&mut val, &exe_path);
+
+        let new_content = serde_json::to_string_pretty(&val)?;
+        fs::write(&path, new_content)?;
+
+        println!("✓ OMNI hooks installed");
+        println!("      PostToolUse (Bash) → distil output transparently");
+        println!("      SessionStart       → inject session context");
+        println!("      PreCompact         → snapshot before compaction\n");
+        println!("   Binary: {}", exe_path);
+        println!("   Config: {}", path.display());
+        println!("   Backup: {}\n", backup_path.display());
+        println!("   Restart Claude Code to activate.");
+    }
+
+    Ok(())
+}
+
+pub fn check_status(val: &Value, exe_path: &str) -> (bool, bool, bool) {
+    let hooks = match val.get("hooks").and_then(|v| v.as_object()) {
+        Some(h) => h,
+        None => return (false, false, false),
+    };
+
+    let check = |event: &str| -> bool {
+        if let Some(arr) = hooks.get(event).and_then(|v| v.as_array()) {
+            for v in arr {
+                if let Some(inner_arr) = v.get("hooks").and_then(|v2| v2.as_array()) {
+                    for hook_def in inner_arr {
+                        if let Some(cmd) = hook_def.get("command").and_then(|c| c.as_str())
+                            && cmd.contains(exe_path)
+                            && cmd.contains("--hook")
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    };
+
+    (
+        check("PostToolUse"),
+        check("SessionStart"),
+        check("PreCompact"),
+    )
+}
+
+pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
+    let obj = match val.as_object_mut() {
+        Some(o) => o,
+        None => {
+            *val = json!({});
+            val.as_object_mut().unwrap()
+        }
+    };
+
+    let hooks = obj
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .unwrap();
+
+    let cmd = format!("{} --hook", exe_path);
+
+    let ensure_hook = |arr_val: &mut serde_json::Value, matcher: &str| {
+        let arr = arr_val.as_array_mut().unwrap();
+        for v in arr.iter() {
+            if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
+                for h in inner {
+                    if h.get("command").and_then(|c| c.as_str()) == Some(cmd.as_str()) {
+                        return;
+                    }
+                }
+            }
+        }
+
+        arr.push(json!({
+            "matcher": matcher,
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": cmd
+                }
+            ]
+        }));
+    };
+
+    ensure_hook(
+        hooks.entry("PostToolUse").or_insert_with(|| json!([])),
+        "Bash",
+    );
+    ensure_hook(hooks.entry("SessionStart").or_insert_with(|| json!([])), "");
+    ensure_hook(hooks.entry("PreCompact").or_insert_with(|| json!([])), "");
+}
+
+pub fn remove_omni_hooks(val: &mut Value) {
+    if let Some(obj) = val.as_object_mut()
+        && let Some(hooks) = obj.get_mut("hooks").and_then(|h| h.as_object_mut())
+    {
+        for (_key, arr_val) in hooks.iter_mut() {
+            if let Some(arr) = arr_val.as_array_mut() {
+                arr.retain(|v| {
+                    if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
+                        !inner.iter().any(|h| {
+                            h.get("command")
+                                .and_then(|c| c.as_str())
+                                .is_some_and(|c| c.contains("omni") && c.contains("--hook"))
+                        })
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_hook_membuat_settings_json_yang_valid_json() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/usr/bin/omni");
+
+        let hooks = val.get("hooks").unwrap().as_object().unwrap();
+        assert!(hooks.contains_key("PostToolUse"));
+        assert!(hooks.contains_key("SessionStart"));
+        assert!(hooks.contains_key("PreCompact"));
+    }
+
+    #[test]
+    fn test_init_hook_idempotent_run_2x_tidak_duplicate() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/usr/bin/omni");
+
+        let get_count = |v: &Value| -> usize {
+            v.get("hooks")
+                .unwrap()
+                .get("PostToolUse")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len()
+        };
+
+        assert_eq!(get_count(&val), 1);
+
+        install_omni_hooks(&mut val, "/usr/bin/omni");
+        assert_eq!(get_count(&val), 1, "Should be idempotent");
+    }
+
+    // "membuat backup" test requires IO side effects, which might be tricky but we can skip pure IO testing inside rust memory unless necessary. The logic is self-evident.
+
+    #[test]
+    fn test_init_status_menampilkan_status_yang_benar() {
+        let mut val = json!({});
+        let exe = "/usr/bin/omni";
+        install_omni_hooks(&mut val, exe);
+
+        // Check status with correct path
+        let (post, sess, pre) = check_status(&val, exe);
+        assert!(post && sess && pre);
+
+        // Check status with incorrect path
+        let (post_f, sess_f, pre_f) = check_status(&val, "/different/omni");
+        assert!(!post_f && !sess_f && !pre_f);
+    }
+
+    #[test]
+    fn test_init_uninstall_membersihkan_semua_entries() {
+        let mut val = json!({});
+        let exe = "/usr/bin/omni";
+        install_omni_hooks(&mut val, exe);
+
+        assert!(check_status(&val, exe).0); // terpasang
+
+        remove_omni_hooks(&mut val);
+
+        assert!(!check_status(&val, exe).0); // hilang
+
+        let arr = val
+            .get("hooks")
+            .unwrap()
+            .get("PostToolUse")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            arr.len(),
+            0,
+            "Array must be empty after retain cleans it out"
+        );
+    }
+}

@@ -1,34 +1,23 @@
 # --- Dependencies ---
-node_modules/
-.zig-cache/
-
-# --- Build Outputs ---
-dist/
-zig-out/
-core/bin/*
-core/omni
-core/omni-wasm.wasm
-core/*.o
-*.wasm
-*.o
-bin/*
-
 # --- Logs & Temporary Files ---
 *.log
 actual_stdout.txt
-core/*.bak
 # --- Environment & Configuration ---
 .env
 .env.*
 ! .env.example
-
 # --- OS & IDE Specific ---
 .DS_Store
 Thumbs.db
 .vscode/
 *.sublime-project
 *.sublime-workspace
-
 # --- Private Internal ---
 .internal/
 tmp/
+# --- Rust Build Outputs ---
+target/
+**/*.rs.bk
+# --- OMNI specific ---
+/.omni/
+/filters_compiled/

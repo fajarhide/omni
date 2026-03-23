@@ -1,35 +1,51 @@
 # Contributing to OMNI
 
-We love your contributions! OMNI is built on a mission to make context usage as efficient as possible. Here’s how you can help:
+## Prerequisites
+
+1. **Rust** (stable, 2024 edition)
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+2. **cargo-insta** (for snapshot tests)
+   ```bash
+   cargo install cargo-insta
+   ```
 
 ## Getting Started
 
-1. **Fork the repo** and clone it locally.
-2. **Install dependencies**:
-   - Zig 0.15.2 (Critical for the core engine)
-   - Node.js 18+ (For the MCP gateway)
-3. **Explore the codebase**:
-   - `core/src/filters/`: Join the mission by adding specialized semantic filters.
-   - `src/`: Refine the MCP server or caching logic.
+```bash
+git clone https://github.com/fajarhide/omni.git
+cd omni
+cargo build
+cargo test    # All 147 tests should pass
+```
 
-## Contribution Workflow
+## Development Workflow
 
-1. **Bug Reports & Feature Requests**: Open an issue describing the context and the problem/idea.
-2. **Pull Requests**:
-   - Fork and Clone the repository locally.
-   - Create a fresh branch from `main`.
-   - Run `make clean` to ensure a fresh environment.
-   - Run `make verify` to ensure system integrity and version consistency.
+1. Create a feature branch: `git checkout -b feature/my-feature`
+2. Make changes
+3. Run: `cargo fmt && cargo clippy && cargo test`
+4. Review snapshots if changed: `cargo insta review`
+5. Submit a PR
 
-## Development Core
+## What We Welcome
 
-Before modifying the core, please read:
-- [DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [ROADMAP.md](docs/ROADMAP.md)
+- New distillers for uncommon tools
+- TOML filters for popular tools
+- Performance optimizations
+- Documentation improvements
+- Bug fixes
 
-## Code of Conduct
+## Code Style
 
-Be kind, respect the semantic integrity of the project, and help us build the most efficient engine for the AI era.
+- Run `cargo fmt` before committing
+- `cargo clippy -- -D warnings` must pass (enforced in CI)
+- All hooks must handle errors gracefully (no panics in production paths)
+- Add tests for new functionality
 
-Thank you for contributing! 
+## See Also
+
+- [CLAUDE.md](CLAUDE.md) — Full developer guide (project structure, architecture)
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — Detailed development setup
+- [docs/FILTERS.md](docs/FILTERS.md) — How to write TOML filters
