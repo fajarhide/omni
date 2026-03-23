@@ -177,7 +177,18 @@ fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
             }
         }
     }
-    out.trim().to_string()
+    let result = out.trim().to_string();
+    if result.is_empty() && !segments.is_empty() {
+        // Fallback: take first few lines of first segment
+        segments[0]
+            .content
+            .lines()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        result
+    }
 }
 
 lazy_static::lazy_static! {

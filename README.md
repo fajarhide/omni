@@ -26,10 +26,14 @@ Most filters work by **rules**: strip lines matching patterns. OMNI works by **m
 - It **knows your session** — boosting files you're actively editing
 - It **never drops** — compressed content is always retrievable via `omni_retrieve()`
 
-### 🚀 The Impact
-
-> **60—90% Token Reduction**  
+### The Impact
+> **Reduce up to 90% AI Token Usage**  
 > *Zero Information Loss. Maximum Agent Context. <2ms Overhead.*
+<br/>
+
+![OMNI Token Savings](omni_token_savings_graphic.png)
+
+
 
 ## How It Works
 

@@ -2,13 +2,15 @@
 ///
 /// This integration test runs the full pipeline (classify → score → compose) on real
 /// fixture files and asserts each achieves a minimum savings percentage.
-use omni::pipeline::{classifier, composer, scorer};
+use omni::pipeline::{classifier, scorer};
 
 fn run_pipeline(input: &str) -> (usize, usize, f64) {
     let ctype = classifier::classify(input);
     let segments = scorer::score_segments(input, &ctype, None);
-    let config = composer::ComposeConfig::default();
-    let (output, _) = composer::compose(segments, None, &config, None, input, &ctype);
+
+    // Use the actual distiller logic from post_tool.rs
+    let distiller = omni::distillers::get_distiller(&ctype);
+    let output = distiller.distill(&segments, input);
 
     let input_len = input.len();
     let output_len = output.len();
@@ -24,12 +26,13 @@ fn run_pipeline(input: &str) -> (usize, usize, f64) {
 /// Small fixtures (<500 bytes) may not achieve significant reduction, so we skip threshold
 /// assertion for those and just verify no-crash + valid output.
 const FIXTURES: &[(&str, &str, f64)] = &[
-    ("git", "tests/fixtures/git_diff_multi_file.txt", 0.0),
-    ("git", "tests/fixtures/git_status_dirty.txt", 0.0),
-    ("build", "tests/fixtures/cargo_build_errors.txt", 0.0),
-    ("test", "tests/fixtures/pytest_failures.txt", 0.0),
-    ("infra", "tests/fixtures/kubectl_pods_mixed.txt", 0.0),
-    ("infra", "tests/fixtures/docker_build_layered.txt", 0.0),
+    ("git", "tests/fixtures/git_diff_multi_file.txt", 50.0),
+    ("git", "tests/fixtures/git_status_dirty.txt", 70.0),
+    ("build", "tests/fixtures/cargo_build_errors.txt", 70.0),
+    ("test", "tests/fixtures/pytest_failures.txt", 85.0),
+    ("infra", "tests/fixtures/kubectl_pods_mixed.txt", 50.0),
+    ("infra", "tests/fixtures/docker_build_layered.txt", 80.0),
+    ("infra", "tests/fixtures/heavy_noise.txt", 90.0),
 ];
 
 #[test]
@@ -38,6 +41,10 @@ fn test_savings_thresholds() {
         let input = std::fs::read_to_string(fixture)
             .unwrap_or_else(|_| panic!("Cannot read fixture: {}", fixture));
         let (input_len, output_len, actual_pct) = run_pipeline(&input);
+        println!(
+            "| {:<10} | {:>9} B | {:>10} B | {:>10.1}% |",
+            filter, input_len, output_len, actual_pct
+        );
 
         // Always verify: output should not be larger than input + small overhead
         assert!(
