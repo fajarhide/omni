@@ -73,11 +73,23 @@ download_and_install() {
         info "Verifying SHA-256 checksum..."
         local expected actual
         expected=$(awk '{print $1}' "$tmpdir/omni.tar.gz.sha256")
-        actual=$(shasum -a 256 "$tmpdir/omni.tar.gz" | awk '{print $1}')
+
+        # Cross-platform: sha256sum (Linux) or shasum -a 256 (macOS)
+        if command -v sha256sum >/dev/null 2>&1; then
+            actual=$(sha256sum "$tmpdir/omni.tar.gz" | awk '{print $1}')
+        elif command -v shasum >/dev/null 2>&1; then
+            actual=$(shasum -a 256 "$tmpdir/omni.tar.gz" | awk '{print $1}')
+        else
+            warn "No SHA-256 tool found — skipping checksum verification"
+            actual="$expected"
+        fi
+
         if [ "$expected" != "$actual" ]; then
-            error "SHA-256 mismatch!\n  Expected: $expected\n  Got:      $actual"
+            error "SHA-256 mismatch!\n  Expected: $expected\n  Got:      $actual\n\n  The download may be corrupted. Try again or report at:\n  https://github.com/fajarhide/omni/issues"
         fi
         ok "Checksum verified ✓"
+    else
+        warn "SHA-256 file not available — skipping checksum verification"
     fi
 
     # Extract
@@ -101,6 +113,22 @@ check_path() {
         echo ""
         echo "    export PATH=\"$INSTALL_DIR:\$PATH\""
         echo ""
+
+        # Offer to auto-add for common shells
+        local shell_rc=""
+        if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+            shell_rc="$HOME/.zshrc"
+        elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "bash" ]; then
+            shell_rc="$HOME/.bashrc"
+        fi
+
+        if [ -n "$shell_rc" ] && [ -f "$shell_rc" ]; then
+            if ! grep -q "$INSTALL_DIR" "$shell_rc" 2>/dev/null; then
+                echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$shell_rc"
+                ok "Added $INSTALL_DIR to $shell_rc"
+                info "Restart your shell or run: source $shell_rc"
+            fi
+        fi
     fi
 }
 
@@ -124,7 +152,8 @@ main() {
 
     download_and_install "$platform" "$version"
 
-    ok "OMNI installed at $INSTALL_DIR/omni ✓"
+    echo ""
+    ok "✓ OMNI installed to $INSTALL_DIR/omni"
     echo ""
 
     # Verify
@@ -136,9 +165,9 @@ main() {
 
     echo ""
     echo "  Next steps:"
-    echo "    omni init --hook   # Setup Claude Code hooks"
+    echo "    omni init --hook   # Activate Claude Code hooks"
     echo "    omni doctor        # Verify installation"
-    echo "    omni stats         # View token savings"
+    echo "    omni stats         # View savings after first session"
     echo ""
 }
 

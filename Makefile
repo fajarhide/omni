@@ -65,3 +65,15 @@ ci: fmt clippy test security binary-check
 
 clean:
 	cargo clean
+
+bump:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make bump VERSION=0.5.1"; exit 1; fi
+	./scripts/bump_version.sh $(VERSION)
+
+release-sha:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make release-sha VERSION=0.5.1"; exit 1; fi
+	./scripts/update_homebrew_sha.sh $(VERSION)
+
+release:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make release VERSION=0.5.1"; exit 1; fi
+	./scripts/omni-release.sh $(VERSION)
