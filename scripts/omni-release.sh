@@ -1,162 +1,118 @@
 #!/bin/bash
-# OMNI Release Master (Rust Edition)
-# Automates: Version bump, Tagging, SHA256 Calculation, and Formula Update
-#
-# Usage: ./scripts/omni-release.sh <version>
-# Example: ./scripts/omni-release.sh 0.5.0
+# omni-release.sh — Pre-release validation and tag creation (Rust Edition)
+# Usage: ./scripts/omni-release.sh 0.5.0
 
 set -euo pipefail
 
-if [ -z "${1:-}" ]; then
-    echo "Usage: ./scripts/omni-release.sh <version>"
-    echo "Example: ./scripts/omni-release.sh 0.5.0"
-    exit 1
-fi
+VERSION="${1:?Usage: omni-release.sh <version>}"
+TAG="v${VERSION}"
 
-VERSION="$1"
-TAG="v$VERSION"
-REPO="fajarhide/omni"
-TAP_REPO_PATH="../homebrew-tap/Formula"
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-echo "═══════════════════════════════════════════"
-echo " OMNI Release — $VERSION"
-echo "═══════════════════════════════════════════"
+ok()   { echo -e "${GREEN}✓${NC} $*"; }
+warn() { echo -e "${YELLOW}⚠${NC} $*"; }
+fail() { echo -e "${RED}✗${NC} $*"; exit 1; }
+info() { echo -e "${CYAN}▸${NC} $*"; }
 
-# 1. Version bump
+echo "═══════════════════════════════════════"
+echo " OMNI Release: ${TAG}"
+echo "═══════════════════════════════════════"
+
+# ─── Pre-flight checks ──────────────────
+
 echo ""
-echo "📦 Step 1: Bump version to $VERSION..."
-sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+info "Pre-flight checks"
 
-# Verify build compiles
+# 1. Verify version in Cargo.toml
+CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+if [ "$CARGO_VERSION" != "$VERSION" ]; then
+    fail "Cargo.toml version ($CARGO_VERSION) ≠ release version ($VERSION)\n  Fix: edit Cargo.toml version field, or run: ./scripts/bump_version.sh $VERSION"
+fi
+ok "Cargo.toml version: $CARGO_VERSION"
+
+# 2. Git status check
+if ! git diff --quiet HEAD; then
+    fail "Working directory is not clean. Commit or stash changes first."
+fi
+ok "Git working directory: clean"
+
+# 3. Branch check
+BRANCH=$(git branch --show-current)
+if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "homebrew_fix" ]; then
+    warn "Not on main branch (on: $BRANCH). Continue? [y/N]"
+    read -r confirm
+    [ "$confirm" = "y" ] || exit 1
+fi
+ok "Branch: $BRANCH"
+
+# 4. Tag check
+if git tag --list | grep -q "^${TAG}$"; then
+    fail "Tag ${TAG} already exists"
+fi
+ok "Tag ${TAG}: not yet created"
+
+# ─── Build validation ────────────────────
+
+echo ""
+info "Build validation"
+
+# 5. cargo fmt check
+cargo fmt --check || fail "cargo fmt check failed. Run: cargo fmt"
+ok "cargo fmt: clean"
+
+# 6. cargo clippy
+echo "   Running clippy..."
+cargo clippy --all-targets -- -D warnings > /tmp/omni-clippy 2>&1 || { cat /tmp/omni-clippy && fail "clippy warnings found"; }
+ok "cargo clippy: no warnings"
+
+# 7. cargo test
+echo "   Running tests..."
+cargo test --all > /tmp/omni-test 2>&1 || { tail -n 20 /tmp/omni-test && fail "tests failed"; }
+ok "cargo test: all pass"
+
+# 8. Release build
 echo "   Building release..."
-cargo build --release --quiet
-echo "   ✓ Build successful"
-
-# Verify version output
-ACTUAL=$("./target/release/omni" version 2>&1)
-if echo "$ACTUAL" | grep -q "$VERSION"; then
-    echo "   ✓ Version verified: $ACTUAL"
-else
-    echo "   ⚠ Version mismatch: got '$ACTUAL', expected '$VERSION'"
+cargo build --release > /tmp/omni-build 2>&1 || { tail -n 20 /tmp/omni-build && fail "release build failed"; }
+BINARY_SIZE=$(du -k target/release/omni | cut -f1)
+ok "Release build: ${BINARY_SIZE}KB"
+if [ "$BINARY_SIZE" -gt 5120 ]; then
+    warn "Binary size ${BINARY_SIZE}KB exceeds 5MB target"
 fi
 
-# 2. Update Homebrew Formula URLs
-echo ""
-echo "📦 Step 2: Update Homebrew formula..."
-sed -i '' "s|version \".*\"|version \"$VERSION\"|" omni.rb
-
-echo "   ✓ Formula version updated"
-
-# 3. Commit and Tag
-echo ""
-echo "🏷  Step 3: Commit and tag..."
-git add Cargo.toml Cargo.lock omni.rb
-git commit -m "chore: release v$VERSION" || echo "   No changes to commit"
-git push origin main
-
-echo "   Creating tag $TAG..."
-git tag -f "$TAG"
-git push -f origin "$TAG"
-echo "   ✓ Tag pushed"
-
-# 4. Wait for GitHub Actions release build
-echo ""
-echo "⏳ Step 4: Waiting for GitHub Actions release build..."
-echo "   The release.yml workflow will:"
-echo "     - Build 4 targets (macOS arm64/x86, Linux musl arm64/x86)"
-echo "     - Generate SHA256SUMS"
-echo "     - Create GitHub Release"
-echo ""
-echo "   Monitor: https://github.com/$REPO/actions"
-echo ""
-echo "   Waiting 10s for release to start..."
-sleep 10
-
-# 5. Fetch SHA256 sums from release (retry loop)
-echo ""
-echo "📥 Step 5: Fetching SHA256 from release artifacts..."
-
-MAX_RETRIES=30
-RETRY_INTERVAL=10
-SHA256_URL="https://github.com/$REPO/releases/download/$TAG/SHA256SUMS"
-
-for i in $(seq 1 $MAX_RETRIES); do
-    if curl -fsSL "$SHA256_URL" -o /tmp/omni-sha256sums 2>/dev/null; then
-        echo "   ✓ SHA256SUMS downloaded"
-        cat /tmp/omni-sha256sums
-        break
-    fi
-    echo "   Attempt $i/$MAX_RETRIES — release not ready yet, retrying in ${RETRY_INTERVAL}s..."
-    sleep $RETRY_INTERVAL
-done
-
-if [ ! -f /tmp/omni-sha256sums ]; then
-    echo "   ⚠ Could not fetch SHA256SUMS automatically."
-    echo "   Manually update omni.rb with SHA256 values from:"
-    echo "   https://github.com/$REPO/releases/tag/$TAG"
-    exit 0
+# 9. Smoke test
+if [ -x tests/smoke_test.sh ]; then
+    echo "   Running smoke tests..."
+    bash tests/smoke_test.sh ./target/release/omni > /tmp/omni-smoke 2>&1 || { cat /tmp/omni-smoke && fail "smoke test failed"; }
+    ok "Smoke test: all pass"
 fi
 
-# 6. Update Formula SHA256 values
+# ─── Confirm and tag ────────────────────
+
 echo ""
-echo "📝 Step 6: Updating formula SHA256 hashes..."
-
-AARCH64_MACOS=$(grep "aarch64-apple-darwin" /tmp/omni-sha256sums | awk '{print $1}')
-X86_64_MACOS=$(grep "x86_64-apple-darwin" /tmp/omni-sha256sums | awk '{print $1}')
-AARCH64_LINUX=$(grep "aarch64-unknown-linux-musl" /tmp/omni-sha256sums | awk '{print $1}')
-X86_64_LINUX=$(grep "x86_64-unknown-linux-musl" /tmp/omni-sha256sums | awk '{print $1}')
-
-# Update SHA256 in formula (macOS arm64)
-if [ -n "$AARCH64_MACOS" ]; then
-    # Replace the first sha256 (after on_arm in on_macos)
-    python3 -c "
-import re
-with open('omni.rb') as f: c = f.read()
-shas = ['$AARCH64_MACOS', '$X86_64_MACOS', '$AARCH64_LINUX', '$X86_64_LINUX']
-i = 0
-def repl(m):
-    global i
-    s = 'sha256 \"' + shas[i] + '\"' if i < len(shas) else m.group(0)
-    i += 1
-    return s
-c = re.sub(r'sha256 \"[A-Fa-f0-9_]+\"', repl, c)
-with open('omni.rb', 'w') as f: f.write(c)
-"
-    echo "   ✓ SHA256 hashes updated in omni.rb"
-fi
-
-# 7. Commit SHA updates
-git add omni.rb
-git commit -m "chore: update formula SHA256 for v$VERSION" || echo "   No SHA changes"
-git push origin main
-
-# 8. Sync with Homebrew Tap
+echo "═══════════════════════════════════════"
+echo " All checks passed! Ready to release ${TAG}"
+echo "═══════════════════════════════════════"
 echo ""
-echo "🍺 Step 7: Syncing with Homebrew Tap..."
-
-BREW_TAP_PATH=$(brew --repository fajarhide/omni 2>/dev/null || echo "")
-
-if [ -d "$TAP_REPO_PATH" ]; then
-    echo "   Syncing with $TAP_REPO_PATH..."
-    cp omni.rb "$TAP_REPO_PATH/omni.rb"
-    (cd "$TAP_REPO_PATH" && git add omni.rb && git commit -m "update omni to $TAG" && git push origin main)
-    echo "   ✓ Tap updated!"
-elif [ -n "$BREW_TAP_PATH" ] && [ -d "$BREW_TAP_PATH" ]; then
-    echo "   Syncing with $BREW_TAP_PATH..."
-    cp omni.rb "$BREW_TAP_PATH/Formula/omni.rb"
-    (cd "$BREW_TAP_PATH" && git add Formula/omni.rb && git commit -m "update omni to $TAG" && git push origin main)
-    echo "   ✓ Tap updated!"
-else
-    echo "   ⚠ Tap not found. Manually copy omni.rb to your Homebrew tap."
-fi
-
-# Done
+echo " This will:"
+echo "  1. Create git tag ${TAG}"
+echo "  2. Push tag to origin (triggers GitHub Actions release)"
+echo "  3. GitHub Actions will build 4 platform binaries"
+echo "  4. GitHub Release will be created automatically"
 echo ""
-echo "═══════════════════════════════════════════"
-echo " ✅ OMNI $VERSION is live!"
-echo "═══════════════════════════════════════════"
+echo " After release completes (~10 min):"
+echo "  5. Run: ./scripts/update_homebrew_sha.sh ${VERSION}"
+echo "  6. Update Homebrew tap with newest omni.rb"
 echo ""
-echo "  Release:  https://github.com/$REPO/releases/tag/$TAG"
-echo "  Install:  brew upgrade omni"
-echo "  Verify:   omni doctor"
+read -r -p "Proceed with release? [y/N] " confirm
+[ "$confirm" = "y" ] || { echo "Aborted."; exit 0; }
+
+git tag -a "${TAG}" -m "Release ${TAG}"
+git push origin "${TAG}"
+
 echo ""
+ok "Tag ${TAG} pushed! Monitor: https://github.com/fajarhide/omni/actions"
+echo "   GitHub Actions will create the release in ~10 minutes."

@@ -6,6 +6,8 @@
   [![CI](https://github.com/fajarhide/omni/actions/workflows/ci.yml/badge.svg)](https://github.com/fajarhide/omni/actions/workflows/ci.yml)
   [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
+  [![Stars](https://img.shields.io/github/stars/fajarhide/omni?style=flat-square)](https://github.com/fajarhide/omni/stargazers)
+  [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
   [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
 </div>
 
@@ -18,13 +20,28 @@
 
 ## Why OMNI?
 
-When Claude runs `git diff`, `cargo test`, or `kubectl get pods`, it receives **everything** — every "Compiling..." line, every cached Docker layer, every passing test. This noise consumes tokens, dilutes reasoning, and slows your agent down.
+AI agents are drowning in noisy CLI output. A `git diff` can easily eat 10K tokens, while a `cargo test` might dump 25K tokens of redundant noise. Claude and other agents read all of it, but 90% of that data is pure distraction that dilutes reasoning and drains your token budget.
 
-Most filters work by **rules**: strip lines matching patterns. OMNI works by **meaning**:
+OMNI intercepts terminal output automatically, keeping only what matters for your current task. It’s not just about making output smaller; it’s about making it smarter. By understanding command structures and your active session context, OMNI ensures your agent sees the signal, not the waste.
 
-- It **understands** that `error[E0432]` matters more than `Compiling foo v0.1.0`
-- It **knows your session** — boosting files you're actively editing
-- It **never drops** — compressed content is always retrievable via `omni_retrieve()`
+## How It Works
+
+```text
+Claude runs git diff  ──▶  800 lines raw output
+                                 │
+PostToolUse hook      ──▶  omni --hook
+                                 │
+Claude reads          ──◀  35 lines pure signal
+```
+
+OMNI knows your session context. Debugging an auth bug? Changes in `src/auth/` get priority automatically. No configuration needed—it just works.
+
+
+1. **Classify** — OMNI identifies the content type (git diff, build output, test results, logs) by analyzing structure, not filenames
+2. **Score** — Each line gets a semantic relevance score based on signal tier (critical → noise) and your current session context
+3. **Compose** — High-signal content is kept, noise is removed, and anything dropped is stored in RewindStore for retrieval
+
+All of this happens **transparently** — your AI agent doesn't know OMNI exists. It just gets better signal.
 
 ### The Impact
 > **Reduce up to 90% AI Token Usage**  
@@ -34,70 +51,24 @@ Most filters work by **rules**: strip lines matching patterns. OMNI works by **m
 ![OMNI Token Savings](omni_token_savings_graphic.png)
 
 
+## What OMNI distils
 
-## How It Works
-
-1. **Classify** — OMNI identifies the content type (git diff, build output, test results, logs) by analyzing structure, not filenames
-2. **Score** — Each line gets a semantic relevance score based on signal tier (critical → noise) and your current session context
-3. **Compose** — High-signal content is kept, noise is removed, and anything dropped is stored in RewindStore for retrieval
-
-All of this happens **transparently** — your AI agent doesn't know OMNI exists. It just gets better signal.
-
-## Quick Start
-
-```bash
-# Install
-brew tap fajarhide/omni
-brew install omni
-
-# Setup Claude Code hooks (one-time)
-omni init --hook
-
-# Verify
-omni doctor
-
-# View token savings after your first session
-omni stats
-```
-
-Or install via script:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.sh | sh
-omni init --hook
-```
-
-## What Gets Distilled?
-
-| Content Type | Example Command | Typical Reduction | What's Kept |
+| Output type | Example | Reduction | What's Kept |
 |---|---|---|---|
-| **Git Diff** | `git diff HEAD~3` | 56-80% | File tree, changed hunks, +/- lines |
-| **Git Status** | `git status` | 70-80% | Branch, staged/modified/untracked summary |
-| **Build Output** | `cargo build` | 65-85% | Error count, error messages, warnings |
-| **Test Results** | `pytest`, `cargo test` | 70-90% | Pass/fail count, failure details |
-| **Infrastructure** | `kubectl get pods` | 60-75% | Pod status summary, non-running details |
-| **Docker** | `docker build .` | 70-85% | Step count, cache hits, image ID |
-| **Logs** | access logs, app logs | 0-40% | Errors, warnings, anomalies |
-
-### Before & After
-
-**`docker build .`** — 15 lines → 1 line (81% reduction)
-```
-# Before (what Claude sees without OMNI):
-Step 1/15 : FROM node:18-alpine
- ---> a1b2c3d4e5f6
-Step 2/15 : RUN npm install
- ---> Using cache
-Step 3/15 : COPY . .
- ---> Running in 9876543210
-...11 more steps...
-Successfully built 9b9c9d09a123
-
-# After (what Claude sees with OMNI):
-docker: 5 steps | 1 cached | Successfully built 9b9c9d09a123
-```
+| git diff | 800 lines → 35 lines | ~96% | File tree, changed hunks, +/- lines |
+| cargo test | 25K tokens → 2K tokens | ~92% | Error count, error messages, warnings |
+| pytest failures | 500 lines → 20 lines | ~96% | Test failures, error messages, warnings |
+| docker build | 600 tokens → 15 tokens | ~98% | Step count, cache hits, image ID |
 
 ## Session Continuity
+
+When Claude Code restarts, OMNI injects context from the previous session so the agent never loses its place. It tracks "hot files" and active errors to guide the agent back to the problem.
+
+```text
+Continuing: debugging auth bug.
+Hot files: src/auth/mod.rs (12x).
+Last error: E0499
+```
 
 OMNI doesn't just compress — it **understands your session context**.
 
@@ -119,9 +90,27 @@ When OMNI compresses aggressively, the original content isn't deleted — it's s
 
 If Claude needs the full content, it simply calls `omni_retrieve("a1b2c3d4")` via MCP and gets everything back. **Zero information loss, guaranteed.**
 
-## Custom TOML Filters
+## Quick Start
 
-Extend OMNI for your company's internal tools without writing code:
+```bash
+# Install
+brew install fajarhide/tap/omni
+
+# Setup Claude Code hooks (one-time)
+omni init --hook
+
+# Verify
+omni doctor
+
+# View token savings after your first session
+omni stats
+```
+
+*Binary: single binary <5MB, zero runtime dependencies.*
+
+## Custom filters
+
+Create powerful filters using simple TOML rules:
 
 ```toml
 # ~/.omni/filters/deploy.toml

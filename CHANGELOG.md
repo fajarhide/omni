@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-23
+
+### Changed — Breaking
+- Full rewrite in Rust — zero Node.js, zero Zig runtime
+- `omni monitor` renamed to `omni stats`
+- Hook format changed — run `omni init --hook` to reinstall
+
+### Added
+- Session continuity via SessionStart + PreCompact hooks
+- RewindStore: compressed content retrievable via `omni_retrieve(hash)`
+- Session-aware distillation: hot files and active errors boost signal priority
+- `omni doctor` — installation diagnostics
+- `omni learn` — auto-generate TOML filters from passthrough output
+- Rust edition 2024
+- SQLite WAL mode + FTS5 for session search
+
+### Fixed
+- Never Drop: output never silently discarded (RewindStore replaces passthrough)
+- Zero startup overhead: native binary vs Node.js V8 startup
+
 ## [0.4.5] - 2026-03-20
 
 ### Added

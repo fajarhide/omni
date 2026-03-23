@@ -100,6 +100,15 @@ jobs:
           fi
           echo "All security pattern checks passed ✓"
 
+      - name: Check no placeholder SHA in formula
+        run: |
+          if grep -q "PLACEHOLDER" omni.rb; then
+            echo "⚠ omni.rb still has PLACEHOLDER SHA values"
+            echo "This is expected before release — just a reminder"
+          else
+            echo "✓ omni.rb has real SHA values"
+          fi
+
   binary-check:
     name: Binary Size & Smoke
     runs-on: ubuntu-latest
