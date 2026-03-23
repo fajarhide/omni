@@ -1,0 +1,27 @@
+schema_version = 1
+
+[filters.bundle]
+description = "Filter noise from bundle install/update output"
+match_command = "^bundle (install|update)"
+strip_ansi = true
+strip_lines_matching = [
+    "^Fetching ",
+    "^Installing ",
+    "^Using ",
+    "^\\s*$",
+]
+on_empty = "bundle: ok"
+
+[[tests.bundle]]
+name = "bundle install"
+input = """
+Fetching gem metadata from https://rubygems.org/..........
+Using bundler 2.4.10
+Fetching racc 1.6.2
+Installing racc 1.6.2 with native extensions
+Using rack 3.0.7
+Bundle complete! 2 Gemfile dependencies, 3 gems now installed.
+Use `bundle info [gemname]` to see where a bundled gem is installed.
+"""
+expected = """Bundle complete! 2 Gemfile dependencies, 3 gems now installed.
+Use `bundle info [gemname]` to see where a bundled gem is installed."""

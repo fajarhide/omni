@@ -1,0 +1,45 @@
+schema_version = 1
+
+[filters.kubectl_logs]
+description = "Filter kubectl logs output to show only errors and warnings"
+match_command = "^kubectl logs"
+strip_ansi = true
+keep_lines_matching = [
+    "ERROR",
+    "ERRO",
+    "WARN",
+    "FATAL",
+    "panic",
+    "Exception",
+]
+max_lines = 30
+on_empty = "kubectl logs: no errors/warnings in output"
+
+[[tests.kubectl_logs]]
+name = "mixed log levels"
+input = """
+2026-03-20T10:00:01Z INFO  Starting application server
+2026-03-20T10:00:02Z DEBUG Database connection pool initialized
+2026-03-20T10:00:03Z INFO  Listening on port 8080
+2026-03-20T10:00:04Z DEBUG Processing request /api/health
+2026-03-20T10:00:05Z INFO  Health check passed
+2026-03-20T10:00:06Z WARN  High memory usage detected: 85%
+2026-03-20T10:00:07Z DEBUG GC cycle completed
+2026-03-20T10:00:08Z ERROR Failed to connect to redis: connection refused
+2026-03-20T10:00:09Z INFO  Retrying connection in 5s
+2026-03-20T10:00:10Z ERROR Redis connection failed after 3 retries
+2026-03-20T10:00:11Z FATAL Shutting down due to critical dependency failure
+"""
+expected = """2026-03-20T10:00:06Z WARN  High memory usage detected: 85%
+2026-03-20T10:00:08Z ERROR Failed to connect to redis: connection refused
+2026-03-20T10:00:10Z ERROR Redis connection failed after 3 retries
+2026-03-20T10:00:11Z FATAL Shutting down due to critical dependency failure"""
+
+[[tests.kubectl_logs]]
+name = "only info and debug"
+input = """
+2026-03-20T10:00:01Z INFO  Starting application
+2026-03-20T10:00:02Z DEBUG Initializing modules
+2026-03-20T10:00:03Z INFO  Ready to serve
+"""
+expected = "kubectl logs: no errors/warnings in output"

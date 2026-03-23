@@ -253,7 +253,11 @@ cargo test           # Run all 147 tests
 cargo insta review   # Review and accept snapshot changes
 ```
 
-See [CLAUDE.md](CLAUDE.md) for the full contributor guide.
+See [CLAUDE.md](CLAUDE.md) and [DEVELOPER.md](docs/DEVELOPER.md) for the full contributor guide.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/image?repos=fajarhide/omni&type=date&legend=top-left)](https://www.star-history.com/?repos=fajarhide%2Fomni&type=date&legend=top-left)
 
 ## License
 

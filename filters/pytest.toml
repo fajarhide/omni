@@ -1,0 +1,65 @@
+schema_version = 1
+
+[filters.pytest]
+description = "Filter noise from pytest output, keeping failures and summary"
+match_command = "^pytest"
+strip_ansi = true
+strip_lines_matching = [
+    " PASSED",
+    "^\\s*$",
+    "^=+ test session starts =+",
+    "^platform ",
+    "^rootdir:",
+    "^configfile:",
+    "^plugins:",
+    "^collected ",
+]
+on_empty = "pytest: all passed"
+
+[[tests.pytest]]
+name = "mixed pass and fail"
+input = """
+============================= test session starts ==============================
+platform linux -- Python 3.12.0, pytest-8.0.0
+rootdir: /home/user/project
+configfile: pyproject.toml
+plugins: cov-4.1.0
+collected 22 items
+
+tests/test_auth.py::test_login PASSED
+tests/test_auth.py::test_logout PASSED
+tests/test_auth.py::test_signup PASSED
+tests/test_api.py::test_get_users PASSED
+tests/test_api.py::test_create_user PASSED
+tests/test_api.py::test_delete_user FAILED
+tests/test_api.py::test_update_user PASSED
+tests/test_db.py::test_connection PASSED
+tests/test_db.py::test_migration FAILED
+
+FAILED tests/test_api.py::test_delete_user - AssertionError: 403 != 200
+FAILED tests/test_db.py::test_migration - ConnectionError: timeout
+
+========================= 2 failed, 20 passed =========================
+"""
+expected = """tests/test_api.py::test_delete_user FAILED
+tests/test_db.py::test_migration FAILED
+FAILED tests/test_api.py::test_delete_user - AssertionError: 403 != 200
+FAILED tests/test_db.py::test_migration - ConnectionError: timeout
+========================= 2 failed, 20 passed ========================="""
+
+[[tests.pytest]]
+name = "all pass"
+input = """
+============================= test session starts ==============================
+platform linux -- Python 3.12.0, pytest-8.0.0
+collected 5 items
+
+tests/test_app.py::test_one PASSED
+tests/test_app.py::test_two PASSED
+tests/test_app.py::test_three PASSED
+tests/test_app.py::test_four PASSED
+tests/test_app.py::test_five PASSED
+
+============================== 5 passed ==============================
+"""
+expected = "============================== 5 passed =============================="

@@ -1,0 +1,41 @@
+schema_version = 1
+
+[filters.git_log]
+description = "Filter verbose git log output to show only commit hashes and messages"
+match_command = "^git log"
+strip_ansi = true
+strip_lines_matching = [
+    "^Author:",
+    "^Date:",
+    "^Merge:",
+    "^\\s*$",
+]
+max_lines = 20
+
+[[tests.git_log]]
+name = "standard log format"
+input = """
+commit a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+Author: John Doe <john@example.com>
+Date:   Mon Mar 20 10:30:00 2026 +0700
+
+    feat: add user authentication
+
+commit b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1
+Author: Jane Smith <jane@example.com>
+Date:   Sun Mar 19 14:20:00 2026 +0700
+
+    fix: resolve database connection timeout
+
+commit c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2
+Author: Bob Lee <bob@example.com>
+Date:   Sat Mar 18 09:15:00 2026 +0700
+
+    docs: update README with setup instructions
+"""
+expected = """commit a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+    feat: add user authentication
+commit b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1
+    fix: resolve database connection timeout
+commit c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2
+    docs: update README with setup instructions"""

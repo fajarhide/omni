@@ -1,0 +1,43 @@
+schema_version = 1
+
+[filters.phpunit]
+description = "Filter noise from PHPUnit and Laravel test output"
+match_command = "^phpunit|php artisan test"
+strip_ansi = true
+strip_lines_matching = [
+    "^\\.*$",
+    "^\\s*$",
+    "^PHPUnit \\d+",
+    "^Runtime:",
+]
+on_empty = "phpunit: all passed"
+
+[[tests.phpunit]]
+name = "mixed pass and fail"
+input = """
+PHPUnit 10.1.0 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.2.0
+
+..F..                                                               5 / 5 (100%)
+
+Time: 00:00.123, Memory: 10.00 MB
+
+There was 1 failure:
+
+1) Tests\\Unit\\ExampleTest::test_basic_test
+Failed asserting that false is true.
+
+/home/user/project/tests/Unit/ExampleTest.php:15
+
+FAILURES!
+Tests: 5, Assertions: 5, Failures: 1.
+"""
+expected = """..F..                                                               5 / 5 (100%)
+Time: 00:00.123, Memory: 10.00 MB
+There was 1 failure:
+1) Tests\\Unit\\ExampleTest::test_basic_test
+Failed asserting that false is true.
+/home/user/project/tests/Unit/ExampleTest.php:15
+FAILURES!
+Tests: 5, Assertions: 5, Failures: 1."""

@@ -1,0 +1,30 @@
+schema_version = 1
+
+[filters.tsc]
+description = "Filter noise from TypeScript compiler (tsc) output"
+match_command = "(tsc|npx tsc)"
+strip_ansi = true
+strip_lines_matching = [
+    '^>',
+    '^\s*$',
+]
+on_empty = "tsc: ok"
+
+[[filters.tsc.match_output]]
+pattern = 'Found 0 errors'
+message = "tsc: ok"
+
+[[tests.tsc]]
+name = "type errors found"
+input = "src/index.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.\nsrc/utils.ts(25,10): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string'.\n\nFound 2 errors in 2 files."
+expected = "src/index.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.\nsrc/utils.ts(25,10): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string'.\nFound 2 errors in 2 files."
+
+[[tests.tsc]]
+name = "no errors"
+input = "> tsc --noEmit\n\nFound 0 errors."
+expected = "tsc: ok"
+
+[[tests.tsc]]
+name = "empty output"
+input = ""
+expected = "tsc: ok"

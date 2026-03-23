@@ -1,0 +1,36 @@
+schema_version = 1
+
+[filters.composer]
+description = "Filter noise from composer install/update/require output"
+match_command = "^composer (install|update|require)"
+strip_ansi = true
+strip_lines_matching = [
+    "^  - (Downloading|Installing|Extracting|Upgrading) ",
+    "^Loading composer repositories",
+    "^Updating dependencies",
+    "^Generating optimized autoload files",
+    "^\\s*$",
+]
+on_empty = "composer: ok"
+
+[[tests.composer]]
+name = "composer install"
+input = """
+Loading composer repositories with package information
+Updating dependencies
+Lock file operations: 1 install, 0 updates, 0 removals
+  - Locking psr/container (2.0.2)
+Writing lock file
+Installing dependencies from lock file (including dev-dependencies)
+Package operations: 1 install, 0 updates, 0 removals
+  - Downloading psr/container (2.0.2)
+  - Installing psr/container (2.0.2): Extracting archive
+Generating optimized autoload files
+1 package suggestions were added by new dependencies, use `composer suggest` to see them.
+"""
+expected = """Lock file operations: 1 install, 0 updates, 0 removals
+  - Locking psr/container (2.0.2)
+Writing lock file
+Installing dependencies from lock file (including dev-dependencies)
+Package operations: 1 install, 0 updates, 0 removals
+1 package suggestions were added by new dependencies, use `composer suggest` to see them."""

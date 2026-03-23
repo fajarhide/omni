@@ -127,6 +127,11 @@ impl TomlFilter {
                     .map(|u| u.is_match(&text))
                     .unwrap_or(false);
                 if !skip {
+                    if let Some(caps) = rule.pattern.captures(&text) {
+                        let mut dst = String::new();
+                        caps.expand(&rule.message, &mut dst);
+                        return dst;
+                    }
                     return rule.message.clone();
                 }
             }
@@ -509,5 +514,26 @@ mod tests {
         // The project local load won't pick up mock files if `omni_config.json` doesn't exist/trust.
         let _filters = load_all_filters();
         // Evaluates successfully cleanly
+    }
+
+    #[test]
+    fn test_verify_all_builtin_filters_pass_their_inline_tests() {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let filters_dir = std::path::Path::new(&manifest_dir).join("filters");
+        let filters = load_from_dir(&filters_dir);
+
+        // Ensure we loaded something
+        assert!(
+            !filters.is_empty(),
+            "Built-in filters directory should not be empty"
+        );
+
+        let report = run_inline_tests(&filters);
+        if !report.failures.is_empty() {
+            for failure in &report.failures {
+                println!("{}", failure);
+            }
+            panic!("TOML Filter Verification Failed");
+        }
     }
 }

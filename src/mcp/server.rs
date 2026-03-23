@@ -167,20 +167,76 @@ impl OmniServer {
         match action.as_str() {
             "status" => {
                 let s = self.session.lock().unwrap();
+                let task = s.inferred_task.as_deref().unwrap_or("not detected");
+                let domain = s.inferred_domain.as_deref().unwrap_or("not detected");
+
+                // Hot files: top 3 dengan count
+                let mut hot: Vec<_> = s.hot_files.iter().collect();
+                hot.sort_by(|a, b| b.1.cmp(a.1));
+                let hot_str = hot
+                    .iter()
+                    .take(3)
+                    .map(|(f, c)| format!("{} ({}x)", f, c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                // Last error
+                let last_err = s
+                    .active_errors
+                    .first()
+                    .map(|e| &e[..e.len().min(100)])
+                    .unwrap_or("none");
+
                 format!(
-                    "OMNI Session: {}\nCommands run: {}",
-                    s.session_id, s.command_count
+                    "OMNI Session: {}\n\
+                     Commands run: {}\n\
+                     Inferred task: {}\n\
+                     Inferred domain: {}\n\
+                     Hot files: {}\n\
+                     Last error: {}",
+                    &s.session_id[..s.session_id.len().min(12)],
+                    s.command_count,
+                    task,
+                    domain,
+                    if hot_str.is_empty() {
+                        "none yet"
+                    } else {
+                        &hot_str
+                    },
+                    last_err
                 )
             }
             "context" => {
                 let s = self.session.lock().unwrap();
-                let task = s.inferred_task.as_deref().unwrap_or("none");
+                let task = s.inferred_task.as_deref().unwrap_or("general development");
                 let err = s
                     .active_errors
                     .first()
                     .map(|e| e.as_str())
                     .unwrap_or("none");
-                format!("[OMNI Context] Task: {}. Error: {}", task, err)
+                let mut hot: Vec<_> = s.hot_files.iter().collect();
+                hot.sort_by(|a, b| b.1.cmp(a.1));
+                let hot_str = hot
+                    .iter()
+                    .take(2)
+                    .map(|(f, c)| format!("{} ({}x)", f, c))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                // Format yang bisa langsung di-inject ke Claude
+                let mut ctx = format!("[OMNI Context] Task: {}.", task);
+                if !hot_str.is_empty() {
+                    ctx.push_str(&format!(" Hot: {}.", hot_str));
+                }
+                if err != "none" {
+                    ctx.push_str(&format!(" Error: {}", &err[..err.len().min(80)]));
+                }
+                // Trim ke max 200 chars
+                if ctx.len() > 200 {
+                    ctx.truncate(197);
+                    ctx.push_str("...");
+                }
+                ctx
             }
             "clear" => {
                 {

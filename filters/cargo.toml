@@ -1,0 +1,63 @@
+schema_version = 1
+
+[filters.cargo]
+description = "Filter noise from cargo build, test, check, and clippy output"
+match_command = "^(cargo|rustc)"
+strip_ansi = true
+strip_lines_matching = [
+    "^\\s*Compiling ",
+    "^\\s*Downloading ",
+    "^\\s*Updating ",
+    "^\\s*Blocking waiting",
+    "^\\s*Locking ",
+    "^\\s*Unpacking ",
+    "^\\s*Fresh ",
+    "^\\s*$",
+]
+on_empty = "cargo: ok"
+
+[[tests.cargo]]
+name = "build with errors"
+input = """
+   Compiling serde v1.0.197
+   Compiling serde_derive v1.0.197
+   Compiling toml v0.8.10
+   Compiling regex v1.10.3
+   Compiling anyhow v1.0.80
+   Compiling clap v4.5.1
+   Compiling tempfile v3.10.0
+   Compiling dirs v5.0.1
+   Compiling omni v0.1.0 (/home/user/omni)
+   Compiling my-crate v0.1.0
+error[E0308]: mismatched types
+ --> src/main.rs:10:5
+  |
+10 |     "hello"
+  |     ^^^^^^^ expected `i32`, found `&str`
+error: aborting due to previous error
+"""
+expected = """error[E0308]: mismatched types
+ --> src/main.rs:10:5
+  |
+10 |     "hello"
+  |     ^^^^^^^ expected `i32`, found `&str`
+error: aborting due to previous error"""
+
+[[tests.cargo]]
+name = "clean build no errors"
+input = """
+   Compiling serde v1.0.197
+   Compiling omni v0.1.0 (/home/user/omni)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.32s
+"""
+expected = "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.32s"
+
+[[tests.cargo]]
+name = "all noise stripped"
+input = """
+   Compiling serde v1.0.197
+   Compiling omni v0.1.0
+   Downloading crates ...
+   Updating crates.io index
+"""
+expected = "cargo: ok"

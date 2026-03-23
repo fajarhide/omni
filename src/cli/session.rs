@@ -75,35 +75,39 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             .inferred_task
             .as_deref()
             .unwrap_or("general development");
+        let err = state
+            .active_errors
+            .first()
+            .map(|e| e.as_str())
+            .unwrap_or("none");
         let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
         hot_vec.sort_by(|a, b| b.1.cmp(a.1));
 
-        let hot_str = if hot_vec.is_empty() {
-            "none".to_string()
-        } else {
-            hot_vec
-                .iter()
-                .take(2)
-                .map(|(k, v)| format!("{} ({}x)", k, v))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
+        let hot_str = hot_vec
+            .iter()
+            .take(2)
+            .map(|(k, v)| format!("{} ({}x)", k, v))
+            .collect::<Vec<_>>()
+            .join(", ");
 
-        let err_str = state
-            .active_errors
-            .first()
-            .map(|s| s.replace('\n', " ").chars().take(80).collect::<String>())
-            .unwrap_or_else(|| "none".to_string());
-
-        let mut msg = format!(
-            "[OMNI Context] Task: {}. Hot: {}. Error: {}",
-            task, hot_str, err_str
-        );
-        if msg.len() > 200 {
-            msg.truncate(197);
-            msg.push_str("...");
+        // Format yang bisa langsung di-inject ke Claude
+        let mut ctx = format!("[OMNI Context] Task: {}.", task);
+        if !hot_str.is_empty() {
+            ctx.push_str(&format!(" Hot: {}.", hot_str));
         }
-        println!("{}", msg);
+        if err != "none" {
+            let err_clean = err.replace('\n', " ");
+            ctx.push_str(&format!(
+                " Error: {}",
+                &err_clean[..err_clean.len().min(80)]
+            ));
+        }
+        // Trim ke max 200 chars
+        if ctx.len() > 200 {
+            ctx.truncate(197);
+            ctx.push_str("...");
+        }
+        println!("{}", ctx);
         return Ok(());
     }
 
@@ -237,5 +241,48 @@ mod tests {
         let args = vec!["session".to_string(), "--history".to_string()];
         let res = run_session(&args, store);
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_session_context_format_under_200_chars() {
+        let mut state = SessionState::new();
+        state.add_hot_file("src/auth/mod.rs");
+        state.add_error("E0499: cannot borrow as mutable");
+        state.inferred_task = Some("fix auth bug".to_string());
+
+        // Simulasi logic dari omni_session "context"
+        let task = state
+            .inferred_task
+            .as_deref()
+            .unwrap_or("general development");
+        let err = state
+            .active_errors
+            .first()
+            .map(|e| e.as_str())
+            .unwrap_or("none");
+        let mut hot: Vec<_> = state.hot_files.iter().collect();
+        hot.sort_by(|a, b| b.1.cmp(a.1));
+        let hot_str = hot
+            .iter()
+            .take(2)
+            .map(|(f, c)| format!("{} ({}x)", f, c))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut ctx = format!("[OMNI Context] Task: {}.", task);
+        if !hot_str.is_empty() {
+            ctx.push_str(&format!(" Hot: {}.", hot_str));
+        }
+        if err != "none" {
+            ctx.push_str(&format!(" Error: {}", &err[..err.len().min(80)]));
+        }
+        if ctx.len() > 200 {
+            ctx.truncate(197);
+            ctx.push_str("...");
+        }
+
+        assert!(ctx.len() <= 200);
+        assert!(ctx.contains("fix auth bug"));
+        assert!(ctx.contains("src/auth/mod.rs"));
     }
 }

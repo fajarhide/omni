@@ -1,0 +1,43 @@
+schema_version = 1
+
+[filters.vitest]
+description = "Filter noise from vitest and jest output"
+match_command = "(vitest|jest|pnpm test|npm test)"
+strip_ansi = true
+strip_lines_matching = [
+    "^\\s*✓ ",
+    "^\\s*✓ ",
+    "^\\s*√ ",
+    "^\\s*PASS ",
+    "^\\s*$",
+    "^stdout ",
+    "^stderr ",
+]
+on_empty = "tests: all passed"
+
+[[tests.vitest]]
+name = "mixed pass and fail"
+input = """
+ ✓ src/utils.test.ts (3 tests)
+ ✓ src/api.test.ts (5 tests)
+ ✗ src/auth.test.ts (2 tests)
+   ✗ should validate token
+     → expected true, received false
+
+ Test Files  1 failed | 2 passed | 3 total
+ Tests       1 failed | 8 passed | 9 total
+"""
+expected = """ ✗ src/auth.test.ts (2 tests)
+   ✗ should validate token
+     → expected true, received false
+ Test Files  1 failed | 2 passed | 3 total
+ Tests       1 failed | 8 passed | 9 total"""
+
+[[tests.vitest]]
+name = "all pass"
+input = """
+ ✓ src/utils.test.ts (3 tests)
+ ✓ src/api.test.ts (5 tests)
+ ✓ src/auth.test.ts (2 tests)
+"""
+expected = "tests: all passed"

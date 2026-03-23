@@ -1,0 +1,44 @@
+schema_version = 1
+
+[filters.rspec]
+description = "Filter noise from RSpec (Ruby) output, keeping failures and summary"
+match_command = "^rspec"
+strip_ansi = true
+strip_lines_matching = [
+    '^[\.FE*sS ]+$',
+    "^\\s*$",
+]
+on_empty = "rspec: all passed"
+
+[[tests.rspec]]
+name = "mixed pass and fail"
+input = """
+...F.
+
+Failures:
+
+  1) User logs in with valid credentials
+     Failure/Error: expect(page).to have_content("Welcome")
+       expected to find text "Welcome" in "Error 500"
+     # ./spec/features/login_spec.rb:10
+
+Finished in 0.1234 seconds (files took 0.5678 seconds to load)
+5 examples, 1 failure
+"""
+expected = """Failures:
+  1) User logs in with valid credentials
+     Failure/Error: expect(page).to have_content("Welcome")
+       expected to find text "Welcome" in "Error 500"
+     # ./spec/features/login_spec.rb:10
+Finished in 0.1234 seconds (files took 0.5678 seconds to load)
+5 examples, 1 failure"""
+
+[[tests.rspec]]
+name = "all pass"
+input = """
+.....
+
+Finished in 0.05 seconds
+5 examples, 0 failures
+"""
+expected = "Finished in 0.05 seconds\n5 examples, 0 failures"

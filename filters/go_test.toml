@@ -1,0 +1,48 @@
+schema_version = 1
+
+[filters.go_test]
+description = "Filter noise from go test, go build, and go vet output"
+match_command = "^go (test|build|vet)"
+strip_ansi = true
+strip_lines_matching = [
+    "^=== RUN ",
+    "^=== PAUSE ",
+    "^=== CONT ",
+    "^\\s*$",
+]
+on_empty = "go test: all passed"
+
+[[tests.go_test]]
+name = "test with failures"
+input = """
+=== RUN   TestAdd
+=== RUN   TestSubtract
+=== RUN   TestMultiply
+=== RUN   TestDivide
+--- FAIL: TestDivide (0.00s)
+    math_test.go:25: expected 5, got 0
+=== RUN   TestModulo
+--- PASS: TestAdd (0.00s)
+--- PASS: TestSubtract (0.00s)
+--- PASS: TestMultiply (0.00s)
+--- PASS: TestModulo (0.00s)
+FAIL
+FAIL    github.com/user/project/math    0.005s
+"""
+expected = """--- FAIL: TestDivide (0.00s)
+    math_test.go:25: expected 5, got 0
+--- PASS: TestAdd (0.00s)
+--- PASS: TestSubtract (0.00s)
+--- PASS: TestMultiply (0.00s)
+--- PASS: TestModulo (0.00s)
+FAIL
+FAIL    github.com/user/project/math    0.005s"""
+
+[[tests.go_test]]
+name = "all pass"
+input = """
+=== RUN   TestAdd
+=== RUN   TestSubtract
+=== RUN   TestMultiply
+"""
+expected = "go test: all passed"

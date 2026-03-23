@@ -1,0 +1,50 @@
+schema_version = 1
+
+[filters.docker_compose]
+description = "Filter noise from docker-compose up/down/logs"
+match_command = "^docker.compose|^docker compose"
+strip_ansi = true
+strip_lines_matching = [
+    "Pulling ",
+    "Already exists",
+    "Pull complete",
+    "Waiting",
+    "Extracting",
+    "Verifying Checksum",
+    "Download complete",
+    "^\\s*$",
+    "^[=>#\\s]+\\d+%",
+]
+on_empty = "docker-compose: ok"
+
+[[tests.docker_compose]]
+name = "compose up with pull noise"
+input = """
+Pulling db (postgres:15)...
+Already exists abc123
+Pull complete def456
+Pull complete ghi789
+Extracting layer
+Creating network "app_default"
+Creating app_db_1
+Creating app_web_1
+Starting app_db_1
+Starting app_web_1
+"""
+expected = """Creating network "app_default"
+Creating app_db_1
+Creating app_web_1
+Starting app_db_1
+Starting app_web_1"""
+
+[[tests.docker_compose]]
+name = "compose with error"
+input = """
+Pulling web (nginx:latest)...
+Already exists abc123
+Pull complete xyz789
+Creating app_web_1
+Error response from daemon: port is already allocated
+"""
+expected = """Creating app_web_1
+Error response from daemon: port is already allocated"""

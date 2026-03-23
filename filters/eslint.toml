@@ -1,0 +1,45 @@
+schema_version = 1
+
+[filters.eslint]
+description = "Filter noise from eslint, biome, and prettier check output"
+match_command = "(eslint|biome|prettier)"
+strip_ansi = true
+strip_lines_matching = [
+    "^✓ ",
+    "^✔ ",
+    "^\\s*$",
+    "^Checked \\d+ file",
+    "^All matched files",
+]
+on_empty = "lint: no issues"
+
+[[tests.eslint]]
+name = "lint errors found"
+input = """
+src/index.ts
+  3:10  error  'foo' is defined but never used  no-unused-vars
+  7:1   warning  Unexpected console statement   no-console
+
+src/utils.ts
+  12:5  error  'bar' is not defined  no-undef
+
+✖ 3 problems (2 errors, 1 warning)
+"""
+expected = """src/index.ts
+  3:10  error  'foo' is defined but never used  no-unused-vars
+  7:1   warning  Unexpected console statement   no-console
+src/utils.ts
+  12:5  error  'bar' is not defined  no-undef
+✖ 3 problems (2 errors, 1 warning)"""
+
+[[tests.eslint]]
+name = "no lint issues"
+input = """
+✓ src/index.ts
+✓ src/utils.ts
+✓ src/api.ts
+
+Checked 3 files
+All matched files use the correct style
+"""
+expected = "lint: no issues"

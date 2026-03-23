@@ -1,0 +1,30 @@
+schema_version = 1
+
+[filters.pip]
+description = "Filter noise from pip install/uninstall output"
+match_command = "^pip (install|uninstall|download|wheel)"
+strip_ansi = true
+strip_lines_matching = [
+    "^Collecting ",
+    "^  Using cached ",
+    "^  Downloading ",
+    "[━#]+",
+    "^\\s*$",
+]
+on_empty = "pip: ok"
+
+[[tests.pip]]
+name = "pip install"
+input = """
+Collecting requests
+  Using cached requests-2.31.0-py3-none-any.whl (62 kB)
+Requirement already satisfied: charset-normalizer<4,>=2 in /usr/lib/python3.11/site-packages (from requests) (3.2.0)
+Collecting idna<4,>=2.5 (from requests)
+  Downloading idna-3.4-py3-none-any.whl (61 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 61.5/61.5 kB 1.2 MB/s eta 0:00:00
+Installing collected packages: idna, requests
+Successfully installed idna-3.4 requests-2.31.0
+"""
+expected = """Requirement already satisfied: charset-normalizer<4,>=2 in /usr/lib/python3.11/site-packages (from requests) (3.2.0)
+Installing collected packages: idna, requests
+Successfully installed idna-3.4 requests-2.31.0"""
