@@ -93,7 +93,7 @@ If Claude needs the full content, it simply calls `omni_retrieve("a1b2c3d4")` vi
 ## Quick Start
 
 ```bash
-# Install
+# Install via Homebrew macOS
 brew install fajarhide/tap/omni
 
 # Setup Claude Code hooks (one-time)
@@ -104,6 +104,13 @@ omni doctor
 
 # View token savings after your first session
 omni stats
+```
+
+Or install via script (Linux):
+
+```bash
+curl -fsSL https://omni.weekndlabs.com | sh
+omni init --hook
 ```
 
 *Binary: single binary <5MB, zero runtime dependencies.*
