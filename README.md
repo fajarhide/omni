@@ -106,10 +106,10 @@ omni doctor
 omni stats
 ```
 
-Or install via script (Linux):
+Or install universal via script:
 
 ```bash
-curl -fsSL https://omni.weekndlabs.com | sh
+curl -fsSL https://omni.weekndlabs.com/install | sh
 omni init --hook
 ```
 

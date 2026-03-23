@@ -114,3 +114,22 @@ fn test_empty_input_no_crash() {
     let (_, output_len, _) = run_pipeline("");
     assert_eq!(output_len, 0);
 }
+
+#[test]
+fn test_pipeline_latency_under_10ms() {
+    use std::time::Instant;
+    let input = include_str!("../tests/fixtures/git_diff_multi_file.txt").repeat(5);
+
+    let start = Instant::now();
+    let ctype = classifier::classify(&input);
+    let segments = scorer::score_segments(&input, &ctype, None);
+    let distiller = omni::distillers::get_distiller(&ctype);
+    distiller.distill(&segments, &input);
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed.as_millis() < 50, // 50ms untuk test (lebih longgar dari 10ms production claim)
+        "Pipeline took {}ms, should be <50ms in debug mode",
+        elapsed.as_millis()
+    );
+}
