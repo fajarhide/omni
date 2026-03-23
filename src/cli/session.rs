@@ -97,7 +97,10 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         }
         if err != "none" {
             let err_clean = err.replace('\n', " ");
-            ctx.push_str(&format!(" Error: {}", &err_clean[..err_clean.len().min(80)]));
+            ctx.push_str(&format!(
+                " Error: {}",
+                &err_clean[..err_clean.len().min(80)]
+            ));
         }
         // Trim ke max 200 chars
         if ctx.len() > 200 {
