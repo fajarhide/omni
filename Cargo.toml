@@ -64,6 +64,7 @@ is-terminal = "0.4"
 # Misc
 tempfile = "3"
 ureq = { version = "2", features = ["json"] }
+rust-embed = "8"
 
 [dev-dependencies]
 insta = "1"  # snapshot testing

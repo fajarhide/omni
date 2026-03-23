@@ -3,6 +3,12 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+pub fn get_claude_json_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claude.json")
+}
+
 pub fn get_settings_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -37,6 +43,7 @@ fn backup_settings(path: &PathBuf) -> anyhow::Result<PathBuf> {
 
 pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     let is_hook = args.iter().any(|a| a == "--hook");
+    let is_mcp = args.iter().any(|a| a == "--mcp");
     let is_status = args.iter().any(|a| a == "--status");
     let is_uninstall = args.iter().any(|a| a == "--uninstall");
 
@@ -68,28 +75,43 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
 
         remove_omni_hooks(&mut val);
 
+        // Also remove MCP from .claude.json
+        let mcp_path = get_claude_json_path();
+        if mcp_path.exists()
+            && let Ok(content) = fs::read_to_string(&mcp_path)
+            && let Ok(mut mcp_val) = serde_json::from_str::<Value>(&content)
+        {
+            if let Some(obj) = mcp_val.as_object_mut()
+                && let Some(servers) = obj.get_mut("mcpServers").and_then(|v| v.as_object_mut())
+            {
+                servers.remove("omni");
+            }
+            let _ = fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_val)?);
+        }
+
         let new_content = serde_json::to_string_pretty(&val)?;
         fs::write(&path, new_content)?;
-        println!("✓ OMNI hooks uninstalled from settings.json");
+        println!("✓ OMNI hooks and MCP server uninstalled");
         return Ok(());
     }
 
-    if is_hook {
+    if is_hook || is_mcp {
         let (path, mut val) = initialize_settings()?;
-        let backup_path = backup_settings(&path)?;
+        let _ = backup_settings(&path);
 
-        install_omni_hooks(&mut val, &exe_path);
+        if is_hook {
+            install_omni_hooks(&mut val, &exe_path);
+            let new_content = serde_json::to_string_pretty(&val)?;
+            fs::write(&path, new_content)?;
+            println!("✓ OMNI hooks installed in Claude settings");
+        }
 
-        let new_content = serde_json::to_string_pretty(&val)?;
-        fs::write(&path, new_content)?;
+        if is_mcp {
+            install_mcp_server(&exe_path)?;
+            println!("✓ OMNI MCP server registered in .claude.json");
+        }
 
-        println!("✓ OMNI hooks installed");
-        println!("      PostToolUse (Bash) → distil output transparently");
-        println!("      SessionStart       → inject session context");
-        println!("      PreCompact         → snapshot before compaction\n");
-        println!("   Binary: {}", exe_path);
-        println!("   Config: {}", path.display());
-        println!("   Backup: {}\n", backup_path.display());
+        println!("\n   Binary: {}", exe_path);
         println!("   Restart Claude Code to activate.");
     }
 
@@ -195,6 +217,59 @@ pub fn remove_omni_hooks(val: &mut Value) {
             }
         }
     }
+}
+
+pub fn install_mcp_server(exe_path: &str) -> anyhow::Result<()> {
+    let path = get_claude_json_path();
+    let mut val = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+    } else {
+        json!({})
+    };
+
+    let obj = val
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("Invalid .claude.json format"))?;
+
+    // 1. Ensure top-level mcpServers exists
+    let servers = obj
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("mcpServers is not an object"))?;
+
+    // 2. Add/Update OMNI
+    servers.insert(
+        "omni".to_string(),
+        json!({
+            "type": "stdio",
+            "command": exe_path,
+            "args": ["--mcp"]
+        }),
+    );
+
+    // 3. Also update any project entries that might have an old OMNI reference
+    if let Some(projects) = obj.get_mut("projects").and_then(|p| p.as_object_mut()) {
+        for (_path, p_val) in projects.iter_mut() {
+            if let Some(ps) = p_val.get_mut("mcpServers").and_then(|s| s.as_object_mut())
+                && ps.contains_key("omni")
+            {
+                ps.insert(
+                    "omni".to_string(),
+                    serde_json::json!({
+                        "command": "omni",
+                        "args": ["--mcp"],
+                        "env": {}
+                    }),
+                );
+            }
+        }
+    }
+
+    let new_content = serde_json::to_string_pretty(&val)?;
+    fs::write(&path, new_content)?;
+    Ok(())
 }
 
 #[cfg(test)]

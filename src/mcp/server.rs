@@ -167,76 +167,65 @@ impl OmniServer {
         match action.as_str() {
             "status" => {
                 let s = self.session.lock().unwrap();
-                let task = s.inferred_task.as_deref().unwrap_or("not detected");
-                let domain = s.inferred_domain.as_deref().unwrap_or("not detected");
+                let task = s.inferred_task.as_deref().unwrap_or("none");
+                let domain = s.inferred_domain.as_deref().unwrap_or("none");
 
-                // Hot files: top 3 dengan count
-                let mut hot: Vec<_> = s.hot_files.iter().collect();
-                hot.sort_by(|a, b| b.1.cmp(a.1));
-                let hot_str = hot
-                    .iter()
-                    .take(3)
-                    .map(|(f, c)| format!("{} ({}x)", f, c))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
+                hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+                let hot_str = if hot_vec.is_empty() {
+                    "none".to_string()
+                } else {
+                    hot_vec
+                        .iter()
+                        .take(3)
+                        .map(|(f, c)| format!("{} ({}x)", f, c))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
 
-                // Last error
-                let last_err = s
+                let err = s
                     .active_errors
                     .first()
-                    .map(|e| &e[..e.len().min(100)])
-                    .unwrap_or("none");
+                    .map(|e| e.replace('\n', " "))
+                    .unwrap_or_else(|| "none".to_string());
 
                 format!(
-                    "OMNI Session: {}\n\
-                     Commands run: {}\n\
-                     Inferred task: {}\n\
-                     Inferred domain: {}\n\
-                     Hot files: {}\n\
-                     Last error: {}",
-                    &s.session_id[..s.session_id.len().min(12)],
-                    s.command_count,
-                    task,
-                    domain,
-                    if hot_str.is_empty() {
-                        "none yet"
-                    } else {
-                        &hot_str
-                    },
-                    last_err
+                    "OMNI Session: {}\nCommands: {}\nTask: {}\nDomain: {}\nHot Files: {}\nLast Error: {}",
+                    s.session_id, s.command_count, task, domain, hot_str, err
                 )
             }
             "context" => {
                 let s = self.session.lock().unwrap();
-                let task = s.inferred_task.as_deref().unwrap_or("general development");
+                let task = s.inferred_task.as_deref().unwrap_or("none");
+
+                let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
+                hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+                let hot_str = if hot_vec.is_empty() {
+                    "none".to_string()
+                } else {
+                    hot_vec
+                        .iter()
+                        .take(2)
+                        .map(|(f, _)| f.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+
                 let err = s
                     .active_errors
                     .first()
-                    .map(|e| e.as_str())
-                    .unwrap_or("none");
-                let mut hot: Vec<_> = s.hot_files.iter().collect();
-                hot.sort_by(|a, b| b.1.cmp(a.1));
-                let hot_str = hot
-                    .iter()
-                    .take(2)
-                    .map(|(f, c)| format!("{} ({}x)", f, c))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .map(|e| e.replace('\n', " "))
+                    .unwrap_or_else(|| "none".to_string());
 
-                // Format yang bisa langsung di-inject ke Claude
-                let mut ctx = format!("[OMNI Context] Task: {}.", task);
-                if !hot_str.is_empty() {
-                    ctx.push_str(&format!(" Hot: {}.", hot_str));
+                let mut msg = format!(
+                    "[OMNI Context] Task: {}. Hot: {}. Error: {}",
+                    task, hot_str, err
+                );
+                if msg.len() > 200 {
+                    msg.truncate(197);
+                    msg.push_str("...");
                 }
-                if err != "none" {
-                    ctx.push_str(&format!(" Error: {}", &err[..err.len().min(80)]));
-                }
-                // Trim ke max 200 chars
-                if ctx.len() > 200 {
-                    ctx.truncate(197);
-                    ctx.push_str("...");
-                }
-                ctx
+                msg
             }
             "clear" => {
                 {
@@ -245,7 +234,7 @@ impl OmniServer {
                 }
                 "Session state cleared.".to_string()
             }
-            _ => "Unknown action defined for bindings.".to_string(),
+            _ => "Unknown action. Use status, context, or clear.".to_string(),
         }
     }
 }

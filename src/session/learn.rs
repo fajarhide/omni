@@ -76,7 +76,7 @@ pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
 }
 
 pub fn generate_toml(candidates: &[PatternCandidate], filter_name: &str) -> String {
-    let mut toml = format!("schema_version = 1\n\n[filters.{}]\n", filter_name);
+    let mut toml = format!("\n[filters.{}]\n", filter_name);
     toml.push_str("description = \"Auto-learned filter\"\n");
     toml.push_str(&format!("match_command = \"{}.*\"\n", filter_name));
     toml.push_str("strip_ansi = true\n");
@@ -84,7 +84,7 @@ pub fn generate_toml(candidates: &[PatternCandidate], filter_name: &str) -> Stri
 
     let mut strips = Vec::new();
     let mut tests = format!(
-        "\n[[tests.{}]\nname = \"auto_learned_strip\"\n",
+        "\n[[tests.{}]]\nname = \"auto_learned_strip\"\n",
         filter_name
     );
     let mut sample_lines = String::new();
@@ -136,15 +136,15 @@ pub fn apply_to_config(
 
     let generated = generate_toml(candidates, filter_name);
 
-    if config_path.exists() {
-        let mut file = OpenOptions::new().append(true).open(config_path)?;
-        writeln!(file, "\n{}", generated)?;
-    } else {
+    if !config_path.exists() {
         if let Some(p) = config_path.parent() {
             fs::create_dir_all(p)?;
         }
-        fs::write(config_path, generated)?;
+        fs::write(config_path, "schema_version = 1\n")?;
     }
+
+    let mut file = OpenOptions::new().append(true).open(config_path)?;
+    file.write_all(generated.as_bytes())?;
 
     Ok(candidates.len())
 }
