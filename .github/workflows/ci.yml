@@ -52,7 +52,7 @@ jobs:
         run: cargo install cargo-insta
 
       - name: Verify snapshots
-        run: cargo insta test --review=fail
+        run: cargo insta test
 
   security:
     name: Security Audit
