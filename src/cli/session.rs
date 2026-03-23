@@ -71,43 +71,36 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     }
 
     if is_inject {
-        let task = state
-            .inferred_task
-            .as_deref()
-            .unwrap_or("general development");
+        let task = state.inferred_task.as_deref().unwrap_or("none");
+
+        let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
+        hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+        let hot_str = if hot_vec.is_empty() {
+            "none".to_string()
+        } else {
+            hot_vec
+                .iter()
+                .take(2)
+                .map(|(f, _)| f.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
         let err = state
             .active_errors
             .first()
-            .map(|e| e.as_str())
-            .unwrap_or("none");
-        let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
-        hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+            .map(|e| e.replace('\n', " "))
+            .unwrap_or_else(|| "none".to_string());
 
-        let hot_str = hot_vec
-            .iter()
-            .take(2)
-            .map(|(k, v)| format!("{} ({}x)", k, v))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        // Format yang bisa langsung di-inject ke Claude
-        let mut ctx = format!("[OMNI Context] Task: {}.", task);
-        if !hot_str.is_empty() {
-            ctx.push_str(&format!(" Hot: {}.", hot_str));
+        let mut msg = format!(
+            "[OMNI Context] Task: {}. Hot: {}. Error: {}",
+            task, hot_str, err
+        );
+        if msg.len() > 200 {
+            msg.truncate(197);
+            msg.push_str("...");
         }
-        if err != "none" {
-            let err_clean = err.replace('\n', " ");
-            ctx.push_str(&format!(
-                " Error: {}",
-                &err_clean[..err_clean.len().min(80)]
-            ));
-        }
-        // Trim ke max 200 chars
-        if ctx.len() > 200 {
-            ctx.truncate(197);
-            ctx.push_str("...");
-        }
-        println!("{}", ctx);
+        println!("{}", msg);
         return Ok(());
     }
 

@@ -1,5 +1,6 @@
-use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
+use crate::session::learn::{apply_to_config, detect_patterns};
 use anyhow::Result;
+use chrono::Utc;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -69,9 +70,10 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         );
     }
 
-    let generated = generate_toml(&candidates, "auto_learned");
+    let filter_name = format!("learned_{}", Utc::now().timestamp());
 
     if dry_run {
+        let generated = crate::session::learn::generate_toml(&candidates, &filter_name);
         println!("\n[Dry Run] Generated TOML configuration:\n{}", generated);
     } else if apply {
         let path = dirs::home_dir()
@@ -79,7 +81,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             .join(".omni")
             .join("filters")
             .join("learned.toml");
-        apply_to_config(&candidates, "auto_learned", &path)?;
+        apply_to_config(&candidates, &filter_name, &path)?;
         println!(
             "\nSuccessfully appended {} triggers to {:?}",
             candidates.len(),

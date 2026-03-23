@@ -1,9 +1,14 @@
 use anyhow::{Context, Result};
 use regex::Regex;
+use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[derive(RustEmbed)]
+#[folder = "filters/"]
+struct Asset;
 
 #[derive(Debug, Deserialize)]
 struct TomlDocument {
@@ -304,6 +309,95 @@ pub fn load_from_dir(dir: &Path) -> Vec<TomlFilter> {
     all_filters
 }
 
+pub fn load_embedded_filters() -> Vec<TomlFilter> {
+    let mut all_filters = Vec::new();
+    for file in Asset::iter() {
+        if file.ends_with(".toml")
+            && let Some(content) = Asset::get(&file)
+        {
+            let s = String::from_utf8_lossy(&content.data);
+            match toml::from_str::<TomlDocument>(&s) {
+                Ok(doc) => {
+                    if let Some(filters) = doc.filters {
+                        let mut tests_map = doc.tests.unwrap_or_default();
+                        for (name, config) in filters {
+                            // Add sys_ prefix to built-in filters
+                            let sys_name = format!("sys_{}", name);
+                            if let Ok(filter) =
+                                create_filter_from_config(sys_name, config, &mut tests_map)
+                            {
+                                all_filters.push(filter);
+                            }
+                        }
+                    }
+                }
+                Err(e) => eprintln!("[omni] failed to parse embedded filter {}: {}", file, e),
+            }
+        }
+    }
+    all_filters
+}
+
+fn create_filter_from_config(
+    name: String,
+    config: FilterConfig,
+    tests_map: &mut HashMap<String, Vec<TestConfig>>,
+) -> Result<TomlFilter> {
+    let match_regex = Regex::new(&config.match_command)?;
+    let mut replace_rules = Vec::new();
+    for rr in config.replace_rules {
+        replace_rules.push((Regex::new(&rr.pattern)?, rr.replacement));
+    }
+
+    let mut match_output = Vec::new();
+    for mo in config.match_output {
+        let pattern = Regex::new(&mo.pattern)?;
+        let unless = match mo.unless {
+            Some(u) => Some(Regex::new(&u)?),
+            None => None,
+        };
+        match_output.push(MatchOutputRule {
+            pattern,
+            message: mo.message,
+            unless,
+        });
+    }
+
+    let line_filter = if let Some(strips) = config.strip_lines_matching {
+        let mut rules = Vec::new();
+        for s in strips {
+            rules.push(Regex::new(&s)?);
+        }
+        LineFilter::Strip(rules)
+    } else if let Some(keeps) = config.keep_lines_matching {
+        let mut rules = Vec::new();
+        for k in keeps {
+            rules.push(Regex::new(&k)?);
+        }
+        LineFilter::Keep(rules)
+    } else {
+        LineFilter::None
+    };
+
+    let inline_tests = tests_map
+        .remove(&name.replace("sys_", ""))
+        .unwrap_or_default();
+
+    Ok(TomlFilter {
+        name,
+        description: config.description,
+        match_regex,
+        strip_ansi: config.strip_ansi,
+        replace_rules,
+        match_output,
+        line_filter,
+        max_lines: config.max_lines,
+        on_empty: config.on_empty,
+        confidence: config.confidence,
+        inline_tests,
+    })
+}
+
 pub fn run_inline_tests(filters: &[TomlFilter]) -> TestReport {
     let mut passes = 0;
     let mut failures = Vec::new();
@@ -327,16 +421,21 @@ pub fn run_inline_tests(filters: &[TomlFilter]) -> TestReport {
 
 pub fn load_all_filters() -> Vec<TomlFilter> {
     let mut all = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
     // 1. .omni/filters/*.toml (project-local, if trusted)
     if let Ok(cwd) = std::env::current_dir() {
-        let omni_config_path = cwd.join("omni_config.json");
-        // We evaluate project trust over omni_config.json conceptually
-        // since `trust.rs` specifically hashes `omni_config.json`.
-        // Alternatively, if the project is trusted, we load its filters directory.
-        if crate::guard::trust::is_trusted(&omni_config_path) {
-            let local_filters_dir = cwd.join(".omni").join("filters");
-            all.append(&mut load_from_dir(&local_filters_dir));
+        let local_filters_dir = cwd.join(".omni").join("filters");
+        if local_filters_dir.exists() {
+            let config_path = cwd.join("omni_config.json");
+            if crate::guard::trust::is_trusted(&config_path) {
+                for f in load_from_dir(&local_filters_dir) {
+                    if !seen.contains(&f.name) {
+                        seen.insert(f.name.clone());
+                        all.push(f);
+                    }
+                }
+            }
         }
     }
 
@@ -344,28 +443,68 @@ pub fn load_all_filters() -> Vec<TomlFilter> {
     if let Some(mut home) = dirs::home_dir() {
         home.push(".omni");
         home.push("filters");
-        all.append(&mut load_from_dir(&home));
-    }
-
-    // 3. Built-in filters (for now loaded straight from standard `filters/` dir relative to project,
-    // though in production we might `include_str!` or `include_dir!`. We use `filters/` path dynamically).
-    if let Ok(cwd) = std::env::current_dir() {
-        let default_filters = cwd.join("filters");
-        all.append(&mut load_from_dir(&default_filters));
-    }
-
-    // Remove duplicates based on name, honoring priority order (first loaded wins)
-    let mut unique = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for filter in all {
-        if !seen.contains(&filter.name) {
-            seen.insert(filter.name.clone());
-            unique.push(filter);
+        for f in load_from_dir(&home) {
+            if !seen.contains(&f.name) {
+                seen.insert(f.name.clone());
+                all.push(f);
+            }
         }
     }
 
-    unique
+    // 3. Built-in filters (embedded)
+    for f in load_embedded_filters() {
+        if !seen.contains(&f.name) {
+            seen.insert(f.name.clone());
+            all.push(f);
+        }
+    }
+
+    all
+}
+
+pub fn get_filters_by_source() -> (Vec<TomlFilter>, Vec<TomlFilter>, Vec<TomlFilter>) {
+    let mut built_in = Vec::new();
+    let mut user = Vec::new();
+    let mut local = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. Local
+    if let Ok(cwd) = std::env::current_dir() {
+        let local_filters_dir = cwd.join(".omni").join("filters");
+        if local_filters_dir.exists() {
+            let config_path = cwd.join("omni_config.json");
+            if crate::guard::trust::is_trusted(&config_path) {
+                for f in load_from_dir(&local_filters_dir) {
+                    if !seen.contains(&f.name) {
+                        seen.insert(f.name.clone());
+                        local.push(f);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. User
+    if let Some(mut home) = dirs::home_dir() {
+        home.push(".omni");
+        home.push("filters");
+        for f in load_from_dir(&home) {
+            if !seen.contains(&f.name) {
+                seen.insert(f.name.clone());
+                user.push(f);
+            }
+        }
+    }
+
+    // 3. Built-in
+    for f in load_embedded_filters() {
+        if !seen.contains(&f.name) {
+            seen.insert(f.name.clone());
+            built_in.push(f);
+        }
+    }
+
+    (built_in, user, local)
 }
 
 #[cfg(test)]

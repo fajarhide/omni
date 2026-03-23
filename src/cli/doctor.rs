@@ -101,27 +101,35 @@ pub fn run() -> anyhow::Result<()> {
         path => {
             if path.exists() {
                 if let Ok(content) = fs::read_to_string(&path) {
-                    if content.contains("omni --hook --post-tool") {
-                        println!("   PostToolUse:  [OK] installed");
-                    } else {
-                        println!("   PostToolUse:  [WARNING] missing");
-                        warnings.push("PostToolUse hook is not installed. Run `omni init`.");
-                        all_ok = false;
-                    }
+                    if content.contains("--hook") {
+                        if content.contains("PostToolUse") {
+                            println!("   PostToolUse:  [OK] installed");
+                        } else {
+                            println!("   PostToolUse:  [WARNING] missing");
+                            warnings.push("PostToolUse hook is not installed. Run `omni init`.");
+                            all_ok = false;
+                        }
 
-                    if content.contains("omni --hook --session-start") {
-                        println!("   SessionStart: [OK] installed");
-                    } else {
-                        println!("   SessionStart: [WARNING] missing");
-                        warnings.push("SessionStart hook is not installed.");
-                        all_ok = false;
-                    }
+                        if content.contains("SessionStart") {
+                            println!("   SessionStart: [OK] installed");
+                        } else {
+                            println!("   SessionStart: [WARNING] missing");
+                            warnings.push("SessionStart hook is not installed.");
+                            all_ok = false;
+                        }
 
-                    if content.contains("omni --hook --pre-compact") {
-                        println!("   PreCompact:   [OK] installed");
+                        if content.contains("PreCompact") {
+                            println!("   PreCompact:   [OK] installed");
+                        } else {
+                            println!("   PreCompact:   [WARNING] missing");
+                            warnings.push("PreCompact hook is not installed.");
+                            all_ok = false;
+                        }
                     } else {
-                        println!("   PreCompact:   [WARNING] missing");
-                        warnings.push("PreCompact hook is not installed.");
+                        println!(
+                            "   Hooks:        [WARNING] omni --hook not found in settings.json"
+                        );
+                        warnings.push("OMNI hooks are not configured. Run `omni init`.");
                         all_ok = false;
                     }
                 }
@@ -161,34 +169,36 @@ pub fn run() -> anyhow::Result<()> {
 
     // 6. Config Filters
     println!(" Filters:");
-    let all_filters = crate::pipeline::toml_filter::load_all_filters();
-    let mut built_in = 0;
-    let mut user: usize = 0;
-    let _local = 0;
+    let (built_in, user_filters, local_filters) =
+        crate::pipeline::toml_filter::get_filters_by_source();
 
-    for f in &all_filters {
-        if f.name.starts_with("sys_") {
-            built_in += 1;
-        } else {
-            user += 1;
-        } // Simplify: assume all non sys_ are user/local
-    }
-
-    println!("   Built-in:    {} filters loaded", built_in);
+    println!(
+        "   Built-in:    {} filters loaded (embedded)",
+        built_in.len()
+    );
 
     let user_dir = conf_dir.join("filters");
     if user_dir.exists() {
-        println!("   User:        ~/.omni/filters/ ({} filters)", user);
+        println!(
+            "   User:        ~/.omni/filters/ ({} filters)",
+            user_filters.len()
+        );
     } else {
-        println!("   User:        ~/.omni/filters/ (missing) [WARNING]");
+        println!("   User:        ~/.omni/filters/ (none)");
     }
 
     let project_dir = PathBuf::from(".omni/filters");
     if project_dir.exists() {
         if crate::guard::trust::is_trusted(std::env::current_dir().unwrap_or_default().as_path()) {
-            println!("   Project:     .omni/filters/ (TRUSTED) [OK]");
+            println!(
+                "   Project:     .omni/filters/ ({} filters, TRUSTED) [OK]",
+                local_filters.len()
+            );
         } else {
-            println!("   Project:     .omni/filters/ (NOT TRUSTED — run: omni trust) [WARNING]");
+            println!(
+                "   Project:     .omni/filters/ ({} filters, NOT TRUSTED — run: omni trust) [WARNING]",
+                local_filters.len()
+            );
             warnings.push("Project filters found but not trusted.");
             all_ok = false;
         }

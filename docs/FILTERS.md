@@ -2,15 +2,19 @@
 
 OMNI supports user-defined TOML filters for distilling output from any command — including internal company tools, custom deploy scripts, and CI pipelines.
 
-## Filter Location
-
 | Directory | Priority | Description |
 |---|---|---|
-| Built-in (compiled) | Lowest | Ships with OMNI |
-| `~/.omni/filters/` | Medium | User-global filters |
-| `.omni/filters/` | Highest | Project-local (requires `omni trust`) |
+| **Built-in (embedded)** | Lowest | Compiled into the OMNI binary |
+| **User** (`~/.omni/filters/`) | Medium | Personal/User-global filters |
+| **Project** (`.omni/filters/`) | Highest | Project-specific (requires `omni trust`) |
 
-Project-local filters override user filters which override built-in filters.
+### Hierarchy Logic
+1. **Project-local filters** override User filters.
+2. **User filters** override Built-in filters.
+3. **Built-in filters** are the fallback for standard commands.
+
+> [!NOTE]
+> **Built-in** filters are not visible in the filesystem because they are compiled into the binary (`embedded`). If you want to modify them, create a file with the same name in `~/.omni/filters/` to override their behavior.
 
 ## Basic Structure
 
@@ -274,11 +278,40 @@ omni learn --dry-run < output.log
 omni learn --apply < output.log
 ```
 
+## Project-local Filters (.omni/filters/)
+
+This filter level is extremely useful for teams or repositories that have specific internal tooling. By placing filters inside the project folder, you ensure that the entire team (and their AI agents) gets consistent signal distillation.
+
+### Usage Guide (Step-by-Step)
+
+1. **Create Directory**: In your project root, create the `.omni/filters/` directory.
+   ```bash
+   mkdir -p .omni/filters
+   ```
+
+2. **Add Filter**: Create a TOML file, for example `.omni/filters/setup-backend.toml`.
+   ```toml
+   schema_version = 1
+   [filters.setup-backend]
+   match_command = "^./scripts/setup-db"
+   strip_lines_matching = ["^Connecting", "^Checking versions"]
+   on_empty = "db: setup complete"
+   ```
+
+3. **Verify & Trust**: Run `omni doctor`. You will see the status **[WARNING] NOT TRUSTED**. Run the following command to enable it:
+   ```bash
+   omni trust
+   ```
+
+### Benefits of Project Filters
+- **Checked into Git**: These filters can be added to the repository (`git add .omni/filters`), ensuring anyone who clones the repo immediately gets the same token savings.
+- **Custom Signalling**: Perfect for internal scripts that produce noisy output but only contain small bits of information relevant to the AI.
+
 ## Trust for Project Filters
 
-Project-local filters (`.omni/filters/`) are not loaded until trusted:
+Project-local filters (`.omni/filters/`) will not be loaded until you explicitly "trust" the project. This is a security feature to prevent malicious filters from untrusted repositories.
 
 ```bash
-omni trust    # Review and trust current project's filters
-omni doctor   # Shows trust status
+omni trust    # Review and approve filters in the current project
+omni doctor   # Check trust status and number of loaded filters
 ```

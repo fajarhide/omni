@@ -196,7 +196,7 @@ $ omni stats
 | `omni init --hook` | Setup Claude Code hooks |
 | `omni stats` | Token savings analytics |
 | `omni session` | Session state inspection |
-| `omni learn` | Auto-generate filters from passthrough |
+| `omni learn` | Auto-generate filters from noise | [docs/LEARN.md](docs/LEARN.md) |
 | `omni doctor` | Diagnose installation |
 | `omni version` | Print version |
 | `omni help` | Show help |
