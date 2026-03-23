@@ -207,7 +207,7 @@ mod tests {
             suggested_action: LearnAction::Strip,
         }];
         let toml = generate_toml(&c, "gen_test");
-        assert!(toml.contains("schema_version = 1"));
+        // schema_version is now handled by apply_to_config, not generation
         assert!(toml.contains("[filters.gen_test]"));
         assert!(toml.contains("\"^Test Prefix Gen\""));
     }
