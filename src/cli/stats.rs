@@ -78,20 +78,16 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
     use colored::*;
 
+    println!("\n{}", "─────────────────────────────────────────────────".bright_black());
     println!(
-        "\n{}",
-        " ───────────────────────────────────────────────── ".bright_black()
-    );
-    println!(
-        " {} {}",
-        "📊".bright_blue(),
+        " {}",
         format!("OMNI Signal Report — {}", period_label)
             .bold()
             .bright_white()
     );
     println!(
         "{}",
-        " ───────────────────────────────────────────────── ".bright_black()
+        "─────────────────────────────────────────────────".bright_black()
     );
 
     println!(
@@ -141,11 +137,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     // Filter breakdown
     let filters = store.filter_breakdown(since)?;
     if !filters.is_empty() {
-        println!(
-            "\n {} {}",
-            "🔍".bright_yellow(),
-            "By Filter:".bold().bright_white()
-        );
+        println!("\n {}", "By Filter:".bold().bright_white());
         for (i, (name, cnt, pct)) in filters.iter().enumerate() {
             let bar = format_bar(*pct);
             let bar_colored = if *pct > 80.0 {
@@ -175,11 +167,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let routes = store.route_distribution(since)?;
     if !routes.is_empty() {
         let total_routes: u64 = routes.iter().map(|(_, c)| c).sum();
-        println!(
-            "\n {} {}",
-            "🛣️ ".bright_magenta(),
-            "Route Distribution:".bold().bright_white()
-        );
+        println!("\n {}", "Route Distribution:".bold().bright_white());
         for (route, cnt) in &routes {
             let pct = if total_routes > 0 {
                 *cnt as f64 / total_routes as f64 * 100.0
@@ -206,8 +194,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         let hot_files = store.hot_files_global(since)?;
         if !hot_files.is_empty() {
             println!(
-                "\n {} {}",
-                "📂".bright_blue(),
+                "\n {}",
                 "Session Insights:".bold().bright_white()
             );
             let files_str: Vec<String> = hot_files
