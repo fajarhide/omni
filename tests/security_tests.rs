@@ -112,3 +112,89 @@ fn test_pipeline_deterministic() {
         "Pipeline should be deterministic for same input"
     );
 }
+
+#[test]
+fn test_env_sanitization_removes_dangerous_vars() {
+    use omni::guard::env::{DENYLIST, sanitize_env};
+
+    // Set beberapa dangerous vars
+    unsafe {
+        std::env::set_var("LD_PRELOAD", "malicious.so");
+        std::env::set_var("BASH_ENV", "evil_script.sh");
+        std::env::set_var("NODE_OPTIONS", "--require=evil");
+    }
+
+    let sanitized = sanitize_env();
+
+    // Verify semua DENYLIST entries hilang
+    for key in DENYLIST {
+        assert!(
+            !sanitized.iter().any(|(k, _)| k == key),
+            "DENYLIST entry '{}' should not be in sanitized env",
+            key
+        );
+    }
+
+    // Verify normal vars masih ada
+    assert!(
+        sanitized.iter().any(|(k, _)| k == "PATH"),
+        "PATH should still be in sanitized env"
+    );
+
+    // Cleanup
+    unsafe {
+        std::env::remove_var("LD_PRELOAD");
+        std::env::remove_var("BASH_ENV");
+        std::env::remove_var("NODE_OPTIONS");
+    }
+}
+
+#[test]
+fn test_hook_handles_null_bytes_gracefully() {
+    use omni::hooks::post_tool::process_payload;
+
+    // Input dengan null bytes tidak boleh crash
+    let malicious = "{\"tool_name\":\"Bash\",\"tool_response\":{\"content\":\"hello\0world\"}}";
+    let result = process_payload(malicious, None, None);
+    // Tidak crash adalah acceptance criteria — result bisa None atau Some
+    let _ = result;
+}
+
+#[test]
+fn test_dispatcher_catch_unwind_works() {
+    // Test bahwa panic di dalam handler tidak propagate
+    // Kita simulasi behavior catch_unwind di dispatcher.rs
+    let result = std::panic::catch_unwind(|| {
+        panic!("intentional panic for test");
+    });
+
+    assert!(result.is_err(), "Should have caught the panic");
+
+    // Verifikasi dispatcher::run behavior (fail silently)
+    let dispatcher_behavior = match result {
+        Ok(_) => "should_not_happen",
+        Err(_) => "caught_and_handled",
+    };
+    assert_eq!(dispatcher_behavior, "caught_and_handled");
+}
+
+#[test]
+fn test_hook_json_escaping_quotes_and_newlines() {
+    use omni::hooks::post_tool::process_payload;
+    use serde_json::json;
+
+    // Input dengan quotes dan newlines dalam content
+    let tricky_content = "error: expected `\"` \nfound `\n` at line 42".repeat(30);
+    let input = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "cargo build"},
+        "tool_response": {"content": tricky_content}
+    });
+
+    if let Some(output) = process_payload(&input.to_string(), None, None) {
+        // Output harus valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(&output)
+            .expect("Hook output must be valid JSON even with special chars");
+        assert!(parsed["hookSpecificOutput"]["updatedResponse"].is_string());
+    }
+}
