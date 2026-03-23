@@ -6,11 +6,7 @@
 * [ ] `cargo clippy -- -D warnings` — no lint warnings
 * [ ] `cargo test` — all tests pass (147+)
 * [ ] `cargo insta review` — all snapshots approved
-* [ ] New functionality has tests
-
-### Description
-
-<!-- Describe your changes -->
+* [ ] New functionality has tests 
 
 ### Type of Change
 
@@ -19,3 +15,7 @@
 - [ ] Documentation
 - [ ] Refactoring
 - [ ] Performance improvement
+
+### Description / Screenshot / Proof
+
+<!-- Update your changes -->
