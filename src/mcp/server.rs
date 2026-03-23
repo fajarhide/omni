@@ -1,7 +1,7 @@
 use crate::pipeline::classifier::classify;
-use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
+use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
 use crate::store::sqlite::Store;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::{ServerHandler, tool};
@@ -312,10 +312,22 @@ mod tests {
         // 5+ repetitive lines should produce real candidate output
         let repetitive = "Compiling foo v1.0\n".repeat(6);
         let out = server.omni_learn(repetitive, false).await;
-        assert!(out.contains("noise patterns"), "expected pattern report, got: {out}");
-        assert!(out.contains("occurrences"), "expected occurrence count, got: {out}");
-        assert!(out.contains("confidence"), "expected confidence score, got: {out}");
-        assert!(out.contains("apply=true"), "expected apply hint, got: {out}");
+        assert!(
+            out.contains("noise patterns"),
+            "expected pattern report, got: {out}"
+        );
+        assert!(
+            out.contains("occurrences"),
+            "expected occurrence count, got: {out}"
+        );
+        assert!(
+            out.contains("confidence"),
+            "expected confidence score, got: {out}"
+        );
+        assert!(
+            out.contains("apply=true"),
+            "expected apply hint, got: {out}"
+        );
     }
 
     #[tokio::test]
