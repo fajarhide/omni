@@ -158,7 +158,7 @@ See [docs/FILTERS.md](docs/FILTERS.md) for the complete filter writing guide.
 $ omni stats
 
  ───────────────────────────────────────────────── 
- 📊 OMNI Signal Report — last 30 days
+  OMNI Signal Report — last 30 days
  ───────────────────────────────────────────────── 
   Commands processed:  1,247
   Data Distilled:      18.4 MB → 3.2 MB
@@ -167,19 +167,19 @@ $ omni stats
   Average Latency:     2.1ms
   RewindStore:         23 archived / 8 retrieved
 
- 🔍 By Filter:
+   By Filter:
    1. git          203x  89%  ████████████████████
    2. build         89x  82%  ████████████████
    3. test          44x  79%  ███████████████
    4. infra         31x  76%  █████████████
 
- 🛣️  Route Distribution:
+  Route Distribution:
   Distill:        1247  (97%)
   Keep:             25  ( 2%)
   Drop:             12  ( 1%)
   Passthrough:       0  ( 0%)
 
- 📂 Session Insights:
+  Session Insights:
   Hot files:  src/auth/mod.rs (12), tests/auth_test.rs (8)
 
  ───────────────────────────────────────────────── 
