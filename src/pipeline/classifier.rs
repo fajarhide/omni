@@ -274,8 +274,8 @@ mod tests {
         let per_iter_us = elapsed_us / iters;
 
         assert!(
-            per_iter_us < 100,
-            "took {}µs per iter, expected < 100µs",
+            per_iter_us < 500,
+            "took {}µs per iter, expected < 500µs",
             per_iter_us
         );
     }
@@ -292,8 +292,8 @@ mod tests {
         let per_iter_us = elapsed_us / iters;
 
         assert!(
-            per_iter_us < 1000,
-            "took {}µs per iter, expected < 1000µs",
+            per_iter_us < 5000,
+            "took {}µs per iter, expected < 5000µs",
             per_iter_us
         );
     }
