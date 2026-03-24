@@ -7,6 +7,13 @@ fn omni_binary() -> String {
     env!("CARGO_BIN_EXE_omni").to_string()
 }
 
+fn omni_cmd() -> (Command, tempfile::NamedTempFile) {
+    let temp_db = tempfile::NamedTempFile::new().expect("Failed to create temp DB");
+    let mut cmd = Command::new(omni_binary());
+    cmd.env("OMNI_DB_PATH", temp_db.path());
+    (cmd, temp_db)
+}
+
 #[test]
 fn test_hook_e2e_git_diff() {
     let fixture =
@@ -21,7 +28,8 @@ fn test_hook_e2e_git_diff() {
         }
     });
 
-    let mut child = Command::new(omni_binary())
+    let (mut cmd, _db) = omni_cmd();
+    let mut child = cmd
         .arg("--hook")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -64,7 +72,8 @@ fn test_hook_non_bash_exit_clean() {
         }
     });
 
-    let mut child = Command::new(omni_binary())
+    let (mut cmd, _db) = omni_cmd();
+    let mut child = cmd
         .arg("--hook")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -90,7 +99,8 @@ fn test_hook_non_bash_exit_clean() {
 
 #[test]
 fn test_hook_invalid_json_exit_clean() {
-    let mut child = Command::new(omni_binary())
+    let (mut cmd, _db) = omni_cmd();
+    let mut child = cmd
         .arg("--hook")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -125,7 +135,8 @@ fn test_hook_short_content_exit_clean() {
         }
     });
 
-    let mut child = Command::new(omni_binary())
+    let (mut cmd, _db) = omni_cmd();
+    let mut child = cmd
         .arg("--hook")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -159,7 +170,8 @@ fn test_hook_short_content_exit_clean() {
 fn test_pipe_mode_via_binary() {
     let input = "diff --git a/foo.rs b/foo.rs\n@@ -1,2 +1,2 @@\n-old line\n+new line\n";
 
-    let mut child = Command::new(omni_binary())
+    let (mut cmd, _db) = omni_cmd();
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -182,10 +194,8 @@ fn test_pipe_mode_via_binary() {
 
 #[test]
 fn test_cli_version() {
-    let output = Command::new(omni_binary())
-        .arg("version")
-        .output()
-        .expect("Failed to run");
+    let (mut cmd, _db) = omni_cmd();
+    let output = cmd.arg("version").output().expect("Failed to run");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -197,10 +207,8 @@ fn test_cli_version() {
 
 #[test]
 fn test_cli_help() {
-    let output = Command::new(omni_binary())
-        .arg("help")
-        .output()
-        .expect("Failed to run");
+    let (mut cmd, _db) = omni_cmd();
+    let output = cmd.arg("help").output().expect("Failed to run");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -215,7 +223,8 @@ fn test_cli_help() {
 
 #[test]
 fn test_cli_unknown_command() {
-    let output = Command::new(omni_binary())
+    let (mut cmd, _db) = omni_cmd();
+    let output = cmd
         .arg("nonexistent-cmd-xyz")
         .output()
         .expect("Failed to run");
@@ -234,10 +243,8 @@ fn test_cli_unknown_command() {
 
 #[test]
 fn test_cli_doctor_runs() {
-    let output = Command::new(omni_binary())
-        .arg("doctor")
-        .output()
-        .expect("Failed to run");
+    let (mut cmd, _db) = omni_cmd();
+    let output = cmd.arg("doctor").output().expect("Failed to run");
 
     assert!(output.status.success(), "Doctor should exit 0");
     let stdout = String::from_utf8_lossy(&output.stdout);

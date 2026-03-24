@@ -157,7 +157,11 @@ pub fn check_status(val: &Value, exe_path: &str) -> (bool, bool, bool) {
                     for hook_def in inner_arr {
                         if let Some(cmd) = hook_def.get("command").and_then(|c| c.as_str())
                             && cmd.contains(exe_path)
-                            && cmd.contains("--hook")
+                            && (cmd.contains("--hook")
+                                || cmd.contains("--post-hook")
+                                || cmd.contains("--pre-hook")
+                                || cmd.contains("--session-start")
+                                || cmd.contains("--pre-compact"))
                         {
                             return true;
                         }
@@ -192,12 +196,12 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
 
     let cmd = format!("{} --hook", exe_path);
 
-    let ensure_hook = |arr_val: &mut serde_json::Value, matcher: &str| {
+    let ensure_hook = |arr_val: &mut serde_json::Value, matcher: &str, hook_cmd: &str| {
         let arr = arr_val.as_array_mut().unwrap();
         for v in arr.iter() {
             if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
                 for h in inner {
-                    if h.get("command").and_then(|c| c.as_str()) == Some(cmd.as_str()) {
+                    if h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd) {
                         return;
                     }
                 }
@@ -209,18 +213,37 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
             "hooks": [
                 {
                     "type": "command",
-                    "command": cmd
+                    "command": hook_cmd
                 }
             ]
         }));
     };
 
+    let script_path = format!("{} --pre-hook", exe_path);
+    let post_cmd = format!("{} --post-hook", exe_path);
+    let session_cmd = format!("{} --session-start", exe_path);
+    let compact_cmd = format!("{} --pre-compact", exe_path);
+
+    ensure_hook(
+        hooks.entry("PreToolUse").or_insert_with(|| json!([])),
+        "Bash",
+        &script_path,
+    );
     ensure_hook(
         hooks.entry("PostToolUse").or_insert_with(|| json!([])),
         "Bash",
+        &post_cmd,
     );
-    ensure_hook(hooks.entry("SessionStart").or_insert_with(|| json!([])), "");
-    ensure_hook(hooks.entry("PreCompact").or_insert_with(|| json!([])), "");
+    ensure_hook(
+        hooks.entry("SessionStart").or_insert_with(|| json!([])),
+        "",
+        &session_cmd,
+    );
+    ensure_hook(
+        hooks.entry("PreCompact").or_insert_with(|| json!([])),
+        "",
+        &compact_cmd,
+    );
 }
 
 pub fn remove_omni_hooks(val: &mut Value) {
@@ -232,9 +255,13 @@ pub fn remove_omni_hooks(val: &mut Value) {
                 arr.retain(|v| {
                     if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
                         !inner.iter().any(|h| {
-                            h.get("command")
-                                .and_then(|c| c.as_str())
-                                .is_some_and(|c| c.contains("omni") && c.contains("--hook"))
+                            h.get("command").and_then(|c| c.as_str()).is_some_and(|c| {
+                                c.contains("omni")
+                                    && (c.contains("--hook")
+                                        || c.contains("--post-hook")
+                                        || c.contains("--session-start")
+                                        || c.contains("--pre-compact"))
+                            })
                         })
                     } else {
                         true

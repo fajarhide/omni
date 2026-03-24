@@ -35,13 +35,22 @@ pub fn classify(input: &str) -> ContentType {
             return ContentType::GitDiff;
         }
     }
-    let has_a = lines.iter().any(|l| l.starts_with("--- a/"));
-    let has_b = lines.iter().any(|l| l.starts_with("+++ b/"));
-    if has_a && has_b {
-        return ContentType::GitDiff;
-    }
-    if lines.iter().take(10).any(|l| l.starts_with("@@ -")) {
-        return ContentType::GitDiff;
+    let exempt_git_diff = lines.iter().any(|l| {
+        l.starts_with("Compiling ")
+            || l.starts_with("Finished ")
+            || (l.starts_with("running ") && l.contains(" test"))
+            || l.contains("test result: ")
+    });
+
+    if !exempt_git_diff {
+        let has_a = lines.iter().any(|l| l.starts_with("--- a/"));
+        let has_b = lines.iter().any(|l| l.starts_with("+++ b/"));
+        if has_a && has_b {
+            return ContentType::GitDiff;
+        }
+        if lines.iter().take(10).any(|l| l.starts_with("@@ -")) {
+            return ContentType::GitDiff;
+        }
     }
 
     // 2. GitStatus
@@ -90,6 +99,12 @@ pub fn classify(input: &str) -> ContentType {
     let has_pass = lines.iter().any(|l| l.contains("PASSED"));
     let has_fail = lines.iter().any(|l| l.contains("FAILED"));
     if has_pass && has_fail {
+        return ContentType::TestOutput;
+    }
+    if lines
+        .iter()
+        .any(|l| l.starts_with("running ") && l.contains(" test"))
+    {
         return ContentType::TestOutput;
     }
     if lines.iter().any(|l| test_kw.iter().any(|k| l.contains(k))) {
@@ -209,6 +224,9 @@ mod tests {
 
         let cargo_test = "running 15 tests\ntest foo ... ok\ntest result: ok. 15 passed";
         assert_eq!(classify(cargo_test), ContentType::TestOutput);
+
+        let cargo_test_diff = "running 1 test\ntest my_test ... FAILED\n\nfailures:\n\n---- my_test stdout ----\nthread 'my_test' panicked at ...\n@@ -1,5 +1,6 @@\n+ foo\n- bar";
+        assert_eq!(classify(cargo_test_diff), ContentType::TestOutput);
     }
 
     #[test]

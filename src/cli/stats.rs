@@ -140,7 +140,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     // Filter breakdown
     let filters = store.filter_breakdown(since)?;
     if !filters.is_empty() {
-        println!("\n {}", "By Filter:".bold().bright_white());
+        println!("\n {}", "By Command:".bold().bright_white());
         for (i, (name, cnt, pct)) in filters.iter().enumerate() {
             let bar = format_bar(*pct);
             let bar_colored = if *pct > 80.0 {

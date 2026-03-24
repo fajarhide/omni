@@ -47,5 +47,6 @@ cargo test    # All 147 tests should pass
 ## See Also
 
 - [CLAUDE.md](CLAUDE.md) — Full developer guide (project structure, architecture)
+- [tests/README.md](tests/README.md#critical-guardrails) — **Critical Guardrails (Avoid deadlocks & hangs)**
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — Detailed development setup
 - [docs/FILTERS.md](docs/FILTERS.md) — How to write TOML filters

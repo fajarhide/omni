@@ -6,9 +6,9 @@
   [![CI](https://github.com/fajarhide/omni/actions/workflows/ci.yml/badge.svg)](https://github.com/fajarhide/omni/actions/workflows/ci.yml)
   [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
-  [![Stars](https://img.shields.io/github/stars/fajarhide/omni?style=flat-square)](https://github.com/fajarhide/omni/stargazers)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
   [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![Stars](https://img.shields.io/github/stars/fajarhide/omni?style=flat-square)](https://github.com/fajarhide/omni/stargazers)
 </div>
 
 <br/>
@@ -24,131 +24,50 @@ AI agents are drowning in noisy CLI output. A `git diff` can easily eat 10K toke
 
 OMNI intercepts terminal output automatically, keeping only what matters for your current task. It’s not just about making output smaller; it’s about making it smarter. By understanding command structures and your active session context, OMNI ensures your agent sees the signal, not the waste.
 
-## How It Works
+1.  **Cost & Latency**: Large outputs consume your context window rapidly and increase the cost of every message.
+2.  **Cognitive Dilution**: LLMs can lose track of complex reasoning when buried under megabytes of raw CLI logs.
+3.  **Auto-Truncation**: Claude Code often cuts off large outputs, potentially missing the exact error or diff line it needs to see.
 
-```text
-Claude runs git diff  ──▶  800 lines raw output
-                                 │
-PostToolUse hook      ──▶  omni --hook
-                                 │
-Claude reads          ──◀  35 lines pure signal
-```
+**OMNI is the solution.** It acts as a "Sieve" that sits between your terminal and the AI, turning raw data into **Semantic Signals**.
 
-OMNI knows your session context. Debugging an auth bug? Changes in `src/auth/` get priority automatically. No configuration needed—it just works.
+---
 
+## How It Works: The Signal Lifecycle
 
-1. **Classify** — OMNI identifies the content type (git diff, build output, test results, logs) by analyzing structure, not filenames
-2. **Score** — Each line gets a semantic relevance score based on signal tier (critical → noise) and your current session context
-3. **Compose** — High-signal content is kept, noise is removed, and anything dropped is stored in RewindStore for retrieval
+OMNI employs a unique, multi-layered native interception strategy to ensure maximum efficiency without losing information:
 
-All of this happens **transparently** — your AI agent doesn't know OMNI exists. It just gets better signal.
+### 1. Surgical Pre-Hook (`PreToolUse`)
+Intercepts noisy commands (like `git`, `cargo`, `npm`, `pytest`) *before* they execute. By natively rewriting these commands to `omni exec`, OMNI prevents auto-truncation and ensures the AI sees a distilled, high-density stream from the first line.
+
+### 2. Safety-Net Post-Hook (`PostToolUse`)
+Automatically distills output from any tool *after* it runs. This acts as a backup for custom scripts or unknown commands that weren't caught by the pre-hook.
+
+### 3. Session Continuity (`SessionStart`)
+When you start a new Claude session, OMNI injects a high-level summary of your *previous* state—hot files, last errors, and active task context—so the agent never reaches for "context" it already had.
+
+### 4. Smart Compaction (`PreCompact`)
+Before Claude prunes its conversation history to save space, OMNI provides a permanent summary of the work done so far, ensuring long-term project memory stays sharp.
+
+---
 
 ### The Impact
-> **Reduce up to 90% AI Token Usage**  
-> *Zero Information Loss. Maximum Agent Context. <2ms Overhead.*
+> **Reduce AI Token Usage by up to 90%**  
+> *Zero Information Loss. Native Binary Performance. <2ms Overhead.*
 <br/>
 
 ![OMNI Token Savings](omni_token_savings_graphic.png)
 
+## Key Features
 
-## What OMNI distils
+### RewindStore: Zero Information Loss
+When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore** with a SHA-256 hash. If the agent needs the full, unbridled output, it simply calls `omni_retrieve("hash")` via its MCP tool.
 
-| Output type | Example | Reduction | What's Kept |
-|---|---|---|---|
-| git diff | 800 lines → 35 lines | ~96% | File tree, changed hunks, +/- lines |
-| cargo test | 25K tokens → 2K tokens | ~92% | Error count, error messages, warnings |
-| pytest failures | 500 lines → 20 lines | ~96% | Test failures, error messages, warnings |
-| docker build | 600 tokens → 15 tokens | ~98% | Step count, cache hits, image ID |
-
-## Session Continuity
-
-When Claude Code restarts, OMNI injects context from the previous session so the agent never loses its place. It tracks "hot files" and active errors to guide the agent back to the problem.
-
-```text
-Continuing: debugging auth bug.
-Hot files: src/auth/mod.rs (12x).
-Last error: E0499
-```
-
-OMNI doesn't just compress — it **understands your session context**.
-
-When you're debugging `src/auth/mod.rs`, OMNI:
-- **Boosts** any output mentioning `auth/mod.rs` (because it's a hot file)
-- **Prioritizes** errors matching patterns you've seen before
-- **Infers** your task domain ("auth module") for smarter scoring
-- **Persists** across compaction events, so Claude never loses context
-
-This is powered by the `SessionState` engine that tracks hot files, recent commands, active errors, and domain hints — all stored in local SQLite.
-
-## RewindStore — Never Drop, Always Retrievable
-
-When OMNI compresses aggressively, the original content isn't deleted — it's stored in the **RewindStore** with a SHA-256 hash:
-
-```
-[omni: 1,247 chars stored → omni_retrieve("a1b2c3d4")]
-```
-
-If Claude needs the full content, it simply calls `omni_retrieve("a1b2c3d4")` via MCP and gets everything back. **Zero information loss, guaranteed.**
-
-## Quick Start
-
-```bash
-# Install via Homebrew macOS
-brew install fajarhide/tap/omni
-
-# Setup Claude Code hooks (one-time)
-omni init --hook
-
-# Verify
-omni doctor
-
-# View token savings after your first session
-omni stats
-```
-
-Or install universal via script:
-
-```bash
-curl -fsSL https://omni.weekndlabs.com/install | sh
-omni init --hook
-```
-
-*Binary: single binary <5MB, zero runtime dependencies.*
-
-## Custom filters
-
-Create powerful filters using simple TOML rules:
-
-```toml
-# ~/.omni/filters/deploy.toml
-schema_version = 1
-
-[filters.deploy]
-description = "Company deploy tool"
-match_command = "^deploy\\b"
-strip_ansi = true
-
-[[filters.deploy.match_output]]
-pattern = "Deployment successful"
-message = "deploy: ✓ success"
-
-strip_lines_matching = ["^\\[DEBUG\\]", "^Waiting"]
-max_lines = 30
-
-[[tests.deploy]]
-name = "strips debug lines"
-input = """
-[DEBUG] Connecting...
-Deployment successful
-"""
-expected = "deploy: ✓ success"
-```
-
-Test your filters: `omni learn --verify`
-
-See [docs/FILTERS.md](docs/FILTERS.md) for the complete filter writing guide.
+### Session Intelligence
+OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring. It then **boosts the relevance scores** of any output related to those active areas.
 
 ## Analytics Dashboard
+
+Keep track of your project's efficiency with OMNI's built-in reporting:
 
 ```bash
 $ omni stats
@@ -161,95 +80,111 @@ $ omni stats
   Signal Ratio:        82.6% reduction
   Estimated Savings:   $0.046 USD
   Average Latency:     2.1ms
-  RewindStore:         23 archived / 8 retrieved
 
-   By Filter:
-   1. git          203x  89%  ████████████████████
-   2. build         89x  82%  ████████████████
-   3. test          44x  79%  ███████████████
-   4. infra         31x  76%  █████████████
+   By Command:
+   1. git diff HEAD~1    203x  89%  ████████████████████
+   2. cargo test         89x  82%  ████████████████
+   3. docker build       44x  79%  ███████████████
 
   Route Distribution:
-  Distill:        1247  (97%)
-  Keep:             25  ( 2%)
-  Drop:             12  ( 1%)
-  Passthrough:       0  ( 0%)
-
-  Session Insights:
-  Hot files:  src/auth/mod.rs (12), tests/auth_test.rs (8)
-
+  Distill:       1247  (97%)
+  Keep/Rewind:     25  ( 2%)
  ───────────────────────────────────────────────── 
 ```
 
-## Supported Agents
+## Quick Start
 
-| Agent | Integration | Status |
-|---|---|---|
-| **Claude Code** | PostToolUse hook (automatic) | ✅ Full support |
-| **Any MCP client** | MCP server (`omni --mcp`) | ✅ Full support |
-| **Shell pipe** | `command \| omni` | ✅ Works now |
+```bash
+# Install via Homebrew macOS
+brew install fajarhide/tap/omni
 
-## Commands
+# Setup Claude Code hooks (Zero-Dependency Native Setup)
+omni init --hook
 
-| Command | Description |
-|---|---|
-| `omni init --hook` | Setup Claude Code hooks |
-| `omni stats` | Token savings analytics |
-| `omni session` | Session state inspection |
-| `omni learn` | Auto-generate filters from noise | [docs/LEARN.md](docs/LEARN.md) |
-| `omni doctor` | Diagnose installation |
-| `omni version` | Print version |
-| `omni help` | Show help |
-| `cmd \| omni` | Pipe mode — distil any command output |
-| `omni --mcp` | Start MCP server |
-| `omni --hook` | Hook mode (used by Claude Code) |
+# Verify your installation
+omni doctor
 
-See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for full usage details.
+# Start a session and see OMNI in action!
+omni stats
+```
+
+On universal setup 
+```bash 
+curl -fsSL https://omni.weekndlabs.com/install | bash
+```
+
+## Custom Filters (TOML)
+
+You can define your own distillation rules for custom internal tools:
+
+```toml
+# ~/.omni/filters/deploy.toml
+schema_version = 1
+
+[filters.deploy]
+description = "Internal deployment tool"
+match_command = "^deploy\\b"
+
+[[filters.deploy.match_output]]
+pattern = "Deployment successful"
+message = "deploy: ✓ success"
+
+strip_lines_matching = ["^\\[DEBUG\\]", "^Connecting"]
+max_lines = 30
+```
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    Agent["Claude Code / MCP Client"]
-    Agent -->|"PostToolUse hook / MCP"| OMNI
+    Agent["Claude Code / MCP Agent"]
+    
+    subgraph Hooks["Native Hook Layer (Transparent)"]
+        Pre["Pre-Hook\n(Rewriter)"]
+        Post["Post-Hook\n(Distiller)"]
+        Sess["Session-Start\n(Context)"]
+        Comp["Pre-Compact\n(Summary)"]
+    end
 
-    subgraph OMNI["OMNI — Semantic Signal Engine"]
+    Agent --> Pre
+    Pre -->|"omni exec"| Output["Raw Stream"]
+    Output --> Post
+    Post --> Agent
+
+    subgraph OMNI_Engine["OMNI — Semantic Signal Engine"]
         direction LR
-        C["🔍 Classifier\n(10 content types)"]
-        S["📊 Scorer\n(signal tiers + context boost)"]
-        R["✂️ Composer\n(threshold + RewindStore)"]
+        C["Classifier"]
+        S["Scorer\n(Context Boost)"]
+        R["Composer\n(Signal Tiering)"]
         C --> S --> R
     end
 
-    subgraph Persistence["SessionState + SQLite"]
-        direction LR
-        HF["Hot Files"]
-        AE["Active Errors"]
-        DH["Domain Hints"]
+    Post --> OMNI_Engine
+    Pre --> OMNI_Engine
+    
+    subgraph Persistence["Persistence Store (SQLite)"]
+        ST["SessionState"]
         RW["RewindStore"]
     end
 
-    OMNI <--> Persistence
-    R -->|"distilled output"| Agent
-    R -->|"dropped content"| RW
+    OMNI_Engine <--> Persistence
+    Sess --> ST
+    Comp --> ST
 ```
 
 ## Development
 
-To ensure your code meets all quality standards before pushing to the repository, run the comprehensive CI pipeline locally:
+OMNI is built for high-performance AI workflows with professional standards.
 
 ```bash
-make ci              # Run fmt, clippy, tests, security audit, and binary size checks
-```
-
-For individual checks during development:
-```bash
+make ci              # Run fmt, clippy, tests, and security audit
 cargo build          # Build the binary
 cargo test           # Run all 147 tests
 cargo insta review   # Review and accept snapshot changes
 ```
 
-See [CLAUDE.md](CLAUDE.md) and [DEVELOPER.md](docs/DEVELOPER.md) for the full contributor guide.
+See [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [Critical Guardrails](tests/README.md#critical-guardrails) for the full contributor guide and architectural rules.
+
 
 ## Star History
 
@@ -257,4 +192,4 @@ See [CLAUDE.md](CLAUDE.md) and [DEVELOPER.md](docs/DEVELOPER.md) for the full co
 
 ## License
 
-MIT
+MIT © Fajar Hidayat

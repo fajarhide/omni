@@ -1,6 +1,8 @@
 pub mod doctor;
+pub mod exec;
 pub mod init;
 pub mod learn;
 pub mod reset;
+pub mod rewrite;
 pub mod session;
 pub mod stats;
