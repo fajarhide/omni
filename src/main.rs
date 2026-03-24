@@ -87,8 +87,8 @@ PIPE MODE (automatic):
   command | omni  Distil command output
 
 Quick start:
-  brew install omni
   omni init --hook   # Setup Claude Code hooks
+  omni init --mcp    # Setup MCP for Claude Desktop
   omni stats         # View savings after first session"#,
         env!("CARGO_PKG_VERSION")
     );
