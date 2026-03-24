@@ -78,6 +78,7 @@ COMMANDS:
   stats           Token savings analytics
   session         Session state management
   learn           Auto-generate filters from passthrough
+  reset           Backup ~/.omni config for a clean uninstall
   doctor          Diagnose installation
   version         Print version
   help            Print this help
@@ -86,8 +87,8 @@ PIPE MODE (automatic):
   command | omni  Distil command output
 
 Quick start:
-  brew install omni
   omni init --hook   # Setup Claude Code hooks
+  omni init --mcp    # Setup MCP for Claude Desktop
   omni stats         # View savings after first session"#,
         env!("CARGO_PKG_VERSION")
     );
@@ -193,6 +194,13 @@ fn main() {
                 "learn" => {
                     if let Err(e) = cli::learn::run_learn(&args) {
                         eprintln!("[omni] Auto-Learn error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
+                "reset" => {
+                    if let Err(e) = cli::reset::run() {
+                        eprintln!("[omni] Reset error: {}", e);
                         std::process::exit(1);
                     }
                 }

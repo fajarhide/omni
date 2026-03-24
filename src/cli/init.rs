@@ -81,10 +81,36 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
             && let Ok(content) = fs::read_to_string(&mcp_path)
             && let Ok(mut mcp_val) = serde_json::from_str::<Value>(&content)
         {
-            if let Some(obj) = mcp_val.as_object_mut()
-                && let Some(servers) = obj.get_mut("mcpServers").and_then(|v| v.as_object_mut())
-            {
-                servers.remove("omni");
+            if let Some(obj) = mcp_val.as_object_mut() {
+                // Remove from global mcpServers
+                if let Some(servers) = obj.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+                    servers.remove("omni");
+                }
+
+                // Remove from project-specific mcpServers (under "projects")
+                if let Some(projects) = obj.get_mut("projects").and_then(|p| p.as_object_mut()) {
+                    for (_path, p_val) in projects.iter_mut() {
+                        if let Some(ps) =
+                            p_val.get_mut("mcpServers").and_then(|s| s.as_object_mut())
+                        {
+                            ps.remove("omni");
+                        }
+                    }
+                }
+
+                // Remove from top-level project keys
+                let top_level_keys: Vec<String> = obj.keys().cloned().collect();
+                for key in top_level_keys {
+                    if key != "mcpServers"
+                        && key != "projects"
+                        && let Some(inner_obj) = obj.get_mut(&key).and_then(|v| v.as_object_mut())
+                        && let Some(ps) = inner_obj
+                            .get_mut("mcpServers")
+                            .and_then(|s| s.as_object_mut())
+                    {
+                        ps.remove("omni");
+                    }
+                }
             }
             let _ = fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_val)?);
         }

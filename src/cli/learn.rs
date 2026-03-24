@@ -2,7 +2,7 @@ use crate::session::learn::{apply_to_config, detect_patterns};
 use anyhow::Result;
 use chrono::Utc;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 
 pub fn run_learn(args: &[String]) -> Result<()> {
@@ -29,7 +29,12 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     let mut input = String::new();
 
-    if from_queue {
+    let mut use_queue = from_queue;
+    if !use_queue && io::stdin().is_terminal() {
+        use_queue = true;
+    }
+
+    if use_queue {
         let dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".omni");
@@ -45,7 +50,11 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 }
             }
         } else {
-            println!("No learn queue found at {:?}", path);
+            println!("No learning data available yet.");
+            println!(
+                "OMNI automatically collects samples of repetitive noise in the background as you use it."
+            );
+            println!("Run this command again after you've processed more unclassified output.");
             return Ok(());
         }
     } else {
@@ -81,12 +90,13 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             .join(".omni")
             .join("filters")
             .join("learned.toml");
-        apply_to_config(&candidates, &filter_name, &path)?;
-        println!(
-            "\nSuccessfully appended {} triggers to {:?}",
-            candidates.len(),
-            path
-        );
+        let added = apply_to_config(&candidates, &filter_name, &path)?;
+        if added > 0 {
+            println!(
+                "\nSuccessfully appended {} new triggers to {:?}",
+                added, path
+            );
+        }
     } else {
         println!(
             "\nRun `omni learn --apply` to automatically write these into your ~/.omni filters."

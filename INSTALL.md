@@ -5,14 +5,13 @@
 ### Via Homebrew
 
 ```bash
-brew tap fajarhide/omni
-brew install omni
+brew install fajarhide/tap/omni
 ```
 
 ### Via Install Script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.sh | sh
+curl -fsSL https://omni.weekndlabs.com/install | sh
 ```
 
 ### From Source

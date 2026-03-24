@@ -106,7 +106,8 @@ pub fn run() -> anyhow::Result<()> {
                             println!("   PostToolUse:  [OK] installed");
                         } else {
                             println!("   PostToolUse:  [WARNING] missing");
-                            warnings.push("PostToolUse hook is not installed. Run `omni init`.");
+                            warnings
+                                .push("PostToolUse hook is not installed. Run `omni init --hook`.");
                             all_ok = false;
                         }
 
@@ -129,7 +130,7 @@ pub fn run() -> anyhow::Result<()> {
                         println!(
                             "   Hooks:        [WARNING] omni --hook not found in settings.json"
                         );
-                        warnings.push("OMNI hooks are not configured. Run `omni init`.");
+                        warnings.push("OMNI hooks are not configured. Run `omni init --hook` to install them.");
                         all_ok = false;
                     }
                 }
@@ -154,7 +155,7 @@ pub fn run() -> anyhow::Result<()> {
     for p in &[mcp_path, mcpa_path] {
         if p.exists()
             && let Ok(c) = fs::read_to_string(p)
-            && (c.contains("omni --mcp") || c.contains("omni\""))
+            && (c.contains("omni --mcp") || c.contains("\"omni\":"))
         {
             mcp_found = true;
             println!(" MCP Server:    {} (registered) [OK]\n", p.display());
@@ -163,7 +164,9 @@ pub fn run() -> anyhow::Result<()> {
     }
     if !mcp_found {
         println!(" MCP Server:    [WARNING] not found in config\n");
-        warnings.push("MCP Server config not found in standard paths. You might need to configure ~/.claude.json manually.");
+        warnings.push(
+            "MCP Server is not configured. Run `omni init --mcp` to install it for Claude Desktop.",
+        );
         all_ok = false;
     }
 
