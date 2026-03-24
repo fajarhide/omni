@@ -148,14 +148,9 @@ pub fn process_payload(
             .sum::<usize>();
         (decision.should_store, dropped, critical)
     } else {
-        // TOML filter case: estimate via line count
         let orig_lines = content.lines().count();
         let final_lines = final_out.lines().count();
-        let dropped = if orig_lines > final_lines {
-            orig_lines - final_lines
-        } else {
-            0
-        };
+        let dropped = orig_lines.saturating_sub(final_lines);
         // If reduced by more than 30% or > 50 lines dropped, trigger rewind
         let should = dropped > 50 || (orig_lines > 10 && final_lines < orig_lines * 7 / 10);
         (should, dropped, 0)
