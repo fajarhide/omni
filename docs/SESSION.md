@@ -67,11 +67,8 @@ export OMNI_CONTINUE=1  # Always continue the last session
 ## Inspecting Sessions
 
 ```bash
-# View current session
-omni session
-
-# View session with context boost details
-omni session --inject
+# View current high-relevance signals
+omni session --status
 
 # List recent sessions
 omni session --history
@@ -117,8 +114,8 @@ This means errors in files you're actively working on get **maximum priority** i
 # Check if session is active
 omni doctor
 
-# View raw session state
-omni session
+# View session status
+omni session --status
 
 # Check if hooks are installed
 omni init --status

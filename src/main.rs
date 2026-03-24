@@ -9,6 +9,7 @@ pub mod pipeline;
 mod session;
 mod store;
 
+use colored::*;
 use std::env;
 use std::io::{self, IsTerminal};
 use std::sync::{Arc, Mutex};
@@ -65,37 +66,54 @@ fn init_globals() -> (Option<Arc<Store>>, Option<Arc<Mutex<SessionState>>>) {
 // ─── Help Text ──────────────────────────────────────────
 
 fn print_help() {
+    let version = env!("CARGO_PKG_VERSION");
+
     println!(
-        r#"omni {} — Less noise. More signal. Right signal.
-
-USAGE:
-  omni [MODE] [COMMAND] [FLAGS]
-
-MODES (automatic, no user interaction needed):
-  --hook          PostToolUse/SessionStart/PreCompact hook
-  --mcp           MCP server mode
-
-COMMANDS:
-  init            Setup OMNI hooks and MCP
-  stats           Token savings analytics
-  session         Session state management
-  learn           Auto-generate filters from passthrough
-  reset           Backup ~/.omni config for a clean uninstall
-  doctor          Diagnose installation
-  version         Print version
-  help            Print this help
-  exec            Execute a command directly and distil its output
-  rewrite         Internal command used by hooks to determine wrapper logic
-
-PIPE MODE (automatic):
-  command | omni  Distil command output
-
-Quick start:
-  omni init --hook   # Setup Claude Code hooks
-  omni init --mcp    # Setup MCP for Claude Desktop
-  omni stats         # View savings after first session"#,
-        env!("CARGO_PKG_VERSION")
+        "\n{} {} — Less noise. More signal. Right signal.",
+        "omni".bold().cyan(),
+        version.bright_black()
     );
+
+    println!("\n{}", "USAGE:".bold().bright_white());
+    println!("  omni {} {}", "[COMMAND]".cyan(), "[FLAGS]".bright_black());
+    println!(
+        "  {} | omni       {}",
+        "cmd / cli".bright_black(),
+        "# Distill command output".bright_black()
+    );
+
+    println!("\n{}", "COMMANDS:".bold().bright_white());
+    println!("  {: <12} Setup OMNI Hooks and MCP server", "init".cyan());
+    println!("  {: <12} View token savings analytics", "stats".cyan());
+    println!("  {: <12} Manage session state", "session".cyan());
+    println!(
+        "  {: <12} Auto-generate filters from history",
+        "learn".cyan()
+    );
+
+    println!("\n{}", "UTILITIES:".bold().bright_white());
+    println!("  {: <12} Diagnose installation health", "doctor".cyan());
+    println!(
+        "  {: <12} Clean uninstall (for backups config)",
+        "reset".cyan()
+    );
+    println!("  {: <12} Print version info", "version, -v".cyan());
+    println!("  {: <12} Show this help message", "help, -h".cyan());
+
+    println!("\n{}", "EXAMPLES:".bold().bright_white());
+    println!(
+        "  omni doctor           {}",
+        "# Diagnose installation health".bright_black()
+    );
+    println!(
+        "  omni stats            {}",
+        "# View your savings".bright_black()
+    );
+    println!(
+        "  ls -R | omni          {}",
+        "# Distill long output".bright_black()
+    );
+    println!();
 }
 
 // ─── Main ───────────────────────────────────────────────
@@ -163,11 +181,11 @@ fn main() {
             let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
             match cmd {
-                "version" => {
+                "version" | "-v" | "--version" => {
                     println!("omni {}", env!("CARGO_PKG_VERSION"));
                 }
 
-                "help" | "--help" | "-h" => {
+                "help" | "-h" | "--help" => {
                     print_help();
                 }
 
@@ -228,14 +246,14 @@ fn main() {
                 }
 
                 "reset" => {
-                    if let Err(e) = cli::reset::run() {
+                    if let Err(e) = cli::reset::run(&args) {
                         eprintln!("[omni] Reset error: {}", e);
                         std::process::exit(1);
                     }
                 }
 
                 "doctor" => {
-                    if let Err(e) = cli::doctor::run() {
+                    if let Err(e) = cli::doctor::run(&args) {
                         eprintln!("[omni] Doctor error: {}", e);
                         std::process::exit(1);
                     }

@@ -83,7 +83,7 @@ check "help shows stats" "$HELP_OUT" "stats"
 check "help shows doctor" "$HELP_OUT" "doctor"
 check "help shows learn" "$HELP_OUT" "learn"
 check "help shows session" "$HELP_OUT" "session"
-check "help shows pipe mode" "$HELP_OUT" "command | omni"
+check "help shows pipe mode" "$HELP_OUT" "| omni"
 
 # ─── 3. Doctor ───────────────────────────────────────────
 echo "▸ Scenario 3: Doctor"

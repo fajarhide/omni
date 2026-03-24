@@ -1,36 +1,124 @@
 use crate::session::learn::{apply_to_config, detect_patterns};
 use anyhow::Result;
 use chrono::Utc;
+use colored::*;
 use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 
+fn print_help() {
+    println!(
+        "\n{} {} — Auto-generate filters from history",
+        "omni".bold().cyan(),
+        "learn".bold().yellow()
+    );
+    println!("\n{}", "USAGE:".bold().bright_white());
+    println!("  omni learn {}", "[FLAGS]".bright_black());
+
+    println!("\n{}", "FLAGS:".bold().bright_white());
+    println!(
+        "  {: <12} Discover and view candidate patterns",
+        "--status".cyan()
+    );
+    println!(
+        "  {: <12} Automatically append new filters to config",
+        "--apply".cyan()
+    );
+    println!(
+        "  {: <12} Preview the generated TOML without writing",
+        "--dry-run".cyan()
+    );
+    println!(
+        "  {: <12} Use background learning queue as source",
+        "--from-queue".cyan()
+    );
+    println!(
+        "  {: <12} Run inline tests for all existing filters",
+        "--verify".cyan()
+    );
+    println!("  {: <12} Show this help message", "--help, -h".cyan());
+
+    println!("\n{}", "EXAMPLES:".bold().bright_white());
+    println!(
+        "  omni learn --status   {}",
+        "# Search for new noise patterns".bright_black()
+    );
+    println!(
+        "  omni learn --dry-run  {}",
+        "# Preview suggested filters".bright_black()
+    );
+    println!(
+        "  omni learn --apply    {}",
+        "# Commit suggestions to config".bright_black()
+    );
+    println!(
+        "  omni learn --from-queue --dry-run {}",
+        "# Learn from recent history".bright_black()
+    );
+    println!(
+        "  omni learn --verify   {}",
+        "# Test existing filters".bright_black()
+    );
+    println!();
+}
+
 pub fn run_learn(args: &[String]) -> Result<()> {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_help();
+        return Ok(());
+    }
+
     let apply = args.iter().any(|a| a == "--apply");
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let from_queue = args.iter().any(|a| a == "--from-queue");
     let verify = args.iter().any(|a| a == "--verify");
+    let is_status = args.iter().any(|a| a == "--status");
+
+    // If no flags, show help
+    if !apply && !dry_run && !from_queue && !verify && !is_status {
+        print_help();
+        return Ok(());
+    }
 
     if verify {
-        println!("Running inline tests for all loaded TOML filters...");
+        println!(
+            "\n{}",
+            "Running inline tests for loaded filters:"
+                .bold()
+                .bright_white()
+        );
         let report = crate::pipeline::toml_filter::run_inline_tests(
             &crate::pipeline::toml_filter::load_all_filters(),
         );
         let total = report.passes + report.failures.len();
-        println!("Filters passed: {}/{}", report.passes, total);
+
+        let status = if report.failures.is_empty() {
+            "ALL PASSED".green()
+        } else {
+            "FAILURES DETECTED".red()
+        };
+
+        println!("  Status:  {} ({} / {})", status, report.passes, total);
+
         if !report.failures.is_empty() {
-            println!("Failures:");
+            println!("\n{}", "Details:".bold().red());
             for f in report.failures {
-                println!("- {}", f);
+                println!("  {} {}", "✗".red(), f);
             }
         }
+        println!();
         return Ok(());
     }
 
     let mut input = String::new();
 
+    // In terminal mode, if an action is used without --from-queue, default to queue
     let mut use_queue = from_queue;
-    if !use_queue && io::stdin().is_terminal() {
+    let is_action = is_status || dry_run || apply;
+    if is_action && !from_queue && io::stdin().is_terminal() {
         use_queue = true;
     }
 
@@ -50,11 +138,9 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 }
             }
         } else {
-            println!("No learning data available yet.");
-            println!(
-                "OMNI automatically collects samples of repetitive noise in the background as you use it."
-            );
-            println!("Run this command again after you've processed more unclassified output.");
+            println!("\n{} No learning data available yet.", "ℹ".blue());
+            println!("  OMNI collects samples of repetitive noise as you use it.");
+            println!("  Run this again after you've processed more output.\n");
             return Ok(());
         }
     } else {
@@ -63,19 +149,55 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     let candidates = detect_patterns(&input);
 
+    println!(
+        "\n{}",
+        "─────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+    println!(" {} — Pattern Discovery", "OMNI".bold().cyan());
+    println!(
+        "{}",
+        "─────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+
     if candidates.is_empty() {
-        println!("No repetitive active noise patterns discovered in input (min 3 occurrences).");
+        println!("  {} No repetitive noise patterns discovered.", "ℹ".blue());
+        println!(
+            "  {} Requirement: minimum 3 occurrences.",
+            "•".bright_black()
+        );
+        println!(
+            "{}\n",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
         return Ok(());
     }
 
-    println!("Identified {} candidate patterns:\n", candidates.len());
+    println!(
+        "  {} Identified {} potential noise patterns:\n",
+        "⚡".yellow(),
+        candidates.len().to_string().yellow().bold()
+    );
+
     for (i, c) in candidates.iter().enumerate() {
+        let action = format!("[{:?}]", c.suggested_action).to_lowercase();
+        let mut preview = c.trigger_prefix.clone();
+        if preview.len() > 60 {
+            preview.truncate(57);
+            preview.push_str("...");
+        }
+
         println!(
-            "{}. [{}] \"{}\" ({} occurences)",
+            "  {:>2}. {: <8} {: <60} ({}x)",
             i + 1,
-            format!("{:?}", c.suggested_action).to_lowercase(),
-            c.trigger_prefix,
-            c.count
+            action.cyan(),
+            preview.bright_white(),
+            c.count.to_string().yellow()
         );
     }
 
@@ -83,7 +205,29 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     if dry_run {
         let generated = crate::session::learn::generate_toml(&candidates, &filter_name);
-        println!("\n[Dry Run] Generated TOML configuration:\n{}", generated);
+        println!(
+            "\n{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
+        println!(
+            " {} Suggested TOML Configuration:",
+            "Preview".bold().bright_white()
+        );
+        println!(
+            "{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
+        println!("{}", generated.cyan());
+        println!(
+            "{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
     } else if apply {
         let path = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -93,15 +237,47 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         let added = apply_to_config(&candidates, &filter_name, &path)?;
         if added > 0 {
             println!(
-                "\nSuccessfully appended {} new triggers to {:?}",
-                added, path
+                "\n{}",
+                "─────────────────────────────────────────"
+                    .bright_black()
+                    .bold()
+            );
+            println!(
+                "  {} Successfully added {} triggers to {:?}",
+                "✓".green(),
+                added,
+                path
+            );
+            println!(
+                "{}",
+                "─────────────────────────────────────────"
+                    .bright_black()
+                    .bold()
             );
         }
     } else {
         println!(
-            "\nRun `omni learn --apply` to automatically write these into your ~/.omni filters."
+            "\n{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
         );
-        println!("Or `omni learn --dry-run` to preview the generated TOML.");
+        println!(
+            "  {} Run {} to commit these filters.",
+            "→".yellow(),
+            "omni learn --apply".cyan().bold()
+        );
+        println!(
+            "  {} Run {} to preview TOML configuration.",
+            "→".yellow(),
+            "omni learn --dry-run".cyan().bold()
+        );
+        println!(
+            "{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
     }
 
     Ok(())

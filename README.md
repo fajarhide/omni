@@ -63,7 +63,19 @@ Before Claude prunes its conversation history to save space, OMNI provides a per
 When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore** with a SHA-256 hash. If the agent needs the full, unbridled output, it simply calls `omni_retrieve("hash")` via its MCP tool.
 
 ### Session Intelligence
-OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring. It then **boosts the relevance scores** of any output related to those active areas.
+OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring. Run `omni session --status` to see your current high-relevance signals.
+
+### Pattern Discovery (Learning)
+OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters and `omni learn --apply` to commit them to your configuration.
+
+### The OMNI Philosophy: Deliberate Action
+
+OMNI is designed for **maximum safety and control**. By default, core commands like `init`, `session`, and `learn` will only show a help screen if no flags are provided. This prevents accidental changes to your global configuration.
+
+Every core command follows a consistent **Discovery vs. Action** pattern:
+- **Discovery**: Use `--status` to see what OMNI has found (installation status, session details, or new noise patterns).
+- **Action**: Use explicit flags like `--all`, `--apply`, or `--clear` to commit changes.
+
 
 ## Analytics Dashboard
 
@@ -95,17 +107,17 @@ $ omni stats
 ## Quick Start
 
 ```bash
-# Install via Homebrew macOS
+# 1. Install via Homebrew (macOS/Linux)
 brew install fajarhide/tap/omni
 
-# Setup Claude Code hooks (Zero-Dependency Native Setup)
-omni init --hook
+# 2. Perform Full Setup (Hooks + MCP Server)
+omni init --all
 
-# Verify your installation
+# 3. Verify Installation
 omni doctor
 
-# Start a session and see OMNI in action!
-omni stats
+# 4. Check Current Status
+omni init --status
 ```
 
 On universal setup 
