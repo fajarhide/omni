@@ -1,0 +1,15 @@
+> my-app@1.0.0 build
+> vite build
+
+npm warn deprecated legacy-pkg@2.0.0: Use modern-pkg instead
+
+vite v5.0.0 building for production...
+transforming...
+✓ 127 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.45 kB │ gzip:   0.30 kB
+dist/assets/style-Ha1b2c3.css     8.21 kB │ gzip:   2.45 kB
+dist/assets/vendor-Xf4g5h6.js    85.30 kB │ gzip:  28.12 kB
+dist/assets/index-Ab7c8d9.js    142.67 kB │ gzip:  45.89 kB
+✓ built in 3.47s

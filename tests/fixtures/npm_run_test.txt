@@ -1,0 +1,13 @@
+> my-app@1.0.0 test
+> vitest run
+
+ ✓ src/utils.test.ts (5 tests) 12ms
+ ✓ src/api.test.ts (8 tests) 45ms
+ ✓ src/hooks/useAuth.test.ts (3 tests) 22ms
+ ✗ src/services/payment.test.ts (2 tests) 31ms
+   ✗ should process refund
+     → AssertionError: expected 200, received 500
+
+ Test Files  1 failed | 3 passed | 4 total
+ Tests       1 failed | 16 passed | 17 total
+ Duration    234ms

@@ -1,12 +1,16 @@
+#[allow(dead_code)]
 pub const MAX_INPUT: usize = 16 * 1024 * 1024; // 16MB
+#[allow(dead_code)]
 pub const WARN_INPUT: usize = 1024 * 1024; // 1MB
 
+#[allow(dead_code)]
 pub enum InputCheck {
     Ok,
     TooLarge,
     Empty,
 }
 
+#[allow(dead_code)]
 pub fn check_input(input: &str) -> InputCheck {
     let len = input.len();
     if len == 0 {

@@ -1,0 +1,11 @@
+bun test v1.0.25 (abc1234f)
+
+ ✓ src/utils.test.ts (5 tests) [2.50ms]
+ ✓ src/api.test.ts (8 tests) [4.10ms]
+ ✓ src/hooks/useAuth.test.ts (3 tests) [1.80ms]
+ ✓ src/services/payment.test.ts (4 tests) [3.20ms]
+
+ 20 pass
+ 0 fail
+ 20 expect() calls
+Ran 4 tests across 4 files. [12.00ms]

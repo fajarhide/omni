@@ -2,7 +2,7 @@ use regex::Regex;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq, Clone)]
