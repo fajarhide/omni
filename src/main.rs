@@ -20,10 +20,11 @@ use crate::store::sqlite::Store;
 
 #[derive(Debug, PartialEq)]
 enum Mode {
-    Hook,
+    PostHook,
     Mcp,
     SessionStart,
     PreCompact,
+    PreHook,
     Pipe,
     Cli,
 }
@@ -31,10 +32,11 @@ enum Mode {
 fn detect_mode(args: &[String]) -> Mode {
     if args.len() > 1 {
         match args[1].as_str() {
-            "--hook" => return Mode::Hook,
+            "--hook" | "--post-hook" => return Mode::PostHook,
             "--mcp" => return Mode::Mcp,
             "--session-start" => return Mode::SessionStart,
             "--pre-compact" => return Mode::PreCompact,
+            "--pre-hook" => return Mode::PreHook,
             _ => {}
         }
     }
@@ -82,6 +84,8 @@ COMMANDS:
   doctor          Diagnose installation
   version         Print version
   help            Print this help
+  exec            Execute a command directly and distil its output
+  rewrite         Internal command used by hooks to determine wrapper logic
 
 PIPE MODE (automatic):
   command | omni  Distil command output
@@ -101,10 +105,17 @@ fn main() {
     let mode = detect_mode(&args);
 
     match mode {
-        Mode::Hook => {
+        Mode::PostHook => {
             let (store, session) = init_globals();
             if let (Some(s), Some(ss)) = (store, session) {
                 let _ = hooks::dispatcher::run(s, ss);
+            }
+        }
+
+        Mode::PreHook => {
+            if let Err(e) = hooks::pre_tool::run() {
+                eprintln!("[omni] Pre-Hook error: {}", e);
+                std::process::exit(1);
             }
         }
 
@@ -142,7 +153,7 @@ fn main() {
                 let session = s.find_latest_session().unwrap_or_else(SessionState::new);
                 Arc::new(Mutex::new(session))
             });
-            if let Err(e) = hooks::pipe::run(store_arc, session_arc) {
+            if let Err(e) = hooks::pipe::run(store_arc, session_arc, None) {
                 eprintln!("[omni] Pipe engine error: {}", e);
                 std::process::exit(1);
             }
@@ -195,6 +206,24 @@ fn main() {
                     if let Err(e) = cli::learn::run_learn(&args) {
                         eprintln!("[omni] Auto-Learn error: {}", e);
                         std::process::exit(1);
+                    }
+                }
+
+                "exec" => {
+                    let store_arc = Store::open().map(Arc::new).ok();
+                    let session_arc = store_arc.as_ref().map(|s| {
+                        let session = s.find_latest_session().unwrap_or_else(SessionState::new);
+                        Arc::new(Mutex::new(session))
+                    });
+                    if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
+                        eprintln!("[omni] Exec error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
+                "rewrite" => {
+                    if let Err(_e) = cli::rewrite::run_rewrite(&args) {
+                        std::process::exit(1); // Standard silent fail for rewrite hook
                     }
                 }
 

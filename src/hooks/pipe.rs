@@ -9,13 +9,17 @@ use crate::store::sqlite::Store;
 const MAX_PIPE_SIZE: usize = 16 * 1024 * 1024; // 16MB
 const WARN_PIPE_SIZE: usize = 1024 * 1024; // 1MB
 
-pub fn run(store: Option<Arc<Store>>, session: Option<Arc<Mutex<SessionState>>>) -> Result<()> {
+pub fn run(
+    store: Option<Arc<Store>>,
+    session: Option<Arc<Mutex<SessionState>>>,
+    command_name: Option<&str>,
+) -> Result<()> {
     let stdin = std::io::stdin().lock();
     let stdout = std::io::stdout().lock();
     let stderr = std::io::stderr().lock();
 
     // Testable generic route separating IO
-    run_inner(stdin, stdout, stderr, store, session)
+    run_inner(stdin, stdout, stderr, store, session, command_name)
 }
 
 pub fn run_inner<R: Read, W: Write, E: Write>(
@@ -24,6 +28,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     mut error: E,
     store: Option<Arc<Store>>,
     session: Option<Arc<Mutex<SessionState>>>,
+    command_name: Option<&str>,
 ) -> Result<()> {
     let start_time = Instant::now();
 
@@ -79,7 +84,13 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     let compose_config = composer::ComposeConfig::default();
     let decision = composer::decide_rewind(&scored_segments, &ctype);
 
-    let final_output = if decision.should_store && store.is_some() {
+    let kept_count = scored_segments
+        .iter()
+        .filter(|s| s.final_score() >= compose_config.threshold)
+        .count();
+    let dropped_count = scored_segments.len() - kept_count;
+
+    let (final_output, rewind_hash_opt) = if decision.should_store && store.is_some() {
         composer::compose(
             scored_segments,
             Some(input_text.clone()),
@@ -88,7 +99,6 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             &input_text,
             &ctype,
         )
-        .0
     } else {
         composer::compose(
             scored_segments,
@@ -98,8 +108,37 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             &input_text,
             &ctype,
         )
-        .0
     };
+
+    if let Some(ref s) = store {
+        let sid = match session {
+            Some(ref m) => m.lock().unwrap().session_id.clone(),
+            None => "pipe_session".to_string(),
+        };
+
+        use crate::pipeline::{DistillResult, Route};
+        let result = DistillResult {
+            output: final_output.clone(),
+            route: if rewind_hash_opt.is_some() {
+                Route::Rewind
+            } else {
+                Route::Keep
+            },
+            filter_name: format!("{:?}", ctype),
+            content_type: ctype.clone(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: input_text.len(),
+            output_bytes: final_output.len(),
+            latency_ms: start_time.elapsed().as_millis() as u64,
+            rewind_hash: rewind_hash_opt,
+            segments_kept: kept_count,
+            segments_dropped: dropped_count,
+        };
+
+        let cmd_to_record = command_name.unwrap_or("");
+        s.record_distillation(&sid, &result, cmd_to_record);
+    }
 
     // 5. If no significant reduction: print original
     let output_to_print = if final_output.len() >= input_text.len() {
@@ -131,7 +170,7 @@ mod tests {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
-        run_inner(input.as_bytes(), &mut out, &mut err, None, None).expect("must succeed");
+        run_inner(input.as_bytes(), &mut out, &mut err, None, None, None).expect("must succeed");
 
         let out_str = String::from_utf8(out).expect("must succeed");
         // Native Git Diff outputs are normally kept natively, so reduction < original_text.len isn't guaranteed heavily
@@ -146,7 +185,7 @@ mod tests {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
-        run_inner(input.as_bytes(), &mut out, &mut err, None, None).expect("must succeed");
+        run_inner(input.as_bytes(), &mut out, &mut err, None, None, None).expect("must succeed");
         let out_str = String::from_utf8(out).expect("must succeed");
 
         // No significant reduction for short inputs
@@ -160,7 +199,14 @@ mod tests {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
-        let res = run_inner(binary_input.as_slice(), &mut out, &mut err, None, None);
+        let res = run_inner(
+            binary_input.as_slice(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            None,
+        );
         assert!(res.is_ok()); // Exit 0 effectively gracefully returns properly
         assert_eq!(out, binary_input); // Binary is passed directly unmodified.
     }

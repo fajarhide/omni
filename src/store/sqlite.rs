@@ -126,10 +126,10 @@ impl Store {
     pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT filter_name, COUNT(*), 
+            "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), 
                     CASE WHEN SUM(input_bytes)=0 THEN 0.0 
                          ELSE ROUND(100.0*(1.0 - CAST(SUM(output_bytes) AS REAL)/SUM(input_bytes)),1) END
-             FROM distillations WHERE ts >= ?1 GROUP BY filter_name ORDER BY COUNT(*) DESC"
+             FROM distillations WHERE ts >= ?1 GROUP BY grp_name ORDER BY COUNT(*) DESC"
         )?;
         let rows = stmt
             .query_map(params![since], |row| {
@@ -503,8 +503,8 @@ impl Store {
 
         let mut by_filter = Vec::new();
         let mut stmt = conn.prepare(
-            "SELECT filter_name, COUNT(*), COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0) 
-             FROM distillations WHERE ts >= ?1 GROUP BY filter_name"
+            "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0) 
+             FROM distillations WHERE ts >= ?1 GROUP BY grp_name"
         )?;
         let rows = stmt.query_map(params![ts_threshold], |row| {
             Ok(FilterStats {
@@ -772,10 +772,15 @@ mod tests {
         assert_eq!(summary.total_input_bytes, 300);
         assert_eq!(summary.total_output_bytes, 100);
 
-        assert_eq!(summary.by_filter.len(), 1);
-        assert_eq!(summary.by_filter[0].filter_name, "f1");
-        assert_eq!(summary.by_filter[0].count, 2);
-        assert_eq!(summary.by_filter[0].total_input_bytes, 300);
+        assert_eq!(summary.by_filter.len(), 2);
+        // Groups are "cmd1" and "cmd2"
+        let group_names: Vec<String> = summary
+            .by_filter
+            .iter()
+            .map(|f| f.filter_name.clone())
+            .collect();
+        assert!(group_names.contains(&"cmd1".to_string()));
+        assert!(group_names.contains(&"cmd2".to_string()));
 
         assert_eq!(summary.by_route.len(), 1);
         assert_eq!(summary.by_route[0].route, "Keep");

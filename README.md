@@ -23,29 +23,29 @@
 AI agents are drowning in noisy CLI output. A `git diff` can easily eat 10K tokens, while a `cargo test` might dump 25K tokens of redundant noise. Claude and other agents read all of it, but 90% of that data is pure distraction that dilutes reasoning and drains your token budget.
 
 OMNI intercepts terminal output automatically, keeping only what matters for your current task. It’s not just about making output smaller; it’s about making it smarter. By understanding command structures and your active session context, OMNI ensures your agent sees the signal, not the waste.
-
 ## How It Works
 
+OMNI uses a two-layer interception strategy to ensure maximum token savings and zero information loss:
+
 ```text
-Claude runs git diff  ──▶  800 lines raw output
-                                 │
-PostToolUse hook      ──▶  omni --hook
-                                 │
-Claude reads          ──◀  35 lines pure signal
+1. PreToolUse Hook (Surgical)  ──▶  omni --pre-hook
+                                        │ (Rewrites to omni exec)
+Claude runs git diff           ──▶  distilled stream (35 lines)
+
+2. PostToolUse Hook (Safety)   ──▶  omni --post-hook
+                                        │ (Backup for non-rewritten tools)
+Claude reads                   ──◀  Final high-density signal
 ```
 
-OMNI knows your session context. Debugging an auth bug? Changes in `src/auth/` get priority automatically. No configuration needed—it just works.
+1. **Pre-Hook (Native)** — OMNI intercepts noisy commands (git, cargo, npm, etc.) *before* they start. By rewriting them to `omni exec`, we prevent Claude from auto-truncating large outputs.
+2. **Post-Hook (Safety Net)** — Runs after a tool finishes, catching any remaining noise from tools that weren't intercepted by the pre-hook.
+3. **Session Intelligence** — OMNI tracks your "hot files" and recent errors in a local SQLite store to boost the relevance scores of concurrent outputs.
 
-
-1. **Classify** — OMNI identifies the content type (git diff, build output, test results, logs) by analyzing structure, not filenames
-2. **Score** — Each line gets a semantic relevance score based on signal tier (critical → noise) and your current session context
-3. **Compose** — High-signal content is kept, noise is removed, and anything dropped is stored in RewindStore for retrieval
-
-All of this happens **transparently** — your AI agent doesn't know OMNI exists. It just gets better signal.
+---
 
 ### The Impact
 > **Reduce up to 90% AI Token Usage**  
-> *Zero Information Loss. Maximum Agent Context. <2ms Overhead.*
+> *Zero Information Loss. Native Binary Performance. <2ms Overhead.*
 <br/>
 
 ![OMNI Token Savings](omni_token_savings_graphic.png)
@@ -53,42 +53,26 @@ All of this happens **transparently** — your AI agent doesn't know OMNI exists
 
 ## What OMNI distils
 
-| Output type | Example | Reduction | What's Kept |
-|---|---|---|---|
-| git diff | 800 lines → 35 lines | ~96% | File tree, changed hunks, +/- lines |
-| cargo test | 25K tokens → 2K tokens | ~92% | Error count, error messages, warnings |
-| pytest failures | 500 lines → 20 lines | ~96% | Test failures, error messages, warnings |
-| docker build | 600 tokens → 15 tokens | ~98% | Step count, cache hits, image ID |
+| Output type | Example | Reduction | What's Kept | Interception |
+|---|---|---|---|---|
+| git diff | 800 lines → 35 lines | ~96% | File tree, changed hunks | `Pre-Hook` |
+| cargo test | 25K tokens → 2K tokens | ~92% | Error count, fail traces | `Pre-Hook` |
+| docker build | 600 tokens → 15 tokens | ~98% | Step count, image ID | `Pre-Hook` |
+| custom scripts | 100 lines → 10 lines | ~90% | Errors, exit codes | `Post-Hook` |
 
 ## Session Continuity
 
-When Claude Code restarts, OMNI injects context from the previous session so the agent never loses its place. It tracks "hot files" and active errors to guide the agent back to the problem.
-
-```text
-Continuing: debugging auth bug.
-Hot files: src/auth/mod.rs (12x).
-Last error: E0499
-```
-
-OMNI doesn't just compress — it **understands your session context**.
-
-When you're debugging `src/auth/mod.rs`, OMNI:
-- **Boosts** any output mentioning `auth/mod.rs` (because it's a hot file)
-- **Prioritizes** errors matching patterns you've seen before
-- **Infers** your task domain ("auth module") for smarter scoring
-- **Persists** across compaction events, so Claude never loses context
-
-This is powered by the `SessionState` engine that tracks hot files, recent commands, active errors, and domain hints — all stored in local SQLite.
+When Claude Code restarts, OMNI injects context from the previous session via the `SessionStart` hook. This includes "hot files" and active errors to ensure the agent never loses its place.
 
 ## RewindStore — Never Drop, Always Retrievable
 
-When OMNI compresses aggressively, the original content isn't deleted — it's stored in the **RewindStore** with a SHA-256 hash:
+When OMNI compresses aggressively, the original content isn't deleted—it's stored in the **RewindStore** with a SHA-256 hash:
 
 ```
 [omni: 1,247 chars stored → omni_retrieve("a1b2c3d4")]
 ```
 
-If Claude needs the full content, it simply calls `omni_retrieve("a1b2c3d4")` via MCP and gets everything back. **Zero information loss, guaranteed.**
+If Claude needs the full content, it simply calls `omni_retrieve("a1b2c3d4")` via MCP and gets everything back.
 
 ## Quick Start
 
@@ -96,13 +80,13 @@ If Claude needs the full content, it simply calls `omni_retrieve("a1b2c3d4")` vi
 # Install via Homebrew macOS
 brew install fajarhide/tap/omni
 
-# Setup Claude Code hooks (one-time)
+# Setup Claude Code hooks (Native Pre/Post/Session/Compact)
 omni init --hook
 
 # Verify
 omni doctor
 
-# View token savings after your first session
+# View token savings grouped by command
 omni stats
 ```
 
@@ -161,23 +145,15 @@ $ omni stats
   Signal Ratio:        82.6% reduction
   Estimated Savings:   $0.046 USD
   Average Latency:     2.1ms
-  RewindStore:         23 archived / 8 retrieved
 
-   By Filter:
-   1. git          203x  89%  ████████████████████
-   2. build         89x  82%  ████████████████
-   3. test          44x  79%  ███████████████
-   4. infra         31x  76%  █████████████
+   By Command:
+   1. git diff HEAD~1    203x  89%  ████████████████████
+   2. cargo test         89x  82%  ████████████████
+   3. docker build       44x  79%  ███████████████
 
   Route Distribution:
-  Distill:        1247  (97%)
-  Keep:             25  ( 2%)
-  Drop:             12  ( 1%)
-  Passthrough:       0  ( 0%)
-
-  Session Insights:
-  Hot files:  src/auth/mod.rs (12), tests/auth_test.rs (8)
-
+  Keep:          1247  (97%)
+  Rewind:          25  ( 2%)
  ───────────────────────────────────────────────── 
 ```
 
@@ -185,24 +161,23 @@ $ omni stats
 
 | Agent | Integration | Status |
 |---|---|---|
-| **Claude Code** | PostToolUse hook (automatic) | ✅ Full support |
+| **Claude Code** | Native Hooks (`Pre`/`Post`/`Session`/`Compact`) | ✅ Full support |
 | **Any MCP client** | MCP server (`omni --mcp`) | ✅ Full support |
-| **Shell pipe** | `command \| omni` | ✅ Works now |
+| **Shell pipe** | `command \| omni` | ✅ Native support |
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `omni init --hook` | Setup Claude Code hooks |
-| `omni stats` | Token savings analytics |
+| `omni init --hook` | Setup all Claude Code hooks |
+| `omni stats` | Token savings analytics (grouped by command) |
+| `omni exec -- <cmd>` | Manually wrap a command for distillation |
 | `omni session` | Session state inspection |
-| `omni learn` | Auto-generate filters from noise | [docs/LEARN.md](docs/LEARN.md) |
+| `omni learn` | Auto-generate filters from noise |
 | `omni doctor` | Diagnose installation |
-| `omni version` | Print version |
-| `omni help` | Show help |
-| `cmd \| omni` | Pipe mode — distil any command output |
+| `omni --pre-hook` | Native PreToolUse rewriter |
+| `omni --post-hook`| Native PostToolUse distiller |
 | `omni --mcp` | Start MCP server |
-| `omni --hook` | Hook mode (used by Claude Code) |
 
 See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for full usage details.
 
@@ -211,13 +186,24 @@ See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for full usage details.
 ```mermaid
 flowchart TB
     Agent["Claude Code / MCP Client"]
-    Agent -->|"PostToolUse hook / MCP"| OMNI
+    
+    subgraph Hooks["Native Hook Layer"]
+        Pre["PreToolUse\n(Command Rewrite)"]
+        Post["PostToolUse\n(Safety Net)"]
+        Sess["SessionStart\n(Context)"]
+        Comp["PreCompact\n(Memory)"]
+    end
 
-    subgraph OMNI["OMNI — Semantic Signal Engine"]
+    Agent --> Pre
+    Pre -->|"omni exec"| Output["Command Output"]
+    Output --> Post
+    Post --> Agent
+
+    subgraph OMNI_Engine["OMNI — Semantic Signal Engine"]
         direction LR
-        C["🔍 Classifier\n(10 content types)"]
-        S["📊 Scorer\n(signal tiers + context boost)"]
-        R["✂️ Composer\n(threshold + RewindStore)"]
+        C["🔍 Classifier"]
+        S["📊 Scorer"]
+        R["✂️ Composer"]
         C --> S --> R
     end
 
