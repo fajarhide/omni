@@ -14,8 +14,10 @@ pub fn classify_line(line: &str) -> SignalTier {
             "error[",
             "ERROR:",
             "Error:",
+            "error TS",
             "FAILED",
             "FAIL:",
+            "FAIL\t",
             "panic:",
             "Traceback (most recent",
             "exception:",
@@ -260,6 +262,14 @@ mod tests {
         assert_eq!(classify_line("fatal: ref is broken"), SignalTier::Critical);
         assert_eq!(classify_line("FAILED test_parse"), SignalTier::Critical);
         assert_eq!(classify_line("✗ fail"), SignalTier::Critical);
+        assert_eq!(
+            classify_line("error TS2307: Cannot find module"),
+            SignalTier::Critical
+        );
+        assert_eq!(
+            classify_line("FAIL\tgithub.com/user/pkg\t0.123s"),
+            SignalTier::Critical
+        );
     }
 
     #[test]

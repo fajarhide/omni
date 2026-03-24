@@ -81,6 +81,9 @@ pub fn classify(input: &str) -> ContentType {
         "Tests:",
         "--- PASS",
         "--- FAIL",
+        "FAIL\t",
+        "PASS\t",
+        "ok  ",
         "✓",
         "✗",
     ];
@@ -206,6 +209,16 @@ mod tests {
 
         let cargo_test = "running 15 tests\ntest foo ... ok\ntest result: ok. 15 passed";
         assert_eq!(classify(cargo_test), ContentType::TestOutput);
+    }
+
+    #[test]
+    fn test_classify_go_test_output() {
+        let go_test =
+            "ok  \tgithub.com/user/pkg1\t0.123s\nFAIL\tgithub.com/user/pkg2\t0.456s\nFAIL";
+        assert_eq!(classify(go_test), ContentType::TestOutput);
+
+        let go_fail = "FAIL\tgithub.com/user/pkg\t0.123s";
+        assert_eq!(classify(go_fail), ContentType::TestOutput);
     }
 
     #[test]

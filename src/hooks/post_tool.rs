@@ -1,5 +1,6 @@
 use crate::distillers;
-use crate::pipeline::{DistillResult, SessionState, classifier, composer, scorer};
+use crate::pipeline::toml_filter;
+use crate::pipeline::{DistillResult, Route, SessionState, classifier, composer, scorer};
 use crate::store::sqlite::Store;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -96,45 +97,88 @@ pub fn process_payload(
         .unwrap_or_default();
 
     let start = Instant::now();
-    let ctype = classifier::classify(&content);
 
-    let scored_segments = if let Some(ref lock) = session {
-        if let Ok(state) = lock.lock() {
-            scorer::score_segments(&content, &ctype, Some(&*state))
+    // TOML-first: try matching command against TOML filters
+    let toml_filters = toml_filter::load_all_filters();
+    let toml_match = toml_filters.iter().find(|f| f.matches(&command));
+
+    let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
+        // Use TOML filter
+        let output = filter.apply(&content);
+        let fname = filter.name.clone();
+        (output, fname, None)
+    } else {
+        // Fallback to Rust distiller pipeline
+        let ctype = classifier::classify(&content);
+
+        let scored_segments = if let Some(ref lock) = session {
+            if let Ok(state) = lock.lock() {
+                scorer::score_segments(&content, &ctype, Some(&*state))
+            } else {
+                scorer::score_segments(&content, &ctype, None)
+            }
         } else {
             scorer::score_segments(&content, &ctype, None)
-        }
-    } else {
-        scorer::score_segments(&content, &ctype, None)
+        };
+
+        let distiller = distillers::get_distiller(&ctype);
+        let output = distiller.distill(&scored_segments, &content);
+        (output, format!("{:?}", ctype), Some(ctype))
     };
 
-    let distiller = distillers::get_distiller(&ctype);
-    let decision = composer::decide_rewind(&scored_segments, &ctype);
-
-    let mut final_out = distiller.distill(&scored_segments, &content);
+    // Check for rewind decision (only for Rust pipeline)
+    let mut final_out = final_out;
     let mut rewind_hash = String::new();
 
-    if decision.should_store {
-        if let Some(ref s) = store {
-            let hash = s.store_rewind(&content);
-            let dropped_lines = scored_segments
-                .iter()
-                .filter(|s| s.final_score() < decision.threshold)
-                .map(|s| s.content.lines().count())
-                .sum::<usize>();
-
-            final_out.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
-                dropped_lines, hash
-            ));
-            rewind_hash = hash;
+    if let Some(ref ctype) = ctype {
+        let scored_segments = if let Some(ref lock) = session {
+            if let Ok(state) = lock.lock() {
+                scorer::score_segments(&content, ctype, Some(&*state))
+            } else {
+                scorer::score_segments(&content, ctype, None)
+            }
         } else {
-            let dropped_lines = scored_segments
-                .iter()
-                .filter(|s| s.final_score() < decision.threshold)
-                .map(|s| s.content.lines().count())
-                .sum::<usize>();
-            final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
+            scorer::score_segments(&content, ctype, None)
+        };
+
+        let decision = composer::decide_rewind(&scored_segments, ctype);
+
+        if decision.should_store {
+            if let Some(ref s) = store {
+                let hash = s.store_rewind(&content);
+                let dropped_lines = scored_segments
+                    .iter()
+                    .filter(|s| s.final_score() < decision.threshold)
+                    .map(|s| s.content.lines().count())
+                    .sum::<usize>();
+
+                final_out.push_str(&format!(
+                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
+                    dropped_lines, hash
+                ));
+                rewind_hash = hash;
+            } else {
+                let dropped_lines = scored_segments
+                    .iter()
+                    .filter(|s| s.final_score() < decision.threshold)
+                    .map(|s| s.content.lines().count())
+                    .sum::<usize>();
+                final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
+            }
+        }
+
+        // Update session state (only for Rust pipeline)
+        if let Some(ref lock) = session
+            && let Ok(mut state) = lock.lock()
+        {
+            if !command.is_empty() {
+                state.add_command(&command);
+            }
+            for seg in &scored_segments {
+                if seg.tier == crate::pipeline::SignalTier::Critical {
+                    state.add_error(&seg.content);
+                }
+            }
         }
     }
 
@@ -145,29 +189,18 @@ pub fn process_payload(
 
     let latency_ms = start.elapsed().as_millis() as u32;
 
-    if let Some(ref lock) = session
-        && let Ok(mut state) = lock.lock()
-    {
-        if !command.is_empty() {
-            state.add_command(&command);
-        }
-        for seg in &scored_segments {
-            if seg.tier == crate::pipeline::SignalTier::Critical {
-                state.add_error(&seg.content);
-            }
-        }
-    }
-
     if let Some(ref s) = store {
         let result = DistillResult {
             output: final_out.clone(),
             route: if rewind_hash.is_empty() {
-                crate::pipeline::Route::Keep
+                Route::Keep
             } else {
-                crate::pipeline::Route::Rewind
+                Route::Rewind
             },
-            filter_name: format!("{:?}", ctype),
-            content_type: ctype.clone(),
+            filter_name: filter_name.clone(),
+            content_type: ctype
+                .clone()
+                .unwrap_or(crate::pipeline::ContentType::Unknown),
             score: 0.0,
             context_score: 0.0,
             input_bytes: content.len(),
@@ -178,16 +211,14 @@ pub fn process_payload(
             } else {
                 Some(rewind_hash)
             },
-            segments_kept: scored_segments
-                .iter()
-                .filter(|s| s.final_score() >= decision.threshold)
-                .count(),
-            segments_dropped: scored_segments
-                .iter()
-                .filter(|s| s.final_score() < decision.threshold)
-                .count(),
+            segments_kept: 0,
+            segments_dropped: 0,
         };
-        let session_id = "hook_session".to_string();
+        let session_id = session
+            .as_ref()
+            .and_then(|lock| lock.lock().ok())
+            .map(|s| s.session_id.clone())
+            .unwrap_or_else(|| "unknown".to_string());
         s.record_distillation(&session_id, &result, &command);
     }
 
