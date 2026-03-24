@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-03-24
+
+### Added
+- `omni reset` command: Safely backs up configs to `~/.omni.<ts>.bak` and removes agent integrations (MCP/Hooks).
+- Automated Release Workflow: `make release` now handles version bumping, commits, and tagging in one command.
+
+### Fixed
+- `omni learn` stability: Resolved stdin "hanging" when run interactively and fixed TOML parsing errors.
+- Noise Deduplication: `omni learn` now skips patterns already present in `learned.toml`.
+- TOML Generation: Improved escaping for quotes and invisible ANSI control characters in generated filters.
+- Project-scoped MCP Detection: `omni doctor` now correctly identifies and validates nested project keys in `~/.claude.json`.
+
+### Improved
+- Actionable Suggestions: `omni doctor` now provides direct CLI commands to fix identified issues.
+- Latency Assertions: Added deterministic tests to verify sub-50ms distillation performance.
+- Clippy Compliance: Resolved all nesting and code quality warnings across the codebase.
+
 ## [0.5.0] - 2026-03-23
 
 ### Changed — Breaking
