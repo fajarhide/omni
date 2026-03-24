@@ -90,10 +90,22 @@ pub fn generate_toml(candidates: &[PatternCandidate], filter_name: &str) -> Stri
     let mut sample_lines = String::new();
 
     for c in candidates {
+        let clean_prefix: String = c
+            .trigger_prefix
+            .chars()
+            .filter(|&ch| !ch.is_control() || ch == '\t')
+            .collect();
+        let clean_sample: String = c
+            .sample_line
+            .chars()
+            .filter(|&ch| !ch.is_control() || ch == '\t')
+            .collect();
+
         // Escape characters for RegEx safeties
-        let escaped_prefix = regex::escape(&c.trigger_prefix).replace("\"", "\\\"");
-        strips.push(format!("\"^{}\"", escaped_prefix));
-        sample_lines.push_str(&format!("{}\n", c.sample_line));
+        let escaped_prefix = regex::escape(&clean_prefix);
+        let toml_safe = escaped_prefix.replace('\\', "\\\\").replace('"', "\\\"");
+        strips.push(format!("\"^{}\"", toml_safe));
+        sample_lines.push_str(&format!("{}\n", clean_sample));
     }
 
     if !strips.is_empty() {
@@ -108,10 +120,8 @@ pub fn generate_toml(candidates: &[PatternCandidate], filter_name: &str) -> Stri
         ));
     }
 
-    tests.push_str(&format!(
-        "input = \"\"\"\n{}\"\"\"\n",
-        sample_lines.trim_end()
-    ));
+    let safe_sample = sample_lines.trim_end().replace("\"\"\"", "\"\"\\\"");
+    tests.push_str(&format!("input = \"\"\"\n{}\n\"\"\"\n", safe_sample));
     if let Some(_first) = candidates.first() {
         tests.push_str(&format!(
             "expected = \"{}: dropped repetitive patterns\"\n",
@@ -134,7 +144,45 @@ pub fn apply_to_config(
         return Ok(0);
     }
 
-    let generated = generate_toml(candidates, filter_name);
+    let existing_content = if config_path.exists() {
+        fs::read_to_string(config_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let mut new_candidates = Vec::new();
+    let mut skipped = 0;
+
+    for c in candidates {
+        let clean_prefix: String = c
+            .trigger_prefix
+            .chars()
+            .filter(|&ch| !ch.is_control() || ch == '\t')
+            .collect();
+        let escaped_prefix = regex::escape(&clean_prefix);
+        let toml_safe = escaped_prefix.replace('\\', "\\\\").replace('"', "\\\"");
+        let pattern_str = format!("\"^{}\"", toml_safe);
+
+        if existing_content.contains(&pattern_str) {
+            skipped += 1;
+            println!(
+                "  [Skip] Pattern \"{}\" already exists in learned filters.",
+                c.trigger_prefix
+            );
+        } else {
+            new_candidates.push(c.clone());
+        }
+    }
+
+    if new_candidates.is_empty() {
+        println!(
+            "\n  All {} patterns are already learned! No new filters added.",
+            skipped
+        );
+        return Ok(0);
+    }
+
+    let generated = generate_toml(&new_candidates, filter_name);
 
     if !config_path.exists() {
         if let Some(p) = config_path.parent() {
@@ -146,7 +194,11 @@ pub fn apply_to_config(
     let mut file = OpenOptions::new().append(true).open(config_path)?;
     file.write_all(generated.as_bytes())?;
 
-    Ok(candidates.len())
+    if skipped > 0 {
+        println!("\n  Skipped {} existing patterns.", skipped);
+    }
+
+    Ok(new_candidates.len())
 }
 
 pub fn queue_for_learn(input: &str, command: &str) {
