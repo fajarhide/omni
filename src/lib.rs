@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_variables, unused_imports)]
-
 // OMNI Library — re-exports for integration tests and external usage.
 
 pub mod cli;

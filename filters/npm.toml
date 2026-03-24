@@ -1,8 +1,8 @@
 schema_version = 1
 
 [filters.npm]
-description = "Filter noise from npm/yarn/pnpm/bun install"
-match_command = "^(npm|yarn|pnpm|bun) (install|ci|add|remove)"
+description = "Filter noise from npm/yarn/pnpm/bun install and run scripts"
+match_command = "^(npm|yarn|pnpm|bun) (install|ci|add|remove|run)"
 strip_ansi = true
 strip_lines_matching = [
     "^npm warn",
@@ -13,6 +13,7 @@ strip_lines_matching = [
     "^\\s*added \\d+ packages, and audited",
     "^\\s*\\d+ packages are looking for funding",
     "^\\s*run `npm fund`",
+    "^> ",
 ]
 on_empty = "npm: install ok"
 
@@ -50,3 +51,42 @@ added 120 packages in 8s
 found 3 vulnerabilities (1 low, 2 moderate)
 """
 expected = "npm: 3 vulnerabilities found!"
+
+[[tests.npm]]
+name = "npm run build output"
+input = """
+> my-app@1.0.0 build
+> vite build
+
+npm warn deprecated some-pkg@1.0.0
+
+vite v5.0.0 building for production...
+✓ 42 modules transformed.
+dist/index.html                  0.45 kB │ gzip:  0.30 kB
+dist/assets/index-abc123.css     1.23 kB │ gzip:  0.65 kB
+dist/assets/index-def456.js    142.00 kB │ gzip: 45.67 kB
+✓ built in 1.23s
+"""
+expected = """vite v5.0.0 building for production...
+✓ 42 modules transformed.
+dist/index.html                  0.45 kB │ gzip:  0.30 kB
+dist/assets/index-abc123.css     1.23 kB │ gzip:  0.65 kB
+dist/assets/index-def456.js    142.00 kB │ gzip: 45.67 kB
+✓ built in 1.23s"""
+
+[[tests.npm]]
+name = "npm run test passthrough"
+input = """
+> my-app@1.0.0 test
+> vitest run
+
+✓ src/utils.test.ts (3 tests) 12ms
+✓ src/api.test.ts (5 tests) 45ms
+
+Test Files  2 passed (2)
+Tests       8 passed (8)
+"""
+expected = """✓ src/utils.test.ts (3 tests) 12ms
+✓ src/api.test.ts (5 tests) 45ms
+Test Files  2 passed (2)
+Tests       8 passed (8)"""

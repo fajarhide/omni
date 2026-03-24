@@ -267,7 +267,7 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         .as_object_mut()
         .unwrap();
 
-    let cmd = format!("{} --hook", exe_path);
+    let _cmd = format!("{} --hook", exe_path);
 
     let ensure_hook = |arr_val: &mut serde_json::Value, matcher: &str, hook_cmd: &str| {
         let arr = arr_val.as_array_mut().unwrap();

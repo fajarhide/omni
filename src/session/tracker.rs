@@ -12,11 +12,13 @@ lazy_static! {
     ).unwrap();
 }
 
+#[allow(dead_code)]
 pub struct SessionTracker {
     session: Arc<Mutex<SessionState>>,
     store: Arc<Store>,
 }
 
+#[allow(dead_code)]
 impl SessionTracker {
     pub fn new(session: Arc<Mutex<SessionState>>, store: Arc<Store>) -> Self {
         Self { session, store }
@@ -78,6 +80,7 @@ impl SessionTracker {
     }
 }
 
+#[allow(dead_code)]
 fn extract_file_paths(text: &str) -> Vec<String> {
     let mut paths = HashSet::new();
     for cap in FILE_PATH_RE.captures_iter(text) {
@@ -114,6 +117,7 @@ fn extract_file_paths(text: &str) -> Vec<String> {
     paths.into_iter().collect()
 }
 
+#[allow(dead_code)]
 fn extract_errors(text: &str) -> Vec<String> {
     let mut errors = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
@@ -168,6 +172,7 @@ fn extract_errors(text: &str) -> Vec<String> {
     unique
 }
 
+#[allow(dead_code)]
 fn truncate_error(err: &str) -> String {
     let mut clean = err.replace('\n', " ");
     if clean.len() > 200 {
@@ -177,6 +182,7 @@ fn truncate_error(err: &str) -> String {
     clean
 }
 
+#[allow(dead_code)]
 pub fn infer_task(session: &SessionState) -> Option<String> {
     let cmds = &session.last_commands;
     let mut task = None;
@@ -217,6 +223,7 @@ pub fn infer_task(session: &SessionState) -> Option<String> {
     })
 }
 
+#[allow(dead_code)]
 pub fn infer_domain(session: &SessionState) -> Option<String> {
     let paths: Vec<String> = session.hot_files.keys().cloned().collect();
     if paths.is_empty() || paths.len() < 2 {

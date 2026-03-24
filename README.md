@@ -195,6 +195,8 @@ cargo test           # Run all 147 tests
 cargo insta review   # Review and accept snapshot changes
 ```
 
+See [docs/TESTING.md](docs/TESTING.md) for a detailed breakdown of our 190+ test suite covering Context Safety, E2E Hooks, Security, and Performance Assertions.
+
 See [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [Critical Guardrails](tests/README.md#critical-guardrails) for the full contributor guide and architectural rules.
 
 

@@ -1,0 +1,14 @@
+bun test v1.0.25 (abc1234f)
+
+ ✓ src/utils.test.ts (5 tests) [2.50ms]
+ ✓ src/api.test.ts (8 tests) [4.10ms]
+ ✗ src/auth.test.ts (2 tests) [3.20ms]
+   ✗ should validate JWT token
+     → expected true, received false
+   ✗ should refresh expired token
+     → TypeError: Cannot read property 'exp' of undefined
+
+ 13 pass
+ 2 fail
+ 15 expect() calls
+Ran 3 tests across 3 files. [10.00ms]

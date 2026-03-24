@@ -1,35 +1,52 @@
 schema_version = 1
 
 [filters.vitest]
-description = "Filter noise from vitest and jest output"
-match_command = "(vitest|jest|pnpm test|npm test)"
+description = "Filter noise from vitest, jest, and bun test output"
+match_command = "(vitest|jest|pnpm test|npm test|bun test|bun run test)"
 strip_ansi = true
 strip_lines_matching = [
     "^\\s*✓ ",
     "^\\s*✓ ",
     "^\\s*√ ",
     "^\\s*PASS ",
-    "^\\s*$",
     "^stdout ",
     "^stderr ",
+    "^bun test v",
 ]
 on_empty = "tests: all passed"
 
 [[tests.vitest]]
-name = "mixed pass and fail"
+name = "mixed pass and fail with diff"
 input = """
  ✓ src/utils.test.ts (3 tests)
  ✓ src/api.test.ts (5 tests)
  ✗ src/auth.test.ts (2 tests)
    ✗ should validate token
-     → expected true, received false
+     AssertionError: expected { role: 'admin' } to loosely equal { role: 'user' }
+
+     - Expected
+     + Received
+
+       Object {
+     -   "role": "user",
+     +   "role": "admin",
+       }
 
  Test Files  1 failed | 2 passed | 3 total
  Tests       1 failed | 8 passed | 9 total
 """
 expected = """ ✗ src/auth.test.ts (2 tests)
    ✗ should validate token
-     → expected true, received false
+     AssertionError: expected { role: 'admin' } to loosely equal { role: 'user' }
+
+     - Expected
+     + Received
+
+       Object {
+     -   "role": "user",
+     +   "role": "admin",
+       }
+
  Test Files  1 failed | 2 passed | 3 total
  Tests       1 failed | 8 passed | 9 total"""
 
@@ -41,3 +58,44 @@ input = """
  ✓ src/auth.test.ts (2 tests)
 """
 expected = "tests: all passed"
+
+[[tests.vitest]]
+name = "bun test all pass"
+input = """
+bun test v1.0.25
+
+ ✓ src/utils.test.ts (3 tests) [2.50ms]
+ ✓ src/api.test.ts (5 tests) [4.10ms]
+ ✓ src/auth.test.ts (2 tests) [1.80ms]
+
+ 10 pass
+ 0 fail
+ 3 expect() calls
+"""
+expected = """
+ 10 pass
+ 0 fail
+ 3 expect() calls"""
+
+[[tests.vitest]]
+name = "bun test with failures"
+input = """
+bun test v1.0.25
+
+ ✓ src/utils.test.ts (3 tests) [2.50ms]
+ ✗ src/auth.test.ts (2 tests) [3.20ms]
+   ✗ should hash password
+     → expected "hashed", received "plain"
+
+ 8 pass
+ 1 fail
+ 9 expect() calls
+"""
+expected = """
+ ✗ src/auth.test.ts (2 tests) [3.20ms]
+   ✗ should hash password
+     → expected "hashed", received "plain"
+
+ 8 pass
+ 1 fail
+ 9 expect() calls"""

@@ -8,12 +8,11 @@ strip_lines_matching = [
     "^=== RUN ",
     "^=== PAUSE ",
     "^=== CONT ",
-    "^\\s*$",
 ]
 on_empty = "go test: all passed"
 
 [[tests.go_test]]
-name = "test with failures"
+name = "test with failures and context"
 input = """
 === RUN   TestAdd
 === RUN   TestSubtract
@@ -21,6 +20,9 @@ input = """
 === RUN   TestDivide
 --- FAIL: TestDivide (0.00s)
     math_test.go:25: expected 5, got 0
+
+    panic: division by zero
+
 === RUN   TestModulo
 --- PASS: TestAdd (0.00s)
 --- PASS: TestSubtract (0.00s)
@@ -31,6 +33,9 @@ FAIL    github.com/user/project/math    0.005s
 """
 expected = """--- FAIL: TestDivide (0.00s)
     math_test.go:25: expected 5, got 0
+
+    panic: division by zero
+
 --- PASS: TestAdd (0.00s)
 --- PASS: TestSubtract (0.00s)
 --- PASS: TestMultiply (0.00s)

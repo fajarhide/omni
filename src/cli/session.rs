@@ -1,4 +1,3 @@
-use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 use chrono::{Local, TimeZone, Utc};
 use colored::*;
@@ -261,6 +260,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::SessionState;
     use tempfile::tempdir;
 
     fn get_store() -> (Arc<Store>, tempfile::TempDir) {

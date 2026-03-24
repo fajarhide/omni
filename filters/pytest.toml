@@ -2,11 +2,10 @@ schema_version = 1
 
 [filters.pytest]
 description = "Filter noise from pytest output, keeping failures and summary"
-match_command = "^pytest"
+match_command = "^(pytest|python3? -m pytest)"
 strip_ansi = true
 strip_lines_matching = [
     " PASSED",
-    "^\\s*$",
     "^=+ test session starts =+",
     "^platform ",
     "^rootdir:",
@@ -17,35 +16,41 @@ strip_lines_matching = [
 on_empty = "pytest: all passed"
 
 [[tests.pytest]]
-name = "mixed pass and fail"
+name = "failure with stack trace"
 input = """
 ============================= test session starts ==============================
 platform linux -- Python 3.12.0, pytest-8.0.0
 rootdir: /home/user/project
-configfile: pyproject.toml
-plugins: cov-4.1.0
-collected 22 items
+collected 2 items
 
-tests/test_auth.py::test_login PASSED
-tests/test_auth.py::test_logout PASSED
-tests/test_auth.py::test_signup PASSED
-tests/test_api.py::test_get_users PASSED
 tests/test_api.py::test_create_user PASSED
 tests/test_api.py::test_delete_user FAILED
-tests/test_api.py::test_update_user PASSED
-tests/test_db.py::test_connection PASSED
-tests/test_db.py::test_migration FAILED
 
-FAILED tests/test_api.py::test_delete_user - AssertionError: 403 != 200
-FAILED tests/test_db.py::test_migration - ConnectionError: timeout
+=================================== FAILURES ===================================
+_______________________________ test_delete_user _______________________________
 
-========================= 2 failed, 20 passed =========================
+    def test_delete_user():
+        response = client.delete("/users/1")
+>       assert response.status_code == 200
+E       assert 403 == 200
+
+tests/test_api.py:45: AssertionError
+
+========================= 1 failed, 1 passed =========================
 """
 expected = """tests/test_api.py::test_delete_user FAILED
-tests/test_db.py::test_migration FAILED
-FAILED tests/test_api.py::test_delete_user - AssertionError: 403 != 200
-FAILED tests/test_db.py::test_migration - ConnectionError: timeout
-========================= 2 failed, 20 passed ========================="""
+
+=================================== FAILURES ===================================
+_______________________________ test_delete_user _______________________________
+
+    def test_delete_user():
+        response = client.delete("/users/1")
+>       assert response.status_code == 200
+E       assert 403 == 200
+
+tests/test_api.py:45: AssertionError
+
+========================= 1 failed, 1 passed ========================="""
 
 [[tests.pytest]]
 name = "all pass"
@@ -56,10 +61,24 @@ collected 5 items
 
 tests/test_app.py::test_one PASSED
 tests/test_app.py::test_two PASSED
-tests/test_app.py::test_three PASSED
-tests/test_app.py::test_four PASSED
-tests/test_app.py::test_five PASSED
 
 ============================== 5 passed ==============================
 """
-expected = "============================== 5 passed =============================="
+expected = """
+============================== 5 passed =============================="""
+
+[[tests.pytest]]
+name = "python -m pytest all pass"
+input = """
+============================= test session starts ==============================
+platform linux -- Python 3.12.0, pytest-8.0.0
+rootdir: /home/user/project
+collected 3 items
+
+tests/test_core.py::test_init PASSED
+tests/test_core.py::test_run PASSED
+tests/test_core.py::test_stop PASSED
+
+============================== 3 passed in 0.42s ==============================
+"""
+expected = "============================== 3 passed in 0.42s =============================="
