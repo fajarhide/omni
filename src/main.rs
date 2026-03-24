@@ -88,6 +88,7 @@ fn print_help() {
         "  {: <12} Auto-generate filters from history",
         "learn".cyan()
     );
+    println!("  {: <12} Retrieve raw unfiltered logs", "rewind".cyan());
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -176,7 +177,38 @@ fn main() {
         }
 
         Mode::Cli => {
+            let is_bare = args.len() == 1;
             let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+
+            if is_bare {
+                let settings_path = cli::init::get_settings_path();
+                let is_installed = if settings_path.exists() {
+                    std::fs::read_to_string(&settings_path)
+                        .map(|c| c.contains("--hook") || c.contains("omni --mcp"))
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+
+                if !is_installed {
+                    use std::io::Write;
+                    println!("\n{}", "✨ Welcome to OMNI!".cyan().bold());
+                    println!("OMNI is not yet fully configured with Claude Code.");
+                    print!("Would you like to run the interactive setup now? [Y/n] ");
+                    let _ = io::stdout().flush();
+
+                    let mut input = String::new();
+                    if io::stdin().read_line(&mut input).is_ok() {
+                        let ans = input.trim().to_lowercase();
+                        if ans.is_empty() || ans == "y" || ans == "yes" {
+                            let init_args =
+                                vec!["omni".to_string(), "init".to_string(), "--all".to_string()];
+                            let _ = cli::init::run_init(&init_args);
+                            return;
+                        }
+                    }
+                }
+            }
 
             match cmd {
                 "version" | "-v" | "--version" => {
@@ -200,6 +232,19 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for stats: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "rewind" => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::rewind::run(&args, &store) {
+                            eprintln!("[omni] Rewind error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for rewind: {}", e);
                         std::process::exit(1);
                     }
                 },

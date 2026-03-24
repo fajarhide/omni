@@ -98,86 +98,96 @@ pub fn process_payload(
 
     let start = Instant::now();
 
+    // ─── Distillation Engine ────────────────────────────────
+    let mut scored_segments = Vec::new();
+
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
     let toml_match = toml_filters.iter().find(|f| f.matches(&command));
 
-    let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
+    let (mut final_out, filter_name, ctype) = if let Some(filter) = toml_match {
         // Use TOML filter
         let output = filter.apply(&content);
         let fname = filter.name.clone();
         (output, fname, None)
     } else {
         // Fallback to Rust distiller pipeline
-        let ctype = classifier::classify(&content);
+        let ct = classifier::classify(&content);
 
-        let scored_segments = if let Some(ref lock) = session {
+        let segments = if let Some(ref lock) = session {
             if let Ok(state) = lock.lock() {
-                scorer::score_segments(&content, &ctype, Some(&*state))
+                scorer::score_segments(&content, &ct, Some(&*state))
             } else {
-                scorer::score_segments(&content, &ctype, None)
+                scorer::score_segments(&content, &ct, None)
             }
         } else {
-            scorer::score_segments(&content, &ctype, None)
+            scorer::score_segments(&content, &ct, None)
         };
 
-        let distiller = distillers::get_distiller(&ctype);
-        let output = distiller.distill(&scored_segments, &content);
-        (output, format!("{:?}", ctype), Some(ctype))
+        let distiller = distillers::get_distiller(&ct);
+        let output = distiller.distill(&segments, &content);
+        let fname = format!("{:?}", ct);
+        scored_segments = segments;
+        (output, fname, Some(ct))
     };
 
-    // Check for rewind decision (only for Rust pipeline)
-    let mut final_out = final_out;
+    // ─── Rewind & Indicators ─────────────────────────────────
     let mut rewind_hash = String::new();
 
-    if let Some(ref ctype) = ctype {
-        let scored_segments = if let Some(ref lock) = session {
-            if let Ok(state) = lock.lock() {
-                scorer::score_segments(&content, ctype, Some(&*state))
-            } else {
-                scorer::score_segments(&content, ctype, None)
-            }
+    let (should_rewind, dropped_lines, critical_kept) = if let Some(ref ct) = ctype {
+        let decision = composer::decide_rewind(&scored_segments, ct);
+        let dropped = scored_segments
+            .iter()
+            .filter(|s| s.final_score() < decision.threshold)
+            .map(|s| s.content.lines().count())
+            .sum::<usize>();
+        let critical = scored_segments
+            .iter()
+            .filter(|s| s.tier == crate::pipeline::SignalTier::Critical)
+            .map(|s| s.content.lines().count())
+            .sum::<usize>();
+        (decision.should_store, dropped, critical)
+    } else {
+        // TOML filter case: estimate via line count
+        let orig_lines = content.lines().count();
+        let final_lines = final_out.lines().count();
+        let dropped = if orig_lines > final_lines {
+            orig_lines - final_lines
         } else {
-            scorer::score_segments(&content, ctype, None)
+            0
         };
+        // If reduced by more than 30% or > 50 lines dropped, trigger rewind
+        let should = dropped > 50 || (orig_lines > 10 && final_lines < orig_lines * 7 / 10);
+        (should, dropped, 0)
+    };
 
-        let decision = composer::decide_rewind(&scored_segments, ctype);
-
-        if decision.should_store {
-            if let Some(ref s) = store {
-                let hash = s.store_rewind(&content);
-                let dropped_lines = scored_segments
-                    .iter()
-                    .filter(|s| s.final_score() < decision.threshold)
-                    .map(|s| s.content.lines().count())
-                    .sum::<usize>();
-
-                final_out.push_str(&format!(
-                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
-                    dropped_lines, hash
-                ));
-                rewind_hash = hash;
-            } else {
-                let dropped_lines = scored_segments
-                    .iter()
-                    .filter(|s| s.final_score() < decision.threshold)
-                    .map(|s| s.content.lines().count())
-                    .sum::<usize>();
-                final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
-            }
+    if should_rewind {
+        if let Some(ref s) = store {
+            let hash = s.store_rewind(&content);
+            final_out.push_str(&format!(
+                "\n[omni: filtered {} noise lines. {} critical lines kept. id: {}]",
+                dropped_lines, critical_kept, hash
+            ));
+            rewind_hash = hash;
+        } else {
+            final_out.push_str(&format!(
+                "\n[omni: filtered {} noise lines. {} critical lines kept]",
+                dropped_lines, critical_kept
+            ));
         }
+    }
 
-        // Update session state (only for Rust pipeline)
-        if let Some(ref lock) = session
-            && let Ok(mut state) = lock.lock()
-        {
-            if !command.is_empty() {
-                state.add_command(&command);
-            }
-            for seg in &scored_segments {
-                if seg.tier == crate::pipeline::SignalTier::Critical {
-                    state.add_error(&seg.content);
-                }
+    // ─── Session Updates ─────────────────────────────────────
+    if let Some(ref lock) = session
+        && let Ok(mut state) = lock.lock()
+    {
+        if !command.is_empty() {
+            state.add_command(&command);
+        }
+        // Only add errors from Rust distillers (scored segments)
+        for seg in &scored_segments {
+            if seg.tier == crate::pipeline::SignalTier::Critical {
+                state.add_error(&seg.content);
             }
         }
     }

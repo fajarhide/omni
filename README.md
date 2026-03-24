@@ -59,14 +59,18 @@ Before Claude prunes its conversation history to save space, OMNI provides a per
 
 ## Key Features
 
-### RewindStore: Zero Information Loss
-When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore** with a SHA-256 hash. If the agent needs the full, unbridled output, it simply calls `omni_retrieve("hash")` via its MCP tool.
+### Rewind: Zero Information Loss
+When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore**. 
+- **AI-Native**: LLMs see an `id: [hash]` in distilled outputs and can call `omni_retrieve` to see the original.
+- **User-Native**: Run `omni rewind` to instantly print the 100% raw output of your last command if OMNI filtered too much.
 
 ### Session Intelligence
 OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring. Run `omni session --status` to see your current high-relevance signals.
 
 ### Pattern Discovery (Learning)
-OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters and `omni learn --apply` to commit them to your configuration.
+OMNI automatically collects samples of repetitive noise.
+- **Proactive**: OMNI displays a `💡` hint when it notices repetitive noise in your session.
+- **Actionable**: Use `omni learn --status` to see candidates and `omni learn --apply` to silence them permanently.
 
 ### The OMNI Philosophy: Deliberate Action
 
@@ -116,8 +120,9 @@ omni init --all
 # 3. Verify Installation
 omni doctor
 
-# 4. Check Current Status
-omni init --status
+# 4. Smart Fix
+# If doctor finds issues, fix them automatically:
+omni doctor --fix
 ```
 
 On universal setup 

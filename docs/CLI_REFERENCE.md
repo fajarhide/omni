@@ -126,7 +126,8 @@ omni learn --verify     # Test: Run inline tests on all filters
 Diagnose installation health.
 
 ```bash
-omni doctor
+omni doctor         # Check health
+omni doctor --fix   # Automatically repair missing/broken configs
 ```
 
 **Checks:**
@@ -142,10 +143,26 @@ omni doctor
 
 ---
 
+### `omni rewind`
+
+Retrieve raw, unfiltered logs from history.
+
+```bash
+omni rewind          # Fetch latest intercepted log
+omni rewind <hash>   # Fetch specific log by ID
+```
+
+**What it does:**
+- Queries the `rewind_store` in SQLite.
+- Prints the original, zero-distillation output to stdout.
+- Allows for instant "undo" if OMNI filtered too much context for debugging.
+
+---
+
 ### `omni version`
 
 ```bash
-omni version    # Prints: omni 0.5.0
+omni version    # Prints: omni 0.6.0
 ```
 
 ---
