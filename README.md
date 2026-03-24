@@ -8,7 +8,7 @@
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
   [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
-  [![Stars](https://img.shields.io/github/stars/fajarhide/omni)](https://github.com/fajarhide/omni/stargazers)
+  [![Stars](https://img.shields.io/github/stars/fajarhide/omni?style=flat-square)](https://github.com/fajarhide/omni/stargazers)
 </div>
 
 <br/>
