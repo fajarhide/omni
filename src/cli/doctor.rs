@@ -170,59 +170,56 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     // 4. Hook entries in ~/.claude/settings.json
     println!("\n {}", "Hooks (Claude Code):".bold().bright_white());
-    match get_settings_path() {
-        path => {
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if content.contains("--hook") {
-                        let fmt_hook = |name: &str, tag: &str| {
-                            if content.contains(tag) {
-                                println!(
-                                    "   {:<15} {}",
-                                    name.bright_black(),
-                                    "[OK] installed".green()
-                                );
-                                true
-                            } else {
-                                println!(
-                                    "   {:<15} {}",
-                                    name.bright_black(),
-                                    "[WARNING] missing".yellow()
-                                );
-                                false
-                            }
-                        };
-
-                        if !fmt_hook("PostToolUse", "PostToolUse") {
-                            all_ok = false;
-                            warnings.push("PostToolUse hook is not installed. Run `omni init`.");
-                        }
-                        if !fmt_hook("SessionStart", "SessionStart") {
-                            all_ok = false;
-                        }
-                        if !fmt_hook("PreCompact", "PreCompact") {
-                            all_ok = false;
-                        }
+    let path = get_settings_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if content.contains("--hook") {
+                let fmt_hook = |name: &str, tag: &str| {
+                    if content.contains(tag) {
+                        println!(
+                            "   {:<15} {}",
+                            name.bright_black(),
+                            "[OK] installed".green()
+                        );
+                        true
                     } else {
                         println!(
                             "   {:<15} {}",
-                            "Hooks:".bright_black(),
-                            "[WARNING] omni not found".yellow()
+                            name.bright_black(),
+                            "[WARNING] missing".yellow()
                         );
-                        warnings.push("OMNI hooks are not configured. Run `omni init`.");
-                        all_ok = false;
+                        false
                     }
+                };
+
+                if !fmt_hook("PostToolUse", "PostToolUse") {
+                    all_ok = false;
+                    warnings.push("PostToolUse hook is not installed. Run `omni init`.");
+                }
+                if !fmt_hook("SessionStart", "SessionStart") {
+                    all_ok = false;
+                }
+                if !fmt_hook("PreCompact", "PreCompact") {
+                    all_ok = false;
                 }
             } else {
                 println!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
-                    "[ERROR] settings.json missing".red()
+                    "[WARNING] omni not found".yellow()
                 );
-                warnings.push("Claude settings not found. Have you installed Claude Code?");
+                warnings.push("OMNI hooks are not configured. Run `omni init`.");
                 all_ok = false;
             }
         }
+    } else {
+        println!(
+            "   {:<15} {}",
+            "Hooks:".bright_black(),
+            "[ERROR] settings.json missing".red()
+        );
+        warnings.push("Claude settings not found. Have you installed Claude Code?");
+        all_ok = false;
     }
     println!();
 
