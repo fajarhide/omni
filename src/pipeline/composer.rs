@@ -81,15 +81,24 @@ pub fn compose(
     if dropped_count > 0
         && let Some(content) = dropped_content
     {
+        let critical_kept: usize = kept_ordered
+            .iter()
+            .filter(|s| s.tier == crate::pipeline::SignalTier::Critical)
+            .map(|s| s.content.lines().count())
+            .sum();
+
         if let Some(s) = store {
             let hash = s.store_rewind(&content);
             output.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
-                dropped_lines, hash
+                "\n[omni: filtered {} noise lines. {} critical lines kept. id: {}]\n",
+                dropped_lines, critical_kept, hash
             ));
             rewind_hash = Some(hash);
         } else {
-            output.push_str(&format!("\n[OMNI: {} lines omitted]\n", dropped_lines));
+            output.push_str(&format!(
+                "\n[omni: filtered {} noise lines. {} critical lines kept]\n",
+                dropped_lines, critical_kept
+            ));
         }
     }
 
@@ -185,7 +194,7 @@ mod tests {
 
         assert!(out.contains("bad loop"));
         assert!(!out.contains("ignored noise")); // Not in main output
-        assert!(out.contains("[OMNI: 1 lines omitted — omni_retrieve("));
+        assert!(out.contains("[omni: filtered 1 noise lines"));
         assert!(hash.is_some());
     }
 

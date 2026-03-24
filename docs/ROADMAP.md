@@ -24,7 +24,23 @@ The full rewrite from Node.js + Zig hybrid to a single Rust binary.
 
 ---
 
-## Next: v0.6.0 (Intelligence Layer)
+## Current: v0.6.0 (UX Magic) ✅
+
+**Status: Complete** (Released 2026-03-25)
+
+Focus on frictionless onboarding and transparent AI-human interaction.
+
+### What Was Delivered
+
+- **Frictionless Onboarding**: Bare `omni` command interactively suggests setup if missing.
+- **Smart Doctor**: `omni doctor --fix` automatically repairs installation gaps.
+- **Micro-Indicators**: LLMs see `[omni: filtered...]` with a Rewind ID for transparency.
+- **Instant Rewind**: `omni rewind` command to recover 100% raw logs immediately.
+- **Proactive Learning**: Background logic hints `💡 Run omni learn` when noise is detected.
+
+---
+
+## Next: v0.7.0 (Intelligence Layer)
 
 ### Planned Features
 

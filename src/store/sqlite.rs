@@ -348,6 +348,19 @@ impl Store {
         content
     }
 
+    pub fn get_latest_rewind_hash(&self) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let hash: Option<String> = conn
+            .query_row(
+                "SELECT hash FROM rewind_store ORDER BY ts DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap_or(None);
+        Ok(hash)
+    }
+
     pub fn delete_session(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;

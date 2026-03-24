@@ -206,7 +206,7 @@ pub fn queue_for_learn(input: &str, command: &str) {
         return;
     }
 
-    let input_clone = input.chars().take(2000).collect::<String>();
+    let input_clone = input.chars().take(50000).collect::<String>();
     let cmd = command.to_string();
 
     std::thread::spawn(move || {
@@ -224,6 +224,21 @@ pub fn queue_for_learn(input: &str, command: &str) {
 
         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
             let _ = writeln!(file, "{}", entry);
+        }
+
+        let candidates = detect_patterns(&input_clone);
+        if !candidates.is_empty() {
+            let total_repetitive: usize = candidates.iter().map(|c| c.count).sum();
+            let display_cmd = if cmd.is_empty() || cmd == "omni_passthrough_eval" {
+                "this command".to_string()
+            } else {
+                format!("'{}'", cmd)
+            };
+
+            eprintln!(
+                "\n💡 OMNI noticed {} repetitive lines from {}. Run 'omni learn' to silence them permanently.",
+                total_repetitive, display_cmd
+            );
         }
     });
 }

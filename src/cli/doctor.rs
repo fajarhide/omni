@@ -315,10 +315,31 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     };
     println!("  {} {}", status_icon, status_msg);
 
+    let fix_requested = args.iter().any(|a| a == "--fix");
+
     if !warnings.is_empty() {
         println!("\n {}", "Suggestions:".bold().bright_white());
-        for w in warnings {
+        for w in &warnings {
             println!("  {} {}", "•".yellow(), w);
+        }
+
+        if fix_requested {
+            println!("\n {}", "Auto-Fixing (omni init --all)...".bold().magenta());
+            let init_args = vec!["omni".to_string(), "init".to_string(), "--all".to_string()];
+            if let Err(e) = crate::cli::init::run_init(&init_args) {
+                println!("  {} Failed to auto-fix: {}", "✗".red(), e);
+            } else {
+                println!("  {} Successfully repaired installation!", "✓".green());
+                println!(
+                    "  {} Run `omni doctor` again to verify.",
+                    "↳".bright_black()
+                );
+            }
+        } else {
+            println!(
+                "\n  {} Run `omni doctor --fix` to attempt automatic repair.",
+                "💡".cyan()
+            );
         }
     }
     println!(
