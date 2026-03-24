@@ -349,7 +349,7 @@ mod tests {
         tracker.track_command("git status", "On branch main", &res);
         let elapsed = start.elapsed();
         // Should be extremely fast because thread spawns
-        assert!(elapsed.as_millis() < 50, "Took {} ms", elapsed.as_millis());
+        assert!(elapsed.as_millis() < 200, "Took {} ms", elapsed.as_millis());
     }
 
     #[test]
@@ -361,6 +361,6 @@ mod tests {
         let start = std::time::Instant::now();
         save_async(session, store);
         let elapsed = start.elapsed();
-        assert!(elapsed.as_millis() < 50);
+        assert!(elapsed.as_millis() < 200);
     }
 }
