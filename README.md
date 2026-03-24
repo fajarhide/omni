@@ -69,7 +69,7 @@ OMNI doesn't just compress; it **understands context**. It tracks which files yo
 
 ### Pattern Discovery (Learning)
 OMNI automatically collects samples of repetitive noise.
-- **Proactive**: OMNI displays a `💡` hint when it notices repetitive noise in your session.
+- **Proactive**: OMNI displays a `OMNI noticed 54 repetitive lines...` hint when it notices repetitive noise in your session.
 - **Actionable**: Use `omni learn --status` to see candidates and `omni learn --apply` to silence them permanently.
 
 ### The OMNI Philosophy: Deliberate Action
