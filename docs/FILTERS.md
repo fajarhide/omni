@@ -271,10 +271,13 @@ expected = "2024-01-15 10:30:03 ERROR Connection timeout to redis-primary"
 # Verify all loaded filters pass inline tests
 omni learn --verify
 
-# Dry-run pattern detection on a log file
+# Discovery: search for patterns in a log file
+omni learn --status < output.log
+
+# Preview: show generated TOML
 omni learn --dry-run < output.log
 
-# Apply detected patterns to learned.toml
+# Action: apply patterns to learned.toml
 omni learn --apply < output.log
 ```
 

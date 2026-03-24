@@ -1,7 +1,46 @@
+use colored::*;
 use serde_json::{Value, json};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+
+fn print_help() {
+    println!(
+        "\n{} {} — Setup OMNI hooks and MCP server",
+        "omni".bold().cyan(),
+        "init".bold().yellow()
+    );
+    println!("\n{}", "USAGE:".bold().bright_white());
+    println!("  omni {}", "init [FLAGS]".cyan());
+
+    println!("\n{}", "FLAGS:".bold().bright_white());
+    println!(
+        "  {: <12} Perform full setup (hooks + MCP server)",
+        "--all".cyan()
+    );
+    println!("  {: <12} Only install Claude Code hooks", "--hook".cyan());
+    println!("  {: <12} Only register MCP server", "--mcp".cyan());
+    println!(
+        "  {: <12} Check current installation status",
+        "--status".cyan()
+    );
+    println!(
+        "  {: <12} Completely remove OMNI Hook and MCP server from Claude",
+        "--uninstall".cyan()
+    );
+    println!("  {: <12} Show this help message", "--help, -h".cyan());
+
+    println!("\n{}", "EXAMPLES:".bold().bright_white());
+    println!(
+        "  omni init --all       {}",
+        "# Recommended full setup".bright_black()
+    );
+    println!(
+        "  omni init --status    {}",
+        "# Verify installation".bright_black()
+    );
+    println!();
+}
 
 pub fn get_claude_json_path() -> PathBuf {
     dirs::home_dir()
@@ -42,10 +81,30 @@ fn backup_settings(path: &PathBuf) -> anyhow::Result<PathBuf> {
 }
 
 pub fn run_init(args: &[String]) -> anyhow::Result<()> {
-    let is_hook = args.iter().any(|a| a == "--hook");
-    let is_mcp = args.iter().any(|a| a == "--mcp");
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_help();
+        return Ok(());
+    }
+
+    let mut is_hook = args.iter().any(|a| a == "--hook");
+    let mut is_mcp = args.iter().any(|a| a == "--mcp");
+    let is_all = args.iter().any(|a| a == "--all");
     let is_status = args.iter().any(|a| a == "--status");
     let is_uninstall = args.iter().any(|a| a == "--uninstall");
+
+    // If no specific flag is provided, show help instead of defaulting to setup
+    if !is_all && !is_status && !is_uninstall && !is_hook && !is_mcp {
+        print_help();
+        return Ok(());
+    }
+
+    if is_all {
+        is_hook = true;
+        is_mcp = true;
+    }
 
     let exe_path = env::current_exe()?.to_string_lossy().to_string();
 
@@ -53,17 +112,20 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         let (_, val) = initialize_settings()?;
         let (post_ok, session_ok, pre_ok) = check_status(&val, &exe_path);
 
+        println!("\n{}", "OMNI Installation Status:".bold().bright_white());
+
         let fmt_status = |ok: bool| {
             if ok {
-                "✓ installed"
+                "✓ installed".green()
             } else {
-                "✗ not installed"
+                "✗ not installed".red()
             }
         };
 
-        println!("  PostToolUse: {}", fmt_status(post_ok));
+        println!("  PostToolUse:  {}", fmt_status(post_ok));
         println!("  SessionStart: {}", fmt_status(session_ok));
         println!("  PreCompact:   {}", fmt_status(pre_ok));
+        println!();
         return Ok(());
     }
 
@@ -129,16 +191,27 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
             install_omni_hooks(&mut val, &exe_path);
             let new_content = serde_json::to_string_pretty(&val)?;
             fs::write(&path, new_content)?;
-            println!("✓ OMNI hooks installed in Claude settings");
+            println!(
+                "  {} {} installed in Claude settings",
+                "✓".green(),
+                "Hooks".bold()
+            );
         }
 
         if is_mcp {
             install_mcp_server(&exe_path)?;
-            println!("✓ OMNI MCP server registered in .claude.json");
+            println!(
+                "  {} {} registered in .claude.json",
+                "✓".green(),
+                "MCP Server".bold()
+            );
         }
 
-        println!("\n   Binary: {}", exe_path);
-        println!("   Restart Claude Code to activate.");
+        println!("\n  {} Binary: {}", "ℹ".blue(), exe_path.bright_black());
+        println!(
+            "  {} Restart Claude Code to activate.\n",
+            "✓".green().bold()
+        );
     }
 
     Ok(())

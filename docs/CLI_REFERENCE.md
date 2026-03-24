@@ -21,6 +21,9 @@ Universal hook mode. Reads JSON from stdin with `hook_event_name` and dispatches
 echo '{"hook_event_name": "PostToolUse", ...}' | omni --hook
 ```
 
+> [!IMPORTANT]
+> OMNI is designed for **Deliberate Action**. Core commands like `init`, `session`, and `learn` show help by default if no flags are provided. Always use a flag to perform an action or check status.
+
 ### `omni --mcp`
 
 Start the MCP server. Provides 5 tools:
@@ -36,10 +39,9 @@ Start the MCP server. Provides 5 tools:
 ### Pipe Mode
 
 ```bash
-# Automatically detected when stdin is not a TTY
-git diff HEAD~3 | omni
-cargo test 2>&1 | omni
-kubectl get pods | omni
+# Explicit flags are recommended even in pipes for clarity
+git diff HEAD~3 | omni --dry-run   # If learning
+cargo test 2>&1 | omni             # standard distillation
 ```
 
 ---
@@ -51,9 +53,11 @@ kubectl get pods | omni
 Setup OMNI hooks in Claude Code.
 
 ```bash
-omni init --hook       # Install PostToolUse/SessionStart/PreCompact hooks
+omni init --all        # Recommended: Full Setup (Hooks + MCP)
+omni init --hook       # Setup Hooks only
+omni init --mcp        # Setup MCP Server only
 omni init --status     # Check installation status
-omni init --uninstall  # Remove all OMNI hooks
+omni init --uninstall  # Remove all OMNI components
 ```
 
 **What it does:**
@@ -90,10 +94,10 @@ omni stats --session    # Session-level breakdown
 Inspect and manage session state.
 
 ```bash
-omni session            # Show current session
-omni session --inject   # Output the injection string (for use in other agents)
+omni session --status   # Show current session details (Hot files, etc.)
 omni session --history  # List recent sessions
 omni session --clear    # Clear current session
+omni session --continue # Resume a stale session
 ```
 
 ---
@@ -103,11 +107,10 @@ omni session --clear    # Clear current session
 Auto-generate TOML filters from passthrough output.
 
 ```bash
-omni learn < output.log           # Analyze from stdin
-omni learn --from-queue           # Analyze from learn queue
-omni learn --dry-run              # Show candidates without applying
-omni learn --apply                # Write to ~/.omni/filters/learned.toml
-omni learn --verify               # Run inline tests on all loaded filters
+omni learn --status     # Discovery: Search for new noise patterns
+omni learn --dry-run    # Preview: Show suggested TOML
+omni learn --apply      # Action: Commit to learned.toml
+omni learn --verify     # Test: Run inline tests on all filters
 ```
 
 **How it works:**

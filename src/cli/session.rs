@@ -1,31 +1,68 @@
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 use chrono::{Local, TimeZone, Utc};
+use colored::*;
 use std::sync::Arc;
 
-pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
-    let mut is_continue = false;
-    let mut is_history = false;
-    let mut is_clear = false;
-    let mut is_inject = false;
+fn print_help() {
+    println!(
+        "\n{} {} — Session state management",
+        "omni".bold().cyan(),
+        "session".bold().yellow()
+    );
+    println!("\n{}", "USAGE:".bold().bright_white());
+    println!("  omni {} {}", "session".cyan(), "[FLAGS]".bright_black());
 
-    for a in args {
-        match a.as_str() {
-            "--continue" => is_continue = true,
-            "--history" => is_history = true,
-            "--clear" => is_clear = true,
-            "--inject" => is_inject = true,
-            _ => {}
-        }
+    println!("\n{}", "FLAGS:".bold().bright_white());
+    println!("  {: <12} Check current session status", "--status".cyan());
+    println!("  {: <12} View recent session history", "--history".cyan());
+    println!(
+        "  {: <12} Reset/Clear the current session",
+        "--clear".cyan()
+    );
+    println!("  {: <12} Continue a stale session", "--continue".cyan());
+    println!("  {: <12} Show this help message", "--help, -h".cyan());
+
+    println!("\n{}", "EXAMPLES:".bold().bright_white());
+    println!(
+        "  omni session --status  {}",
+        "# View current session status".bright_black()
+    );
+    println!(
+        "  omni session --history {}",
+        "# View past sessions".bright_black()
+    );
+    println!();
+}
+
+pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_help();
+        return Ok(());
+    }
+
+    let is_history = args.iter().any(|a| a == "--history");
+    let is_clear = args.iter().any(|a| a == "--clear");
+    let is_continue = args.iter().any(|a| a == "--continue");
+    let is_status = args.iter().any(|a| a == "--status");
+    let is_inject = args.iter().any(|a| a == "--inject");
+
+    // If no flags, show help
+    if !is_history && !is_clear && !is_continue && !is_status && !is_inject {
+        print_help();
+        return Ok(());
     }
 
     if is_history {
         let sessions = store.list_recent_sessions(10).unwrap_or_default();
         if sessions.is_empty() {
-            println!("No recent sessions found.");
+            println!("\n{} No recent sessions found.", "ℹ".blue());
             return Ok(());
         }
-        println!("Recent Sessions:");
+        println!("\n{}", "Recent Session History:".bold().bright_white());
         for s in sessions {
             let ago = (Utc::now().timestamp() - s.last_active) / 60;
             let time_str = if ago < 60 {
@@ -34,14 +71,22 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
                 format!("{}h ago", ago / 60)
             };
             let task = s.inferred_task.as_deref().unwrap_or("not detected");
+            let sid = if s.session_id.len() > 8 {
+                &s.session_id[..8]
+            } else {
+                &s.session_id
+            };
+
             println!(
-                "- {} ({}) | Task: {} | Commands: {}",
-                s.session_id,
-                time_str,
-                task,
-                s.last_commands.len()
+                "  {} {} {: <10} | {: <20} | {} cmds",
+                "•".bright_black(),
+                sid.cyan(),
+                time_str.bright_black(),
+                task.bright_white(),
+                s.last_commands.len().to_string().yellow()
             );
         }
+        println!();
         return Ok(());
     }
 
@@ -49,30 +94,32 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         Some(s) => s,
         None => {
             if is_inject {
-                // Return silently or empty context
                 return Ok(());
             }
-            println!("No active session found.");
+            println!("\n{} No active session found.\n", "ℹ".blue());
             return Ok(());
         }
     };
 
     if is_clear {
         let _ = store.delete_session(&state.session_id);
-        println!("Current session cleared.");
+        println!("{} Current session cleared.", "✓".green());
         return Ok(());
     }
 
     if is_continue {
         state.last_active = Utc::now().timestamp();
         store.upsert_session(&state);
-        println!("Session {} marked as continued.", state.session_id);
+        println!(
+            "{} Session {} marked as continued.",
+            "✓".green(),
+            state.session_id.cyan()
+        );
         return Ok(());
     }
 
     if is_inject {
         let task = state.inferred_task.as_deref().unwrap_or("none");
-
         let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
         hot_vec.sort_by(|a, b| b.1.cmp(a.1));
         let hot_str = if hot_vec.is_empty() {
@@ -85,7 +132,6 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-
         let err = state
             .active_errors
             .first()
@@ -104,79 +150,112 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Default output
-    let ago = (Utc::now().timestamp() - state.started_at) / 60;
-    let time_str = if ago < 60 {
-        format!("{}m ago", ago)
-    } else {
-        format!("{}h ago", ago / 60)
-    };
+    if is_status {
+        let ago = (Utc::now().timestamp() - state.started_at) / 60;
+        let time_str = if ago < 60 {
+            format!("{}m ago", ago)
+        } else {
+            format!("{}h ago", ago / 60)
+        };
+        let started_str = Local
+            .timestamp_opt(state.started_at, 0)
+            .single()
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "unknown time".to_string());
 
-    // Formatting started_at local time safely
-    let started_str = Local
-        .timestamp_opt(state.started_at, 0)
-        .single()
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| "unknown time".to_string());
+        let sid = if state.session_id.len() > 8 {
+            &state.session_id[..8]
+        } else {
+            &state.session_id
+        };
 
-    println!("─────────────────────────────────────────");
-    println!(" OMNI — Current Session");
-    println!("─────────────────────────────────────────");
-
-    let sid = if state.session_id.len() > 8 {
-        &state.session_id[..8]
-    } else {
-        &state.session_id
-    };
-    println!(" Session:   {}", sid);
-    println!(" Started:   {} ({})", time_str, started_str);
-    println!(" Commands:  {}", state.last_commands.len());
-    println!();
-    println!(
-        " Inferred task:   {}",
-        state.inferred_task.as_deref().unwrap_or("not detected")
-    );
-    println!(
-        " Inferred domain: {}",
-        state.inferred_domain.as_deref().unwrap_or("not detected")
-    );
-    println!();
-
-    let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
-    hot_vec.sort_by(|a, b| b.1.cmp(a.1));
-    println!(" Hot files ({} total):", state.hot_files.len());
-    for (i, (file, count)) in hot_vec.iter().take(3).enumerate() {
-        println!("  {}. {}      ({} accesses)", i + 1, file, count);
-    }
-
-    println!();
-    println!(" Active errors:");
-    if state.active_errors.is_empty() {
-        println!("  • none");
-    } else {
-        for err in state.active_errors.iter().take(3) {
-            let e = err.replace('\n', " ");
-            let clean = if e.len() > 80 {
-                format!("{}...", &e[..77])
-            } else {
-                e
-            };
-            println!("  • {}", clean);
-        }
-    }
-    println!();
-
-    let domain = state.inferred_domain.as_deref().unwrap_or("unknown");
-    if domain != "unknown" {
         println!(
-            " Context score: session context is boosting signals in {}/*",
-            domain
+            "\n{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
         );
-    } else {
-        println!(" Context score: baseline session context mapping");
-    }
+        println!(" {} — Current Session", "OMNI".bold().cyan());
+        println!(
+            "{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
 
-    Ok(())
+        println!(
+            "  {:<15} {}",
+            "Session ID:".bright_black(),
+            sid.cyan().bold()
+        );
+        println!(
+            "  {:<15} {} ({})",
+            "Started:".bright_black(),
+            time_str,
+            started_str.bright_black()
+        );
+        println!(
+            "  {:<15} {}\n",
+            "Commands:".bright_black(),
+            state.last_commands.len().to_string().yellow()
+        );
+
+        println!(
+            "  {:<15} {}",
+            "Task:".bright_black(),
+            state
+                .inferred_task
+                .as_deref()
+                .unwrap_or("not detected")
+                .bright_white()
+                .bold()
+        );
+        println!(
+            "  {:<15} {}\n",
+            "Domain:".bright_black(),
+            state
+                .inferred_domain
+                .as_deref()
+                .unwrap_or("not detected")
+                .bright_white()
+        );
+
+        let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
+        hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+        println!(" {}", "Hot files:".bold().bright_white());
+        for (i, (file, count)) in hot_vec.iter().take(3).enumerate() {
+            println!(
+                "  {:>2}. {: <30} ({}x)",
+                i + 1,
+                file.cyan(),
+                count.to_string().yellow()
+            );
+        }
+
+        println!("\n {}", "Active errors:".bold().bright_white());
+        if state.active_errors.is_empty() {
+            println!("  {} none", "•".bright_black());
+        } else {
+            for err in state.active_errors.iter().take(3) {
+                let e = err.replace('\n', " ");
+                let clean = if e.len() > 80 {
+                    format!("{}...", &e[..77])
+                } else {
+                    e
+                };
+                println!("  {} {}", "•".red(), clean.red());
+            }
+        }
+        println!(
+            "\n{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
+        Ok(())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

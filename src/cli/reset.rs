@@ -1,12 +1,41 @@
+use colored::*;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn run() -> Result<(), String> {
+fn print_help() {
+    println!(
+        "\n{} {} — Clean uninstall (with backups)",
+        "omni".bold().cyan(),
+        "reset".bold().yellow()
+    );
+    println!("\n{}", "USAGE:".bold().bright_white());
+    println!("  omni {}", "reset".cyan());
+
+    println!("\n{}", "DESCRIPTION:".bold().bright_white());
+    println!("  Performs a clean uninstall of OMNI by:");
+    println!("  1. Backing up ~/.omni to a .bak folder");
+    println!("  2. Removing hooks from Claude settings");
+    println!("  3. Unregistering the MCP server");
+    println!();
+}
+
+pub fn run(args: &[String]) -> Result<(), String> {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_help();
+        return Ok(());
+    }
+
     let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
     let omni_dir = home_dir.join(".omni");
 
     if !omni_dir.exists() {
-        println!("[omni] The ~/.omni directory does not exist. Nothing to reset.");
+        println!(
+            "\n{} The ~/.omni directory does not exist. Nothing to reset.",
+            "ℹ".blue()
+        );
         return Ok(());
     }
 
@@ -19,25 +48,33 @@ pub fn run() -> Result<(), String> {
     let backup_dir = home_dir.join(&backup_dir_name);
 
     if let Err(e) = fs::rename(&omni_dir, &backup_dir) {
-        return Err(format!(
-            "Failed to backup ~/.omni to ~/{}: {}",
-            backup_dir_name, e
-        ));
+        return Err(format!("{} Failed to backup ~/.omni: {}", "✗".red(), e));
     }
 
-    println!("✓ Data backed up successfully.");
-    println!("  Moved ~/.omni to ~/{}", backup_dir_name);
-    println!();
+    println!(
+        "\n{} {} backed up successfully.",
+        "✓".green(),
+        "Data".bold()
+    );
+    println!("  Moved ~/.omni to ~/{}\n", backup_dir_name.bright_black());
 
-    println!("Cleaning up agent integrations...");
+    println!("{} Cleaning up agent integrations...", "ℹ".blue());
     let args = vec!["--uninstall".to_string()];
     if let Err(e) = crate::cli::init::run_init(&args) {
-        println!("  (Note: could not fully remove hooks/MCP configs: {})", e);
+        println!(
+            "  {} (Note: could not fully remove hooks/MCP: {})",
+            "⚠".yellow(),
+            e
+        );
     }
 
-    println!();
     println!(
-        "You can now run 'brew uninstall fajarhide/tap/omni' safely for a completely clean uninstall."
+        "\n{} You can now safely uninstall OMNI.",
+        "✓".green().bold()
+    );
+    println!(
+        "  Run: {} brew uninstall fajarhide/tap/omni\n",
+        "→".yellow()
     );
 
     Ok(())

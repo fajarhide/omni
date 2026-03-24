@@ -16,9 +16,14 @@ Whenever OMNI runs as a hook (e.g., inside Claude Code), it silently monitors fo
 
 `~/.omni/learn_queue.jsonl`
 
-You can process this queue at any time:
+You can process this queue by discovering patterns first:
 ```bash
-omni learn --from-queue --dry-run
+omni learn --status
+```
+
+Then preview or apply:
+```bash
+omni learn --dry-run
 ```
 
 ## 2. Manual Learning (Pipe Mode)
@@ -26,7 +31,7 @@ omni learn --from-queue --dry-run
 If you have a log file or a command output that is very noisy, you can pipe it directly into OMNI to generate a filter:
 
 ```bash
-cat build.log | omni learn --dry-run
+cat build.log | omni learn --status
 ```
 
 ## 3. Applying Learned Filters

@@ -1,5 +1,6 @@
 use crate::store::sqlite::Store;
 use anyhow::Result;
+use colored::*;
 
 // ─── Helper Functions ───────────────────────────────────
 
@@ -40,9 +41,52 @@ fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+fn print_help() {
+    println!(
+        "\n{} {} — Token savings analytics",
+        "omni".bold().cyan(),
+        "stats".bold().yellow()
+    );
+    println!("\n{}", "USAGE:".bold().bright_white());
+    println!("  omni {} {}", "stats".cyan(), "[FLAGS]".bright_black());
+
+    println!("\n{}", "FLAGS:".bold().bright_white());
+    println!("  {: <12} View today's stats", "--today".cyan());
+    println!("  {: <12} View last 7 days", "--week".cyan());
+    println!("  {: <12} View last 30 days (default)", "--month".cyan());
+    println!(
+        "  {: <12} Show detailed session insights",
+        "--session".cyan()
+    );
+    println!(
+        "  {: <12} Show unclassified passthrough candidates",
+        "--passthrough".cyan()
+    );
+    println!("  {: <12} Show this help message", "--help, -h".cyan());
+
+    println!("\n{}", "EXAMPLES:".bold().bright_white());
+    println!(
+        "  omni stats --today    {} View your savings today",
+        "#".bright_black()
+    );
+    println!(
+        "  omni stats --session  {} View hot files and errors",
+        "#".bright_black()
+    );
+    println!();
+}
+
 // ─── Main Entry ─────────────────────────────────────────
 
 pub fn run(args: &[String], store: &Store) -> Result<()> {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_help();
+        return Ok(());
+    }
+
     let show_passthrough = args.iter().any(|a| a == "--passthrough");
     let show_session = args.iter().any(|a| a == "--session");
 
@@ -76,21 +120,21 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     // Rewind
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
 
-    use colored::*;
-
     println!(
         "\n{}",
-        "─────────────────────────────────────────────────".bright_black()
+        "─────────────────────────────────────────────────"
+            .bright_black()
+            .bold()
     );
     println!(
         " {}",
-        format!("OMNI Signal Report — {}", period_label)
-            .bold()
-            .bright_white()
+        format!("OMNI Signal Report — {}", period_label.bold()).bright_white()
     );
     println!(
         "{}",
-        "─────────────────────────────────────────────────".bright_black()
+        "─────────────────────────────────────────────────"
+            .bright_black()
+            .bold()
     );
 
     println!(
@@ -208,8 +252,11 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
     println!(
         "{}",
-        " ───────────────────────────────────────────────── ".bright_black()
+        "─────────────────────────────────────────────────"
+            .bright_black()
+            .bold()
     );
+    println!();
     Ok(())
 }
 
