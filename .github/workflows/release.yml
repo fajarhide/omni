@@ -68,7 +68,7 @@ jobs:
           shasum -a 256 omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: omni-${{ matrix.target }}
           path: dist/omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz*
