@@ -163,3 +163,6 @@ Verify with: `omni learn --verify`
 - **Deterministic**: Same input always produces same output (no randomness)
 - **Sub-millisecond**: Pipeline targets <2ms for typical inputs
 - **Never drop**: RewindStore ensures no information is permanently lost
+
+### Essential Reading
+- [tests/README.md#critical-guardrails](tests/README.md#critical-guardrails) — **Mandatory: Prevent deadlocks & test hangs**

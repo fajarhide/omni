@@ -20,9 +20,9 @@
 
 ## Why OMNI?
 
-AI agents like Claude Code or Cursor are revolutionizing development, but they face a hidden tax: **The Token Flood.**
+AI agents are drowning in noisy CLI output. A `git diff` can easily eat 10K tokens, while a `cargo test` might dump 25K tokens of redundant noise. Claude and other agents read all of it, but 90% of that data is pure distraction that dilutes reasoning and drains your token budget.
 
-When an AI runs a command like `git diff` or `cargo test`, it often receives thousands of lines of raw output. Most of this data is "noise"—redundant headers, repetitive build logs, or unchanged code context. This noise causes three major problems:
+OMNI intercepts terminal output automatically, keeping only what matters for your current task. It’s not just about making output smaller; it’s about making it smarter. By understanding command structures and your active session context, OMNI ensures your agent sees the signal, not the waste.
 
 1.  **Cost & Latency**: Large outputs consume your context window rapidly and increase the cost of every message.
 2.  **Cognitive Dilution**: LLMs can lose track of complex reasoning when buried under megabytes of raw CLI logs.
@@ -183,7 +183,7 @@ cargo test           # Run all 147 tests
 cargo insta review   # Review and accept snapshot changes
 ```
 
-See [CLAUDE.md](CLAUDE.md) and [DEVELOPER.md](docs/DEVELOPER.md) for the full contributor guide.
+See [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [Critical Guardrails](tests/README.md#critical-guardrails) for the full contributor guide and architectural rules.
 
 
 ## Star History

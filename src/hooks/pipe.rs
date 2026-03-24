@@ -76,10 +76,21 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     }
 
     // 4. Run pipeline natively
-    let ctype = classifier::classify(&input_text);
+    let (ctype, scored_segments, sid) = {
+        let c = classifier::classify(&input_text);
 
-    let active_session = session.as_ref().map(|s| s.lock().expect("must succeed"));
-    let scored_segments = scorer::score_segments(&input_text, &ctype, active_session.as_deref());
+        let (s_id, active_session_opt) = match session {
+            Some(ref m) => {
+                let guard = m.lock().expect("must succeed");
+                (guard.session_id.clone(), Some(guard))
+            }
+            None => ("pipe_session".to_string(), None),
+        };
+
+        let ss = scorer::score_segments(&input_text, &c, active_session_opt.as_deref());
+        (c, ss, s_id)
+        // Lock released here as guard/active_session_opt go out of scope
+    };
 
     let compose_config = composer::ComposeConfig::default();
     let decision = composer::decide_rewind(&scored_segments, &ctype);
@@ -111,11 +122,6 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     };
 
     if let Some(ref s) = store {
-        let sid = match session {
-            Some(ref m) => m.lock().unwrap().session_id.clone(),
-            None => "pipe_session".to_string(),
-        };
-
         use crate::pipeline::{DistillResult, Route};
         let result = DistillResult {
             output: final_output.clone(),
