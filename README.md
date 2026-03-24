@@ -32,16 +32,6 @@ OMNI intercepts terminal output automatically, keeping only what matters for you
 
 ---
 
-## ⚡ The OMNI Philosophy: Deliberate Action
-
-OMNI is designed for **maximum safety and control**. By default, core commands like `init`, `session`, and `learn` will only show a help screen if no flags are provided. This prevents accidental changes to your global configuration.
-
-Every core command follows a consistent **Discovery vs. Action** pattern:
-- **Discovery**: Use `--status` to see what OMNI has found (installation status, session details, or new noise patterns).
-- **Action**: Use explicit flags like `--all`, `--apply`, or `--clear` to commit changes.
-
----
-
 ## How It Works: The Signal Lifecycle
 
 OMNI employs a unique, multi-layered native interception strategy to ensure maximum efficiency without losing information:
@@ -77,6 +67,15 @@ OMNI doesn't just compress; it **understands context**. It tracks which files yo
 
 ### Pattern Discovery (Learning)
 OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters and `omni learn --apply` to commit them to your configuration.
+
+### The OMNI Philosophy: Deliberate Action
+
+OMNI is designed for **maximum safety and control**. By default, core commands like `init`, `session`, and `learn` will only show a help screen if no flags are provided. This prevents accidental changes to your global configuration.
+
+Every core command follows a consistent **Discovery vs. Action** pattern:
+- **Discovery**: Use `--status` to see what OMNI has found (installation status, session details, or new noise patterns).
+- **Action**: Use explicit flags like `--all`, `--apply`, or `--clear` to commit changes.
+
 
 ## Analytics Dashboard
 
