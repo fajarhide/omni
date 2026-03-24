@@ -2,7 +2,7 @@ use crate::session::learn::{apply_to_config, detect_patterns};
 use anyhow::Result;
 use chrono::Utc;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 
 pub fn run_learn(args: &[String]) -> Result<()> {
@@ -29,7 +29,12 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     let mut input = String::new();
 
-    if from_queue {
+    let mut use_queue = from_queue;
+    if !use_queue && io::stdin().is_terminal() {
+        use_queue = true;
+    }
+
+    if use_queue {
         let dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".omni");
