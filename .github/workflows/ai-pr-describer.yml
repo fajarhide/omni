@@ -24,3 +24,5 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           openai-model: '${{ secrets.OPENAI_MODEL }}'
           openai-base-url: '${{ secrets.OPENAI_BASE_URL }}'
+          max-tokens: 2000
+          max-context-tokens: 256000
