@@ -28,6 +28,14 @@ pub fn run() -> Result<(), String> {
     println!("✓ Data backed up successfully.");
     println!("  Moved ~/.omni to ~/{}", backup_dir_name);
     println!();
+
+    println!("Cleaning up agent integrations...");
+    let args = vec!["--uninstall".to_string()];
+    if let Err(e) = crate::cli::init::run_init(&args) {
+        println!("  (Note: could not fully remove hooks/MCP configs: {})", e);
+    }
+
+    println!();
     println!(
         "You can now run 'brew uninstall fajarhide/tap/omni' safely for a completely clean uninstall."
     );
