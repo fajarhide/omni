@@ -101,15 +101,14 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
                 // Remove from top-level project keys
                 let top_level_keys: Vec<String> = obj.keys().cloned().collect();
                 for key in top_level_keys {
-                    if key != "mcpServers" && key != "projects" {
-                        if let Some(inner_obj) = obj.get_mut(&key).and_then(|v| v.as_object_mut()) {
-                            if let Some(ps) = inner_obj
-                                .get_mut("mcpServers")
-                                .and_then(|s| s.as_object_mut())
-                            {
-                                ps.remove("omni");
-                            }
-                        }
+                    if key != "mcpServers"
+                        && key != "projects"
+                        && let Some(inner_obj) = obj.get_mut(&key).and_then(|v| v.as_object_mut())
+                        && let Some(ps) = inner_obj
+                            .get_mut("mcpServers")
+                            .and_then(|s| s.as_object_mut())
+                    {
+                        ps.remove("omni");
                     }
                 }
             }
