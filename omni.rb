@@ -33,8 +33,7 @@ class Omni < Formula
   def caveats
     <<~EOS
       Quick start:
-        omni init --hook   # Activate PostToolUse hook for Claude Code
-        omni init --mcp    # Setup MCP for Claude Desktop
+        omni init          # Initialize OMNI setup
         omni doctor        # Verify installation
         omni stats         # View token savings
 

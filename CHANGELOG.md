@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-03-25
+
+### Added
+- Native support for `npm run`, `yarn run`, `pnpm run`, and `bun run` scripts in TOML filters.
+- Support for `python -m pytest` and `python3 -m pytest` commands.
+- Support for `bun test` and `bun run test` runners.
+
+### Improved
+- Context Safety: Enhanced preservation of multi-line test failure diffs (Vitest/Jest) by refining empty-line stripping rules.
+- Accuracy: Improved token savings calculations in `omni stats` for more precise analytics.
+
+### Fixed
+- Clippy Compliance: Resolved all remaining `D warnings` including `implicit-saturating-sub` in distillation hooks.
+- Filter coverage gaps: Fixed missing interceptions for common JS/Python test runner variants.
+
 ## [0.5.1] - 2026-03-24
 
 ### Added
