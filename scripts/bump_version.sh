@@ -15,20 +15,27 @@ if ! echo "$NEW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     exit 1
 fi
 
-echo "Bumping version to $NEW..."
+# 1. Check if bump is needed
+CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+if [ "$CURRENT_VERSION" = "$NEW" ]; then
+    echo "✓ Version is already $NEW. Skipping bump."
+    exit 0
+fi
 
-# 1. Update Cargo.toml
+echo "Bumping version from $CURRENT_VERSION to $NEW..."
+
+# 2. Update Cargo.toml
 sed -i.bak "s/^version = \".*\"/version = \"$NEW\"/" Cargo.toml
 rm -f Cargo.toml.bak
 
-# 2. Update Cargo.lock
+# 3. Update Cargo.lock
 cargo check --quiet 2>/dev/null || true
 
-# 3. Verify build
+# 4. Verify build
 echo "Verifying build..."
 cargo build --quiet
 
-# 4. Verify version output
+# 5. Verify version output
 ACTUAL=$(./target/debug/omni version 2>&1)
 if echo "$ACTUAL" | grep -q "$NEW"; then
     echo "✓ Version output: $ACTUAL"
@@ -37,7 +44,7 @@ else
     echo "  Note: version is read from Cargo.toml via env!(\"CARGO_PKG_VERSION\")"
 fi
 
-# 5. Stage and commit
+# 6. Stage and commit
 git add Cargo.toml Cargo.lock
 git commit -m "chore: bump version to $NEW"
 

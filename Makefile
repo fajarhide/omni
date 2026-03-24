@@ -76,4 +76,5 @@ release-sha:
 
 release:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make release VERSION=0.5.1"; exit 1; fi
+	@$(MAKE) bump VERSION=$(VERSION)
 	./scripts/omni-release.sh $(VERSION)
