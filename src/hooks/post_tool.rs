@@ -96,11 +96,17 @@ pub fn process_payload(
         .and_then(|i| i.command.clone())
         .unwrap_or_default();
 
+    let clean_command = if let Some(stripped) = command.strip_prefix("omni exec ") {
+        stripped
+    } else {
+        &command
+    };
+
     let start = Instant::now();
 
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
-    let toml_match = toml_filters.iter().find(|f| f.matches(&command));
+    let toml_match = toml_filters.iter().find(|f| f.matches(clean_command));
 
     let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
         // Use TOML filter

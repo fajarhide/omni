@@ -1,3 +1,4 @@
+use crate::session::correction::{self, CommandExecution};
 use crate::session::learn::{apply_to_config, detect_patterns};
 use anyhow::Result;
 use chrono::Utc;
@@ -122,6 +123,8 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         use_queue = true;
     }
 
+    let mut executions = Vec::new();
+
     if use_queue {
         let dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -132,9 +135,15 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             for line in content.lines() {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(line)
                     && let Some(s) = val.get("sample").and_then(|v| v.as_str())
+                    && let Some(c) = val.get("command").and_then(|v| v.as_str())
                 {
                     input.push_str(s);
                     input.push('\n');
+                    executions.push(CommandExecution {
+                        command: c.to_string(),
+                        is_error: false, // Will be inferred by classify_error
+                        output: s.to_string(),
+                    });
                 }
             }
         } else {
@@ -199,6 +208,33 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             preview.bright_white(),
             c.count.to_string().yellow()
         );
+    }
+
+    // DISCOVER CORRECTIONS
+    let correction_pairs = correction::find_corrections(&executions);
+    let correction_rules = correction::deduplicate_corrections(correction_pairs);
+
+    if !correction_rules.is_empty() {
+        println!(
+            "\n  {} Identified {} common command corrections:\n",
+            "💡".bright_cyan(),
+            correction_rules.len().to_string().cyan().bold()
+        );
+
+        for (i, rule) in correction_rules.iter().take(5).enumerate() {
+            println!(
+                "  {:>2}. {: <25} → {: <25} ({}x)",
+                i + 1,
+                rule.wrong_pattern.red(),
+                rule.right_pattern.green(),
+                rule.occurrences.to_string().yellow()
+            );
+            println!(
+                "      Cause: {} | Base: {}",
+                rule.error_type.as_str().bright_black(),
+                rule.base_command.bright_black()
+            );
+        }
     }
 
     let filter_name = format!("learned_{}", Utc::now().timestamp());

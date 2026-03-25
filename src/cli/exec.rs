@@ -32,13 +32,13 @@ pub fn run_exec(
         || cmd.contains('&')
         || cmd.contains(';');
 
-    let (child, cmd_name) = if needs_shell {
-        let full_cmd = if cmd_args.is_empty() {
-            cmd.to_string()
-        } else {
-            format!("{} {}", cmd, cmd_args.join(" "))
-        };
+    let full_cmd = if cmd_args.is_empty() {
+        cmd.to_string()
+    } else {
+        format!("{} {}", cmd, cmd_args.join(" "))
+    };
 
+    let (child, cmd_name) = if needs_shell {
         let c = Command::new("sh")
             .arg("-c")
             .arg(&full_cmd)
@@ -52,7 +52,7 @@ pub fn run_exec(
                     e
                 )
             })?;
-        (c, cmd.clone())
+        (c, full_cmd)
     } else {
         let c = Command::new(cmd)
             .args(cmd_args)
@@ -60,7 +60,7 @@ pub fn run_exec(
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| anyhow::anyhow!("omni exec: failed to execute '{}': {}", cmd, e))?;
-        (c, cmd.clone())
+        (c, full_cmd)
     };
 
     let output = child.wait_with_output()?;

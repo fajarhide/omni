@@ -75,9 +75,13 @@ pub fn classify_line(line: &str) -> SignalTier {
             "npm warn ",
             "[DEBUG]",
             "[TRACE]",
+            "DEBUG:",
+            "TRACE:",
             "Refreshing state",
         ],
-    ) {
+    ) || trimmed.starts_with("DEBUG ")
+        || trimmed.starts_with("TRACE ")
+    {
         return SignalTier::Noise;
     }
 

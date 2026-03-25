@@ -88,6 +88,10 @@ fn print_help() {
         "  {: <12} Auto-generate filters from history",
         "learn".cyan()
     );
+    println!(
+        "  {: <12} View and manage archived content",
+        "rewind".cyan()
+    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -95,8 +99,15 @@ fn print_help() {
         "  {: <12} Clean uninstall (for backups config)",
         "reset".cyan()
     );
+    println!(
+        "  {: <12} Compare last original input vs distilled",
+        "diff".cyan()
+    );
     println!("  {: <12} Upgrade OMNI to latest", "update".cyan());
-    println!("  {: <12} Print version info", "version, -v".cyan());
+    println!(
+        "  {: <12} View version and environment info",
+        "version".cyan()
+    );
     println!("  {: <12} Show this help message", "help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -192,6 +203,13 @@ fn main() {
                     print_help();
                 }
 
+                "diff" => {
+                    if let Err(e) = cli::diff::run_diff(&args) {
+                        eprintln!("[omni] Diff error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
                 "init" => {
                     let _ = cli::init::run_init(&args);
                 }
@@ -229,6 +247,19 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
+
+                "rewind" => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::rewind::run_rewind(&args, &store) {
+                            eprintln!("[omni] Rewind error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for rewind: {}", e);
+                        std::process::exit(1);
+                    }
+                },
 
                 "exec" => {
                     let store_arc = Store::open().map(Arc::new).ok();

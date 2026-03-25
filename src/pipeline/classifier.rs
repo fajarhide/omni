@@ -8,7 +8,7 @@ lazy_static! {
     static ref RE_LOG_DATE: Regex =
         Regex::new(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}/[a-zA-Z]{3}/\d{4})").unwrap();
     static ref RE_LOG_SEV: Regex =
-        Regex::new(r"\[(INFO|ERROR|WARN|WARNING|DEBUG|FATAL)\]").unwrap();
+        Regex::new(r"(?i)\[?(INFO|ERROR|WARN|WARNING|DEBUG|FATAL)\]?[:\s]").unwrap();
     static ref RE_TABULAR_SPACES: Regex = Regex::new(r" {2,}").unwrap();
 }
 
@@ -139,6 +139,7 @@ pub fn classify(input: &str) -> ContentType {
 
     let infra_kw = [
         "aws ",
+        "podman ",
         "Terraform will",
         "Terraform has",
         "Terraform plan",

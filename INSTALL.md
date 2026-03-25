@@ -41,7 +41,7 @@ omni doctor         # Verify everything is working
 ## Verify Installation
 
 ```bash
-omni version    # Should print: omni 0.5.0
+omni version    # Should print: omni 0.5.4-rc3
 omni doctor     # Full diagnostic check
 omni stats      # View token savings after your first session
 ```

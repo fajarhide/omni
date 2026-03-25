@@ -65,6 +65,7 @@ is-terminal = "0.4"
 tempfile = "3"
 ureq = { version = "2", features = ["json"] }
 rust-embed = "8"
+strsim = "0.11"
 
 [dev-dependencies]
 insta = "1"  # snapshot testing

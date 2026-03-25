@@ -33,12 +33,19 @@ pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
             continue;
         }
 
-        // 3. Ambil prefix: take first 3 words
-        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        // 3. Ambil prefix: take first 3 words, but strip numbers to group similar steps
+        let words: Vec<String> = trimmed
+            .split_whitespace()
+            .map(|w| {
+                // If it's just #, ignore or keep as is? Let's keep it to preserve structure
+                num_re.replace_all(w, "#").to_string()
+            })
+            .collect();
+
         let prefix = if words.len() >= 3 {
             format!("{} {} {}", words[0], words[1], words[2])
         } else {
-            trimmed.to_string()
+            words.join(" ")
         };
 
         // 4. Hitung frekuensi setiap prefix
@@ -202,11 +209,11 @@ pub fn apply_to_config(
 }
 
 pub fn queue_for_learn(input: &str, command: &str) {
-    if input.len() <= 200 {
+    if input.len() <= 100 {
         return;
     }
 
-    let input_clone = input.chars().take(2000).collect::<String>();
+    let input_clone = input.chars().take(5000).collect::<String>();
     let cmd = command.to_string();
 
     std::thread::spawn(move || {
@@ -239,6 +246,16 @@ mod tests {
         let candidates = detect_patterns(input);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].trigger_prefix, "Waiting for connection");
+        assert_eq!(candidates[0].count, 3);
+    }
+
+    #[test]
+    fn test_detect_patterns_for_podman_steps() {
+        let input = "[1/2] STEP 1/7: FROM alpine\n[1/2] STEP 2/7: RUN ls\n[1/2] STEP 3/7: RUN date";
+        let candidates = detect_patterns(input);
+        assert_eq!(candidates.len(), 1);
+        // Prefix should have numbers replaced by #
+        assert_eq!(candidates[0].trigger_prefix, "[#/#] STEP #/#:");
         assert_eq!(candidates[0].count, 3);
     }
 

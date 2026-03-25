@@ -1,5 +1,6 @@
 use crate::pipeline::{ContentType, OutputSegment};
 use crate::store::sqlite::Store;
+use colored::Colorize;
 use std::sync::Arc;
 
 pub struct RewindDecision {
@@ -48,9 +49,28 @@ pub fn compose(
         return ("".to_string(), None); // Fully dropped
     }
 
-    // Auto-Learn execution: evaluates Passthrough outputs > 200 chars identifying potential noise natively.
-    if matches!(route, ContentType::Unknown) && original_text.len() > 200 {
-        crate::session::learn::queue_for_learn(original_text, "omni_passthrough_eval");
+    // Auto-Learn execution:
+    // Trigger learning if:
+    // 1. ContentType is Unknown
+    // 2. OR Distillation was poor (less than 30% of lines dropped) for a large enough output.
+    // This captures cases like Podman which might be classified as InfraOutput but have no matching filters.
+    let total_lines = segments.len();
+    let dropped_lines_count = segments
+        .iter()
+        .filter(|s| s.final_score() < config.threshold)
+        .count();
+
+    let poor_distillation =
+        total_lines > 5 && (dropped_lines_count as f32 / total_lines.max(1) as f32) < 0.3;
+
+    if (matches!(route, ContentType::Unknown) || poor_distillation)
+        && original_text.len() > 100
+        && !matches!(route, ContentType::StructuredData)
+    {
+        crate::session::learn::queue_for_learn(
+            original_text,
+            &format!("omni_eval_{:?}", route).to_lowercase(),
+        );
     }
 
     let mut kept_ordered: Vec<&OutputSegment> = segments
@@ -83,13 +103,25 @@ pub fn compose(
     {
         if let Some(s) = store {
             let hash = s.store_rewind(&content);
+            let reduction = (dropped_lines as f32 / total_lines.max(1) as f32) * 100.0;
+
             output.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
-                dropped_lines, hash
+                "\n{} {} {} {} lines to an optimized state ({}% reduction). The hash {} stores the full output in RewindStore for retrieval.\n",
+                "⏺".cyan(),
+                "OMNI".bold().bright_white(),
+                "distilled".bright_green(),
+                dropped_lines.to_string().bold(),
+                format!("{:.1}", reduction).yellow(),
+                hash.cyan().bold()
             ));
             rewind_hash = Some(hash);
         } else {
-            output.push_str(&format!("\n[OMNI: {} lines omitted]\n", dropped_lines));
+            output.push_str(&format!(
+                "\n{} {} {} lines omitted for efficiency.\n",
+                "⏺".cyan(),
+                "OMNI:".bold().bright_white(),
+                dropped_lines
+            ));
         }
     }
 
@@ -185,7 +217,8 @@ mod tests {
 
         assert!(out.contains("bad loop"));
         assert!(!out.contains("ignored noise")); // Not in main output
-        assert!(out.contains("[OMNI: 1 lines omitted — omni_retrieve("));
+        assert!(out.contains("distilled"));
+        assert!(out.contains("lines to an optimized state"));
         assert!(hash.is_some());
     }
 
