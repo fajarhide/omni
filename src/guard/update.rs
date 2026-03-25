@@ -17,7 +17,13 @@ fn get_cache_path() -> PathBuf {
         .join("update_cache.json")
 }
 
-pub fn check() -> Option<String> {
+pub enum Status {
+    Latest,
+    UpdateAvailable(String),
+    Ahead,
+}
+
+pub fn get_status() -> Status {
     let current_version = env!("CARGO_PKG_VERSION");
     let cache_path = get_cache_path();
 
@@ -26,63 +32,79 @@ pub fn check() -> Option<String> {
         .unwrap_or_default()
         .as_secs();
 
-    // 1. Try to load from cache
-    if let Ok(content) = fs::read_to_string(&cache_path)
+    // Try to get latest version from cache or fetch it
+    let latest = if let Ok(content) = fs::read_to_string(&cache_path)
         && let Ok(cache) = serde_json::from_str::<UpdateCache>(&content)
         && now < cache.last_checked + 86400
     {
-        if is_newer(&cache.latest_version, current_version) {
-            return Some(cache.latest_version);
-        }
-        return None;
-    }
+        Some(cache.latest_version)
+    } else {
+        // Fetch from GitHub
+        let url = "https://api.github.com/repos/fajarhide/omni/releases/latest";
+        let agent = ureq::AgentBuilder::new()
+            .timeout_read(std::time::Duration::from_secs(2))
+            .timeout_connect(std::time::Duration::from_secs(2))
+            .build();
 
-    // 2. Not in cache or cache expired: Fetch from GitHub
-    // We do this synchronously but with a very short timeout (2s)
-    let url = "https://api.github.com/repos/fajarhide/omni/releases/latest";
-    let agent = ureq::AgentBuilder::new()
-        .timeout_read(std::time::Duration::from_secs(2))
-        .timeout_connect(std::time::Duration::from_secs(2))
-        .build();
-
-    let resp = agent.get(url).set("User-Agent", "omni-cli").call();
-
-    match resp {
-        Ok(response) => {
-            #[derive(Deserialize)]
-            struct GitHubRelease {
-                tag_name: String,
-            }
-
-            if let Ok(release) = response.into_json::<GitHubRelease>() {
-                let latest = release.tag_name.trim_start_matches('v').to_string();
-
-                // Save to cache
-                let cache = UpdateCache {
-                    latest_version: latest.clone(),
-                    last_checked: now,
-                };
-                if let Ok(json) = serde_json::to_string(&cache) {
-                    let _ = fs::create_dir_all(cache_path.parent().unwrap());
-                    let _ = fs::write(&cache_path, json);
+        match agent.get(url).set("User-Agent", "omni-cli").call() {
+            Ok(response) => {
+                #[derive(Deserialize)]
+                struct GitHubRelease {
+                    tag_name: String,
                 }
-
-                if is_newer(&latest, current_version) {
-                    return Some(latest);
+                if let Ok(release) = response.into_json::<GitHubRelease>() {
+                    let v = release.tag_name.trim_start_matches('v').to_string();
+                    // Save to cache
+                    let cache = UpdateCache {
+                        latest_version: v.clone(),
+                        last_checked: now,
+                    };
+                    if let Ok(json) = serde_json::to_string(&cache) {
+                        let _ = fs::create_dir_all(cache_path.parent().unwrap());
+                        let _ = fs::write(&cache_path, json);
+                    }
+                    Some(v)
+                } else {
+                    None
                 }
             }
+            Err(_) => None,
         }
-        Err(_) => {
-            // Fail silently on network errors
-        }
-    }
+    };
 
-    None
+    match latest {
+        Some(v) => {
+            if is_newer(&v, current_version) {
+                Status::UpdateAvailable(v)
+            } else if is_newer(current_version, &v) {
+                Status::Ahead
+            } else {
+                Status::Latest
+            }
+        }
+        None => Status::Latest, // Assume latest if offline
+    }
+}
+
+pub fn check() -> Option<String> {
+    match get_status() {
+        Status::UpdateAvailable(v) => Some(v),
+        _ => None,
+    }
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
-    let v1: Vec<u32> = latest.split('.').filter_map(|s| s.parse().ok()).collect();
-    let v2: Vec<u32> = current.split('.').filter_map(|s| s.parse().ok()).collect();
+    let parse_v = |v: &str| -> Vec<u32> {
+        v.split('.')
+            .map(|s| {
+                // Take only the numeric part before any hyphen
+                s.split('-').next().unwrap_or("0").parse().unwrap_or(0)
+            })
+            .collect()
+    };
+
+    let v1 = parse_v(latest);
+    let v2 = parse_v(current);
 
     for (a, b) in v1.iter().zip(v2.iter()) {
         if a > b {
@@ -92,6 +114,21 @@ fn is_newer(latest: &str, current: &str) -> bool {
             return false;
         }
     }
+
+    // If numeric parts are equal, check pre-release suffixes
+    if v1 == v2 {
+        let s1 = latest.split('-').nth(1).unwrap_or("");
+        let s2 = current.split('-').nth(1).unwrap_or("");
+
+        if s1.is_empty() && !s2.is_empty() {
+            return true;
+        } // "0.5.4" > "0.5.4-rc1"
+        if !s1.is_empty() && s2.is_empty() {
+            return false;
+        } // "0.5.4-rc1" < "0.5.4"
+        return s1 > s2; // "0.5.4-rc2" > "0.5.4-rc1"
+    }
+
     v1.len() > v2.len()
 }
 
@@ -119,5 +156,11 @@ mod tests {
         assert!(is_newer("1.0.0", "0.9.9"));
         assert!(!is_newer("0.5.2", "0.5.2"));
         assert!(!is_newer("0.5.1", "0.5.2"));
+
+        // Pre-release tests
+        assert!(is_newer("0.5.4", "0.5.4-rc1"));
+        assert!(!is_newer("0.5.4-rc1", "0.5.4"));
+        assert!(!is_newer("0.5.3", "0.5.4-rc1"));
+        assert!(is_newer("0.5.4-rc2", "0.5.4-rc1"));
     }
 }

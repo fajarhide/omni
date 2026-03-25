@@ -76,12 +76,25 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     );
 
     // 1. Binary Version
-    println!(
-        "  {:<15} omni v{} {}",
-        "Binary:".bright_black(),
-        env!("CARGO_PKG_VERSION"),
-        "[OK]".green().bold()
-    );
+    let status = crate::guard::update::get_status();
+    let version_info = match status {
+        crate::guard::update::Status::Latest => {
+            format!("omni v{} {}", env!("CARGO_PKG_VERSION"), "[LATEST]".green())
+        }
+        crate::guard::update::Status::UpdateAvailable(v) => format!(
+            "omni v{} {} (Latest: {})",
+            env!("CARGO_PKG_VERSION"),
+            "[UPDATE]".yellow().bold(),
+            v.green()
+        ),
+        crate::guard::update::Status::Ahead => format!(
+            "omni v{} {}",
+            env!("CARGO_PKG_VERSION"),
+            "[AHEAD/RC]".blue().bold()
+        ),
+    };
+
+    println!("  {:<15} {}", "Binary:".bright_black(), version_info);
 
     // 2. Config Dir
     let conf_dir = dirs::home_dir()
