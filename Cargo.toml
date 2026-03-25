@@ -1,6 +1,6 @@
 [package]
 name = "omni"
-version = "0.5.4-rc3"
+version = "0.5.4-rc4"
 edition = "2024"
 authors = ["Fajar Hidayat"]
 description = "Semantic Signal Engine that cuts AI token consumption by up to 90%."
