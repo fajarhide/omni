@@ -126,7 +126,8 @@ omni learn --verify     # Test: Run inline tests on all filters
 Diagnose installation health.
 
 ```bash
-omni doctor
+omni doctor             # Run diagnostics only
+omni doctor --fix       # Diagnose AND auto-fix all issues
 ```
 
 **Checks:**
@@ -139,6 +140,18 @@ omni doctor
 - Filter loading (built-in, user, project)
 - RewindStore status
 - Recent activity timestamps
+
+**Auto-Fix (`--fix`):**
+
+When `--fix` is passed, OMNI will automatically resolve detected issues:
+
+| Issue | Fix Applied |
+|---|---|
+| Missing `~/.omni/` directory | Creates the directory |
+| Missing Claude Code hooks | Runs `omni init --hook` |
+| Missing MCP server registration | Runs `omni init --mcp` |
+| Untrusted project filters | Runs `omni trust` on the project |
+| Invalid user filter files | Renames broken `.toml` to `.toml.bak` |
 
 ---
 

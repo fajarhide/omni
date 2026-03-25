@@ -125,7 +125,10 @@ omni init --all
 # 3. Verify Installation
 omni doctor
 
-# 4. Check Current Status
+# 4. Or auto-fix any issues
+omni doctor --fix
+
+# 5. Check Current Status
 omni init --status
 ```
 
