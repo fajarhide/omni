@@ -9,7 +9,7 @@ fn print_help() {
         "reset".bold().yellow()
     );
     println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni {}", "reset".cyan());
+    println!("  omni {} [--yes]", "reset".cyan());
 
     println!("\n{}", "DESCRIPTION:".bold().bright_white());
     println!("  Performs a clean uninstall of OMNI by:");
@@ -26,6 +26,27 @@ pub fn run(args: &[String]) -> Result<(), String> {
     {
         print_help();
         return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--yes" || a == "-y") {
+        // Skip prompt
+    } else {
+        use std::io::{self, Write};
+        print!(
+            "{} Are you sure you want to uninstall OMNI? [y/N]: ",
+            "⚠".yellow().bold()
+        );
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            return Err("Failed to read input".to_string());
+        }
+        let input = input.trim().to_lowercase();
+        if input != "y" && input != "yes" {
+            println!("Reset aborted.");
+            return Ok(());
+        }
     }
 
     let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;

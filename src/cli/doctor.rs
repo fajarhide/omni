@@ -21,6 +21,10 @@ fn print_help() {
     println!("  • MCP server registration");
     println!("  • Filter trust and loading status");
     println!();
+
+    if let Some(latest) = crate::guard::update::check() {
+        crate::guard::update::print_notification(&latest);
+    }
 }
 
 fn format_time_ago(ts: u64) -> String {
@@ -169,11 +173,16 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     }
 
     // 4. Hook entries in ~/.claude/settings.json
-    println!("\n {}", "Hooks (Claude Code):".bold().bright_white());
+    println!("\n {}", "OMNI Hooks:".bold().bright_white());
     let path = get_settings_path();
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
-            if content.contains("--hook") {
+            if content.contains("--hook")
+                || content.contains("--post-hook")
+                || content.contains("--pre-hook")
+                || content.contains("--session-start")
+                || content.contains("--pre-compact")
+            {
                 let fmt_hook = |name: &str, tag: &str| {
                     if content.contains(tag) {
                         println!(
@@ -192,6 +201,9 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                     }
                 };
 
+                if !fmt_hook("PreToolUse", "PreToolUse") {
+                    all_ok = false;
+                }
                 if !fmt_hook("PostToolUse", "PostToolUse") {
                     all_ok = false;
                     warnings.push("PostToolUse hook is not installed. Run `omni init`.");
@@ -206,7 +218,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 println!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
-                    "[WARNING] omni not found".yellow()
+                    "[WARNING] no hooks found".yellow().bold()
                 );
                 warnings.push("OMNI hooks are not configured. Run `omni init`.");
                 all_ok = false;
@@ -221,9 +233,9 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         warnings.push("Claude settings not found. Have you installed Claude Code?");
         all_ok = false;
     }
-    println!();
 
     // 5. MCP Server registration
+    println!("\n {}", "OMNI MCP Server:".bold().bright_white());
     let mcp_path = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Library/Application Support/Claude/claude_desktop_config.json");
@@ -251,7 +263,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!(
             "   {:<15} {}",
             "Registered:".bright_black(),
-            "[WARNING] not found".yellow().bold()
+            "[WARNING] no MCP server found".yellow().bold()
         );
         warnings.push("MCP Server is not configured. Run `omni init`.");
         all_ok = false;
@@ -299,6 +311,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         }
     } else {
         println!("   {:<15} none", "Project:".bright_black());
+    }
+
+    if let Some(latest) = crate::guard::update::check() {
+        crate::guard::update::print_notification(&latest);
     }
 
     // Status Footer

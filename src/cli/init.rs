@@ -332,6 +332,7 @@ pub fn remove_omni_hooks(val: &mut Value) {
                                 c.contains("omni")
                                     && (c.contains("--hook")
                                         || c.contains("--post-hook")
+                                        || c.contains("--pre-hook")
                                         || c.contains("--session-start")
                                         || c.contains("--pre-compact"))
                             })
