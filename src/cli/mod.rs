@@ -1,9 +1,11 @@
+pub mod diff;
 pub mod doctor;
 pub mod exec;
 pub mod init;
 pub mod learn;
 pub mod reset;
 pub mod rewrite;
+pub mod rewind;
 pub mod session;
 pub mod stats;
 pub mod update;

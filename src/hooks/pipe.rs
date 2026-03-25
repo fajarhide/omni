@@ -1,4 +1,5 @@
 use anyhow::Result;
+use colored::Colorize;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -180,6 +181,12 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         };
 
         s.record_distillation(&s_id, &result, command_name.unwrap_or(""));
+        
+        // Save for `omni diff`
+        let cache_dir = dirs::home_dir().unwrap_or_default().join(".omni").join("cache");
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let _ = std::fs::write(cache_dir.join("last_input.txt"), &input_text);
+        let _ = std::fs::write(cache_dir.join("last_output.txt"), &final_output);
     }
 
     // 5. If no significant reduction: print original
@@ -192,10 +199,24 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     output.write_all(output_to_print.as_bytes())?;
     output.flush()?;
 
-    // 6. Latency bounfores ensuring visibility into heavy SQLite evaluations natively
+    // 6. Premium status indicator
     let elapsed = start_time.elapsed().as_millis();
-    if elapsed > 100 {
-        writeln!(error, "[omni: {}ms]", elapsed)?;
+    let reduction = if input_text.len() > 0 {
+        100.0 * (1.0 - final_output.len() as f64 / input_text.len() as f64)
+    } else {
+        0.0
+    };
+
+    if reduction > 10.0 || elapsed > 100 {
+        let msg = format!(
+            "{} {:.1}% reduction ({} → {}) {}ms",
+            "⏺".cyan(),
+            reduction,
+            crate::cli::stats::format_bytes(input_text.len() as u64).black(),
+            crate::cli::stats::format_bytes(final_output.len() as u64).green(),
+            elapsed.to_string().bright_black()
+        );
+        writeln!(error, "{} {}", "[OMNI Active]".bold().cyan(), msg)?;
     }
 
     // 7. Exit 0 (Success)

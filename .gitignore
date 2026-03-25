@@ -2,6 +2,7 @@
 # --- Logs & Temporary Files ---
 *.log
 actual_stdout.txt
+*.py
 # --- Environment & Configuration ---
 .env
 .env.*

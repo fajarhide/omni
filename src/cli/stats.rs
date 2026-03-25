@@ -185,6 +185,15 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let filters = store.filter_breakdown(since)?;
     if !filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
+        println!(
+            "   #  {:<24} {:>7} {:>9}  {}",
+            "Command", "Count", "Savings", "Signal Strength"
+        );
+        println!(
+            "   ── {:─<24} ─────── ───────── ────────────────────",
+            ""
+        );
+
         for (i, (name, cnt, pct)) in filters.iter().enumerate() {
             let bar = format_bar(*pct);
             let bar_colored = if *pct > 80.0 {
@@ -199,7 +208,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
             };
 
             println!(
-                "  {:>2}. {:<24} {:>4}x  {:>3.0}%  {}{}",
+                "  {:>2}. {:<24} {:>6}x  {:>7.1}%  {}{}",
                 i + 1,
                 name.bright_cyan(),
                 cnt,
@@ -224,12 +233,19 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
             let route_color = match route.to_lowercase().as_str() {
                 "distill" | "keep" => route.bright_green(),
                 "rewind" => route.bright_blue(),
+                "soft" => route.bright_yellow(),
                 "drop" => route.bright_red(),
                 _ => route.bright_black(),
             };
+
+            // Fix alignment: print name with fixed width before formatting
+            let label = format!("{}:", route);
+            let padding = " ".repeat(15_usize.saturating_sub(label.len()));
+
             println!(
-                "  {:<15} {:>5}  ({:>3.0}%)",
-                format!("{}:", route_color),
+                "  {}{}{:>5}  ({:>3.0}%)",
+                route_color.bold(),
+                ":".bright_white().to_string() + &padding,
                 cnt,
                 pct
             );

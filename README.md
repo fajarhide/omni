@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="OMNI Semantic Signal Engine" width="250" />
+  <img src="media/logo.png" alt="OMNI Semantic Signal Engine" width="250" />
 
   **Less noise. More signal. Right signal. Reduce AI token consumption by up to 90%.**
 
@@ -40,7 +40,12 @@ OMNI employs a unique, multi-layered native interception strategy to ensure maxi
 Intercepts noisy commands (like `git`, `cargo`, `npm`, `pytest`) *before* they execute. By natively rewriting these commands to `omni exec`, OMNI prevents auto-truncation and ensures the AI sees a distilled, high-density stream from the first line.
 
 ### 2. Safety-Net Post-Hook (`PostToolUse`)
-Automatically distills output from any tool *after* it runs. This acts as a backup for custom scripts or unknown commands that weren't caught by the pre-hook.
+Automatically distills output from any tool *after* it runs. This acts as a backup for custom scripts or unknown commands.
+
+<div align="center">
+  <img src="media/omni-terminal-hook-indikator.png" alt="OMNI Terminal Hook" width="700" />
+  <p><i>Real-time ROI feedback on every distilled command.</i></p>
+</div>
 
 ### 3. Session Continuity (`SessionStart`)
 When you start a new Claude session, OMNI injects a high-level summary of your *previous* state—hot files, last errors, and active task context—so the agent never reaches for "context" it already had.
@@ -52,21 +57,44 @@ Before Claude prunes its conversation history to save space, OMNI provides a per
 
 ### The Impact
 > **Reduce AI Token Usage by up to 90%**  
-> *Zero Information Loss. Native Binary Performance. <2ms Overhead.*
+> *Zero Information Loss. Native Binary Performance. Real-time ROI Monitoring.*
 <br/>
 
-![OMNI Token Savings](omni_token_savings_graphic.png)
+![OMNI Token Savings](media/omni_token_savings_graphic.png)
 
 ## Key Features
 
+<br/>
+
 ### RewindStore: Zero Information Loss
-When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore** with a SHA-256 hash. If the agent needs the full, unbridled output, it simply calls `omni_retrieve("hash")` via its MCP tool.
+When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore** with a SHA-256 hash. 
+- **Agent Access**: Call `omni_retrieve("hash")` via the MCP tool.
+- **Human Access**: Use `omni rewind list` and `omni rewind show <hash>` to manage your archives locally.
+
+<div align="center">
+  <img src="media/omni-rewind-list.png" alt="OMNI Rewind List" width="700" />
+</div>
+
+### Signal Comparison: `omni diff`
+Instantly visualize the value of OMNI. Run `omni diff` after any command to see a side-by-side comparison of the raw input vs. distilled signal.
+
+<div align="center">
+  <img src="media/omni-diff.png" alt="OMNI Diff" width="700" />
+</div>
 
 ### Session Intelligence
-OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring. Run `omni session --status` to see your current high-relevance signals.
+OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring.
+
+<div align="center">
+  <img src="media/omni-session-status.png" alt="OMNI Session" width="700" />
+</div>
 
 ### Pattern Discovery (Learning)
-OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters and `omni learn --apply` to commit them to your configuration.
+OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters.
+
+<div align="center">
+  <img src="media/omni-learn-status.png" alt="OMNI Learn" width="700" />
+</div>
 
 ### The OMNI Philosophy: Deliberate Action
 
@@ -81,28 +109,9 @@ Every core command follows a consistent **Discovery vs. Action** pattern:
 
 Keep track of your project's efficiency with OMNI's built-in reporting:
 
-```bash
-$ omni stats
-
- ───────────────────────────────────────────────── 
-  OMNI Signal Report — last 30 days
- ───────────────────────────────────────────────── 
-  Commands processed:  1,247
-  Data Distilled:      18.4 MB → 3.2 MB
-  Signal Ratio:        82.6% reduction
-  Estimated Savings:   $0.046 USD
-  Average Latency:     2.1ms
-
-   By Command:
-   1. git diff HEAD~1    203x  89%  ████████████████████
-   2. cargo test         89x  82%  ████████████████
-   3. docker build       44x  79%  ███████████████
-
-  Route Distribution:
-  Distill:       1247  (97%)
-  Keep/Rewind:     25  ( 2%)
- ───────────────────────────────────────────────── 
-```
+<div align="center">
+  <img src="media/omni-stats.png" alt="OMNI Stats" width="700" />
+</div>
 
 ## Quick Start
 

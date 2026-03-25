@@ -1,0 +1,48 @@
+# OMNI Configuration Template
+# Place this file at ~/.omni/omni.toml or in your project root.
+
+[global]
+# Performance and behavior
+max_pipe_size = "16MB"
+default_route = "Keep"  # Options: Keep, Soft, Rewind, Drop, Passthrough
+
+[ui]
+# Aesthetics for terminal output
+show_indicator = true      # Show the ✨ OMNI status line
+indicator_style = "minimal" # Options: minimal, verbose, sparkle
+colors = true              # Enable vibrant ANSI colors
+
+[[filters]]
+name = "Production Logs"
+match = "kubectl logs.*"
+# Use regex to keep only ERROR and CRITICAL lines
+keep = [
+    '(?i)error',
+    '(?i)critical',
+    '(?i)exception',
+    '(?i)failed'
+]
+# Drop boring progress logs
+drop = [
+    'GET /health',
+    'Connection pool status',
+    'DEBUG.*'
+]
+route = "Distill"
+
+[[filters]]
+name = "Git Noise Reduction"
+match = "git status"
+drop = [
+    '\(use "git add <file>..." to include in what will be committed\)',
+    '\(use "git restore <file>..." to discard changes in working directory\)',
+    'no changes added to commit \(use "git add" and/or "git commit -a"\)'
+]
+route = "Keep"
+
+[[filters]]
+name = "Build Cleanup"
+match = "cargo build|npm install"
+# Aggressively compress repetitive dependency lists
+route = "Rewind"
+threshold = 0.8

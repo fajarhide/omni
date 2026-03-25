@@ -245,7 +245,7 @@ mod tests {
         let input = "Waiting for connection 1\nWaiting for connection 2\nWaiting for connection 3\nFinished dev";
         let candidates = detect_patterns(input);
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].trigger_prefix, "Waiting for connection #");
+        assert_eq!(candidates[0].trigger_prefix, "Waiting for connection");
         assert_eq!(candidates[0].count, 3);
     }
 

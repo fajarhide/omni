@@ -1,5 +1,6 @@
 use crate::pipeline::{ContentType, OutputSegment};
 use crate::store::sqlite::Store;
+use colored::Colorize;
 use std::sync::Arc;
 
 pub struct RewindDecision {
@@ -102,13 +103,25 @@ pub fn compose(
     {
         if let Some(s) = store {
             let hash = s.store_rewind(&content);
+            let reduction = (dropped_lines as f32 / total_lines.max(1) as f32) * 100.0;
+            
             output.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
-                dropped_lines, hash
+                "\n{} {} {} {} lines to an optimized state ({}% reduction). The hash {} stores the full output in RewindStore for retrieval.\n",
+                "⏺".cyan(),
+                "OMNI".bold().bright_white(),
+                "distilled".bright_green(),
+                dropped_lines.to_string().bold(),
+                format!("{:.1}", reduction).yellow(),
+                hash.cyan().bold()
             ));
             rewind_hash = Some(hash);
         } else {
-            output.push_str(&format!("\n[OMNI: {} lines omitted]\n", dropped_lines));
+            output.push_str(&format!(
+                "\n{} {} {} lines omitted for efficiency.\n",
+                "⏺".cyan(),
+                "OMNI:".bold().bright_white(),
+                dropped_lines
+            ));
         }
     }
 
@@ -204,7 +217,8 @@ mod tests {
 
         assert!(out.contains("bad loop"));
         assert!(!out.contains("ignored noise")); // Not in main output
-        assert!(out.contains("[OMNI: 1 lines omitted — omni_retrieve("));
+        assert!(out.contains("distilled"));
+        assert!(out.contains("lines to an optimized state"));
         assert!(hash.is_some());
     }
 
