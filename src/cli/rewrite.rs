@@ -27,25 +27,19 @@ pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
         "node ",
         "python ",
         "go ",
+        "bash ",
+        "sh ",
     ];
 
     let wants_rewrite = allow_list.iter().any(|&p| cmd_str.starts_with(p));
 
     if wants_rewrite {
-        // Do not rewrite if it contains shell symbols
-        let has_shell_symbols = cmd_str.contains('|')
-            || cmd_str.contains('>')
-            || cmd_str.contains('<')
-            || cmd_str.contains("&&")
-            || cmd_str.contains(';');
+        // We always try to rewrite recognized tools to capture them.
+        // run_exec will handle whether to use a shell or not.
+        let exe_path = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("omni"));
+        let exe_name = exe_path.to_string_lossy();
 
-        if !has_shell_symbols {
-            let exe_path =
-                std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("omni"));
-            let exe_name = exe_path.to_string_lossy();
-
-            return Some(format!("{} exec {}", exe_name, cmd_str));
-        }
+        return Some(format!("{} exec {}", exe_name, cmd_str));
     }
 
     None

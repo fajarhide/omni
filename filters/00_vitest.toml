@@ -6,7 +6,6 @@ match_command = "(vitest|jest|pnpm test|npm test|bun test|bun run test)"
 strip_ansi = true
 strip_lines_matching = [
     "^\\s*✓ ",
-    "^\\s*✓ ",
     "^\\s*√ ",
     "^\\s*PASS ",
     "^stdout ",

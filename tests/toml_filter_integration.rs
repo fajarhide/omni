@@ -464,11 +464,24 @@ mod terraform {
     }
 
     #[test]
+    fn matches_terraform_apply_destroy_init() {
+        let filters = load_filters();
+        let f = get_filter(&filters, "terraform");
+        assert_matches(f, "terraform apply");
+        assert_matches(f, "terraform apply -auto-approve");
+        assert_matches(f, "terraform destroy");
+        assert_matches(f, "terraform destroy -auto-approve");
+        assert_matches(f, "terraform init");
+        assert_matches(f, "terraform init -upgrade");
+    }
+
+    #[test]
     fn does_not_match_unrelated() {
         let filters = load_filters();
         let f = get_filter(&filters, "terraform");
-        assert_not_matches(f, "terraform apply");
-        assert_not_matches(f, "terraform init");
+        assert_not_matches(f, "terraform fmt");
+        assert_not_matches(f, "terraform validate");
+        assert_not_matches(f, "terrafirma plan");
     }
 }
 

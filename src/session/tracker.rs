@@ -259,13 +259,13 @@ pub fn infer_domain(session: &SessionState) -> Option<String> {
 }
 
 fn save_async(session: Arc<Mutex<SessionState>>, store: Arc<Store>) {
-    // Actually we already saved in thread earlier or we can just spawn again explicitly over the requirement bounds
-    // Since we spawned thread inside track_command, this just does the synchronous DB hit natively detached.
-    let s = match session.lock() {
-        Ok(l) => l.clone(),
-        Err(_) => return,
-    };
-    store.upsert_session(&s);
+    thread::spawn(move || {
+        let s = match session.lock() {
+            Ok(l) => l.clone(),
+            Err(_) => return,
+        };
+        store.upsert_session(&s);
+    });
 }
 
 #[cfg(test)]

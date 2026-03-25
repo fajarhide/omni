@@ -19,18 +19,48 @@ pub fn run_exec(
     let cmd = &args[2];
     let cmd_args = &args[3..];
 
-    let child_res = Command::new(cmd)
-        .args(cmd_args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit()) // Let stderr bypass OMNI directly to the terminal
-        .spawn();
+    // Detect if we need to run via shell
+    let needs_shell = cmd_args.iter().any(|arg| {
+        arg.contains('|')
+            || arg.contains('>')
+            || arg.contains('<')
+            || arg.contains('&')
+            || arg.contains(';')
+    }) || cmd.contains('|')
+        || cmd.contains('>')
+        || cmd.contains('<')
+        || cmd.contains('&')
+        || cmd.contains(';');
 
-    let child = match child_res {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("omni exec: failed to execute '{}': {}", cmd, e);
-            std::process::exit(1);
-        }
+    let (child, cmd_name) = if needs_shell {
+        let full_cmd = if cmd_args.is_empty() {
+            cmd.to_string()
+        } else {
+            format!("{} {}", cmd, cmd_args.join(" "))
+        };
+
+        let c = Command::new("sh")
+            .arg("-c")
+            .arg(&full_cmd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "omni exec: failed to execute shell command '{}': {}",
+                    full_cmd,
+                    e
+                )
+            })?;
+        (c, cmd.clone())
+    } else {
+        let c = Command::new(cmd)
+            .args(cmd_args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("omni exec: failed to execute '{}': {}", cmd, e))?;
+        (c, cmd.clone())
     };
 
     let output = child.wait_with_output()?;
@@ -45,7 +75,7 @@ pub fn run_exec(
         stderr,
         store,
         session,
-        Some(cmd),
+        Some(&cmd_name),
     )?;
 
     if !output.status.success() {

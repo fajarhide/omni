@@ -1,7 +1,7 @@
 schema_version = 1
 
 [filters.terraform]
-match_command = "terraform plan"
+match_command = "^terraform (plan|apply|destroy|init)"
 strip_ansi = true
 
 [[filters.terraform.match_output]]
@@ -12,7 +12,19 @@ message = "terraform: $1 add, $2 change, $3 destroy"
 pattern = "No changes. Your infrastructure matches the configuration."
 message = "terraform: no changes"
 
-strip_lines_matching = ["^Refreshing state...", "^Reading..."]
+[[filters.terraform.match_output]]
+pattern = "Apply complete! Resources: (\\d+) added, (\\d+) changed, (\\d+) destroyed"
+message = "terraform apply: $1 added, $2 changed, $3 destroyed"
+
+[[filters.terraform.match_output]]
+pattern = "Destroy complete! Resources: (\\d+) destroyed"
+message = "terraform destroy: $1 destroyed"
+
+[[filters.terraform.match_output]]
+pattern = "Terraform has been successfully initialized!"
+message = "terraform init: success"
+
+strip_lines_matching = ["^Refreshing state...", "^Reading...", "Still destroying:", "Still creating:", "Still modifying...", "\\|\\s*[~+-]\\s*$"]
 max_lines = 50
 
 [[tests.terraform]]
@@ -30,3 +42,33 @@ Refreshing state...
 Plan: 2 to add, 0 to change, 1 to destroy.
 """
 expected = "terraform: 2 add, 0 change, 1 destroy"
+
+[[tests.terraform]]
+name = "apply success"
+input = """
+Refreshing state...
+Still creating... [10s elapsed]
+Still creating... [20s elapsed]
+Apply complete! Resources: 2 added, 0 changed, 1 destroyed.
+"""
+expected = "terraform apply: 2 added, 0 changed, 1 destroyed"
+
+[[tests.terraform]]
+name = "destroy success"
+input = """
+Refreshing state...
+Still destroying... [10s elapsed]
+Destroy complete! Resources: 3 destroyed.
+"""
+expected = "terraform destroy: 3 destroyed"
+
+[[tests.terraform]]
+name = "init success"
+input = """
+Initializing the backend...
+Initializing provider plugins...
+- Finding hashicorp/aws versions matching ~> 5.0...
+- Installing hashicorp/aws v5.45.0...
+Terraform has been successfully initialized!
+"""
+expected = "terraform init: success"

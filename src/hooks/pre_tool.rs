@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pre_hook_ignores_shell_pipes() {
+    fn test_pre_hook_handles_shell_pipes() {
         let input = json!({
             "tool_input": {
                 "command": "git status | grep foo"
@@ -107,7 +107,7 @@ mod tests {
         })
         .to_string();
 
-        let output = process_payload(&input);
-        assert!(output.is_none());
+        let output = process_payload(&input).expect("Should rewrite");
+        assert!(output.contains("exec git status | grep foo"));
     }
 }

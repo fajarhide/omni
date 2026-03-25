@@ -199,7 +199,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
             };
 
             println!(
-                "  {:>2}. {:<12} {:>4}x  {:>3.0}%  {}{}",
+                "  {:>2}. {:<24} {:>4}x  {:>3.0}%  {}{}",
                 i + 1,
                 name.bright_cyan(),
                 cnt,

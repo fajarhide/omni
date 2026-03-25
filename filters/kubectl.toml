@@ -1,6 +1,6 @@
 schema_version = 1
 [filters.kubectl]
-match_command = "kubectl"
+match_command = "^kubectl (get|describe|apply|delete|create|patch|scale|exec|port-forward|rollout|top|wait|config|cluster-info|version|api-resources|api-versions)"
 strip_ansi = true
 
 [[filters.kubectl.match_output]]
