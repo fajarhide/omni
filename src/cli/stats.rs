@@ -187,7 +187,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         println!("\n {}", "By Command:".bold().bright_white());
         println!(
             "   #  {:<24} {:>7} {:>9}  Signal Strength",
-            "Command", "Count", "Savings"
+            "CLI", "Count", "Savings"
         );
         println!("   ── {:─<24} ─────── ───────── ────────────────────", "");
 
@@ -204,10 +204,18 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
                 "".clear()
             };
 
+            let display_name = if name.chars().count() > 21 {
+                let mut s: String = name.chars().take(18).collect();
+                s.push_str("...");
+                s
+            } else {
+                name.clone()
+            };
+
             println!(
                 "  {:>2}. {:<24} {:>6}x  {:>7.1}%  {}{}",
                 i + 1,
-                name.bright_cyan(),
+                display_name.bright_cyan(),
                 cnt,
                 pct,
                 bar_colored,
@@ -240,7 +248,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
             let padding = " ".repeat(15_usize.saturating_sub(label.len()));
 
             println!(
-                "  {}{}{:>5}  ({:>3.0}%)",
+                "  {}{}{:>15}  ({:>3.0}%)",
                 route_color.bold(),
                 ":".bright_white().to_string() + &padding,
                 cnt,
