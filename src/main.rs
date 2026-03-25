@@ -99,9 +99,15 @@ fn print_help() {
         "  {: <12} Clean uninstall (for backups config)",
         "reset".cyan()
     );
-    println!("  {: <12} Compare last original input vs distilled", "diff".cyan());
+    println!(
+        "  {: <12} Compare last original input vs distilled",
+        "diff".cyan()
+    );
     println!("  {: <12} Upgrade OMNI to latest", "update".cyan());
-    println!("  {: <12} View version and environment info", "version".cyan());
+    println!(
+        "  {: <12} View version and environment info",
+        "version".cyan()
+    );
     println!("  {: <12} Show this help message", "help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());

@@ -104,7 +104,7 @@ pub fn compose(
         if let Some(s) = store {
             let hash = s.store_rewind(&content);
             let reduction = (dropped_lines as f32 / total_lines.max(1) as f32) * 100.0;
-            
+
             output.push_str(&format!(
                 "\n{} {} {} {} lines to an optimized state ({}% reduction). The hash {} stores the full output in RewindStore for retrieval.\n",
                 "⏺".cyan(),

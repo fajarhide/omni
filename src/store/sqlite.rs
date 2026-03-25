@@ -175,7 +175,10 @@ impl Store {
         Ok((total, retrieved))
     }
 
-    pub fn list_recent_rewinds(&self, limit: usize) -> Result<Vec<crate::cli::rewind::RewindEntry>> {
+    pub fn list_recent_rewinds(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::cli::rewind::RewindEntry>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT hash, ts, original_len, retrieved FROM rewind_store ORDER BY ts DESC LIMIT ?1",

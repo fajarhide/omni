@@ -181,9 +181,12 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         };
 
         s.record_distillation(&s_id, &result, command_name.unwrap_or(""));
-        
+
         // Save for `omni diff`
-        let cache_dir = dirs::home_dir().unwrap_or_default().join(".omni").join("cache");
+        let cache_dir = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".omni")
+            .join("cache");
         let _ = std::fs::create_dir_all(&cache_dir);
         let _ = std::fs::write(cache_dir.join("last_input.txt"), &input_text);
         let _ = std::fs::write(cache_dir.join("last_output.txt"), &final_output);
@@ -201,7 +204,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
 
     // 6. Premium status indicator
     let elapsed = start_time.elapsed().as_millis();
-    let reduction = if input_text.len() > 0 {
+    let reduction = if !input_text.is_empty() {
         100.0 * (1.0 - final_output.len() as f64 / input_text.len() as f64)
     } else {
         0.0

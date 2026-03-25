@@ -5,7 +5,10 @@ use colored::*;
 pub fn run_rewind(args: &[String], store: &Store) -> Result<()> {
     let subcmd = args.get(2).map(|s| s.as_str()).unwrap_or("list");
 
-    if args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
         print_help();
         return Ok(());
     }
@@ -43,11 +46,22 @@ fn print_help() {
         "rewind".bold().yellow()
     );
     println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni {} {} {}", "rewind".cyan(), "<COMMAND>".yellow(), "[HASH]".bright_black());
+    println!(
+        "  omni {} {} {}",
+        "rewind".cyan(),
+        "<COMMAND>".yellow(),
+        "[HASH]".bright_black()
+    );
 
     println!("\n{}", "COMMANDS:".bold().bright_white());
-    println!("  {: <12} Show recent archived chunks (default)", "list".cyan());
-    println!("  {: <12} View the full content of an archive", "show".cyan());
+    println!(
+        "  {: <12} Show recent archived chunks (default)",
+        "list".cyan()
+    );
+    println!(
+        "  {: <12} View the full content of an archive",
+        "show".cyan()
+    );
     println!("  {: <12} Show this help message", "help".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -65,10 +79,13 @@ fn print_help() {
 fn list_rewinds(store: &Store) -> Result<()> {
     let rewinds = store.list_recent_rewinds(12)?;
 
-    println!("\n {}", "OMNI REWIND: Archived Signal Data".bold().bright_white());
     println!(
-        "   {:<10} {:<14} {:>10}  {}",
-        "HASH", "TIMESTAMP", "CAPACITY", "STATUS"
+        "\n {}",
+        "OMNI REWIND: Archived Signal Data".bold().bright_white()
+    );
+    println!(
+        "   {:<10} {:<14} {:>10}  STATUS",
+        "HASH", "TIMESTAMP", "CAPACITY"
     );
     println!("   ────────── ────────────── ──────────  ────────");
 
@@ -92,7 +109,11 @@ fn list_rewinds(store: &Store) -> Result<()> {
             status
         );
     }
-    println!("\n {} Run {} to view content", "Tip:".yellow(), "omni rewind show <hash>".cyan());
+    println!(
+        "\n {} Run {} to view content",
+        "Tip:".yellow(),
+        "omni rewind show <hash>".cyan()
+    );
     println!();
     Ok(())
 }
@@ -112,26 +133,44 @@ fn show_rewind(store: &Store, hash: &str) -> Result<()> {
             size_str.yellow()
         );
 
-        println!("\n {}", format!("CONTENT PREVIEW [ {} ]", hash).bold().bright_cyan());
-        println!("{}", " ──────────────────────────────────────────────────────────────────".bright_black());
-        
+        println!(
+            "\n {}",
+            format!("CONTENT PREVIEW [ {} ]", hash).bold().bright_cyan()
+        );
+        println!(
+            "{}",
+            " ──────────────────────────────────────────────────────────────────".bright_black()
+        );
+
         let lines_vec: Vec<&str> = content.lines().collect();
         for line in lines_vec.iter().take(40) {
             println!("  {}", line);
         }
-        
+
         if lines_vec.len() > 40 {
-            println!("\n  {} ... ({} more lines) ...", "---".bright_black(), lines_vec.len() - 40);
+            println!(
+                "\n  {} ... ({} more lines) ...",
+                "---".bright_black(),
+                lines_vec.len() - 40
+            );
         }
 
-        println!("{}", " ──────────────────────────────────────────────────────────────────".bright_black());
+        println!(
+            "{}",
+            " ──────────────────────────────────────────────────────────────────".bright_black()
+        );
         println!(
             " {} Signature: {} | Data Integrity Verified",
             "✨".cyan(),
             hash.bold().bright_white()
         );
     } else {
-        eprintln!("{} {}: No content found for hash {}", "error".red(), "omni".bold(), hash.yellow());
+        eprintln!(
+            "{} {}: No content found for hash {}",
+            "error".red(),
+            "omni".bold(),
+            hash.yellow()
+        );
     }
     Ok(())
 }

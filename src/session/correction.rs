@@ -136,7 +136,9 @@ pub fn extract_base_command(cmd: &str) -> String {
         1 => parts[0].to_string(),
         _ => {
             // Check if second part is a common sub-command
-            let common_subs = ["commit", "push", "pull", "checkout", "install", "run", "test", "build"];
+            let common_subs = [
+                "commit", "push", "pull", "checkout", "install", "run", "test", "build",
+            ];
             if common_subs.contains(&parts[1]) {
                 format!("{} {}", parts[0], parts[1])
             } else {
@@ -194,7 +196,10 @@ pub fn command_similarity(a: &str, b: &str) -> f64 {
 /// Check if error is a compilation/test error (TDD cycle, not CLI correction)
 fn is_tdd_cycle_error(output: &str) -> bool {
     // Compilation errors
-    if output.contains("error[E") || output.contains("aborting due to") || output.contains("unresolved import") {
+    if output.contains("error[E")
+        || output.contains("aborting due to")
+        || output.contains("unresolved import")
+    {
         return true;
     }
 
@@ -288,8 +293,6 @@ pub fn find_corrections(commands: &[CommandExecution]) -> Vec<CorrectionPair> {
     corrections
 }
 
-
-
 /// Extract the specific token that changed between wrong and right commands
 fn extract_diff_token(wrong: &str, right: &str) -> String {
     let wrong_parts: std::collections::HashSet<&str> = wrong.split_whitespace().collect();
@@ -376,9 +379,18 @@ mod tests {
 
     #[test]
     fn test_classify_error_types() {
-        assert_eq!(classify_error("unexpected argument '--foo'"), ErrorType::UnknownFlag);
-        assert_eq!(classify_error("command not found: gti"), ErrorType::CommandNotFound);
-        assert_eq!(classify_error("No such file or directory"), ErrorType::WrongPath);
+        assert_eq!(
+            classify_error("unexpected argument '--foo'"),
+            ErrorType::UnknownFlag
+        );
+        assert_eq!(
+            classify_error("command not found: gti"),
+            ErrorType::CommandNotFound
+        );
+        assert_eq!(
+            classify_error("No such file or directory"),
+            ErrorType::WrongPath
+        );
     }
 
     #[test]
@@ -386,7 +398,10 @@ mod tests {
         assert_eq!(extract_base_command("git commit -m 'fix'"), "git commit");
         assert_eq!(extract_base_command("cargo test --lib"), "cargo test");
         assert_eq!(extract_base_command("ls -la"), "ls");
-        assert_eq!(extract_base_command("RUST_BACKTRACE=1 cargo test"), "cargo test");
+        assert_eq!(
+            extract_base_command("RUST_BACKTRACE=1 cargo test"),
+            "cargo test"
+        );
     }
 
     #[test]
@@ -448,13 +463,18 @@ mod tests {
     #[test]
     fn test_is_tdd_cycle_error() {
         assert!(is_tdd_cycle_error("error[E0425]: cannot find value `x`"));
-        assert!(is_tdd_cycle_error("test result: FAILED. 10 passed; 1 failed"));
+        assert!(is_tdd_cycle_error(
+            "test result: FAILED. 10 passed; 1 failed"
+        ));
     }
 
     #[test]
     fn test_differs_only_by_path() {
         // High similarity but different paths
-        assert!(differs_only_by_path("cat /very/long/path/to/file1.txt --flag --opt", "cat /very/long/path/to/file2.txt --flag --opt"));
+        assert!(differs_only_by_path(
+            "cat /very/long/path/to/file1.txt --flag --opt",
+            "cat /very/long/path/to/file2.txt --flag --opt"
+        ));
         assert!(!differs_only_by_path("git commit", "git push"));
     }
 }

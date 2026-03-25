@@ -186,13 +186,10 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     if !filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
         println!(
-            "   #  {:<24} {:>7} {:>9}  {}",
-            "Command", "Count", "Savings", "Signal Strength"
+            "   #  {:<24} {:>7} {:>9}  Signal Strength",
+            "Command", "Count", "Savings"
         );
-        println!(
-            "   ── {:─<24} ─────── ───────── ────────────────────",
-            ""
-        );
+        println!("   ── {:─<24} ─────── ───────── ────────────────────", "");
 
         for (i, (name, cnt, pct)) in filters.iter().enumerate() {
             let bar = format_bar(*pct);
