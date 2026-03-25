@@ -311,7 +311,9 @@ pub fn load_from_dir(dir: &Path) -> Vec<TomlFilter> {
 
 pub fn load_embedded_filters() -> Vec<TomlFilter> {
     let mut all_filters = Vec::new();
-    for file in Asset::iter() {
+    let mut files: Vec<String> = Asset::iter().map(|s| s.to_string()).collect();
+    files.sort(); // Sort alphabetically so specific filters (e.g., 00_vitest.toml) load before general ones (e.g., npm.toml)
+    for file in files {
         if file.ends_with(".toml")
             && let Some(content) = Asset::get(&file)
         {
