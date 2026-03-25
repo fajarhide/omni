@@ -1,28 +1,28 @@
 class Omni < Formula
   desc "Semantic Signal Engine — Less noise. More signal. Right signal."
   homepage "https://github.com/fajarhide/omni"
-  version "0.5.4-rc3"
+  version "0.5.4-rc4"
   license "MIT"
 
   on_macos do
     on_arm do
       url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "3d1650c15289b47ab829bcd0007cea20551a0690928bfa53c83ddffc178c4c11"
+      sha256 "0c4e120bcd6a3c28f094e63f00bea456af745648558c9913978302e64e4061cd"
     end
     on_intel do
       url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "21f99376fa5db62e80514adadf300524a988f9396e05615c2d97038ac7207ec8"
+      sha256 "a315b1d761e8cbc334a7e393d3ffcb6249311584555a56b8165ba60d08fdaf3b"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "9bcc15a9070faba2dc66120a1a44cb01ebcb6b9b0024c5948fa38b058584c52e"
+      sha256 "36948a8ac455962f523bc63c5be908558e7d0fef19aefeb300e560331a2730fb"
     end
     on_intel do
       url "https://github.com/fajarhide/omni/releases/download/v#{version}/omni-v#{version}-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "a4cc92ad035bbb25cc04e544bb63ef53ace2c4c601b3509cafcb08ff19e39a8f"
+      sha256 "0f7da2d67a68c7c97cab2c022a4b11b3efa9fdbc1090265c8e754ea379b48b01"
     end
   end
 
