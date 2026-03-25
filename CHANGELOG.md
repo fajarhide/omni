@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-03-25
+
+### Added
+- `omni update` command: Easily upgrade OMNI to the latest version via Homebrew with a confirmation prompt.
+- Automated Version Check: OMNI now checks for updates from GitHub (24h cached) and notifies you in `help` and `doctor` screens.
+- Safety Confirmations: Added `[y/N]` interactive prompts to `omni reset` and `omni update` to prevent accidental uninstalls or upgrades.
+- Full Hook Diagnostics: `omni doctor` now explicitly checks and displays status for all 4 OMNI hooks, including `PreToolUse`.
+
+### Fixed
+- Hook Cleanup: `omni reset` and `omni init --uninstall` now correctly remove `PreToolUse` (Bash) hooks from Claude settings.
+- Hook Detection: Fixed `omni doctor` logic to correctly identify OMNI hooks using any valid flag variant.
+- Clippy Compliance: Resolved `collapsible-if` and other minor lints in the new update module.
+
+### Improved
+- CLI Diagnostics: Refined `omni doctor` output with clearer labels ("OMNI Hooks", "OMNI MCP Server") for better readability.
+
 ## [0.5.2] - 2026-03-25
 
 ### Added

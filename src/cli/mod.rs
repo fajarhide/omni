@@ -6,3 +6,4 @@ pub mod reset;
 pub mod rewrite;
 pub mod session;
 pub mod stats;
+pub mod update;

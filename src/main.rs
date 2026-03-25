@@ -95,6 +95,7 @@ fn print_help() {
         "  {: <12} Clean uninstall (for backups config)",
         "reset".cyan()
     );
+    println!("  {: <12} Upgrade OMNI to latest", "update".cyan());
     println!("  {: <12} Print version info", "version, -v".cyan());
     println!("  {: <12} Show this help message", "help, -h".cyan());
 
@@ -112,6 +113,10 @@ fn print_help() {
         "# Distill long output".bright_black()
     );
     println!();
+
+    if let Some(latest) = crate::guard::update::check() {
+        crate::guard::update::print_notification(&latest);
+    }
 }
 
 // ─── Main ───────────────────────────────────────────────
@@ -253,6 +258,13 @@ fn main() {
                 "doctor" => {
                     if let Err(e) = cli::doctor::run(&args) {
                         eprintln!("[omni] Doctor error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
+                "update" => {
+                    if let Err(e) = cli::update::run(&args) {
+                        eprintln!("[omni] Update error: {}", e);
                         std::process::exit(1);
                     }
                 }

@@ -33,9 +33,9 @@ class Omni < Formula
   def caveats
     <<~EOS
       Quick start:
-        omni init          # Initialize OMNI setup
-        omni doctor        # Verify installation
-        omni stats         # View token savings
+        omni init --all        # Initialize OMNI setup
+        omni doctor            # Verify installation
+        omni stats             # View token savings
 
       OMNI works automatically — no configuration needed.
       Hooks intercept Claude Code tool outputs and distill them in real-time.
