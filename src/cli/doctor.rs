@@ -11,7 +11,7 @@ fn print_help() {
         "doctor".bold().yellow()
     );
     println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni {}", "doctor".cyan());
+    println!("  omni doctor {}", "[--fix]".cyan());
 
     println!("\n{}", "DESCRIPTION:".bold().bright_white());
     println!("  Checks the health of your OMNI installation, including:");
@@ -20,6 +20,11 @@ fn print_help() {
     println!("  • Claude Code hook installation");
     println!("  • MCP server registration");
     println!("  • Filter trust and loading status");
+    println!("\n{}", "FLAGS:".bold().bright_white());
+    println!(
+        "  {: <12} Automatically fix configuration and integration issues",
+        "--fix".cyan()
+    );
     println!();
 
     if let Some(latest) = crate::guard::update::check() {
@@ -55,6 +60,8 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         print_help();
         return Ok(());
     }
+
+    let fix_mode = args.iter().any(|a| a == "--fix");
 
     let mut all_ok = true;
     let mut warnings = Vec::new();
@@ -111,13 +118,21 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             "[OK]".green().bold()
         );
     } else {
-        println!(
-            "  {:<15} ~/.omni/ {}",
-            "Config dir:".bright_black(),
-            "[ERROR]".red().bold()
-        );
-        warnings.push("Config directory ~/.omni/ is missing or not writable. Run `omni init`.");
-        all_ok = false;
+        if fix_mode && fs::create_dir_all(&conf_dir).is_ok() {
+            println!(
+                "  {:<15} ~/.omni/ {}",
+                "Config dir:".bright_black(),
+                "[FIXED]".green().bold()
+            );
+        } else {
+            println!(
+                "  {:<15} ~/.omni/ {}",
+                "Config dir:".bright_black(),
+                "[ERROR]".red().bold()
+            );
+            warnings.push("Config directory ~/.omni/ is missing or not writable. Run `omni init`.");
+            all_ok = false;
+        }
     }
 
     // 3. Database
@@ -227,24 +242,67 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 if !fmt_hook("PreCompact", "PreCompact") {
                     all_ok = false;
                 }
+
+                if fix_mode && !all_ok {
+                    let _ = crate::cli::init::run_init(&[
+                        "omni".to_string(),
+                        "init".to_string(),
+                        "--hook".to_string(),
+                    ]);
+                    println!(
+                        "   {:<15} {}",
+                        "Hooks:".bright_black(),
+                        "[FIXED] missing hooks installed".green().bold()
+                    );
+                    all_ok = true;
+                    warnings.retain(|w| {
+                        !w.contains("hook") && !w.contains("Claude settings not found")
+                    });
+                }
             } else {
-                println!(
-                    "   {:<15} {}",
-                    "Hooks:".bright_black(),
-                    "[WARNING] no hooks found".yellow().bold()
-                );
-                warnings.push("OMNI hooks are not configured. Run `omni init`.");
-                all_ok = false;
+                if fix_mode {
+                    let _ = crate::cli::init::run_init(&[
+                        "omni".to_string(),
+                        "init".to_string(),
+                        "--hook".to_string(),
+                    ]);
+                    println!(
+                        "   {:<15} {}",
+                        "Hooks:".bright_black(),
+                        "[FIXED] installed".green().bold()
+                    );
+                } else {
+                    println!(
+                        "   {:<15} {}",
+                        "Hooks:".bright_black(),
+                        "[WARNING] no hooks found".yellow().bold()
+                    );
+                    warnings.push("OMNI hooks are not configured. Run `omni init`.");
+                    all_ok = false;
+                }
             }
         }
     } else {
-        println!(
-            "   {:<15} {}",
-            "Hooks:".bright_black(),
-            "[ERROR] settings.json missing".red()
-        );
-        warnings.push("Claude settings not found. Have you installed Claude Code?");
-        all_ok = false;
+        if fix_mode {
+            let _ = crate::cli::init::run_init(&[
+                "omni".to_string(),
+                "init".to_string(),
+                "--hook".to_string(),
+            ]);
+            println!(
+                "   {:<15} {}",
+                "Hooks:".bright_black(),
+                "[FIXED] installed".green().bold()
+            );
+        } else {
+            println!(
+                "   {:<15} {}",
+                "Hooks:".bright_black(),
+                "[ERROR] settings.json missing".red()
+            );
+            warnings.push("Claude settings not found. Have you installed Claude Code?");
+            all_ok = false;
+        }
     }
 
     // 5. MCP Server registration
@@ -273,13 +331,26 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         }
     }
     if !mcp_found {
-        println!(
-            "   {:<15} {}",
-            "Registered:".bright_black(),
-            "[WARNING] no MCP server found".yellow().bold()
-        );
-        warnings.push("MCP Server is not configured. Run `omni init`.");
-        all_ok = false;
+        if fix_mode {
+            let _ = crate::cli::init::run_init(&[
+                "omni".to_string(),
+                "init".to_string(),
+                "--mcp".to_string(),
+            ]);
+            println!(
+                "   {:<15} {}",
+                "Registered:".bright_black(),
+                "[FIXED] registered".green().bold()
+            );
+        } else {
+            println!(
+                "   {:<15} {}",
+                "Registered:".bright_black(),
+                "[WARNING] no MCP server found".yellow().bold()
+            );
+            warnings.push("MCP Server is not configured. Run `omni init`.");
+            all_ok = false;
+        }
     }
 
     // 6. Config Filters
@@ -300,6 +371,28 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             "User:".bright_black(),
             user_filters.len().to_string().yellow()
         );
+
+        if fix_mode && let Ok(entries) = std::fs::read_dir(&user_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "toml")
+                    && crate::pipeline::toml_filter::load_from_file(&path).is_err()
+                {
+                    let bak_path = path.with_extension("toml.bak");
+                    if std::fs::rename(&path, &bak_path).is_ok() {
+                        println!(
+                            "   {:<15} {} {}",
+                            "Cleaned:".bright_black(),
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .bright_black(),
+                            "[RENAMED TO .bak]".green().bold()
+                        );
+                    }
+                }
+            }
+        }
     } else {
         println!("   {:<15} none", "User:".bright_black());
     }
@@ -314,13 +407,24 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 "[OK]".green().bold()
             );
         } else {
-            println!(
-                "   {:<15} .omni/filters/ (NOT TRUSTED) {}",
-                "Project:".bright_black(),
-                "[WARNING]".yellow().bold()
-            );
-            warnings.push("Project filters found but not trusted. Run: `omni trust`.");
-            all_ok = false;
+            if fix_mode {
+                let _ = crate::guard::trust::trust_project(
+                    std::env::current_dir().unwrap_or_default().as_path(),
+                );
+                println!(
+                    "   {:<15} .omni/filters/ (TRUSTED) {}",
+                    "Project:".bright_black(),
+                    "[FIXED]".green().bold()
+                );
+            } else {
+                println!(
+                    "   {:<15} .omni/filters/ (NOT TRUSTED) {}",
+                    "Project:".bright_black(),
+                    "[WARNING]".yellow().bold()
+                );
+                warnings.push("Project filters found but not trusted. Run: `omni trust`.");
+                all_ok = false;
+            }
         }
     } else {
         println!("   {:<15} none", "Project:".bright_black());
