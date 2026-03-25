@@ -57,13 +57,14 @@ struct ReplaceRuleConfig {
     replacement: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TestConfig {
     pub name: String,
     pub input: String,
     pub expected: String,
 }
 
+#[derive(Clone)]
 pub struct TomlFilter {
     pub name: String,
     pub description: Option<String>,
@@ -78,12 +79,14 @@ pub struct TomlFilter {
     pub inline_tests: Vec<TestConfig>,
 }
 
+#[derive(Clone)]
 pub enum LineFilter {
     Strip(Vec<Regex>),
     Keep(Vec<Regex>),
     None,
 }
 
+#[derive(Clone)]
 pub struct MatchOutputRule {
     pub pattern: Regex,
     pub message: String,

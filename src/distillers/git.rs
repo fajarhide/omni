@@ -159,31 +159,38 @@ fn distill_diff(segments: &[OutputSegment], _input: &str) -> String {
 fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
     let mut out = String::new();
     for seg in segments {
-        if seg.tier == SignalTier::Critical || seg.tier == SignalTier::Important {
-            for line in seg.content.lines() {
-                if line.starts_with("commit ")
-                    || crate::distillers::git::RE_GIT_LOG_HASH.is_match(line)
-                {
-                    let hash: String = line.replace("commit ", "").chars().take(7).collect();
-                    out.push_str(&hash);
-                    out.push(' ');
-                } else if !line.starts_with("Author:")
-                    && !line.starts_with("Date:")
-                    && !line.trim().is_empty()
-                {
-                    out.push_str(line.trim());
-                    out.push('\n');
-                }
+        // Look for common commit hash patterns
+        for line in seg.content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            if line.starts_with("commit ") {
+                let hash: String = line.replace("commit ", "").chars().take(7).collect();
+                out.push_str(&hash);
+                out.push(' ');
+            } else if crate::distillers::git::RE_GIT_LOG_HASH.is_match(line) {
+                let hash: String = line.chars().take(7).collect();
+                out.push_str(&hash);
+                out.push(' ');
+            } else if !line.starts_with("Author:")
+                && !line.starts_with("Date:")
+                && !line.starts_with("Merge:")
+            {
+                out.push_str(line);
+                out.push('\n');
             }
         }
     }
+
     let result = out.trim().to_string();
     if result.is_empty() && !segments.is_empty() {
-        // Fallback: take first few lines of first segment
+        // Last resort: take first 5 lines
         segments[0]
             .content
             .lines()
-            .take(3)
+            .take(5)
             .collect::<Vec<_>>()
             .join("\n")
     } else {

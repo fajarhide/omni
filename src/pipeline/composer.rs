@@ -48,9 +48,28 @@ pub fn compose(
         return ("".to_string(), None); // Fully dropped
     }
 
-    // Auto-Learn execution: evaluates Passthrough outputs > 200 chars identifying potential noise natively.
-    if matches!(route, ContentType::Unknown) && original_text.len() > 200 {
-        crate::session::learn::queue_for_learn(original_text, "omni_passthrough_eval");
+    // Auto-Learn execution:
+    // Trigger learning if:
+    // 1. ContentType is Unknown
+    // 2. OR Distillation was poor (less than 30% of lines dropped) for a large enough output.
+    // This captures cases like Podman which might be classified as InfraOutput but have no matching filters.
+    let total_lines = segments.len();
+    let dropped_lines_count = segments
+        .iter()
+        .filter(|s| s.final_score() < config.threshold)
+        .count();
+
+    let poor_distillation =
+        total_lines > 5 && (dropped_lines_count as f32 / total_lines.max(1) as f32) < 0.3;
+
+    if (matches!(route, ContentType::Unknown) || poor_distillation)
+        && original_text.len() > 100
+        && !matches!(route, ContentType::StructuredData)
+    {
+        crate::session::learn::queue_for_learn(
+            original_text,
+            &format!("omni_eval_{:?}", route).to_lowercase(),
+        );
     }
 
     let mut kept_ordered: Vec<&OutputSegment> = segments

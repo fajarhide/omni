@@ -1,0 +1,75 @@
+schema_version = 1
+
+[filters.docker]
+description = "Distills Docker and Podman build/run output"
+match_command = "^(docker|podman) (build|run|pull|push|image|ps).*"
+strip_ansi = true
+confidence = 0.9
+
+# 1. Clean up progress and layer noise
+strip_lines_matching = [
+    "^\\s*--->",                             # Docker intermediate layer noise (hashes, "Running in")
+    "^Extracting ",                            # Progress
+    "^Downloading ",                           # Progress
+    "^Waiting ",                               # Progress
+    "^Verifying Checksum",                     # Progress
+    "^Download complete",                      # Progress
+    "^Pull complete",                          # Progress
+    "^Digest: sha256:",                        # Final digest noise
+    "^Status: Downloaded newer image",        # Final status noise
+    "^Resolving .* as an alias",              # Podman specific
+    "^Trying to pull ",                        # Podman specific
+    "^Getting image source signatures",        # Podman specific
+    "^Copying blob ",                          # Podman specific
+    "^Copying config ",                        # Podman specific
+    "^Writing manifest ",                      # Podman specific
+    "^Storing signatures"                      # Podman specific
+]
+
+# 2. Keep the core structural steps and final success/error
+keep_lines_matching = [
+    "^Step \\d+/\\d+",                         # Docker Steps
+    "^\\[\\d+/\\d+\\] STEP \\d+/\\d+",         # Podman Steps
+    "^Successfully built ",                    # Success
+    "^Successfully tagged ",                   # Success
+    "^Error response from daemon:",            # Error
+    "^Error: "                                 # General Error
+]
+
+max_lines = 100
+on_empty = "docker: image operation completed successfully"
+
+[[tests.docker]]
+name = "podman_build_sample"
+input = """
+Resolving "golang" as an alias (/etc/containers/registries.conf.d/000-shortnames.conf)
+Trying to pull docker.io/library/golang:1.22-alpine...
+Getting image source signatures
+Copying blob 4f4fb700ef54 done [900.0B]
+Copying config d123456789 done [1.2KB]
+Writing manifest to image destination
+[1/2] STEP 1/7: FROM golang:1.22-alpine AS builder
+[1/2] STEP 2/7: RUN apk add --no-cache git
+Successfully built d123456789
+"""
+expected = """
+[1/2] STEP 1/7: FROM golang:1.22-alpine AS builder
+[1/2] STEP 2/7: RUN apk add --no-cache git
+Successfully built d123456789
+"""
+
+[[tests.docker]]
+name = "docker_layer_noise"
+input = """
+Step 1/5 : FROM alpine:latest
+ ---> 49f356fa4eb1
+Step 2/5 : RUN apk add curl
+ ---> Running in a1b2c3d4e5f6
+ ---> a1b2c3d4e5f6
+Successfully built a1b2c3d4e5f6
+"""
+expected = """
+Step 1/5 : FROM alpine:latest
+Step 2/5 : RUN apk add curl
+Successfully built a1b2c3d4e5f6
+"""

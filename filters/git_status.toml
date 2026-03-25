@@ -1,0 +1,47 @@
+schema_version = 1
+
+[filters.git_status]
+description = "Filter verbose git status output to show only summarized changes"
+match_command = "^git status"
+strip_ansi = true
+strip_lines_matching = [
+    '(?m)^On branch ',
+    '(?m)^Your branch is up to date',
+    '(?m)^\s*\(use "git ',
+    '(?m)^nothing to commit, working tree clean',
+    '(?m)^no changes added to commit',
+    '(?m)^\s*$',
+]
+replace_rules = [
+    { pattern = '(?m)^Changes to be committed:', replacement = 'Staged:' },
+    { pattern = '(?m)^Changes not staged for commit:', replacement = 'Modified:' },
+    { pattern = '(?m)^Untracked files:', replacement = 'Untracked:' },
+]
+max_lines = 30
+
+[[tests.git_status]]
+name = "dirty status"
+input = """On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   src/new_feature.rs
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   README.md
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	tests/new_test.rs
+
+no changes added to commit (use "git add" and/or "git commit -a")
+"""
+expected = """Staged:
+	new file:   src/new_feature.rs
+Modified:
+	modified:   README.md
+Untracked:
+	tests/new_test.rs"""

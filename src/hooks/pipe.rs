@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::pipeline::{SessionState, classifier, composer, scorer};
+use crate::pipeline::{SessionState, classifier, composer, scorer, toml_filter};
 use crate::store::sqlite::Store;
 
 const MAX_PIPE_SIZE: usize = 16 * 1024 * 1024; // 16MB
@@ -75,11 +75,17 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         )?;
     }
 
-    // 4. Run pipeline natively
-    let (ctype, scored_segments, sid) = {
-        let c = classifier::classify(&input_text);
+    // 4. Run pipeline
+    let command_name = command_name.map(|c| {
+        if let Some(stripped) = c.strip_prefix("omni exec ") {
+            stripped
+        } else {
+            c
+        }
+    });
 
-        let (s_id, active_session_opt) = match session {
+    let (s_id, final_output, filter_name, ctype, rewind_hash_opt, kept_count, dropped_count) = {
+        let (s_id_internal, active_session_opt) = match session {
             Some(ref m) => {
                 let guard = m.lock().expect("must succeed");
                 (guard.session_id.clone(), Some(guard))
@@ -87,38 +93,69 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             None => ("pipe_session".to_string(), None),
         };
 
-        let ss = scorer::score_segments(&input_text, &c, active_session_opt.as_deref());
-        (c, ss, s_id)
-        // Lock released here as guard/active_session_opt go out of scope
-    };
+        let mut matched_toml = None;
+        if let Some(cmd) = command_name {
+            let filters = toml_filter::load_all_filters();
+            if let Some(f) = filters.iter().find(|filter| filter.matches(cmd)) {
+                matched_toml = Some(f.clone());
+            }
+        }
 
-    let compose_config = composer::ComposeConfig::default();
-    let decision = composer::decide_rewind(&scored_segments, &ctype);
+        if let Some(filter) = matched_toml {
+            let out = filter.apply(&input_text);
+            (
+                s_id_internal,
+                out,
+                filter.name.clone(),
+                crate::pipeline::ContentType::Unknown,
+                None,
+                0,
+                0,
+            )
+        } else {
+            let c = classifier::classify(&input_text);
+            let scored_segments =
+                scorer::score_segments(&input_text, &c, active_session_opt.as_deref());
+            drop(active_session_opt);
 
-    let kept_count = scored_segments
-        .iter()
-        .filter(|s| s.final_score() >= compose_config.threshold)
-        .count();
-    let dropped_count = scored_segments.len() - kept_count;
+            let compose_config = composer::ComposeConfig::default();
+            let decision = composer::decide_rewind(&scored_segments, &c);
 
-    let (final_output, rewind_hash_opt) = if decision.should_store && store.is_some() {
-        composer::compose(
-            scored_segments,
-            Some(input_text.clone()),
-            &compose_config,
-            store.as_deref(),
-            &input_text,
-            &ctype,
-        )
-    } else {
-        composer::compose(
-            scored_segments,
-            None,
-            &compose_config,
-            None,
-            &input_text,
-            &ctype,
-        )
+            let k_count = scored_segments
+                .iter()
+                .filter(|s| s.final_score() >= compose_config.threshold)
+                .count();
+            let d_count = scored_segments.len() - k_count;
+
+            let (out, r_hash) = if decision.should_store && store.is_some() {
+                composer::compose(
+                    scored_segments,
+                    Some(input_text.clone()),
+                    &compose_config,
+                    store.as_deref(),
+                    &input_text,
+                    &c,
+                )
+            } else {
+                composer::compose(
+                    scored_segments,
+                    None,
+                    &compose_config,
+                    None,
+                    &input_text,
+                    &c,
+                )
+            };
+            (
+                s_id_internal,
+                out,
+                format!("{:?}", c),
+                c,
+                r_hash,
+                k_count,
+                d_count,
+            )
+        }
     };
 
     if let Some(ref s) = store {
@@ -130,7 +167,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             } else {
                 Route::Keep
             },
-            filter_name: format!("{:?}", ctype),
+            filter_name: filter_name.clone(),
             content_type: ctype.clone(),
             score: 0.0,
             context_score: 0.0,
@@ -142,8 +179,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             segments_dropped: dropped_count,
         };
 
-        let cmd_to_record = command_name.unwrap_or("");
-        s.record_distillation(&sid, &result, cmd_to_record);
+        s.record_distillation(&s_id, &result, command_name.unwrap_or(""));
     }
 
     // 5. If no significant reduction: print original

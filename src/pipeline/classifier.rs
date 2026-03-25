@@ -139,6 +139,7 @@ pub fn classify(input: &str) -> ContentType {
 
     let infra_kw = [
         "aws ",
+        "podman ",
         "Terraform will",
         "Terraform has",
         "Terraform plan",
