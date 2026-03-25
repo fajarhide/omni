@@ -9,9 +9,9 @@ if [ -z "$NEW" ]; then
     exit 1
 fi
 
-# Validate version format
-if ! echo "$NEW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "Error: version must be in X.Y.Z format (got: $NEW)"
+# Validate version format (Standard SemVer with optional pre-release)
+if ! echo "$NEW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+    echo "Error: version must be in X.Y.Z or X.Y.Z-prerelease format (got: $NEW)"
     exit 1
 fi
 

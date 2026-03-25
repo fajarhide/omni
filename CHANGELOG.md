@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4-rc1] - 2026-03-25
+
+### Added
+- **Filter Priority System**: Introduced alphabetical sorting for built-in filters (e.g., `00_vitest.toml` vs `npm.toml`) to ensure specialized matches take precedence.
+- **Enhanced `omni exec`**:
+    - Intelligent Shell Detection: Automatically detects and runs commands with pipes, redirects, or semicolons via `sh -c`.
+    - Real-time Distillation: Native command output is now seamlessly piped through OMNI's semantic engine.
+    - Exit Code Passthrough: Native exit codes are now correctly preserved and returned to the caller.
+- **Deep Terraform Support**: Expanded Terraform filters with over 40+ new specialized rules for cleaner infrastructure distillation.
+
+### Improved
+- **Filter Precision**: Refactored Vitest and Kubectl filters for higher signal-to-noise ratios.
+- **Session Tracking**: Enhanced stability in session state persistence and rule application.
+
+### Fixed
+- **Hook Reliability**: Resolved edge cases in `PreToolUse` hook handling for more consistent distillation.
+
 ## [0.5.3] - 2026-03-25
 
 ### Added
