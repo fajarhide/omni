@@ -211,15 +211,15 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     }
 
     // 4.5 Transcript: mark completed + snapshot session state
-    if let Some(ref sid) = transcript_session_id {
-        if let Some(mut transcript) = Transcript::load(sid) {
-            let _ = transcript.mark_last_completed(&final_output);
-            // Snapshot session state for crash recovery context
-            if let Some(ref session_arc) = session {
-                if let Ok(guard) = session_arc.lock() {
-                    let _ = transcript.snapshot_state(&guard);
-                }
-            }
+    if let Some(ref sid) = transcript_session_id
+        && let Some(mut transcript) = Transcript::load(sid)
+    {
+        let _ = transcript.mark_last_completed(&final_output);
+        // Snapshot session state for crash recovery context
+        if let Some(ref session_arc) = session
+            && let Ok(guard) = session_arc.lock()
+        {
+            let _ = transcript.snapshot_state(&guard);
         }
     }
 

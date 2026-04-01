@@ -65,15 +65,8 @@ impl OmniServer {
             let filter_name = format!("learned_{}", chrono::Utc::now().timestamp());
             let _toml_content = generate_toml(&candidates, &filter_name);
 
-            let config_path = dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".omni")
-                .join("filters")
-                .join("learned.toml");
-
-            if let Some(parent) = config_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+            let config_path = crate::paths::learned_filters_path();
+            let _ = crate::paths::ensure_omni_home();
 
             match apply_to_config(&candidates, &filter_name, &config_path) {
                 Ok(added) => {

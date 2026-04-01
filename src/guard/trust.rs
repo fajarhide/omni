@@ -1,3 +1,4 @@
+use crate::paths;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -6,10 +7,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(not(test))]
 fn get_trusted_file_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".omni")
-        .join("trusted.json")
+    paths::trusted_projects_path()
 }
 
 #[cfg(test)]
@@ -17,7 +15,7 @@ thread_local! {
     pub static TEST_TRUST_FILE: std::cell::RefCell<PathBuf> = std::cell::RefCell::new({
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("must succeed").as_nanos();
         let tid = std::thread::current().id();
-        std::env::temp_dir().join(format!("omni_test_trusted_{:?}_{}.json", tid, nanos))
+        crate::paths::temp_dir().join(format!("omni_test_trusted_{:?}_{}.json", tid, nanos))
     });
 }
 

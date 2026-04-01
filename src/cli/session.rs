@@ -356,14 +356,14 @@ fn run_resume() -> anyhow::Result<()> {
                 );
             }
 
-            if let Some(ref state) = t.session_state {
-                if let Some(ref task) = state.inferred_task {
-                    println!(
-                        "\n  {:<15} {}",
-                        "Last task:".bright_black(),
-                        task.bright_white()
-                    );
-                }
+            if let Some(ref state) = t.session_state
+                && let Some(ref task) = state.inferred_task
+            {
+                println!(
+                    "\n  {:<15} {}",
+                    "Last task:".bright_black(),
+                    task.bright_white()
+                );
             }
 
             println!(

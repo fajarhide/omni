@@ -125,22 +125,21 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     transcript::cleanup_old(7);
 
     // Only check for interrupted sessions when not forcing fresh
-    if !cfg.force_fresh {
-        if let Some(pending) = transcript::find_pending() {
-            if pending.session_id != new_state.session_id {
-                let summary = format!(
-                    "OMNI: Interrupted session detected. {}",
-                    pending.interrupted_summary()
-                );
-                let out = HookOutput {
-                    hook_specific_output: HookSpecificOutput {
-                        hook_event_name: "SessionStart".to_string(),
-                        system_prompt_addition: summary,
-                    },
-                };
-                return serde_json::to_string(&out).ok();
-            }
-        }
+    if !cfg.force_fresh
+        && let Some(pending) = transcript::find_pending()
+        && pending.session_id != new_state.session_id
+    {
+        let summary = format!(
+            "OMNI: Interrupted session detected. {}",
+            pending.interrupted_summary()
+        );
+        let out = HookOutput {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "SessionStart".to_string(),
+                system_prompt_addition: summary,
+            },
+        };
+        return serde_json::to_string(&out).ok();
     }
 
     None

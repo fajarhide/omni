@@ -245,12 +245,11 @@ pub fn find_pending() -> Option<Transcript> {
     candidates.sort_by(|a, b| b.0.cmp(&a.0));
 
     for (_, path) in candidates {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(transcript) = serde_json::from_str::<Transcript>(&content) {
-                if transcript.pending_count() > 0 {
-                    return Some(transcript);
-                }
-            }
+        if let Ok(content) = fs::read_to_string(&path)
+            && let Ok(transcript) = serde_json::from_str::<Transcript>(&content)
+            && transcript.pending_count() > 0
+        {
+            return Some(transcript);
         }
     }
 
@@ -289,10 +288,10 @@ pub fn list_recent(limit: usize) -> Vec<Transcript> {
 
     let mut out = Vec::new();
     for (_, path) in candidates.into_iter().take(limit) {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(transcript) = serde_json::from_str::<Transcript>(&content) {
-                out.push(transcript);
-            }
+        if let Ok(content) = fs::read_to_string(&path)
+            && let Ok(transcript) = serde_json::from_str::<Transcript>(&content)
+        {
+            out.push(transcript);
         }
     }
     out

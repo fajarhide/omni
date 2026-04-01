@@ -29,6 +29,9 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             binary: omni
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            binary: omni.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -59,13 +62,23 @@ jobs:
           target: ${{ matrix.target }}
           args: "--release"
 
+      - name: Build release (Windows)
+        if: runner.os == 'Windows'
+        run: cargo build --release --target ${{ matrix.target }}
+
       - name: Package binary
+        shell: bash
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
           cd dist
-          tar czf omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
-          shasum -a 256 omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            zip omni-${{ github.ref_name }}-${{ matrix.target }}.zip ${{ matrix.binary }}
+            sha256sum omni-${{ github.ref_name }}-${{ matrix.target }}.zip > omni-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
+          else
+            tar czf omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
+            sha256sum omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

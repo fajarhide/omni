@@ -40,10 +40,10 @@ pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Resu
         Ok(res) => res,
         Err(_) => {
             // Transcript: mark failed on panic so crash is recorded
-            if let Ok(guard) = session_clone.lock() {
-                if let Some(mut transcript) = Transcript::load(&guard.session_id) {
-                    let _ = transcript.mark_last_failed("process panicked during hook dispatch");
-                }
+            if let Ok(guard) = session_clone.lock()
+                && let Some(mut transcript) = Transcript::load(&guard.session_id)
+            {
+                let _ = transcript.mark_last_failed("process panicked during hook dispatch");
             }
             Ok(())
         }
@@ -82,12 +82,12 @@ pub fn process_payload(
     };
 
     // Transcript: mark completed + snapshot state after dispatch
-    if let Ok(guard) = session.lock() {
-        if let Some(mut transcript) = Transcript::load(&guard.session_id) {
-            let output_str = result.as_deref().unwrap_or("(no output)");
-            let _ = transcript.mark_last_completed(output_str);
-            let _ = transcript.snapshot_state(&guard);
-        }
+    if let Ok(guard) = session.lock()
+        && let Some(mut transcript) = Transcript::load(&guard.session_id)
+    {
+        let output_str = result.as_deref().unwrap_or("(no output)");
+        let _ = transcript.mark_last_completed(output_str);
+        let _ = transcript.snapshot_state(&guard);
     }
 
     result
