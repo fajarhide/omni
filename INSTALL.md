@@ -14,6 +14,12 @@ brew install fajarhide/tap/omni
 curl -fsSL https://omni.weekndlabs.com/install | sh
 ```
 
+### Via PowerShell (Windows Native)
+
+```powershell
+irm https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.ps1 | iex
+```
+
 ### From Source
 
 ```bash

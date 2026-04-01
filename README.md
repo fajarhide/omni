@@ -135,9 +135,14 @@ omni doctor --fix
 omni init --status
 ```
 
-On universal setup 
+On universal setup (macOS / Linux / WSL)
 ```bash 
 curl -fsSL https://omni.weekndlabs.com/install | bash
+```
+
+On Windows (Native PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.ps1 | iex
 ```
 
 ## Custom Filters (TOML)
