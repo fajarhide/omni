@@ -84,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: omni-${{ matrix.target }}
-          path: dist/omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz*
+          path: dist/omni-${{ github.ref_name }}-${{ matrix.target }}.*
 
   release:
     name: Create Release
@@ -101,7 +101,7 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name '*.tar.gz' -o -name '*.sha256' \) -exec cp {} release/ \;
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \) -exec cp {} release/ \;
 
           echo "=== Release files ==="
           ls -la release/
@@ -118,6 +118,7 @@ jobs:
           generate_release_notes: true
           files: |
             release/*.tar.gz
+            release/*.zip
             release/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
