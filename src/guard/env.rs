@@ -1,6 +1,5 @@
 use std::env;
 
-#[allow(dead_code)]
 pub const DENYLIST: &[&str] = &[
     "BASH_ENV",
     "ENV",
@@ -28,7 +27,6 @@ pub const DENYLIST: &[&str] = &[
     "PROMPT_COMMAND",
 ];
 
-#[allow(dead_code)]
 pub fn sanitize_env() -> Vec<(String, String)> {
     env::vars()
         .filter(|(k, _)| !DENYLIST.contains(&k.as_str()))

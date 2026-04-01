@@ -64,7 +64,7 @@ export OMNI_FRESH=1  # Start with a clean session
 export OMNI_CONTINUE=1  # Always continue the last session
 ```
 
-## Inspecting Sessions
+## Inspecting and Managing Sessions
 
 ```bash
 # View current high-relevance signals
@@ -75,6 +75,24 @@ omni session --history
 
 # Clear current session
 omni session --clear
+
+# View transcript of recent session
+omni session --transcript
+
+# Resume an interrupted session
+omni session --resume
+```
+
+### Transcript and Recovery
+
+OMNI tracks a persistent session transcript locally. If your Claude session crashes or gets interrupted, your work is not lost. OMNI automatically saves tool calls and outputs to disk.
+
+```bash
+# Check if there is an interrupted session that can be resumed
+omni session --status
+
+# Recover and resume the session
+omni session --resume
 ```
 
 ### Example Output

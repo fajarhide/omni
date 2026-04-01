@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 pub enum ErrorType {
     UnknownFlag,
     CommandNotFound,
-    #[allow(dead_code)]
     WrongSyntax,
     WrongPath,
     MissingArg,
@@ -56,6 +55,10 @@ lazy_static! {
         r"(?i)(command not found|not recognized as an internal|no such file or directory.*command)"
     ).unwrap();
 
+    static ref WRONG_SYNTAX_RE: Regex = Regex::new(
+        r"(?i)(unexpected syntax|invalid syntax|syntax error|parse error|expected.*but found)"
+    ).unwrap();
+
     static ref WRONG_PATH_RE: Regex = Regex::new(
         r"(?i)(no such file or directory|cannot find the path|file not found)"
     ).unwrap();
@@ -101,6 +104,8 @@ pub fn classify_error(output: &str) -> ErrorType {
         ErrorType::MissingArg
     } else if PERMISSION_DENIED_RE.is_match(output) {
         ErrorType::PermissionDenied
+    } else if WRONG_SYNTAX_RE.is_match(output) {
+        ErrorType::WrongSyntax
     } else if WRONG_PATH_RE.is_match(output) {
         ErrorType::WrongPath
     } else {

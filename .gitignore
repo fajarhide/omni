@@ -22,3 +22,4 @@ target/
 # --- OMNI specific ---
 /.omni/
 /filters_compiled/
+*.html

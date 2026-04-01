@@ -4,7 +4,7 @@ pub mod scorer;
 pub mod toml_filter;
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
 // 1. Content type — hasil Stage 1 classifier
@@ -142,6 +142,22 @@ pub struct SessionState {
     // Command history
     pub command_count: u32,
     pub last_commands: Vec<String>, // last 20 commands
+
+    // Distillation Telemetry
+    pub last_significant_distillations: VecDeque<DistillSummary>, // max 5 entries
+    pub cumulative_input_bytes: u64,
+    pub cumulative_output_bytes: u64,
+    pub top_command_info: Option<(String, f32)>, // (command, savings_pct)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DistillSummary {
+    pub command: String,
+    pub content_type: ContentType,
+    pub route: Route,
+    pub input_bytes: usize,
+    pub output_bytes: usize,
+    pub timestamp: i64,
 }
 
 impl SessionState {
@@ -152,8 +168,21 @@ impl SessionState {
             session_id: id,
             started_at: now,
             last_active: now,
+            last_significant_distillations: VecDeque::with_capacity(5),
             ..Default::default()
         }
+    }
+
+    pub fn estimated_tokens_saved(&self) -> u64 {
+        if self.cumulative_input_bytes > self.cumulative_output_bytes {
+            (self.cumulative_input_bytes - self.cumulative_output_bytes) / 4
+        } else {
+            0
+        }
+    }
+
+    pub fn top_command(&self) -> Option<(String, f32)> {
+        self.top_command_info.clone()
     }
 
     // Score boost from session context for a text

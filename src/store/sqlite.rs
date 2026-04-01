@@ -3,6 +3,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
+use crate::paths;
 use crate::pipeline::{DistillResult, SessionState};
 
 pub struct FilterStats {
@@ -37,10 +38,7 @@ impl Store {
         let db_path = if let Ok(custom_path) = std::env::var("OMNI_DB_PATH") {
             std::path::PathBuf::from(custom_path)
         } else {
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".omni")
-                .join("omni.db")
+            paths::database_path()
         };
 
         Self::open_path(&db_path)

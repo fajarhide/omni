@@ -94,10 +94,12 @@ omni stats --session    # Session-level breakdown
 Inspect and manage session state.
 
 ```bash
-omni session --status   # Show current session details (Hot files, etc.)
-omni session --history  # List recent sessions
-omni session --clear    # Clear current session
-omni session --continue # Resume a stale session
+omni session --status     # Show current session details (Hot files, etc.)
+omni session --history    # List recent sessions
+omni session --clear      # Clear current session
+omni session --continue   # Continue a stale session
+omni session --resume     # Resume an interrupted session
+omni session --transcript # View transcript of recent session
 ```
 
 ---

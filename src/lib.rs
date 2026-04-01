@@ -5,6 +5,7 @@ pub mod distillers;
 pub mod guard;
 pub mod hooks;
 pub mod mcp;
+pub mod paths;
 pub mod pipeline;
 pub mod session;
 pub mod store;

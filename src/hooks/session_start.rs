@@ -1,5 +1,6 @@
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
+use crate::store::transcript;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -8,10 +9,8 @@ use std::sync::Arc;
 struct HookInput {
     #[serde(rename = "hookEventName")]
     hook_event_name: String,
-    #[allow(dead_code)]
     #[serde(rename = "sessionId")]
     session_id: String,
-    #[allow(dead_code)]
     #[serde(rename = "workingDirectory")]
     working_directory: String,
 }
@@ -105,14 +104,42 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     }
 
     // Fresh session logic
-    // Create new store mapping bounds natively generating randomized timestamps SessionState ids.
     let new_state = SessionState::new();
     store.upsert_session(&new_state);
-    store.index_event(
-        &new_state.session_id,
-        "SessionStart",
-        "Fresh session started",
-    );
+    let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
+    store.index_event(&new_state.session_id, "SessionStart", &start_msg);
+
+    // Initialize transcript for new session
+    let cwd = if parsed.working_directory.is_empty() {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    } else {
+        parsed.working_directory.clone()
+    };
+    let t = transcript::Transcript::new(&new_state.session_id, &cwd);
+    let _ = t.save();
+
+    // Cleanup old transcripts (7 days)
+    transcript::cleanup_old(7);
+
+    // Only check for interrupted sessions when not forcing fresh
+    if !cfg.force_fresh
+        && let Some(pending) = transcript::find_pending()
+        && pending.session_id != new_state.session_id
+    {
+        let summary = format!(
+            "OMNI: Interrupted session detected. {}",
+            pending.interrupted_summary()
+        );
+        let out = HookOutput {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "SessionStart".to_string(),
+                system_prompt_addition: summary,
+            },
+        };
+        return serde_json::to_string(&out).ok();
+    }
 
     None
 }
@@ -163,6 +190,11 @@ mod tests {
     fn get_store() -> (Arc<Store>, tempfile::TempDir) {
         let dir = tempdir().expect("must succeed");
         let db_path = dir.path().join("omni.db");
+        // Set transcript dir to clean temp dir so find_pending() doesn't interfere
+        let transcript_dir = dir.path().join("transcripts");
+        unsafe {
+            std::env::set_var("OMNI_TRANSCRIPT_DIR", transcript_dir.to_str().unwrap());
+        }
         (
             Arc::new(Store::open_path(&db_path).expect("must succeed")),
             dir,

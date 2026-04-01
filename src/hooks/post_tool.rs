@@ -128,8 +128,9 @@ pub fn process_payload(
         };
 
         let distiller = distillers::get_distiller(&ctype);
+        let active_ctype = distiller.content_type();
         let output = distiller.distill(&scored_segments, &content);
-        (output, format!("{:?}", ctype), Some(ctype))
+        (output, format!("{:?}", active_ctype), Some(active_ctype))
     };
 
     // Check for rewind decision (only for Rust pipeline)
@@ -226,6 +227,11 @@ pub fn process_payload(
             .map(|s| s.session_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
         s.record_distillation(&session_id, &result, &command);
+
+        if let Some(ref sess) = session {
+            let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
+            tracker.track_command(&command, &content, &result);
+        }
     }
 
     serde_json::to_string(&HookOutput {

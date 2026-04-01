@@ -3,6 +3,7 @@ mod distillers;
 mod guard;
 mod hooks;
 mod mcp;
+mod paths;
 pub mod pipeline;
 mod session;
 mod store;

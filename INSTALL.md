@@ -34,7 +34,7 @@ omni doctor         # Verify everything is working
 
 ## System Requirements
 
-- **macOS** (arm64, x86_64) or **Linux** (arm64, x86_64)
+- **macOS** (arm64, x86_64), **Linux** (arm64, x86_64), or **Windows** (x86_64)
 - No runtime dependencies — OMNI is a single static binary
 - ~4MB disk space
 

@@ -12,7 +12,6 @@ struct Asset;
 
 #[derive(Debug, Deserialize)]
 struct TomlDocument {
-    #[allow(dead_code)]
     schema_version: u32,
     filters: Option<HashMap<String, FilterConfig>>,
     tests: Option<HashMap<String, Vec<TestConfig>>>,
@@ -183,6 +182,14 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
 
     let doc: TomlDocument = toml::from_str(&content)
         .with_context(|| format!("Failed to parse TOML in {}", path.display()))?;
+
+    if doc.schema_version > 1 {
+        eprintln!(
+            "[omni] Warning: parsing newer TOML schema version {} in {}",
+            doc.schema_version,
+            path.display()
+        );
+    }
 
     let mut results = Vec::new();
 

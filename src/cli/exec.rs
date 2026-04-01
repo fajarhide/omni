@@ -40,6 +40,8 @@ pub fn run_exec(
 
     let (child, cmd_name) = if needs_shell {
         let c = Command::new("sh")
+            .env_clear()
+            .envs(crate::guard::env::sanitize_env())
             .arg("-c")
             .arg(&full_cmd)
             .stdout(Stdio::piped())
@@ -55,6 +57,8 @@ pub fn run_exec(
         (c, full_cmd)
     } else {
         let c = Command::new(cmd)
+            .env_clear()
+            .envs(crate::guard::env::sanitize_env())
             .args(cmd_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -73,12 +77,16 @@ pub fn run_exec(
         &output.stdout[..],
         stdout,
         stderr,
-        store,
-        session,
+        store.clone(),
+        session.clone(),
         Some(&cmd_name),
     )?;
 
     if !output.status.success() {
+        if let (Some(sess), Some(st)) = (&session, &store) {
+            let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), st.clone());
+            tracker.track_error(&String::from_utf8_lossy(&output.stderr));
+        }
         std::process::exit(output.status.code().unwrap_or(1));
     }
 

@@ -5,7 +5,6 @@ use chrono::Utc;
 use colored::*;
 use std::fs;
 use std::io::{self, IsTerminal, Read};
-use std::path::PathBuf;
 
 fn print_help() {
     println!(
@@ -126,9 +125,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
     let mut executions = Vec::new();
 
     if use_queue {
-        let dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".omni");
+        let dir = crate::paths::omni_home();
         let path = dir.join("learn_queue.jsonl");
         if path.exists() {
             let content = fs::read_to_string(&path)?;
@@ -265,11 +262,8 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bold()
         );
     } else if apply {
-        let path = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".omni")
-            .join("filters")
-            .join("learned.toml");
+        let path = crate::paths::learned_filters_path();
+        let _ = crate::paths::ensure_omni_home();
         let added = apply_to_config(&candidates, &filter_name, &path)?;
         if added > 0 {
             println!(

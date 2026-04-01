@@ -12,21 +12,20 @@ lazy_static! {
     ).unwrap();
 }
 
-#[allow(dead_code)]
 pub struct SessionTracker {
     session: Arc<Mutex<SessionState>>,
     store: Arc<Store>,
 }
 
-#[allow(dead_code)]
 impl SessionTracker {
     pub fn new(session: Arc<Mutex<SessionState>>, store: Arc<Store>) -> Self {
         Self { session, store }
     }
 
-    pub fn track_command(&self, command: &str, output: &str, _result: &DistillResult) {
+    pub fn track_command(&self, command: &str, output: &str, result: &DistillResult) {
         let cmd = command.to_string();
         let out = output.to_string();
+        let result_clone = result.clone();
         let session = self.session.clone();
         let store = self.store.clone();
 
@@ -41,6 +40,42 @@ impl SessionTracker {
             };
 
             session_locked.add_command(&cmd);
+
+            // Update Distillation Telemetry
+            session_locked.cumulative_input_bytes += result_clone.input_bytes as u64;
+            session_locked.cumulative_output_bytes += result_clone.output_bytes as u64;
+
+            let savings_pct = result_clone.savings_pct() as f32;
+            let current_top = session_locked
+                .top_command_info
+                .as_ref()
+                .map(|(_, p)| *p)
+                .unwrap_or(-1.0);
+            if savings_pct > current_top {
+                // Ignore commands that are too trivial
+                if result_clone.input_bytes > 500 {
+                    session_locked.top_command_info = Some((cmd.clone(), savings_pct));
+                }
+            }
+
+            if result_clone.is_meaningful()
+                || result_clone.route != crate::pipeline::Route::Passthrough
+            {
+                let summary = crate::pipeline::DistillSummary {
+                    command: cmd.clone(),
+                    content_type: result_clone.content_type,
+                    route: result_clone.route,
+                    input_bytes: result_clone.input_bytes,
+                    output_bytes: result_clone.output_bytes,
+                    timestamp: chrono::Utc::now().timestamp(),
+                };
+                session_locked
+                    .last_significant_distillations
+                    .push_front(summary);
+                if session_locked.last_significant_distillations.len() > 5 {
+                    session_locked.last_significant_distillations.pop_back();
+                }
+            }
 
             for p in paths.iter().chain(cmd_paths.iter()) {
                 session_locked.add_hot_file(p);
@@ -64,7 +99,6 @@ impl SessionTracker {
         });
     }
 
-    #[allow(dead_code)]
     pub fn track_error(&self, error_msg: &str) {
         let err = error_msg.to_string();
         let session = self.session.clone();
@@ -80,7 +114,6 @@ impl SessionTracker {
     }
 }
 
-#[allow(dead_code)]
 fn extract_file_paths(text: &str) -> Vec<String> {
     let mut paths = HashSet::new();
     for cap in FILE_PATH_RE.captures_iter(text) {
@@ -117,7 +150,6 @@ fn extract_file_paths(text: &str) -> Vec<String> {
     paths.into_iter().collect()
 }
 
-#[allow(dead_code)]
 fn extract_errors(text: &str) -> Vec<String> {
     let mut errors = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
@@ -172,7 +204,6 @@ fn extract_errors(text: &str) -> Vec<String> {
     unique
 }
 
-#[allow(dead_code)]
 fn truncate_error(err: &str) -> String {
     let mut clean = err.replace('\n', " ");
     if clean.len() > 200 {
@@ -182,7 +213,6 @@ fn truncate_error(err: &str) -> String {
     clean
 }
 
-#[allow(dead_code)]
 pub fn infer_task(session: &SessionState) -> Option<String> {
     let cmds = &session.last_commands;
     let mut task = None;
@@ -223,7 +253,6 @@ pub fn infer_task(session: &SessionState) -> Option<String> {
     })
 }
 
-#[allow(dead_code)]
 pub fn infer_domain(session: &SessionState) -> Option<String> {
     let paths: Vec<String> = session.hot_files.keys().cloned().collect();
     if paths.is_empty() || paths.len() < 2 {
