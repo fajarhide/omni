@@ -89,6 +89,9 @@ OMNI doesn't just compress; it **understands context**. It tracks which files yo
   <img src="media/omni-session-status.png" alt="OMNI Session" width="700" />
 </div>
 
+### Transcript & Recovery
+OMNI safely persists session transcripts as you work. If your AI agent crashes or gets interrupted, you can seamlessly **resume your session** and pick up right where you left off. OMNI ensures you never lose critical tool calls or outputs. Use `omni session --resume` to recover an interrupted session.
+
 ### Pattern Discovery (Learning)
 OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters.
 

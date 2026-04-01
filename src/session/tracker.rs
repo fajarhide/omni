@@ -22,9 +22,10 @@ impl SessionTracker {
         Self { session, store }
     }
 
-    pub fn track_command(&self, command: &str, output: &str, _result: &DistillResult) {
+    pub fn track_command(&self, command: &str, output: &str, result: &DistillResult) {
         let cmd = command.to_string();
         let out = output.to_string();
+        let result_clone = result.clone();
         let session = self.session.clone();
         let store = self.store.clone();
 
@@ -39,6 +40,42 @@ impl SessionTracker {
             };
 
             session_locked.add_command(&cmd);
+
+            // Update Distillation Telemetry
+            session_locked.cumulative_input_bytes += result_clone.input_bytes as u64;
+            session_locked.cumulative_output_bytes += result_clone.output_bytes as u64;
+
+            let savings_pct = result_clone.savings_pct() as f32;
+            let current_top = session_locked
+                .top_command_info
+                .as_ref()
+                .map(|(_, p)| *p)
+                .unwrap_or(-1.0);
+            if savings_pct > current_top {
+                // Ignore commands that are too trivial
+                if result_clone.input_bytes > 500 {
+                    session_locked.top_command_info = Some((cmd.clone(), savings_pct));
+                }
+            }
+
+            if result_clone.is_meaningful()
+                || result_clone.route != crate::pipeline::Route::Passthrough
+            {
+                let summary = crate::pipeline::DistillSummary {
+                    command: cmd.clone(),
+                    content_type: result_clone.content_type,
+                    route: result_clone.route,
+                    input_bytes: result_clone.input_bytes,
+                    output_bytes: result_clone.output_bytes,
+                    timestamp: chrono::Utc::now().timestamp(),
+                };
+                session_locked
+                    .last_significant_distillations
+                    .push_front(summary);
+                if session_locked.last_significant_distillations.len() > 5 {
+                    session_locked.last_significant_distillations.pop_back();
+                }
+            }
 
             for p in paths.iter().chain(cmd_paths.iter()) {
                 session_locked.add_hot_file(p);
