@@ -1,6 +1,7 @@
 use crate::hooks::{post_tool, pre_compact, session_start};
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
+use crate::store::transcript::{Transcript, TranscriptEntry};
 use serde::Deserialize;
 use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
@@ -12,6 +13,7 @@ struct HookPeeker {
 }
 
 pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Result<()> {
+    let session_clone = session.clone();
     match std::panic::catch_unwind(|| {
         let stdin = io::stdin();
         let mut input_str = String::new();
@@ -36,7 +38,15 @@ pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Resu
         Ok(())
     }) {
         Ok(res) => res,
-        Err(_) => Ok(()), // fail silently if panic
+        Err(_) => {
+            // Transcript: mark failed on panic so crash is recorded
+            if let Ok(guard) = session_clone.lock() {
+                if let Some(mut transcript) = Transcript::load(&guard.session_id) {
+                    let _ = transcript.mark_last_failed("process panicked during hook dispatch");
+                }
+            }
+            Ok(())
+        }
     }
 }
 
@@ -52,14 +62,35 @@ pub fn process_payload(
 
     let event_name = peeker.hook_event_name.as_deref().unwrap_or("PostToolUse");
 
-    match event_name {
+    // Transcript: persist hook payload BEFORE dispatching
+    if let Ok(guard) = session.lock() {
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        let mut transcript = Transcript::load_or_new(&guard.session_id, &cwd);
+        let entry = TranscriptEntry::new_hook(event_name, input_str);
+        let _ = transcript.append_entry(entry);
+    }
+
+    let result = match event_name {
         "SessionStart" => {
             let cfg = session_start::SessionConfig::from_env();
             session_start::process_payload(input_str, store, cfg)
         }
-        "PreCompact" => pre_compact::process_payload(input_str, store, session),
-        _ => post_tool::process_payload(input_str, Some(store), Some(session)),
+        "PreCompact" => pre_compact::process_payload(input_str, store, session.clone()),
+        _ => post_tool::process_payload(input_str, Some(store), Some(session.clone())),
+    };
+
+    // Transcript: mark completed + snapshot state after dispatch
+    if let Ok(guard) = session.lock() {
+        if let Some(mut transcript) = Transcript::load(&guard.session_id) {
+            let output_str = result.as_deref().unwrap_or("(no output)");
+            let _ = transcript.mark_last_completed(output_str);
+            let _ = transcript.snapshot_state(&guard);
+        }
     }
+
+    result
 }
 
 #[cfg(test)]

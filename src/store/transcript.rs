@@ -1,0 +1,634 @@
+use anyhow::{Context, Result};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+use crate::pipeline::SessionState;
+
+// ─── Entry Types ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum EntryKind {
+    UserInput,     // Direct user input (pipe mode)
+    HookInput,     // Hook payload (post-hook, session-start, etc.)
+    PipeInput,     // Pipe stdin input
+    DistillResult, // Output after pipeline processing
+    Error,         // An error occurred during processing
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum EntryStatus {
+    Pending,    // Written to disk, not yet processed
+    InProgress, // Processing started
+    Completed,  // Processing finished successfully
+    Failed,     // Processing failed
+}
+
+// ─── TranscriptEntry ────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptEntry {
+    pub id: String,
+    pub ts: i64,
+    pub kind: EntryKind,
+    pub payload: String,
+    pub status: EntryStatus,
+    pub result: Option<String>, // Filled when completed
+    pub command: Option<String>,
+}
+
+impl TranscriptEntry {
+    pub fn new(kind: EntryKind, payload: &str, command: Option<&str>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: format!("{}", now.timestamp_millis()),
+            ts: now.timestamp(),
+            kind,
+            payload: truncate_payload(payload, 64 * 1024), // max 64KB per entry
+            status: EntryStatus::Pending,
+            result: None,
+            command: command.map(|c| c.to_string()),
+        }
+    }
+
+    pub fn new_input(input: &str, command: Option<&str>) -> Self {
+        Self::new(EntryKind::PipeInput, input, command)
+    }
+
+    pub fn new_hook(event_name: &str, payload: &str) -> Self {
+        let summary = if payload.len() > 2048 {
+            format!(
+                "{}... [truncated {} bytes]",
+                &payload[..2048],
+                payload.len()
+            )
+        } else {
+            payload.to_string()
+        };
+        Self::new(
+            EntryKind::HookInput,
+            &format!("[{}] {}", event_name, summary),
+            None,
+        )
+    }
+
+    pub fn is_pending(&self) -> bool {
+        matches!(self.status, EntryStatus::Pending | EntryStatus::InProgress)
+    }
+}
+
+// ─── Transcript ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transcript {
+    pub session_id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub working_directory: String,
+    pub entries: Vec<TranscriptEntry>,
+    pub session_state: Option<SessionState>,
+}
+
+impl Transcript {
+    /// Create a new empty transcript
+    pub fn new(session_id: &str, working_dir: &str) -> Self {
+        let now = Utc::now().timestamp();
+        Self {
+            session_id: session_id.to_string(),
+            created_at: now,
+            updated_at: now,
+            working_directory: working_dir.to_string(),
+            entries: Vec::new(),
+            session_state: None,
+        }
+    }
+
+    /// Load transcript from disk, returns None if not found or corrupt
+    pub fn load(session_id: &str) -> Option<Self> {
+        let path = transcript_path(session_id);
+        if !path.exists() {
+            return None;
+        }
+
+        let content = fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    /// Load existing transcript or create a new one
+    pub fn load_or_new(session_id: &str, working_dir: &str) -> Self {
+        Self::load(session_id).unwrap_or_else(|| Self::new(session_id, working_dir))
+    }
+
+    /// Save transcript to disk using atomic write (tmp + rename)
+    pub fn save(&self) -> Result<()> {
+        let dir = transcripts_dir();
+        fs::create_dir_all(&dir).context("Failed to create transcripts directory")?;
+
+        let path = dir.join(format!("{}.json", self.session_id));
+        let tmp_path = dir.join(format!("{}.json.tmp", self.session_id));
+
+        let json = serde_json::to_string_pretty(self).context("Failed to serialize transcript")?;
+
+        // Atomic write: write to tmp file first, then rename
+        fs::write(&tmp_path, &json).context("Failed to write transcript tmp file")?;
+        fs::rename(&tmp_path, &path).context("Failed to rename transcript file")?;
+
+        Ok(())
+    }
+
+    /// Append a new entry and auto-save
+    pub fn append_entry(&mut self, entry: TranscriptEntry) -> Result<()> {
+        self.updated_at = Utc::now().timestamp();
+        self.entries.push(entry);
+        self.save()
+    }
+
+    /// Mark the last pending entry as completed with result
+    pub fn mark_last_completed(&mut self, result: &str) -> Result<()> {
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.is_pending()) {
+            entry.status = EntryStatus::Completed;
+            entry.result = Some(truncate_payload(result, 32 * 1024));
+        }
+        self.updated_at = Utc::now().timestamp();
+        self.save()
+    }
+
+    /// Mark the last pending entry as failed with error
+    pub fn mark_last_failed(&mut self, error: &str) -> Result<()> {
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.is_pending()) {
+            entry.status = EntryStatus::Failed;
+            entry.result = Some(error.to_string());
+        }
+        self.updated_at = Utc::now().timestamp();
+        self.save()
+    }
+
+    /// Count of entries that are still pending
+    pub fn pending_count(&self) -> usize {
+        self.entries.iter().filter(|e| e.is_pending()).count()
+    }
+
+    /// Update session state snapshot and save
+    pub fn snapshot_state(&mut self, state: &SessionState) -> Result<()> {
+        self.session_state = Some(state.clone());
+        self.updated_at = Utc::now().timestamp();
+        self.save()
+    }
+
+    /// Human-readable summary for interrupted session
+    pub fn interrupted_summary(&self) -> String {
+        let pending = self.pending_count();
+        let last_input = self
+            .entries
+            .iter()
+            .rev()
+            .find(|e| matches!(e.kind, EntryKind::PipeInput | EntryKind::UserInput))
+            .map(|e| {
+                if e.payload.len() > 60 {
+                    format!("{}...", &e.payload[..57])
+                } else {
+                    e.payload.clone()
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let age_mins = (Utc::now().timestamp() - self.updated_at) / 60;
+        let age_str = if age_mins < 60 {
+            format!("{}m ago", age_mins)
+        } else {
+            format!("{}h ago", age_mins / 60)
+        };
+
+        format!(
+            "Session {} ({}, {} pending): last input: {}",
+            &self.session_id[..self.session_id.len().min(12)],
+            age_str,
+            pending,
+            last_input,
+        )
+    }
+}
+
+// ─── Global Operations ──────────────────────────────────
+
+/// Find any transcript that has pending/in-progress entries (most recent first)
+pub fn find_pending() -> Option<Transcript> {
+    let dir = transcripts_dir();
+    if !dir.exists() {
+        return None;
+    }
+
+    let mut candidates: Vec<(i64, PathBuf)> = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json")
+                && !path.to_string_lossy().ends_with(".tmp")
+            {
+                // Quick check: read modified time for sorting
+                let modified = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .map(|t| {
+                        t.duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+                candidates.push((modified, path));
+            }
+        }
+    }
+
+    // Sort: most recent first
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    for (_, path) in candidates {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(transcript) = serde_json::from_str::<Transcript>(&content) {
+                if transcript.pending_count() > 0 {
+                    return Some(transcript);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// List recent transcripts (most recent first)
+pub fn list_recent(limit: usize) -> Vec<Transcript> {
+    let dir = transcripts_dir();
+    if !dir.exists() {
+        return Vec::new();
+    }
+
+    let mut candidates: Vec<(i64, PathBuf)> = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json")
+                && !path.to_string_lossy().ends_with(".tmp")
+            {
+                let modified = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .map(|t| {
+                        t.duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+                candidates.push((modified, path));
+            }
+        }
+    }
+
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut out = Vec::new();
+    for (_, path) in candidates.into_iter().take(limit) {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(transcript) = serde_json::from_str::<Transcript>(&content) {
+                out.push(transcript);
+            }
+        }
+    }
+    out
+}
+
+/// Cleanup transcript files older than N days
+pub fn cleanup_old(days: u32) {
+    let dir = transcripts_dir();
+    if !dir.exists() {
+        return;
+    }
+
+    let threshold = Utc::now().timestamp() - (days as i64 * 86400);
+
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json" || e == "tmp") {
+                // Try to read and check timestamp, or fall back to file mtime
+                let should_delete = if let Ok(content) = fs::read_to_string(&path) {
+                    serde_json::from_str::<Transcript>(&content)
+                        .map(|t| t.updated_at < threshold)
+                        .unwrap_or(true) // corrupt file, delete
+                } else {
+                    // Can't read file, check mtime
+                    fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .map(|t| {
+                            t.duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| (d.as_secs() as i64) < threshold)
+                                .unwrap_or(true)
+                        })
+                        .unwrap_or(true)
+                };
+
+                if should_delete {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+}
+
+// ─── Helpers ────────────────────────────────────────────
+
+fn transcripts_dir() -> PathBuf {
+    if let Ok(custom) = std::env::var("OMNI_TRANSCRIPT_DIR") {
+        return PathBuf::from(custom);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".omni")
+        .join("transcripts")
+}
+
+fn transcript_path(session_id: &str) -> PathBuf {
+    transcripts_dir().join(format!("{}.json", session_id))
+}
+
+fn truncate_payload(payload: &str, max_bytes: usize) -> String {
+    if payload.len() <= max_bytes {
+        payload.to_string()
+    } else {
+        format!(
+            "{}... [truncated, {} total bytes]",
+            &payload[..max_bytes],
+            payload.len()
+        )
+    }
+}
+
+// ─── Tests ──────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    // Serialize all transcript tests — they share the OMNI_TRANSCRIPT_DIR env var
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn setup_test_dir() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
+        let guard = TEST_LOCK.lock().unwrap();
+        let dir = tempdir().unwrap();
+        unsafe {
+            std::env::set_var("OMNI_TRANSCRIPT_DIR", dir.path().to_str().unwrap());
+        }
+        (dir, guard)
+    }
+
+    #[test]
+    fn test_transcript_new_has_correct_fields() {
+        let t = Transcript::new("sess_123", "/tmp/project");
+        assert_eq!(t.session_id, "sess_123");
+        assert_eq!(t.working_directory, "/tmp/project");
+        assert!(t.entries.is_empty());
+        assert!(t.session_state.is_none());
+        assert!(t.created_at > 0);
+    }
+
+    #[test]
+    fn test_entry_new_input_creates_pending_entry() {
+        let entry = TranscriptEntry::new_input("ls -la output here", Some("ls"));
+        assert_eq!(entry.kind, EntryKind::PipeInput);
+        assert_eq!(entry.status, EntryStatus::Pending);
+        assert!(entry.is_pending());
+        assert_eq!(entry.command, Some("ls".to_string()));
+        assert_eq!(entry.payload, "ls -la output here");
+    }
+
+    #[test]
+    fn test_entry_new_hook_truncates_large_payload() {
+        let large = "x".repeat(5000);
+        let entry = TranscriptEntry::new_hook("PostToolUse", &large);
+        assert_eq!(entry.kind, EntryKind::HookInput);
+        assert!(entry.payload.contains("[PostToolUse]"));
+        assert!(entry.payload.contains("truncated"));
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut t = Transcript::new("roundtrip_1", "/project");
+        let entry = TranscriptEntry::new_input("git status", Some("git"));
+        t.append_entry(entry).unwrap();
+
+        let loaded = Transcript::load("roundtrip_1").unwrap();
+        assert_eq!(loaded.session_id, "roundtrip_1");
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].payload, "git status");
+    }
+
+    #[test]
+    fn test_atomic_write_no_corrupt_file() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let t = Transcript::new("atomic_1", "/project");
+        t.save().unwrap();
+
+        // Tmp file should not exist after successful save
+        let tmp_path = transcripts_dir().join("atomic_1.json.tmp");
+        assert!(!tmp_path.exists());
+
+        // Main file should exist
+        let main_path = transcripts_dir().join("atomic_1.json");
+        assert!(main_path.exists());
+    }
+
+    #[test]
+    fn test_mark_last_completed() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut t = Transcript::new("complete_1", "/project");
+        t.append_entry(TranscriptEntry::new_input("input1", None))
+            .unwrap();
+        t.append_entry(TranscriptEntry::new_input("input2", None))
+            .unwrap();
+
+        t.mark_last_completed("result for input2").unwrap();
+
+        assert_eq!(t.entries[0].status, EntryStatus::Pending);
+        assert_eq!(t.entries[1].status, EntryStatus::Completed);
+        assert_eq!(t.entries[1].result, Some("result for input2".to_string()));
+    }
+
+    #[test]
+    fn test_mark_last_failed() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut t = Transcript::new("fail_1", "/project");
+        t.append_entry(TranscriptEntry::new_input("bad input", None))
+            .unwrap();
+
+        t.mark_last_failed("pipeline error: out of memory").unwrap();
+
+        assert_eq!(t.entries[0].status, EntryStatus::Failed);
+        assert!(
+            t.entries[0]
+                .result
+                .as_ref()
+                .unwrap()
+                .contains("out of memory")
+        );
+    }
+
+    #[test]
+    fn test_pending_count() {
+        let mut t = Transcript::new("count_1", "/project");
+        assert_eq!(t.pending_count(), 0);
+
+        t.entries.push(TranscriptEntry::new_input("a", None));
+        t.entries.push(TranscriptEntry::new_input("b", None));
+        assert_eq!(t.pending_count(), 2);
+
+        t.entries[0].status = EntryStatus::Completed;
+        assert_eq!(t.pending_count(), 1);
+
+        t.entries[1].status = EntryStatus::Failed;
+        assert_eq!(t.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_find_pending_with_no_transcripts() {
+        let (_dir, _lock) = setup_test_dir();
+        assert!(find_pending().is_none());
+    }
+
+    #[test]
+    fn test_find_pending_finds_interrupted_session() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut t = Transcript::new("interrupted_1", "/project");
+        t.append_entry(TranscriptEntry::new_input("pending work", None))
+            .unwrap();
+
+        let found = find_pending();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().session_id, "interrupted_1");
+    }
+
+    #[test]
+    fn test_find_pending_skips_completed_sessions() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut t = Transcript::new("done_1", "/project");
+        t.append_entry(TranscriptEntry::new_input("done work", None))
+            .unwrap();
+        t.mark_last_completed("result").unwrap();
+
+        assert!(find_pending().is_none());
+    }
+
+    #[test]
+    fn test_load_or_new_creates_if_missing() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let t = Transcript::load_or_new("new_session", "/project");
+        assert_eq!(t.session_id, "new_session");
+        assert!(t.entries.is_empty());
+    }
+
+    #[test]
+    fn test_load_or_new_loads_if_exists() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut original = Transcript::new("existing_1", "/project");
+        original
+            .append_entry(TranscriptEntry::new_input("existing", None))
+            .unwrap();
+
+        let loaded = Transcript::load_or_new("existing_1", "/other");
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.working_directory, "/project"); // Original dir preserved
+    }
+
+    #[test]
+    fn test_cleanup_old_removes_stale_transcripts() {
+        let (_dir, _lock) = setup_test_dir();
+
+        // Create a transcript with very old updated_at
+        let mut t = Transcript::new("old_1", "/project");
+        t.updated_at = Utc::now().timestamp() - (10 * 86400); // 10 days ago
+        t.save().unwrap();
+
+        // Create a fresh one
+        let fresh = Transcript::new("fresh_1", "/project");
+        fresh.save().unwrap();
+
+        cleanup_old(7); // Keep last 7 days
+
+        assert!(Transcript::load("old_1").is_none());
+        assert!(Transcript::load("fresh_1").is_some());
+    }
+
+    #[test]
+    fn test_list_recent_returns_all() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let t1 = Transcript::new("list_a", "/project");
+        t1.save().unwrap();
+
+        let t2 = Transcript::new("list_b", "/project");
+        t2.save().unwrap();
+
+        let recent = list_recent(10);
+        assert_eq!(recent.len(), 2);
+        // Both transcripts should be found
+        let ids: Vec<&str> = recent.iter().map(|t| t.session_id.as_str()).collect();
+        assert!(ids.contains(&"list_a"));
+        assert!(ids.contains(&"list_b"));
+    }
+
+    #[test]
+    fn test_interrupted_summary_format() {
+        let mut t = Transcript::new("summary_1", "/project");
+        t.entries
+            .push(TranscriptEntry::new_input("cargo test --all", None));
+
+        let summary = t.interrupted_summary();
+        assert!(summary.contains("summary_1"));
+        assert!(summary.contains("1 pending"));
+        assert!(summary.contains("cargo test --all"));
+    }
+
+    #[test]
+    fn test_snapshot_state_persists() {
+        let (_dir, _lock) = setup_test_dir();
+
+        let mut t = Transcript::new("state_1", "/project");
+        let mut state = SessionState::new();
+        state.inferred_task = Some("fixing tests".to_string());
+
+        t.snapshot_state(&state).unwrap();
+
+        let loaded = Transcript::load("state_1").unwrap();
+        assert!(loaded.session_state.is_some());
+        assert_eq!(
+            loaded.session_state.unwrap().inferred_task,
+            Some("fixing tests".to_string())
+        );
+    }
+
+    #[test]
+    fn test_truncate_payload_preserves_short_strings() {
+        let short = "hello world";
+        assert_eq!(truncate_payload(short, 1024), short);
+    }
+
+    #[test]
+    fn test_truncate_payload_truncates_long_strings() {
+        let long = "x".repeat(2000);
+        let truncated = truncate_payload(&long, 100);
+        assert!(truncated.len() < 200);
+        assert!(truncated.contains("truncated"));
+        assert!(truncated.contains("2000 total bytes"));
+    }
+}

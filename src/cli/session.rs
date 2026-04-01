@@ -1,4 +1,5 @@
 use crate::store::sqlite::Store;
+use crate::store::transcript;
 use chrono::{Local, TimeZone, Utc};
 use colored::*;
 use std::sync::Arc;
@@ -13,23 +14,36 @@ fn print_help() {
     println!("  omni {} {}", "session".cyan(), "[FLAGS]".bright_black());
 
     println!("\n{}", "FLAGS:".bold().bright_white());
-    println!("  {: <12} Check current session status", "--status".cyan());
-    println!("  {: <12} View recent session history", "--history".cyan());
+    println!("  {: <16} Check current session status", "--status".cyan());
+    println!("  {: <16} View recent session history", "--history".cyan());
     println!(
-        "  {: <12} Reset/Clear the current session",
+        "  {: <16} Reset/Clear the current session",
         "--clear".cyan()
     );
-    println!("  {: <12} Continue a stale session", "--continue".cyan());
-    println!("  {: <12} Show this help message", "--help, -h".cyan());
+    println!("  {: <16} Continue a stale session", "--continue".cyan());
+    println!("  {: <16} Resume an interrupted session", "--resume".cyan());
+    println!(
+        "  {: <16} View transcript of recent session",
+        "--transcript".cyan()
+    );
+    println!("  {: <16} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni session --status  {}",
+        "  omni session --status      {}",
         "# View current session status".bright_black()
     );
     println!(
-        "  omni session --history {}",
+        "  omni session --history     {}",
         "# View past sessions".bright_black()
+    );
+    println!(
+        "  omni session --resume      {}",
+        "# Resume interrupted session".bright_black()
+    );
+    println!(
+        "  omni session --transcript  {}",
+        "# View session transcript".bright_black()
     );
     println!();
 }
@@ -48,11 +62,30 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     let is_continue = args.iter().any(|a| a == "--continue");
     let is_status = args.iter().any(|a| a == "--status");
     let is_inject = args.iter().any(|a| a == "--inject");
+    let is_resume = args.iter().any(|a| a == "--resume");
+    let is_transcript = args.iter().any(|a| a == "--transcript");
 
     // If no flags, show help
-    if !is_history && !is_clear && !is_continue && !is_status && !is_inject {
+    if !is_history
+        && !is_clear
+        && !is_continue
+        && !is_status
+        && !is_inject
+        && !is_resume
+        && !is_transcript
+    {
         print_help();
         return Ok(());
+    }
+
+    // --resume: detect and show interrupted sessions
+    if is_resume {
+        return run_resume();
+    }
+
+    // --transcript: view transcript of most recent session
+    if is_transcript {
+        return run_transcript();
     }
 
     if is_history {
@@ -255,6 +288,199 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     } else {
         Ok(())
     }
+}
+
+// ─── Resume: Detect interrupted sessions ─────────────
+
+fn run_resume() -> anyhow::Result<()> {
+    match transcript::find_pending() {
+        Some(t) => {
+            println!(
+                "\n{}",
+                "─────────────────────────────────────────"
+                    .bright_black()
+                    .bold()
+            );
+            println!(" {} — Interrupted Session Detected", "OMNI".bold().cyan());
+            println!(
+                "{}",
+                "─────────────────────────────────────────"
+                    .bright_black()
+                    .bold()
+            );
+
+            let sid = if t.session_id.len() > 8 {
+                &t.session_id[..8]
+            } else {
+                &t.session_id
+            };
+
+            let age_mins = (Utc::now().timestamp() - t.updated_at) / 60;
+            let age_str = if age_mins < 60 {
+                format!("{}m ago", age_mins)
+            } else {
+                format!("{}h ago", age_mins / 60)
+            };
+
+            println!("  {:<15} {}", "Session:".bright_black(), sid.cyan().bold());
+            println!("  {:<15} {}", "Last active:".bright_black(), age_str);
+            println!(
+                "  {:<15} {}",
+                "Directory:".bright_black(),
+                t.working_directory.bright_white()
+            );
+            println!(
+                "  {:<15} {}",
+                "Total entries:".bright_black(),
+                t.entries.len().to_string().yellow()
+            );
+            println!(
+                "  {:<15} {}\n",
+                "Pending:".bright_black(),
+                t.pending_count().to_string().red().bold()
+            );
+
+            println!(" {}", "Pending entries:".bold().bright_white());
+            for entry in t.entries.iter().filter(|e| e.is_pending()) {
+                let kind = format!("{:?}", entry.kind);
+                let payload_preview = if entry.payload.len() > 60 {
+                    format!("{}...", &entry.payload[..57])
+                } else {
+                    entry.payload.clone()
+                };
+                println!(
+                    "  {} {} {}",
+                    "•".yellow(),
+                    kind.cyan(),
+                    payload_preview.bright_black()
+                );
+            }
+
+            if let Some(ref state) = t.session_state {
+                if let Some(ref task) = state.inferred_task {
+                    println!(
+                        "\n  {:<15} {}",
+                        "Last task:".bright_black(),
+                        task.bright_white()
+                    );
+                }
+            }
+
+            println!(
+                "\n  {} Use {} to continue this session.",
+                "Tip:".bold().green(),
+                "omni session --continue".cyan()
+            );
+            println!(
+                "{}",
+                "─────────────────────────────────────────"
+                    .bright_black()
+                    .bold()
+            );
+        }
+        None => {
+            println!(
+                "\n{} No interrupted sessions found. All clean.",
+                "✓".green()
+            );
+        }
+    }
+    Ok(())
+}
+
+// ─── Transcript: View session transcript ─────────────
+
+fn run_transcript() -> anyhow::Result<()> {
+    let recent = transcript::list_recent(1);
+    if recent.is_empty() {
+        println!("\n{} No transcripts found.", "ℹ".blue());
+        return Ok(());
+    }
+
+    let t = &recent[0];
+    let sid = if t.session_id.len() > 8 {
+        &t.session_id[..8]
+    } else {
+        &t.session_id
+    };
+
+    println!(
+        "\n{}",
+        "─────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+    println!(
+        " {} — Session Transcript ({})",
+        "OMNI".bold().cyan(),
+        sid.cyan()
+    );
+    println!(
+        "{}",
+        "─────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+
+    println!(
+        "  {:<15} {}",
+        "Directory:".bright_black(),
+        t.working_directory.bright_white()
+    );
+    println!(
+        "  {:<15} {}",
+        "Entries:".bright_black(),
+        t.entries.len().to_string().yellow()
+    );
+    println!(
+        "  {:<15} {}\n",
+        "Pending:".bright_black(),
+        t.pending_count().to_string().bright_black()
+    );
+
+    for (i, entry) in t.entries.iter().enumerate() {
+        let status_icon = match entry.status {
+            transcript::EntryStatus::Pending => "⏳".to_string(),
+            transcript::EntryStatus::InProgress => "⚙".to_string(),
+            transcript::EntryStatus::Completed => "✓".green().to_string(),
+            transcript::EntryStatus::Failed => "✗".red().to_string(),
+        };
+        let kind = format!("{:?}", entry.kind);
+
+        let ts_str = Local
+            .timestamp_opt(entry.ts, 0)
+            .single()
+            .map(|dt| dt.format("%H:%M:%S").to_string())
+            .unwrap_or_else(|| "??".to_string());
+
+        let payload_preview = if entry.payload.len() > 50 {
+            format!("{}...", &entry.payload[..47])
+        } else {
+            entry.payload.clone()
+        }
+        .replace('\n', " ");
+
+        println!(
+            "  {:>3}. {} {} {} {}",
+            i + 1,
+            status_icon,
+            ts_str.bright_black(),
+            kind.cyan(),
+            payload_preview
+        );
+
+        if let Some(ref cmd) = entry.command {
+            println!("       {} {}", "cmd:".bright_black(), cmd.yellow());
+        }
+    }
+
+    println!(
+        "\n{}",
+        "─────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+    Ok(())
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use crate::pipeline::{SessionState, classifier, composer, scorer, toml_filter};
 use crate::store::sqlite::Store;
+use crate::store::transcript::{Transcript, TranscriptEntry};
 
 const MAX_PIPE_SIZE: usize = 16 * 1024 * 1024; // 16MB
 const WARN_PIPE_SIZE: usize = 1024 * 1024; // 1MB
@@ -75,6 +76,23 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             "[omni: Warning] Input size exceeds 1MB, processing may take longer..."
         )?;
     }
+
+    // 3.5 Transcript: persist input BEFORE processing
+    let transcript_session_id = if let Some(ref session_arc) = session {
+        if let Ok(guard) = session_arc.lock() {
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string());
+            let mut transcript = Transcript::load_or_new(&guard.session_id, &cwd);
+            let entry = TranscriptEntry::new_input(&input_text, command_name);
+            let _ = transcript.append_entry(entry);
+            Some(guard.session_id.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // 4. Run pipeline
     let command_name = command_name.map(|c| {
@@ -190,6 +208,19 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         let _ = std::fs::create_dir_all(&cache_dir);
         let _ = std::fs::write(cache_dir.join("last_input.txt"), &input_text);
         let _ = std::fs::write(cache_dir.join("last_output.txt"), &final_output);
+    }
+
+    // 4.5 Transcript: mark completed + snapshot session state
+    if let Some(ref sid) = transcript_session_id {
+        if let Some(mut transcript) = Transcript::load(sid) {
+            let _ = transcript.mark_last_completed(&final_output);
+            // Snapshot session state for crash recovery context
+            if let Some(ref session_arc) = session {
+                if let Ok(guard) = session_arc.lock() {
+                    let _ = transcript.snapshot_state(&guard);
+                }
+            }
+        }
     }
 
     // 5. If no significant reduction: print original

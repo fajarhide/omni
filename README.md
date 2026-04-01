@@ -214,8 +214,17 @@ See [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [Critical Gu
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/image?repos=fajarhide/omni&type=date&legend=top-left)](https://www.star-history.com/?repos=fajarhide%2Fomni&type=date&legend=top-left)
+<p align="center">
+  <a href="https://star-history.com/#fajarhide/omni&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=fajarhide/omni&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=fajarhide/omni&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=fajarhide/omni&type=Date" width="600" />
+    </picture>
+  </a>
+</p>
+
 
 ## License
 
-MIT © Fajar Hidayat
+[MIT](LICENSE) © Fajar Hidayat
