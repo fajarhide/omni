@@ -1,3 +1,4 @@
+#[cfg(not(test))]
 use crate::paths;
 use anyhow::Result;
 use sha2::{Digest, Sha256};

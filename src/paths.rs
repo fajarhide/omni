@@ -14,7 +14,7 @@ use std::path::PathBuf;
 /// Resolves automatically:
 /// - Linux/macOS: `~/.omni`
 /// - Windows: `%USERPROFILE%\.omni`
-/// Falls back to temp directory if home directory is not available
+///   Falls back to temp directory if home directory is not available
 #[inline]
 pub fn omni_home() -> PathBuf {
     home_dir().unwrap_or_else(temp_dir).join(".omni")
@@ -44,6 +44,7 @@ pub fn filters_directory() -> PathBuf {
 
 /// Get path to trusted projects signature file
 #[inline]
+#[cfg_attr(test, allow(dead_code))]
 pub fn trusted_projects_path() -> PathBuf {
     omni_home().join("trusted.json")
 }

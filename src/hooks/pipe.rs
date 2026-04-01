@@ -8,9 +8,6 @@ use crate::pipeline::{SessionState, classifier, composer, scorer, toml_filter};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
-const MAX_PIPE_SIZE: usize = 16 * 1024 * 1024; // 16MB
-const WARN_PIPE_SIZE: usize = 1024 * 1024; // 1MB
-
 pub fn run(
     store: Option<Arc<Store>>,
     session: Option<Arc<Mutex<SessionState>>>,
@@ -46,18 +43,12 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         }
 
         total_read += n;
-        if total_read > MAX_PIPE_SIZE {
+        if total_read > crate::guard::limits::MAX_INPUT {
             // Cap buffer up to 16MB for safety LLM limits
             buffer.extend_from_slice(&chunk[..n]);
             break;
         }
         buffer.extend_from_slice(&chunk[..n]);
-    }
-
-    // 2. If empty: eprintln! + exit 1
-    if buffer.is_empty() {
-        writeln!(error, "omni: Error: No input provided on stdin")?;
-        std::process::exit(1);
     }
 
     // 3. Binary input -> passthrough (output raw)
@@ -70,11 +61,18 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         }
     };
 
-    if input_text.len() > WARN_PIPE_SIZE {
-        writeln!(
-            error,
-            "[omni: Warning] Input size exceeds 1MB, processing may take longer..."
-        )?;
+    match crate::guard::limits::check_input(&input_text) {
+        crate::guard::limits::InputCheck::Empty => {
+            writeln!(error, "omni: Error: No input provided on stdin")?;
+            std::process::exit(1);
+        }
+        crate::guard::limits::InputCheck::TooLarge => {
+            writeln!(
+                error,
+                "[omni: Warning] Input size exceeds 1MB, processing may take longer..."
+            )?;
+        }
+        crate::guard::limits::InputCheck::Ok => {}
     }
 
     // 3.5 Transcript: persist input BEFORE processing
@@ -199,6 +197,11 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         };
 
         s.record_distillation(&s_id, &result, command_name.unwrap_or(""));
+
+        if let Some(ref sess) = session {
+            let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
+            tracker.track_command(command_name.unwrap_or(""), &input_text, &result);
+        }
 
         // Save for `omni diff`
         let cache_dir = dirs::home_dir()

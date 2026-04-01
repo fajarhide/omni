@@ -9,10 +9,8 @@ use std::sync::Arc;
 struct HookInput {
     #[serde(rename = "hookEventName")]
     hook_event_name: String,
-    #[allow(dead_code)]
     #[serde(rename = "sessionId")]
     session_id: String,
-    #[allow(dead_code)]
     #[serde(rename = "workingDirectory")]
     working_directory: String,
 }
@@ -108,16 +106,17 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     // Fresh session logic
     let new_state = SessionState::new();
     store.upsert_session(&new_state);
-    store.index_event(
-        &new_state.session_id,
-        "SessionStart",
-        "Fresh session started",
-    );
+    let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
+    store.index_event(&new_state.session_id, "SessionStart", &start_msg);
 
     // Initialize transcript for new session
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| ".".to_string());
+    let cwd = if parsed.working_directory.is_empty() {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    } else {
+        parsed.working_directory.clone()
+    };
     let t = transcript::Transcript::new(&new_state.session_id, &cwd);
     let _ = t.save();
 

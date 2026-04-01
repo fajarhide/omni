@@ -8,10 +8,8 @@ use std::sync::{Arc, Mutex};
 struct HookInput {
     #[serde(rename = "hookEventName")]
     hook_event_name: String,
-    #[allow(dead_code)]
     #[serde(rename = "sessionId")]
     session_id: String,
-    #[allow(dead_code)]
     #[serde(rename = "compactionReason")]
     compaction_reason: Option<String>,
 }
@@ -55,8 +53,11 @@ pub fn process_payload(
     let summary_str = build_compact_summary(&state, &store);
 
     // Index checkpoint event to FTS5
-    let index_msg = format!("PreCompact: {}", summary_str);
-    store.index_event(&state.session_id, "PreCompact", &index_msg);
+    let reason_str = parsed
+        .compaction_reason
+        .unwrap_or_else(|| "limit_reached".to_string());
+    let index_msg = format!("PreCompact ({}): {}", reason_str, summary_str);
+    store.index_event(&parsed.session_id, "PreCompact", &index_msg);
 
     // Save updated session state
     state.last_active = Utc::now().timestamp();
@@ -255,7 +256,7 @@ mod tests {
 
         let input = json!({
             "hookEventName": "PreCompact",
-            "sessionId": "123"
+            "sessionId": &session_id
         });
 
         let _ = process_payload(&input.to_string(), store.clone(), session);
