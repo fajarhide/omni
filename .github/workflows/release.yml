@@ -73,7 +73,7 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
-            zip omni-${{ github.ref_name }}-${{ matrix.target }}.zip ${{ matrix.binary }}
+            7z a omni-${{ github.ref_name }}-${{ matrix.target }}.zip ${{ matrix.binary }}
             sha256sum omni-${{ github.ref_name }}-${{ matrix.target }}.zip > omni-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
           else
             tar czf omni-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
