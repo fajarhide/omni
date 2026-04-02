@@ -29,7 +29,7 @@ pub const DENYLIST: &[&str] = &[
 
 pub fn sanitize_env() -> Vec<(String, String)> {
     env::vars()
-        .filter(|(k, _)| !DENYLIST.contains(&k.as_str()))
+        .filter(|(k, _)| !DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(k)))
         .collect()
 }
 
@@ -61,7 +61,7 @@ mod tests {
         let sanitized = sanitize_env();
 
         for (k, _) in sanitized {
-            assert!(!DENYLIST.contains(&k.as_str()));
+            assert!(!DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(&k)));
         }
 
         for key in DENYLIST {
@@ -79,7 +79,7 @@ mod tests {
         }
 
         let sanitized = sanitize_env();
-        let has_path = sanitized.iter().any(|(k, _)| k == "PATH");
+        let has_path = sanitized.iter().any(|(k, _)| k.to_uppercase() == "PATH");
         let has_normal = sanitized
             .iter()
             .any(|(k, v)| k == "NORMAL_VAR" && v == "123");

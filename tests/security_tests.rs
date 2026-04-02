@@ -25,7 +25,7 @@ fn test_env_sanitization_denylist() {
     // Verify denylist vars are NOT in sanitized output
     for var in DENYLIST {
         assert!(
-            !sanitized.iter().any(|(k, _)| k == var),
+            !sanitized.iter().any(|(k, _)| k.eq_ignore_ascii_case(var)),
             "Denylist variable {} should be removed by sanitize_env",
             var
         );
@@ -129,7 +129,7 @@ fn test_env_sanitization_removes_dangerous_vars() {
     // Verify semua DENYLIST entries hilang
     for key in DENYLIST {
         assert!(
-            !sanitized.iter().any(|(k, _)| k == key),
+            !sanitized.iter().any(|(k, _)| k.eq_ignore_ascii_case(key)),
             "DENYLIST entry '{}' should not be in sanitized env",
             key
         );
@@ -137,7 +137,7 @@ fn test_env_sanitization_removes_dangerous_vars() {
 
     // Verify normal vars masih ada
     assert!(
-        sanitized.iter().any(|(k, _)| k == "PATH"),
+        sanitized.iter().any(|(k, _)| k.to_uppercase() == "PATH"),
         "PATH should still be in sanitized env"
     );
 

@@ -1,5 +1,6 @@
 use colored::*;
 use std::io::{self, Write};
+#[cfg(not(target_family = "windows"))]
 use std::process::Command;
 
 pub fn print_help() {
@@ -54,28 +55,43 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 return Ok(());
             }
 
-            println!("{} Updating OMNI via Homebrew...", "🚀".cyan());
+            #[cfg(target_family = "windows")]
+            {
+                println!(
+                    "\n{} Due to Windows installation methods, auto-update is not supported.",
+                    "ℹ️".blue()
+                );
+                println!(
+                    "   Please download the latest release from: https://github.com/fajarhide/omni/releases"
+                );
+                return Ok(());
+            }
 
-            // Run brew upgrade
-            let status = Command::new("brew")
-                .args(["upgrade", "fajarhide/tap/omni"])
-                .status();
+            #[cfg(not(target_family = "windows"))]
+            {
+                println!("{} Updating OMNI via Homebrew...", "🚀".cyan());
 
-            match status {
-                Ok(s) if s.success() => {
-                    println!("\n{} OMNI updated successfully!", "✓".green());
-                }
-                Ok(s) => {
-                    return Err(format!(
-                        "Brew upgrade failed with exit code: {}. You may need to run 'brew update' first.",
-                        s.code().unwrap_or(1)
-                    ));
-                }
-                Err(e) => {
-                    return Err(format!(
-                        "Failed to execute 'brew': {}. Please run 'brew upgrade fajarhide/tap/omni' manually.",
-                        e
-                    ));
+                // Run brew upgrade
+                let status = Command::new("brew")
+                    .args(["upgrade", "fajarhide/tap/omni"])
+                    .status();
+
+                match status {
+                    Ok(s) if s.success() => {
+                        println!("\n{} OMNI updated successfully!", "✓".green());
+                    }
+                    Ok(s) => {
+                        return Err(format!(
+                            "Brew upgrade failed with exit code: {}. You may need to run 'brew update' first.",
+                            s.code().unwrap_or(1)
+                        ));
+                    }
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to execute 'brew': {}. Please run 'brew upgrade fajarhide/tap/omni' manually.",
+                            e
+                        ));
+                    }
                 }
             }
         }

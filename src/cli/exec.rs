@@ -39,10 +39,19 @@ pub fn run_exec(
     };
 
     let (child, cmd_name) = if needs_shell {
-        let c = Command::new("sh")
+        #[cfg(target_family = "windows")]
+        let mut c = Command::new("cmd");
+        #[cfg(target_family = "windows")]
+        c.arg("/C");
+
+        #[cfg(not(target_family = "windows"))]
+        let mut c = Command::new("sh");
+        #[cfg(not(target_family = "windows"))]
+        c.arg("-c");
+
+        let c = c
             .env_clear()
             .envs(crate::guard::env::sanitize_env())
-            .arg("-c")
             .arg(&full_cmd)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

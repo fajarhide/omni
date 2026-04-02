@@ -181,6 +181,24 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         .bright_magenta()
     );
 
+    // Collapse savings
+    let collapse_stats = store.collapse_aggregate(since);
+    if let Ok((events, total_original, total_collapsed)) = collapse_stats
+        && events > 0
+    {
+        println!(
+            "  {:<20} {}",
+            "Collapse:".bright_black(),
+            format!(
+                "{} → {} lines across {} events",
+                format_number(total_original),
+                format_number(total_collapsed),
+                events
+            )
+            .bright_green()
+        );
+    }
+
     // Filter breakdown
     let filters = store.filter_breakdown(since)?;
     if !filters.is_empty() {

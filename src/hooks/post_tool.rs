@@ -1,6 +1,6 @@
 use crate::distillers;
 use crate::pipeline::toml_filter;
-use crate::pipeline::{DistillResult, Route, SessionState, classifier, composer, scorer};
+use crate::pipeline::{DistillResult, Route, SessionState, classifier, collapse, composer, scorer};
 use crate::store::sqlite::Store;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -117,19 +117,23 @@ pub fn process_payload(
         // Fallback to Rust distiller pipeline
         let ctype = classifier::classify(&content);
 
+        // Pre-processing: collapse repetitive lines before scoring
+        let collapse_result = collapse::collapse(&content, &ctype);
+        let effective_input = collapse_result.collapsed_lines.join("\n");
+
         let scored_segments = if let Some(ref lock) = session {
             if let Ok(state) = lock.lock() {
-                scorer::score_segments(&content, &ctype, Some(&*state))
+                scorer::score_segments(&effective_input, &ctype, Some(&*state))
             } else {
-                scorer::score_segments(&content, &ctype, None)
+                scorer::score_segments(&effective_input, &ctype, None)
             }
         } else {
-            scorer::score_segments(&content, &ctype, None)
+            scorer::score_segments(&effective_input, &ctype, None)
         };
 
         let distiller = distillers::get_distiller(&ctype);
         let active_ctype = distiller.content_type();
-        let output = distiller.distill(&scored_segments, &content);
+        let output = distiller.distill(&scored_segments, &effective_input);
         (output, format!("{:?}", active_ctype), Some(active_ctype))
     };
 
@@ -220,6 +224,7 @@ pub fn process_payload(
             },
             segments_kept: 0,
             segments_dropped: 0,
+            collapse_savings: None,
         };
         let session_id = session
             .as_ref()

@@ -227,6 +227,17 @@ impl Store {
         Ok(rows)
     }
 
+    /// Collapse aggregate: (event_count, total_original_lines, total_collapsed_lines)
+    pub fn collapse_aggregate(&self, since: i64) -> Result<(u64, u64, u64)> {
+        let conn = self.conn.lock().unwrap();
+        let r = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(collapse_original),0), COALESCE(SUM(collapse_to),0) FROM distillations WHERE ts >= ?1 AND collapse_original > 0",
+            params![since],
+            |row| Ok((row.get::<_,u64>(0)?, row.get::<_,u64>(1)?, row.get::<_,u64>(2)?)),
+        ).unwrap_or((0, 0, 0));
+        Ok(r)
+    }
+
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(
@@ -290,6 +301,17 @@ impl Store {
             );
             "#,
         )?;
+
+        // Safe migration: add collapse columns if not present
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN collapse_original INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN collapse_to INTEGER DEFAULT 0",
+            [],
+        );
+
         Ok(())
     }
 
@@ -300,10 +322,11 @@ impl Store {
         };
 
         let ts = chrono::Utc::now().timestamp();
+        let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
         let _ = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, content_type, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             (session_id, ts, filter_name, content_type, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 session_id,
                 ts,
@@ -317,6 +340,8 @@ impl Store {
                 result.latency_ms,
                 result.rewind_hash.as_deref().unwrap_or(""),
                 command,
+                col_orig as i64,
+                col_to as i64,
             ],
         );
     }
@@ -657,6 +682,7 @@ mod tests {
             rewind_hash: None,
             segments_kept: 1,
             segments_dropped: 0,
+            collapse_savings: None,
         };
         // Should not panic
         store.record_distillation("sess_123", &res, "npm start");
@@ -769,6 +795,7 @@ mod tests {
             rewind_hash: None,
             segments_kept: 1,
             segments_dropped: 0,
+            collapse_savings: None,
         };
         store.record_distillation("sess_1", &res1, "cmd1");
 
@@ -785,6 +812,7 @@ mod tests {
             rewind_hash: None,
             segments_kept: 1,
             segments_dropped: 0,
+            collapse_savings: None,
         };
         store.record_distillation("sess_1", &res2, "cmd2");
 

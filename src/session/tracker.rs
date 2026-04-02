@@ -380,6 +380,7 @@ mod tests {
             rewind_hash: None,
             segments_kept: 0,
             segments_dropped: 0,
+            collapse_savings: None,
         };
 
         tracker.track_command("git status", "On branch main", &res);

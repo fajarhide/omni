@@ -1,4 +1,5 @@
 pub mod classifier;
+pub mod collapse;
 pub mod composer;
 pub mod scorer;
 pub mod toml_filter;
@@ -106,6 +107,7 @@ pub struct DistillResult {
     pub rewind_hash: Option<String>, // if content is in RewindStore
     pub segments_kept: usize,
     pub segments_dropped: usize,
+    pub collapse_savings: Option<(usize, usize)>, // (original_lines, collapsed_to)
 }
 
 impl DistillResult {
@@ -250,6 +252,7 @@ mod tests {
             rewind_hash: None,
             segments_kept: 0,
             segments_dropped: 0,
+            collapse_savings: None,
         };
         assert_eq!(res.savings_pct(), 75.0);
 
@@ -276,6 +279,7 @@ mod tests {
             rewind_hash: None,
             segments_kept: 0,
             segments_dropped: 0,
+            collapse_savings: None,
         };
         assert!(res.is_meaningful());
 

@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::pipeline::{SessionState, classifier, composer, scorer, toml_filter};
+use crate::pipeline::{SessionState, classifier, collapse, composer, scorer, toml_filter};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
@@ -131,8 +131,13 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             )
         } else {
             let c = classifier::classify(&input_text);
+
+            // Pre-processing: collapse repetitive lines before scoring
+            let collapse_result = collapse::collapse(&input_text, &c);
+            let effective_input = collapse_result.collapsed_lines.join("\n");
+
             let scored_segments =
-                scorer::score_segments(&input_text, &c, active_session_opt.as_deref());
+                scorer::score_segments(&effective_input, &c, active_session_opt.as_deref());
             drop(active_session_opt);
 
             let compose_config = composer::ComposeConfig::default();
@@ -194,6 +199,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             rewind_hash: rewind_hash_opt,
             segments_kept: kept_count,
             segments_dropped: dropped_count,
+            collapse_savings: None,
         };
 
         s.record_distillation(&s_id, &result, command_name.unwrap_or(""));
