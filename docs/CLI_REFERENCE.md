@@ -183,12 +183,13 @@ omni -h         # Same as above
 | `OMNI_FRESH` | unset | Set to `1` to force a fresh session |
 | `OMNI_CONTINUE` | unset | Set to `1` to always continue last session |
 | `OMNI_DB_PATH` | `~/.omni/omni.db` | Custom database path |
+| `OMNI_QUIET` | unset | Set to `1` to suppress stderr stats output in pipe mode |
 
 ## Exit Codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Success |
-| `1` | Error (unknown command, pipe mode empty stdin, etc.) |
+| `0` | Success (includes empty stdin in pipe mode — silent passthrough) |
+| `1` | Error (unknown command, database failure, etc.) |
 
 Hooks **always** exit 0 — they never crash the host agent.

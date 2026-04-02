@@ -4,7 +4,9 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::pipeline::{SessionState, classifier, collapse, composer, scorer, toml_filter};
+use crate::pipeline::{
+    ContentType, Route, SessionState, classifier, collapse, composer, scorer, toml_filter,
+};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
@@ -21,8 +23,30 @@ pub fn run(
     run_inner(stdin, stdout, stderr, store, session, command_name)
 }
 
+struct PipelineResult {
+    session_id: String,
+    output: String,
+    filter_name: String,
+    content_type: ContentType,
+    rewind_hash: Option<String>,
+    segments_kept: usize,
+    segments_dropped: usize,
+    input_text: String,
+    start_time: Instant,
+}
+
+impl PipelineResult {
+    fn best_output(&self) -> &str {
+        if self.output.len() >= self.input_text.len() {
+            &self.input_text // 100% Passthrough fallback maintaining limits correctly
+        } else {
+            &self.output
+        }
+    }
+}
+
 pub fn run_inner<R: Read, W: Write, E: Write>(
-    mut input: R,
+    input: R,
     mut output: W,
     mut error: E,
     store: Option<Arc<Store>>,
@@ -31,7 +55,56 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
 ) -> Result<()> {
     let start_time = Instant::now();
 
-    // 1. Baca stdin sampai EOF (max 16MB)
+    // Phase 1: Read
+    let input_text = match read_input(input, &mut output)? {
+        Some(text) => text,
+        None => return Ok(()), // Binary data was passed through directly
+    };
+
+    // Phase 2: Guard
+    if let crate::guard::limits::InputCheck::Empty = crate::guard::limits::check_input(&input_text)
+    {
+        // Silent passthrough: command produced no output (e.g. failed upstream).
+        // Don't error — just exit cleanly so we don't pollute Claude Code's stderr.
+        return Ok(());
+    } else if let crate::guard::limits::InputCheck::TooLarge =
+        crate::guard::limits::check_input(&input_text)
+    {
+        writeln!(
+            error,
+            "[omni: Warning] Input size exceeds 1MB, processing may take longer..."
+        )?;
+    }
+
+    // Phase 3: Transcript Begin
+    let command_stripped = command_name.map(|c| {
+        if let Some(stripped) = c.strip_prefix("omni exec ") {
+            stripped
+        } else {
+            c
+        }
+    });
+    transcript_begin(&session, &input_text, command_stripped, &mut error);
+
+    // Phase 4: Distill
+    let result = distill(
+        input_text,
+        &session,
+        command_stripped,
+        start_time,
+        store.as_deref(),
+    );
+
+    // Phase 5: Persist
+    persist(&result, &store, &session, command_stripped, &mut error);
+
+    // Phase 6: Output
+    emit_output(&result, &mut output, &mut error)?;
+
+    Ok(())
+}
+
+fn read_input<R: Read, W: Write>(mut input: R, mut output: W) -> Result<Option<String>> {
     let mut buffer = Vec::new();
     let mut chunk = vec![0; 8192];
     let mut total_read = 0;
@@ -51,91 +124,72 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         buffer.extend_from_slice(&chunk[..n]);
     }
 
-    // 3. Binary input -> passthrough (output raw)
-    let input_text = match std::str::from_utf8(&buffer) {
-        Ok(s) => s.to_string(),
+    match std::str::from_utf8(&buffer) {
+        Ok(s) => Ok(Some(s.to_string())),
         Err(_) => {
             // Buffer invalid UTF-8 format (binary), dump as is directly safely.
             output.write_all(&buffer)?;
-            return Ok(());
+            Ok(None)
         }
-    };
+    }
+}
 
-    match crate::guard::limits::check_input(&input_text) {
-        crate::guard::limits::InputCheck::Empty => {
-            writeln!(error, "omni: Error: No input provided on stdin")?;
-            std::process::exit(1);
+fn with_session<F, R>(session: &Option<Arc<Mutex<SessionState>>>, f: F) -> Option<R>
+where
+    F: FnOnce(&SessionState) -> R,
+{
+    session.as_ref().and_then(|m| m.lock().ok().map(|g| f(&g)))
+}
+
+fn transcript_begin<E: Write>(
+    session: &Option<Arc<Mutex<SessionState>>>,
+    input_text: &str,
+    command_name: Option<&str>,
+    error: &mut E,
+) {
+    if let Some(guard) = session.as_ref().and_then(|m| m.lock().ok()) {
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        let mut transcript = Transcript::load_or_new(&guard.session_id, &cwd);
+        let entry = TranscriptEntry::new_input(input_text, command_name);
+        if let Err(e) = transcript.append_entry(entry)
+            && cfg!(debug_assertions)
+        {
+            let _ = writeln!(error, "[omni:debug] transcript append error: {}", e);
         }
-        crate::guard::limits::InputCheck::TooLarge => {
-            writeln!(
-                error,
-                "[omni: Warning] Input size exceeds 1MB, processing may take longer..."
-            )?;
+    }
+}
+
+fn distill(
+    input_text: String,
+    session: &Option<Arc<Mutex<SessionState>>>,
+    command_name: Option<&str>,
+    start_time: Instant,
+    store: Option<&Store>,
+) -> PipelineResult {
+    let session_id = with_session(session, |g| g.session_id.clone())
+        .unwrap_or_else(|| "pipe_session".to_string());
+
+    let mut matched_toml = None;
+    if let Some(cmd) = command_name {
+        let filters = toml_filter::load_all_filters();
+        if let Some(f) = filters.iter().find(|filter| filter.matches(cmd)) {
+            matched_toml = Some(f.clone());
         }
-        crate::guard::limits::InputCheck::Ok => {}
     }
 
-    // 3.5 Transcript: persist input BEFORE processing
-    let transcript_session_id = if let Some(ref session_arc) = session {
-        if let Ok(guard) = session_arc.lock() {
-            let cwd = std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string());
-            let mut transcript = Transcript::load_or_new(&guard.session_id, &cwd);
-            let entry = TranscriptEntry::new_input(&input_text, command_name);
-            let _ = transcript.append_entry(entry);
-            Some(guard.session_id.clone())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // 4. Run pipeline
-    let command_name = command_name.map(|c| {
-        if let Some(stripped) = c.strip_prefix("omni exec ") {
-            stripped
-        } else {
-            c
-        }
-    });
-
-    let (s_id, final_output, filter_name, ctype, rewind_hash_opt, kept_count, dropped_count) = {
-        let (s_id_internal, active_session_opt) = match session {
-            Some(ref m) => {
-                let guard = m.lock().expect("must succeed");
-                (guard.session_id.clone(), Some(guard))
-            }
-            None => ("pipe_session".to_string(), None),
-        };
-
-        let mut matched_toml = None;
-        if let Some(cmd) = command_name {
-            let filters = toml_filter::load_all_filters();
-            if let Some(f) = filters.iter().find(|filter| filter.matches(cmd)) {
-                matched_toml = Some(f.clone());
-            }
-        }
-
+    let (output, filter_name, ctype, rewind_hash, kept_count, dropped_count) =
         if let Some(filter) = matched_toml {
             let out = filter.apply(&input_text);
-            (
-                s_id_internal,
-                out,
-                filter.name.clone(),
-                crate::pipeline::ContentType::Unknown,
-                None,
-                0,
-                0,
-            )
+            (out, filter.name.clone(), ContentType::Unknown, None, 0, 0)
         } else {
             let c = classifier::classify(&input_text);
 
-            // Pre-processing: collapse repetitive lines before scoring
             let collapse_result = collapse::collapse(&input_text, &c);
             let effective_input = collapse_result.collapsed_lines.join("\n");
 
+            let active_session_opt = session.as_ref().and_then(|m| m.lock().ok());
             let scored_segments =
                 scorer::score_segments(&effective_input, &c, active_session_opt.as_deref());
             drop(active_session_opt);
@@ -149,103 +203,133 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
                 .count();
             let d_count = scored_segments.len() - k_count;
 
-            let (out, r_hash) = if decision.should_store && store.is_some() {
-                composer::compose(
-                    scored_segments,
-                    Some(input_text.clone()),
-                    &compose_config,
-                    store.as_deref(),
-                    &input_text,
-                    &c,
-                )
-            } else {
-                composer::compose(
-                    scored_segments,
-                    None,
-                    &compose_config,
-                    None,
-                    &input_text,
-                    &c,
-                )
-            };
-            (
-                s_id_internal,
-                out,
-                format!("{:?}", c),
-                c,
-                r_hash,
-                k_count,
-                d_count,
-            )
-        }
-    };
+            let store_for_compose = if decision.should_store { store } else { None };
 
-    if let Some(ref s) = store {
-        use crate::pipeline::{DistillResult, Route};
-        let result = DistillResult {
-            output: final_output.clone(),
-            route: if rewind_hash_opt.is_some() {
+            let (out, r_hash) = composer::compose(
+                scored_segments,
+                if decision.should_store {
+                    Some(input_text.clone())
+                } else {
+                    None
+                }, // Temporary clone for compose drops
+                &compose_config,
+                store_for_compose,
+                &input_text,
+                &c,
+            );
+
+            (out, format!("{:?}", c), c, r_hash, k_count, d_count)
+        };
+
+    PipelineResult {
+        session_id,
+        output,
+        filter_name,
+        content_type: ctype,
+        rewind_hash,
+        segments_kept: kept_count,
+        segments_dropped: dropped_count,
+        input_text,
+        start_time,
+    }
+}
+
+fn persist<E: Write>(
+    result: &PipelineResult,
+    store_opt: &Option<Arc<Store>>,
+    session: &Option<Arc<Mutex<SessionState>>>,
+    command_name: Option<&str>,
+    error: &mut E,
+) {
+    if let Some(s) = store_opt {
+        use crate::pipeline::DistillResult;
+        let distill_result = DistillResult {
+            output: result.best_output().to_string(), // use the best output for persistence
+            route: if result.rewind_hash.is_some() {
                 Route::Rewind
             } else {
                 Route::Keep
             },
-            filter_name: filter_name.clone(),
-            content_type: ctype.clone(),
+            filter_name: result.filter_name.clone(),
+            content_type: result.content_type.clone(),
             score: 0.0,
             context_score: 0.0,
-            input_bytes: input_text.len(),
-            output_bytes: final_output.len(),
-            latency_ms: start_time.elapsed().as_millis() as u64,
-            rewind_hash: rewind_hash_opt,
-            segments_kept: kept_count,
-            segments_dropped: dropped_count,
+            input_bytes: result.input_text.len(),
+            output_bytes: result.best_output().len(),
+            latency_ms: result.start_time.elapsed().as_millis() as u64,
+            rewind_hash: result.rewind_hash.clone(),
+            segments_kept: result.segments_kept,
+            segments_dropped: result.segments_dropped,
             collapse_savings: None,
         };
 
-        s.record_distillation(&s_id, &result, command_name.unwrap_or(""));
+        s.record_distillation(
+            &result.session_id,
+            &distill_result,
+            command_name.unwrap_or(""),
+        );
 
-        if let Some(ref sess) = session {
+        if let Some(sess) = session {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
-            tracker.track_command(command_name.unwrap_or(""), &input_text, &result);
+            tracker.track_command(
+                command_name.unwrap_or(""),
+                &result.input_text,
+                &distill_result,
+            );
         }
 
-        // Save for `omni diff`
         let cache_dir = dirs::home_dir()
             .unwrap_or_default()
             .join(".omni")
             .join("cache");
-        let _ = std::fs::create_dir_all(&cache_dir);
-        let _ = std::fs::write(cache_dir.join("last_input.txt"), &input_text);
-        let _ = std::fs::write(cache_dir.join("last_output.txt"), &final_output);
-    }
-
-    // 4.5 Transcript: mark completed + snapshot session state
-    if let Some(ref sid) = transcript_session_id
-        && let Some(mut transcript) = Transcript::load(sid)
-    {
-        let _ = transcript.mark_last_completed(&final_output);
-        // Snapshot session state for crash recovery context
-        if let Some(ref session_arc) = session
-            && let Ok(guard) = session_arc.lock()
+        if let Err(e) = std::fs::create_dir_all(&cache_dir)
+            && cfg!(debug_assertions)
         {
-            let _ = transcript.snapshot_state(&guard);
+            let _ = writeln!(error, "[omni:debug] cache dir creation error: {}", e);
+        }
+        if let Err(e) = std::fs::write(cache_dir.join("last_input.txt"), &result.input_text)
+            && cfg!(debug_assertions)
+        {
+            let _ = writeln!(error, "[omni:debug] cache input write error: {}", e);
+        }
+        if let Err(e) = std::fs::write(cache_dir.join("last_output.txt"), result.best_output())
+            && cfg!(debug_assertions)
+        {
+            let _ = writeln!(error, "[omni:debug] cache output write error: {}", e);
         }
     }
 
-    // 5. If no significant reduction: print original
-    let output_to_print = if final_output.len() >= input_text.len() {
-        &input_text // 100% Passthrough fallback maintaining limits correctly
-    } else {
-        &final_output
-    };
+    let transcript_load = Transcript::load(&result.session_id);
+    if let Some(mut transcript) = transcript_load {
+        if let Err(e) = transcript.mark_last_completed(result.best_output())
+            && cfg!(debug_assertions)
+        {
+            let _ = writeln!(error, "[omni:debug] transcript complete error: {}", e);
+        }
+        if let Some(guard) = session.as_ref().and_then(|m| m.lock().ok())
+            && let Err(e) = transcript.snapshot_state(&guard)
+            && cfg!(debug_assertions)
+        {
+            let _ = writeln!(error, "[omni:debug] transcript snapshot error: {}", e);
+        }
+    }
+}
 
-    output.write_all(output_to_print.as_bytes())?;
+fn emit_output<W: Write, E: Write>(
+    result: &PipelineResult,
+    output: &mut W,
+    error: &mut E,
+) -> Result<()> {
+    output.write_all(result.best_output().as_bytes())?;
     output.flush()?;
 
-    // 6. Premium status indicator
-    let elapsed = start_time.elapsed().as_millis();
-    let reduction = if !input_text.is_empty() {
-        100.0 * (1.0 - final_output.len() as f64 / input_text.len() as f64)
+    if crate::guard::env::is_quiet() {
+        return Ok(());
+    }
+
+    let elapsed = result.start_time.elapsed().as_millis();
+    let reduction = if !result.input_text.is_empty() {
+        100.0 * (1.0 - result.best_output().len() as f64 / result.input_text.len() as f64)
     } else {
         0.0
     };
@@ -255,14 +339,13 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             "{} {:.1}% reduction ({} → {}) {}ms",
             "⏺".cyan(),
             reduction,
-            crate::cli::stats::format_bytes(input_text.len() as u64).black(),
-            crate::cli::stats::format_bytes(final_output.len() as u64).green(),
+            crate::cli::stats::format_bytes(result.input_text.len() as u64).black(),
+            crate::cli::stats::format_bytes(result.best_output().len() as u64).green(),
             elapsed.to_string().bright_black()
         );
         writeln!(error, "{} {}", "[OMNI Active]".bold().cyan(), msg)?;
     }
 
-    // 7. Exit 0 (Success)
     Ok(())
 }
 
@@ -279,10 +362,8 @@ mod tests {
         run_inner(input.as_bytes(), &mut out, &mut err, None, None, None).expect("must succeed");
 
         let out_str = String::from_utf8(out).expect("must succeed");
-        // Native Git Diff outputs are normally kept natively, so reduction < original_text.len isn't guaranteed heavily
-        // The pipe mode should successfully print it.
         assert!(out_str.contains("diff --git"));
-        assert!(!err.iter().any(|&b| b == b'e' || b == b'E')); // No errors in output pipe error block
+        assert!(!err.iter().any(|&b| b == b'e' || b == b'E'));
     }
 
     #[test]
@@ -294,13 +375,12 @@ mod tests {
         run_inner(input.as_bytes(), &mut out, &mut err, None, None, None).expect("must succeed");
         let out_str = String::from_utf8(out).expect("must succeed");
 
-        // No significant reduction for short inputs
         assert_eq!(out_str, input);
     }
 
     #[test]
     fn test_pipe_mode_exit_0_selalu_as_ok() {
-        let binary_input: Vec<u8> = vec![0xFF, 0xFE, 0xFD]; // Invalid UTF-8 Binary Data Checks
+        let binary_input: Vec<u8> = vec![0xFF, 0xFE, 0xFD];
 
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -313,7 +393,7 @@ mod tests {
             None,
             None,
         );
-        assert!(res.is_ok()); // Exit 0 effectively gracefully returns properly
-        assert_eq!(out, binary_input); // Binary is passed directly unmodified.
+        assert!(res.is_ok());
+        assert_eq!(out, binary_input);
     }
 }
