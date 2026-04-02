@@ -1,5 +1,6 @@
 use crate::pipeline::scorer::classify_line;
 use crate::pipeline::{ContentType, SignalTier};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 // ─── Data Structures ────────────────────────────────────
@@ -27,7 +28,10 @@ pub struct CollapseResult {
 // ─── Fast Normalization (no regex in hot path) ──────────
 
 /// Strip ANSI escape codes without regex for performance.
-fn strip_ansi(line: &str) -> String {
+fn strip_ansi(line: &str) -> Cow<'_, str> {
+    if !line.as_bytes().contains(&0x1b) {
+        return Cow::Borrowed(line);
+    }
     let bytes = line.as_bytes();
     let mut out = String::with_capacity(line.len());
     let mut i = 0;
@@ -46,19 +50,17 @@ fn strip_ansi(line: &str) -> String {
             i += 1;
         }
     }
-    out
+    Cow::Owned(out)
 }
 
 /// Fast structural normalization for pattern grouping.
 /// Produces a "skeleton" of the line:
-/// - Strip ANSI, trim, lowercase
 /// - Replace contiguous digits with "#"
 /// - Replace identifiers between delimiters with "_" (to group test names etc.)
 ///
 /// Strategy: extract the "structural template" — the fixed parts of the line.
-fn normalize_structural(line: &str) -> String {
-    let clean = strip_ansi(line);
-    let trimmed = clean.trim();
+/// Input `trimmed` is assumed to be stripped of ANSI codes and whitespace trimmed.
+fn normalize_structural(trimmed: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
@@ -85,8 +87,7 @@ fn normalize_structural(line: &str) -> String {
 
 /// Content-type aware normalization. For test/build output, use a more
 /// aggressive "template extraction" that groups lines with the same structure.
-fn normalize_for_content(line: &str, content_type: &ContentType) -> String {
-    let clean = strip_ansi(line);
+fn normalize_for_content(clean: &str, content_type: &ContentType) -> String {
     let trimmed = clean.trim();
 
     match content_type {
@@ -94,7 +95,7 @@ fn normalize_for_content(line: &str, content_type: &ContentType) -> String {
         ContentType::BuildOutput => normalize_build_line(trimmed),
         ContentType::InfraOutput => normalize_infra_line(trimmed),
         ContentType::LogOutput => normalize_log_line(trimmed),
-        _ => normalize_structural(line),
+        _ => normalize_structural(trimmed),
     }
 }
 
@@ -329,7 +330,7 @@ fn collapse_inner(input: &str, content_type: &ContentType) -> CollapseResult {
             normals.push(String::new());
             is_critical.push(true);
         } else {
-            normals.push(normalize_for_content(line, content_type));
+            normals.push(normalize_for_content(&clean, content_type));
             is_critical.push(false);
         }
     }
