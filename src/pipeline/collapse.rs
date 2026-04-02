@@ -682,7 +682,8 @@ mod tests {
         assert!(
             per_iter_us < target_us,
             "collapse took {}µs per iter for 1000 lines, expected <{}µs",
-            per_iter_us, target_us
+            per_iter_us,
+            target_us
         );
     }
 

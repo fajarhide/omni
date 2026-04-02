@@ -313,7 +313,8 @@ mod tests {
         assert!(
             per_iter_us < target_us,
             "took {}µs per iter, expected < {}µs",
-            per_iter_us, target_us
+            per_iter_us,
+            target_us
         );
     }
 
@@ -336,7 +337,8 @@ mod tests {
         assert!(
             per_iter_us < target_us,
             "took {}µs per iter, expected < {}µs",
-            per_iter_us, target_us
+            per_iter_us,
+            target_us
         );
     }
 }
