@@ -156,6 +156,16 @@ Verify with: `omni learn --verify`
 - **rewind_store**: Compressed content (SHA-256 hash → content, with retrieval counter)
 - **session_events (FTS5)**: Full-text searchable event index
 
+## Cross-Platform OS Best Practices
+
+OMNI must compile and pass tests gracefully across Linux, macOS, and Windows. All agents and contributors strictly adhere to the following pillars:
+
+1. **No Hardcoded Path Separators**: Never use `/` or `\\` directly for file paths. Always use `std::path::PathBuf` and `PathBuf::push()` to build paths dynamically.
+2. **Line Endings (`\n` vs `\r\n`)**: Never hard-match exactly against `\n` in string assertions. Windows uses `\r\n`. Use `.lines()` iterator which gracefully cleans lines on all OS, or use `replace("\r\n", "\n")` before assertions.
+3. **OS-Specific Executable Suffixes**: Never assume binary names are exactly `./omni`. In Windows it compiles as `omni.exe`. Use `std::env::consts::EXE_SUFFIX` for dynamic matching.
+4. **Environment Variables**: Windows environment variables are case-insensitive. Unix is case-sensitive. Always use `eq_ignore_ascii_case()` when reading from `std::env::vars()` or interacting with os-injected configurations to prevent false-panics.
+5. **Robust CI Matrix Testing**: Before declaring success, guarantee the feature respects the Github Actions CI matrix. Changes to system integration code must be fundamentally safe to execute against `windows-latest` alongside `ubuntu-latest`.
+
 ## Key Design Decisions
 
 - **Panic safety**: All hooks use `catch_unwind` — OMNI never crashes the host agent
