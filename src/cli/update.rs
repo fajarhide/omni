@@ -56,8 +56,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
             #[cfg(target_family = "windows")]
             {
-                println!("\n{} Due to Windows installation methods, auto-update is not supported.", "ℹ️".blue());
-                println!("   Please download the latest release from: https://github.com/fajarhide/omni/releases");
+                println!(
+                    "\n{} Due to Windows installation methods, auto-update is not supported.",
+                    "ℹ️".blue()
+                );
+                println!(
+                    "   Please download the latest release from: https://github.com/fajarhide/omni/releases"
+                );
                 return Ok(());
             }
 

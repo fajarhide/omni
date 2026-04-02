@@ -49,7 +49,8 @@ pub fn run_exec(
         #[cfg(not(target_family = "windows"))]
         c.arg("-c");
 
-        let c = c.env_clear()
+        let c = c
+            .env_clear()
             .envs(crate::guard::env::sanitize_env())
             .arg(&full_cmd)
             .stdout(Stdio::piped())
