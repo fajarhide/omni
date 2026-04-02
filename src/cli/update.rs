@@ -1,5 +1,6 @@
 use colored::*;
 use std::io::{self, Write};
+#[cfg(not(target_family = "windows"))]
 use std::process::Command;
 
 pub fn print_help() {
