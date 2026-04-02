@@ -183,12 +183,12 @@ check "unknown command error" "$UNKNOWN_OUT" "unknown command"
 
 EMPTY_PIPE_EXIT=0
 printf '' | "$OMNI" 2>/dev/null || EMPTY_PIPE_EXIT=$?
-# Empty pipe should exit 1
-if [ "$EMPTY_PIPE_EXIT" -ne 0 ]; then
-    echo "  ✓ empty pipe exits non-zero ($EMPTY_PIPE_EXIT)"
+# Empty pipe should exit 0 (silent passthrough)
+if [ "$EMPTY_PIPE_EXIT" -eq 0 ]; then
+    echo "  ✓ empty pipe exits cleanly ($EMPTY_PIPE_EXIT)"
     PASS=$((PASS + 1))
 else
-    echo "  ✗ empty pipe should exit non-zero"
+    echo "  ✗ empty pipe should exit 0 but got $EMPTY_PIPE_EXIT"
     FAIL=$((FAIL + 1))
 fi
 TOTAL=$((TOTAL + 1))

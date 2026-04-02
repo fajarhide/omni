@@ -33,6 +33,11 @@ pub fn sanitize_env() -> Vec<(String, String)> {
         .collect()
 }
 
+/// Returns true if OMNI_QUIET=1 is set. Suppresses stderr stats in pipe mode.
+pub fn is_quiet() -> bool {
+    env::vars().any(|(k, _)| k.eq_ignore_ascii_case("OMNI_QUIET"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
