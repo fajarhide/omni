@@ -63,8 +63,9 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
 
     match crate::guard::limits::check_input(&input_text) {
         crate::guard::limits::InputCheck::Empty => {
-            writeln!(error, "omni: Error: No input provided on stdin")?;
-            std::process::exit(1);
+            // Silent passthrough: command produced no output (e.g. failed upstream).
+            // Don't error — just exit cleanly so we don't pollute Claude Code's stderr.
+            return Ok(());
         }
         crate::guard::limits::InputCheck::TooLarge => {
             writeln!(
