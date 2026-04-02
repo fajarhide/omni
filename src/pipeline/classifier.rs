@@ -305,10 +305,15 @@ mod tests {
         let elapsed_us = start.elapsed().as_micros();
         let per_iter_us = elapsed_us / iters;
 
+        #[cfg(debug_assertions)]
+        let target_us = 2500;
+        #[cfg(not(debug_assertions))]
+        let target_us = 500;
+
         assert!(
-            per_iter_us < 500,
-            "took {}µs per iter, expected < 500µs",
-            per_iter_us
+            per_iter_us < target_us,
+            "took {}µs per iter, expected < {}µs",
+            per_iter_us, target_us
         );
     }
 
@@ -323,10 +328,15 @@ mod tests {
         let elapsed_us = start.elapsed().as_micros();
         let per_iter_us = elapsed_us / iters;
 
+        #[cfg(debug_assertions)]
+        let target_us = 25000;
+        #[cfg(not(debug_assertions))]
+        let target_us = 5000;
+
         assert!(
-            per_iter_us < 5000,
-            "took {}µs per iter, expected < 5000µs",
-            per_iter_us
+            per_iter_us < target_us,
+            "took {}µs per iter, expected < {}µs",
+            per_iter_us, target_us
         );
     }
 }
