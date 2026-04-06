@@ -14,11 +14,14 @@ pub enum ContentType {
     GitDiff,
     GitStatus,
     GitLog,
-    BuildOutput,    // cargo, npm, pip, make
-    TestOutput,     // pytest, cargo test, vitest, go test
-    InfraOutput,    // kubectl, terraform, helm, docker
-    LogOutput,      // access log, error log, syslog
-    TabularData,    // kubectl get pods (table format)
+    BuildOutput,    // cargo, npm, pip, make, compilation errors
+    TestOutput,     // pytest, cargo test, go test (non-JS)
+    InfraOutput,    // legacy — general infra, non-cloud
+    Cloud, // docker ps/build/logs, kubectl get/describe/apply, terraform apply, helm, aws cli
+    SystemOps, // ls, grep/rg, find, tree, env, cat (system exploration)
+    JsTs,  // vitest, tsc, playwright, eslint, prettier, esbuild output
+    LogOutput, // access log, error log, syslog
+    TabularData, // column-aligned tabular data
     StructuredData, // JSON output for CLI
     Unknown,
 }

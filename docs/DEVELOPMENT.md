@@ -109,11 +109,12 @@ tests/smoke_test.sh ./target/debug/omni
 
 GitHub Actions runs on every push/PR:
 
-1. **fmt** — `cargo fmt --check`
-2. **clippy** — `cargo clippy -- -D warnings`
-3. **test** — matrix `[ubuntu, macOS]` → `cargo test --all`
-4. **security** — `cargo audit` + dangerous pattern scan
-5. **binary-check** — size check + smoke tests
+1. **make ci (Ubuntu)** — canonical pipeline from the `Makefile`
+2. **cross-platform test matrix** — macOS and Windows run `cargo test --all`
+
+The Ubuntu job is the source of truth for formatting, clippy, tests, snapshot verification,
+security audit, binary size, and smoke checks. Keep `Makefile` and `.github/workflows/ci.yml`
+aligned so local and hosted CI stay identical.
 
 Releases are triggered by pushing a `v*` tag (see `scripts/omni-release.sh`).
 

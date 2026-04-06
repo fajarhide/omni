@@ -1,0 +1,15 @@
+Step 1/6 : FROM node:18-alpine
+ ---> 8a3c4b2d1e0f
+Step 2/6 : WORKDIR /app
+ ---> Using cache
+ ---> 9b4d5c3e2f1a
+Step 3/6 : COPY package*.json ./
+ ---> Using cache
+ ---> 0c5e6d4f3a2b
+Step 4/6 : RUN npm ci --production
+npm ERR! code ERESOLVE
+npm ERR! ERESOLVE unable to resolve dependency tree
+npm ERR! Could not resolve dependency: peer react@"^17.0.0" from @mui/material@5.14.0
+npm ERR! error Found: react@18.2.0
+npm ERR! A complete log of this run can be found in: /root/.npm/_logs/2026-04-06T12_00_00_000Z-debug-0.log
+The command '/bin/sh -c npm ci --production' returned a non-zero code: 1

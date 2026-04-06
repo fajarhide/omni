@@ -129,6 +129,119 @@ pub fn classify(input: &str) -> ContentType {
         return ContentType::BuildOutput;
     }
 
+    // 5.5 Cloud (docker, kubectl, terraform, helm, aws — lebih spesifik dari InfraOutput)
+    let cloud_kw = [
+        "docker ps",
+        "docker build",
+        "docker run",
+        "docker images",
+        "docker logs",
+        "kubectl get",
+        "kubectl describe",
+        "kubectl apply",
+        "kubectl delete",
+        "kubectl logs",
+        "terraform apply",
+        "terraform plan",
+        "terraform destroy",
+        "helm install",
+        "helm upgrade",
+        "helm list",
+        "helm repo",
+        "aws s3",
+        "aws ec2",
+        "aws ecs",
+        "aws lambda",
+        "aws cloudformation",
+        "CrashLoopBackOff",
+        "OOMKilled",
+        "ImagePullBackOff",
+        "Evicted",
+        "Terminating",
+    ];
+    if lines.iter().any(|l| cloud_kw.iter().any(|k| l.contains(k))) {
+        return ContentType::Cloud;
+    }
+    // kubectl table header (NAME READY STATUS RESTARTS)
+    if lines.iter().any(|l| {
+        (l.contains("READY") && l.contains("STATUS") && l.contains("RESTARTS"))
+            || (l.contains("NAMESPACE") && l.contains("NAME") && l.contains("STATUS"))
+    }) {
+        return ContentType::Cloud;
+    }
+
+    // 5.6 JsTs (vitest, tsc, playwright, eslint)
+    let jsts_kw = [
+        "vitest",
+        "VITE v",
+        "Test Files",
+        "Tests  ",
+        "error TS",
+        "tsc --",
+        "Found errors",
+        "playwright",
+        "✓ Passed",
+        "✗ Failed",
+        "eslint",
+        "prettier",
+        "PASS src/",
+        "FAIL src/",
+        "● ",
+    ];
+    if lines.iter().any(|l| jsts_kw.iter().any(|k| l.contains(k))) {
+        return ContentType::JsTs;
+    }
+    // vitest unicode markers
+    if lines.iter().any(|l| l.contains("✓") || l.contains("✗"))
+        && lines
+            .iter()
+            .any(|l| l.contains(".test.") || l.contains(".spec."))
+    {
+        return ContentType::JsTs;
+    }
+
+    // 5.7 SystemOps (ls, grep, find, tree, env)
+    {
+        let first = lines.first().map(|l| l.trim()).unwrap_or("");
+        // ls -la output: starts with "total N"
+        let is_ls = first.starts_with("total ");
+        // grep output: multiple lines "filename:content" pattern
+        let grep_pattern_count = lines
+            .iter()
+            .filter(|l| {
+                l.contains(':')
+                    && !l.contains("error")
+                    && !l.contains("Error")
+                    && !l.starts_with("Step ")
+                    && !l.starts_with("DEBUG:")
+                    && !l.starts_with("INFO:")
+            })
+            .count();
+        let is_grep = grep_pattern_count >= 3;
+        // find output: multiple lines starting with ./ or /
+        let find_count = lines
+            .iter()
+            .filter(|l| l.starts_with("./") || (l.starts_with('/') && !l.contains(':')))
+            .count();
+        let is_find = find_count >= 3;
+        // tree output
+        let is_tree = lines
+            .iter()
+            .any(|l| l.contains("├──") || l.contains("└──") || l.contains("directories"));
+        // env output
+        let env_count = lines
+            .iter()
+            .filter(|l| {
+                l.contains('=') && l.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+            })
+            .count();
+        let is_env = env_count >= 5;
+
+        if is_ls || is_grep || is_find || is_tree || is_env {
+            return ContentType::SystemOps;
+        }
+    }
+
     // 6. InfraOutput
     let has_kubectl_header = lines
         .iter()
@@ -243,14 +356,14 @@ mod tests {
     #[test]
     fn test_classify_kubectl_get_pods() {
         let kube = "NAME                               READY   STATUS    RESTARTS   AGE\nnginx-deployment-7fb96c846b-f4jnm   1/1     Running   0          5d";
-        assert_eq!(classify(kube), ContentType::InfraOutput); // Kubectl specific
+        assert_eq!(classify(kube), ContentType::Cloud); // Kubectl specific is now Cloud
     }
 
     #[test]
     fn test_classify_docker_build_output() {
         let docker =
             "Step 1/5 : FROM alpine:latest\n ---> 49f356fa4eb1\nStep 2/5 : RUN apk add curl";
-        assert_eq!(classify(docker), ContentType::InfraOutput);
+        assert_eq!(classify(docker), ContentType::InfraOutput); // Still infra output right now
 
         let terra = "Terraform will perform the following actions:";
         assert_eq!(classify(terra), ContentType::InfraOutput);

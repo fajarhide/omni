@@ -1,6 +1,7 @@
 use crate::pipeline::{ContentType, OutputSegment};
 
 pub mod build;
+pub mod cloud;
 pub mod generic;
 pub mod git;
 pub mod infra;
@@ -23,6 +24,9 @@ pub fn get_distiller(content_type: &ContentType) -> Box<dyn Distiller> {
         ContentType::InfraOutput => Box::new(infra::InfraDistiller),
         ContentType::LogOutput => Box::new(log::LogDistiller),
         ContentType::TabularData => Box::new(tabular::TabularDistiller),
+        ContentType::Cloud => Box::new(cloud::CloudDistiller),
+        ContentType::SystemOps => Box::new(generic::GenericDistiller),
+        ContentType::JsTs => Box::new(test::TestDistiller),
         ContentType::StructuredData | ContentType::Unknown => Box::new(generic::GenericDistiller),
     }
 }
@@ -89,5 +93,25 @@ mod tests {
         test_nginx_log_distillation,
         "nginx_access_log.txt",
         ContentType::LogOutput
+    );
+    snapshot_test!(
+        test_cloud_kubectl,
+        "kubectl_get_pods_mixed.txt",
+        ContentType::Cloud
+    );
+    snapshot_test!(
+        test_cloud_docker_ps,
+        "docker_ps_mixed.txt",
+        ContentType::Cloud
+    );
+    snapshot_test!(
+        test_cloud_docker_build_error,
+        "docker_build_error.txt",
+        ContentType::Cloud
+    );
+    snapshot_test!(
+        test_cloud_terraform_plan,
+        "terraform_plan_cloud.txt",
+        ContentType::Cloud
     );
 }
