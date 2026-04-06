@@ -146,10 +146,6 @@ mod tests {
             "workingDirectory": "/tmp"
         });
 
-        unsafe {
-            std::env::set_var("OMNI_CONTINUE", "1");
-            std::env::set_var("OMNI_FRESH", "0");
-        }
         let out = process_payload(&input.to_string(), store, session);
 
         assert!(out.is_some());

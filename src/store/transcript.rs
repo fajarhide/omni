@@ -337,7 +337,17 @@ pub fn cleanup_old(days: u32) {
 
 // ─── Helpers ────────────────────────────────────────────
 
+#[cfg(test)]
+thread_local! {
+    pub static MOCK_TRANSCRIPT_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 fn transcripts_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(mock) = MOCK_TRANSCRIPT_DIR.with(|d| d.borrow().clone()) {
+        return mock;
+    }
+
     if let Ok(custom) = std::env::var("OMNI_TRANSCRIPT_DIR") {
         return PathBuf::from(custom);
     }
@@ -368,19 +378,12 @@ fn truncate_payload(payload: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
 
-    // Serialize all transcript tests — they share the OMNI_TRANSCRIPT_DIR env var
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn setup_test_dir() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
-        let guard = TEST_LOCK.lock().unwrap();
+    fn setup_test_dir() -> tempfile::TempDir {
         let dir = tempdir().unwrap();
-        unsafe {
-            std::env::set_var("OMNI_TRANSCRIPT_DIR", dir.path().to_str().unwrap());
-        }
-        (dir, guard)
+        MOCK_TRANSCRIPT_DIR.with(|d| *d.borrow_mut() = Some(dir.path().to_path_buf()));
+        dir
     }
 
     #[test]
@@ -414,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_save_and_load_roundtrip() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut t = Transcript::new("roundtrip_1", "/project");
         let entry = TranscriptEntry::new_input("git status", Some("git"));
@@ -428,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_atomic_write_no_corrupt_file() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let t = Transcript::new("atomic_1", "/project");
         t.save().unwrap();
@@ -444,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_mark_last_completed() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut t = Transcript::new("complete_1", "/project");
         t.append_entry(TranscriptEntry::new_input("input1", None))
@@ -461,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_mark_last_failed() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut t = Transcript::new("fail_1", "/project");
         t.append_entry(TranscriptEntry::new_input("bad input", None))
@@ -497,13 +500,13 @@ mod tests {
 
     #[test]
     fn test_find_pending_with_no_transcripts() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
         assert!(find_pending().is_none());
     }
 
     #[test]
     fn test_find_pending_finds_interrupted_session() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut t = Transcript::new("interrupted_1", "/project");
         t.append_entry(TranscriptEntry::new_input("pending work", None))
@@ -516,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_find_pending_skips_completed_sessions() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut t = Transcript::new("done_1", "/project");
         t.append_entry(TranscriptEntry::new_input("done work", None))
@@ -528,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_load_or_new_creates_if_missing() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let t = Transcript::load_or_new("new_session", "/project");
         assert_eq!(t.session_id, "new_session");
@@ -537,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_load_or_new_loads_if_exists() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut original = Transcript::new("existing_1", "/project");
         original
@@ -551,7 +554,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_old_removes_stale_transcripts() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         // Create a transcript with very old updated_at
         let mut t = Transcript::new("old_1", "/project");
@@ -570,7 +573,7 @@ mod tests {
 
     #[test]
     fn test_list_recent_returns_all() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let t1 = Transcript::new("list_a", "/project");
         t1.save().unwrap();
@@ -600,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_state_persists() {
-        let (_dir, _lock) = setup_test_dir();
+        let _dir = setup_test_dir();
 
         let mut t = Transcript::new("state_1", "/project");
         let mut state = SessionState::new();

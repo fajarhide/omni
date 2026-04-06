@@ -28,7 +28,11 @@ pub const DENYLIST: &[&str] = &[
 ];
 
 pub fn sanitize_env() -> Vec<(String, String)> {
-    env::vars()
+    sanitize_vars(env::vars())
+}
+
+pub fn sanitize_vars(vars: impl IntoIterator<Item = (String, String)>) -> Vec<(String, String)> {
+    vars.into_iter()
         .filter(|(k, _)| !DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(k)))
         .collect()
 }
@@ -44,46 +48,37 @@ mod tests {
 
     #[test]
     fn test_sanitize_env_menghapus_ld_preload() {
-        unsafe {
-            std::env::set_var("LD_PRELOAD", "bad.so");
-        }
-        let sanitized = sanitize_env();
+        let mock_env = vec![
+            ("LD_PRELOAD".to_string(), "bad.so".to_string()),
+            ("NORMAL_VAR".to_string(), "123".to_string()),
+        ];
+        let sanitized = sanitize_vars(mock_env);
         let contains = sanitized.iter().any(|(k, _)| k == "LD_PRELOAD");
         assert!(!contains);
-        unsafe {
-            std::env::remove_var("LD_PRELOAD");
-        }
     }
 
     #[test]
     fn test_sanitize_env_menghapus_semua_denylist_entries() {
-        for key in DENYLIST {
-            unsafe {
-                std::env::set_var(key, "malicious_payload");
-            }
-        }
+        let mock_env: Vec<(String, String)> = DENYLIST
+            .iter()
+            .map(|key| (key.to_string(), "malicious_payload".to_string()))
+            .collect();
 
-        let sanitized = sanitize_env();
+        let sanitized = sanitize_vars(mock_env);
 
         for (k, _) in sanitized {
             assert!(!DENYLIST.iter().any(|d| d.eq_ignore_ascii_case(&k)));
-        }
-
-        for key in DENYLIST {
-            unsafe {
-                std::env::remove_var(key);
-            }
         }
     }
 
     #[test]
     fn test_sanitize_env_mempertahankan_path_and_normal_vars() {
-        unsafe {
-            std::env::set_var("PATH", "/usr/bin:/bin");
-            std::env::set_var("NORMAL_VAR", "123");
-        }
+        let mock_env = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("NORMAL_VAR".to_string(), "123".to_string()),
+        ];
 
-        let sanitized = sanitize_env();
+        let sanitized = sanitize_vars(mock_env);
         let has_path = sanitized.iter().any(|(k, _)| k.to_uppercase() == "PATH");
         let has_normal = sanitized
             .iter()
