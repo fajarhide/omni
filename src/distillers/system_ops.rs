@@ -79,9 +79,7 @@ fn is_grep_output(lines: &[&str]) -> bool {
                 // Must not start with uppercase_key=value (that's env)
                 !before.contains('=')
                     && !before.is_empty()
-                    && (before.contains('/')
-                        || before.contains('.')
-                        || before.contains('\\'))
+                    && (before.contains('/') || before.contains('.') || before.contains('\\'))
             } else {
                 false
             }
@@ -95,17 +93,21 @@ fn is_ls_output(lines: &[&str]) -> bool {
     let first = lines.first().map(|l| l.trim()).unwrap_or("");
     if first.starts_with("total ") {
         // Additional check: lines starting with permission string (drwx, -rw-, lrwx)
-        let perm_count = lines.iter().skip(1).filter(|l| {
-            let t = l.trim();
-            t.starts_with("drwx")
-                || t.starts_with("-rw")
-                || t.starts_with("lrwx")
-                || t.starts_with("d---")
-                || t.starts_with("----")
-                || t.starts_with("drw-")
-                || t.starts_with("-r-")
-                || t.starts_with("-r--")
-        }).count();
+        let perm_count = lines
+            .iter()
+            .skip(1)
+            .filter(|l| {
+                let t = l.trim();
+                t.starts_with("drwx")
+                    || t.starts_with("-rw")
+                    || t.starts_with("lrwx")
+                    || t.starts_with("d---")
+                    || t.starts_with("----")
+                    || t.starts_with("drw-")
+                    || t.starts_with("-r-")
+                    || t.starts_with("-r--")
+            })
+            .count();
         perm_count >= 1
     } else {
         false
@@ -176,17 +178,16 @@ fn distill_grep_output(input: &str) -> String {
             let content = &trimmed[colon_pos + 1..];
 
             // Skip if filepath doesn't look like a file
-            if filepath.is_empty() || (!filepath.contains('/') && !filepath.contains('.') && !filepath.contains('\\')) {
+            if filepath.is_empty()
+                || (!filepath.contains('/') && !filepath.contains('.') && !filepath.contains('\\'))
+            {
                 continue;
             }
 
             total_matches += 1;
 
             // Extract just the filename (basename)
-            let basename = filepath
-                .rsplit('/')
-                .next()
-                .unwrap_or(filepath);
+            let basename = filepath.rsplit('/').next().unwrap_or(filepath);
             *by_file.entry(basename.to_string()).or_insert(0) += 1;
 
             // Check for error/panic lines — always show these
@@ -366,14 +367,8 @@ fn distill_tree_output(input: &str) -> String {
         })
         .filter_map(|l| {
             let t = l.trim_start();
-            let name = t
-                .trim_start_matches("├── ")
-                .trim_start_matches("└── ");
-            if name.is_empty() {
-                None
-            } else {
-                Some(name)
-            }
+            let name = t.trim_start_matches("├── ").trim_start_matches("└── ");
+            if name.is_empty() { None } else { Some(name) }
         })
         .collect();
 
@@ -417,9 +412,7 @@ pub fn distill_env_output(input: &str) -> String {
 
             // Check if sensitive
             let key_upper = key.to_uppercase();
-            let is_sensitive = SENSITIVE_PATTERNS
-                .iter()
-                .any(|p| key_upper.contains(p));
+            let is_sensitive = SENSITIVE_PATTERNS.iter().any(|p| key_upper.contains(p));
 
             if is_sensitive {
                 redacted_count += 1;
@@ -429,7 +422,11 @@ pub fn distill_env_output(input: &str) -> String {
             // Group by prefix (first word before _ or full key if no _)
             let prefix = if let Some(underscore_pos) = key.find('_') {
                 let p = &key[..underscore_pos];
-                if p.is_empty() { key.to_string() } else { p.to_string() }
+                if p.is_empty() {
+                    key.to_string()
+                } else {
+                    p.to_string()
+                }
             } else {
                 key.to_string()
             };
@@ -525,9 +522,18 @@ mod tests {
     fn test_env_redaction_removes_secrets() {
         let input = "ANTHROPIC_API_KEY=sk-ant-abc123\nHOME=/home/user\nGITHUB_TOKEN=ghp_secret";
         let result = distill_env_output(input);
-        assert!(!result.contains("sk-ant-abc123"), "API key should be redacted");
-        assert!(!result.contains("ghp_secret"), "GitHub token should be redacted");
-        assert!(result.contains("[REDACTED]"), "Should contain [REDACTED] marker");
+        assert!(
+            !result.contains("sk-ant-abc123"),
+            "API key should be redacted"
+        );
+        assert!(
+            !result.contains("ghp_secret"),
+            "GitHub token should be redacted"
+        );
+        assert!(
+            result.contains("[REDACTED]"),
+            "Should contain [REDACTED] marker"
+        );
     }
 
     #[test]
@@ -628,8 +634,7 @@ mod tests {
 
     #[test]
     fn test_grep_distill_shows_error_lines() {
-        let input =
-            "src/auth.rs:47:    return Err(AuthError::InvalidToken);\nsrc/db.rs:10:fn connect() {\nsrc/db.rs:20:fn query() {\nsrc/auth.rs:50:    panic!(\"fatal auth error\");";
+        let input = "src/auth.rs:47:    return Err(AuthError::InvalidToken);\nsrc/db.rs:10:fn connect() {\nsrc/db.rs:20:fn query() {\nsrc/auth.rs:50:    panic!(\"fatal auth error\");";
         let result = distill_grep_output(input);
         assert!(result.contains("Error matches:"));
         assert!(result.contains("AuthError"));

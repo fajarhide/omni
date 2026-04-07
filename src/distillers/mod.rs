@@ -130,9 +130,5 @@ mod tests {
         "find_project_output.txt",
         ContentType::SystemOps
     );
-    snapshot_test!(
-        test_systemops_env,
-        "env_output.txt",
-        ContentType::SystemOps
-    );
+    snapshot_test!(test_systemops_env, "env_output.txt", ContentType::SystemOps);
 }
