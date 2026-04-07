@@ -1,0 +1,37 @@
+ DEV  v1.6.0 /home/user/project
+
+ ✓ src/utils/__tests__/format.test.ts (8 tests) 3ms
+ ✓ src/utils/__tests__/validate.test.ts (5 tests) 2ms
+ ✓ src/components/__tests__/Button.test.tsx (4 tests) 12ms
+ ✓ src/components/__tests__/Modal.test.tsx (3 tests) 8ms
+ ✓ src/hooks/__tests__/useAuth.test.ts (6 tests) 5ms
+ ✗ src/services/__tests__/api.test.ts (2 tests | 1 failed) 15ms
+   ✗ should handle rate limiting
+     → expected 429 to equal 200
+     ❯ src/services/__tests__/api.test.ts:47:12
+      45| const response = await api.get('/users');
+      46| expect(response.status).toBe(200);
+      47|                        ^
+      48|
+ ✗ src/auth/__tests__/login.test.ts (4 tests | 2 failed) 22ms
+   ✗ should validate JWT expiry
+     → TokenExpiredError: jwt expired
+     ❯ src/auth/__tests__/login.test.ts:28:5
+      26| const token = createToken({ exp: Date.now() - 1000 });
+      27| const result = validateToken(token);
+      28|                ^
+      29|
+   ✗ should refresh token on 401
+     → expected true to be false
+     ❯ src/auth/__tests__/login.test.ts:55:10
+      53| const refreshed = await refreshOnUnauthorized();
+      54| expect(refreshed).toBe(false);
+      55|                   ^
+      56|
+ ✓ src/store/__tests__/reducer.test.ts (12 tests) 4ms
+ ✓ src/api/__tests__/client.test.ts (7 tests) 6ms
+
+ Test Files  2 failed | 8 passed (10)
+ Tests  3 failed | 48 passed (51)
+ Start at  14:23:05
+ Duration  245ms (transform 89ms, setup 12ms, collect 45ms, tests 77ms, environment 22ms, prepare 0ms)

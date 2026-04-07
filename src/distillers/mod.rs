@@ -5,6 +5,7 @@ pub mod cloud;
 pub mod generic;
 pub mod git;
 pub mod infra;
+pub mod jsts;
 pub mod log;
 pub mod system_ops;
 pub mod tabular;
@@ -27,7 +28,7 @@ pub fn get_distiller(content_type: &ContentType) -> Box<dyn Distiller> {
         ContentType::TabularData => Box::new(tabular::TabularDistiller),
         ContentType::Cloud => Box::new(cloud::CloudDistiller),
         ContentType::SystemOps => Box::new(system_ops::SystemOpsDistiller),
-        ContentType::JsTs => Box::new(test::TestDistiller),
+        ContentType::JsTs => Box::new(jsts::JsTsDistiller),
         ContentType::StructuredData | ContentType::Unknown => Box::new(generic::GenericDistiller),
     }
 }
@@ -131,4 +132,25 @@ mod tests {
         ContentType::SystemOps
     );
     snapshot_test!(test_systemops_env, "env_output.txt", ContentType::SystemOps);
+    
+    snapshot_test!(
+        test_jsts_vitest,
+        "vitest_mixed.txt",
+        ContentType::JsTs
+    );
+    snapshot_test!(
+        test_jsts_tsc,
+        "tsc_errors.txt",
+        ContentType::JsTs
+    );
+    snapshot_test!(
+        test_jsts_playwright,
+        "playwright_fail.txt",
+        ContentType::JsTs
+    );
+    snapshot_test!(
+        test_jsts_eslint,
+        "eslint_errors.txt",
+        ContentType::JsTs
+    );
 }
