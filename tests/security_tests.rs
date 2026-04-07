@@ -11,31 +11,23 @@ fn run_pipeline(input: &str) -> String {
 
 #[test]
 fn test_env_sanitization_denylist() {
-    use omni::guard::env::{DENYLIST, sanitize_env};
+    use omni::guard::env::{DENYLIST, sanitize_vars};
 
-    // Set some dangerous env vars (unsafe in Rust 2024)
+    // Set some dangerous env vars in a mock environment
+    let mut mock_env: Vec<(String, String)> = Vec::new();
     for var in DENYLIST.iter().take(3) {
-        unsafe {
-            std::env::set_var(var, "INJECTED_VALUE");
-        }
+        mock_env.push((var.to_string(), "INJECTED_VALUE".to_string()));
     }
 
-    let sanitized = sanitize_env();
+    let sanitized = sanitize_vars(mock_env);
 
     // Verify denylist vars are NOT in sanitized output
     for var in DENYLIST {
         assert!(
             !sanitized.iter().any(|(k, _)| k.eq_ignore_ascii_case(var)),
-            "Denylist variable {} should be removed by sanitize_env",
+            "Denylist variable {} should be removed by sanitize_vars",
             var
         );
-    }
-
-    // Cleanup
-    for var in DENYLIST.iter().take(3) {
-        unsafe {
-            std::env::remove_var(var);
-        }
     }
 }
 
@@ -115,16 +107,17 @@ fn test_pipeline_deterministic() {
 
 #[test]
 fn test_env_sanitization_removes_dangerous_vars() {
-    use omni::guard::env::{DENYLIST, sanitize_env};
+    use omni::guard::env::{DENYLIST, sanitize_vars};
 
-    // Set beberapa dangerous vars
-    unsafe {
-        std::env::set_var("LD_PRELOAD", "malicious.so");
-        std::env::set_var("BASH_ENV", "evil_script.sh");
-        std::env::set_var("NODE_OPTIONS", "--require=evil");
-    }
+    // Set beberapa dangerous vars in a mock env
+    let mock_env = vec![
+        ("LD_PRELOAD".to_string(), "malicious.so".to_string()),
+        ("BASH_ENV".to_string(), "evil_script.sh".to_string()),
+        ("NODE_OPTIONS".to_string(), "--require=evil".to_string()),
+        ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+    ];
 
-    let sanitized = sanitize_env();
+    let sanitized = sanitize_vars(mock_env);
 
     // Verify semua DENYLIST entries hilang
     for key in DENYLIST {
@@ -140,13 +133,6 @@ fn test_env_sanitization_removes_dangerous_vars() {
         sanitized.iter().any(|(k, _)| k.to_uppercase() == "PATH"),
         "PATH should still be in sanitized env"
     );
-
-    // Cleanup
-    unsafe {
-        std::env::remove_var("LD_PRELOAD");
-        std::env::remove_var("BASH_ENV");
-        std::env::remove_var("NODE_OPTIONS");
-    }
 }
 
 #[test]

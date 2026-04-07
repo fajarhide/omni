@@ -192,9 +192,9 @@ mod tests {
         let db_path = dir.path().join("omni.db");
         // Set transcript dir to clean temp dir so find_pending() doesn't interfere
         let transcript_dir = dir.path().join("transcripts");
-        unsafe {
-            std::env::set_var("OMNI_TRANSCRIPT_DIR", transcript_dir.to_str().unwrap());
-        }
+        crate::store::transcript::MOCK_TRANSCRIPT_DIR.with(|d| {
+            *d.borrow_mut() = Some(transcript_dir);
+        });
         (
             Arc::new(Store::open_path(&db_path).expect("must succeed")),
             dir,
