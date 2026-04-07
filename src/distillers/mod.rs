@@ -132,25 +132,13 @@ mod tests {
         ContentType::SystemOps
     );
     snapshot_test!(test_systemops_env, "env_output.txt", ContentType::SystemOps);
-    
-    snapshot_test!(
-        test_jsts_vitest,
-        "vitest_mixed.txt",
-        ContentType::JsTs
-    );
-    snapshot_test!(
-        test_jsts_tsc,
-        "tsc_errors.txt",
-        ContentType::JsTs
-    );
+
+    snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", ContentType::JsTs);
+    snapshot_test!(test_jsts_tsc, "tsc_errors.txt", ContentType::JsTs);
     snapshot_test!(
         test_jsts_playwright,
         "playwright_fail.txt",
         ContentType::JsTs
     );
-    snapshot_test!(
-        test_jsts_eslint,
-        "eslint_errors.txt",
-        ContentType::JsTs
-    );
+    snapshot_test!(test_jsts_eslint, "eslint_errors.txt", ContentType::JsTs);
 }
