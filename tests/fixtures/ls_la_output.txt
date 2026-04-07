@@ -1,0 +1,17 @@
+total 248
+drwxr-xr-x  12 user  staff    384 Apr  5 14:23 .
+drwxr-xr-x   8 user  staff    256 Apr  1 09:00 ..
+-rw-r--r--   1 user  staff    178 Mar 28 16:45 .gitignore
+drwxr-xr-x   3 user  staff     96 Apr  5 14:23 .github
+-rw-r--r--   1 user  staff   1847 Apr  5 14:20 Cargo.toml
+-rw-r--r--   1 user  staff  45032 Apr  5 14:20 Cargo.lock
+-rw-r--r--   1 user  staff   1087 Mar 15 10:30 LICENSE
+-rw-r--r--   1 user  staff   4521 Apr  3 11:15 README.md
+drwxr-xr-x  18 user  staff    576 Apr  5 14:20 src
+drwxr-xr-x   4 user  staff    128 Apr  2 09:30 tests
+drwxr-xr-x   3 user  staff     96 Mar 20 14:00 filters
+lrwxr-xr-x   1 user  staff     15 Mar 10 08:00 docs -> ../docs-site
+-rw-r--r--   1 user  staff    892 Apr  5 14:23 build.rs
+drwxr-xr-x   2 user  staff     64 Apr  1 09:00 benches
+-rw-r--r--   1 user  staff    234 Mar 28 09:15 rustfmt.toml
+-rw-r--r--   1 user  staff   3201 Apr  4 16:40 CHANGELOG.md

@@ -6,6 +6,7 @@ pub mod generic;
 pub mod git;
 pub mod infra;
 pub mod log;
+pub mod system_ops;
 pub mod tabular;
 pub mod test;
 
@@ -25,7 +26,7 @@ pub fn get_distiller(content_type: &ContentType) -> Box<dyn Distiller> {
         ContentType::LogOutput => Box::new(log::LogDistiller),
         ContentType::TabularData => Box::new(tabular::TabularDistiller),
         ContentType::Cloud => Box::new(cloud::CloudDistiller),
-        ContentType::SystemOps => Box::new(generic::GenericDistiller),
+        ContentType::SystemOps => Box::new(system_ops::SystemOpsDistiller),
         ContentType::JsTs => Box::new(test::TestDistiller),
         ContentType::StructuredData | ContentType::Unknown => Box::new(generic::GenericDistiller),
     }
@@ -113,5 +114,25 @@ mod tests {
         test_cloud_terraform_plan,
         "terraform_plan_cloud.txt",
         ContentType::Cloud
+    );
+    snapshot_test!(
+        test_systemops_grep,
+        "grep_recursive_output.txt",
+        ContentType::SystemOps
+    );
+    snapshot_test!(
+        test_systemops_ls,
+        "ls_la_output.txt",
+        ContentType::SystemOps
+    );
+    snapshot_test!(
+        test_systemops_find,
+        "find_project_output.txt",
+        ContentType::SystemOps
+    );
+    snapshot_test!(
+        test_systemops_env,
+        "env_output.txt",
+        ContentType::SystemOps
     );
 }

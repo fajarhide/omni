@@ -1,0 +1,22 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+grep: 33 matches in 13 files
+  classifier.rs: 4 matches
+  build.rs: 3 matches
+  integration_test.rs: 3 matches
+  post_tool.rs: 3 matches
+  scorer.rs: 3 matches
+  sqlite.rs: 3 matches
+  test.rs: 3 matches
+  correction.rs: 2 matches
+  doctor.rs: 2 matches
+  main.rs: 2 matches
+  +3 more files
+Error matches:
+  src/pipeline/classifier.rs:15:    if line.contains("error") {
+  src/pipeline/classifier.rs:28:    // Check for error patterns
+  src/pipeline/classifier.rs:45:    let error_count = lines.iter().filter(|l| l.contains("error")).count();
+  src/pipeline/classifier.rs:89:    fn classify_error_output() {
+  src/pipeline/scorer.rs:12:    // Score error lines higher
