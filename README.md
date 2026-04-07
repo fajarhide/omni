@@ -163,7 +163,7 @@ Heimsense unlocks restricted environments like `claude-code` to run with *any* f
 This is a passion project built for the era of Agentic AI. Whether you're here to save money on tokens, test out free models, or help build the ultimate agentic toolbelt, contributions are always welcome!
 
 - **Development**: Want to build from source? Run `make ci` and `cargo build`. Read our [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-- **License**: [MIT License](LICENSE) © Fajar Hidayat
+- **License**: [MIT License](LICENSE)
 
 <!-- Star History -->
 <p align="center">
@@ -176,7 +176,4 @@ This is a passion project built for the era of Agentic AI. Whether you're here t
   </a>
 </p>
 
-
-## License
-
-[MIT](LICENSE) © Fajar Hidayat
+Build with ❤️ by [Fajar Hidayat](https://github.com/fajarhide)
