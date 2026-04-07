@@ -600,6 +600,49 @@ impl Store {
         })
     }
 
+    /// Content type breakdown: (content_type, count, avg_reduction_pct, comma_separated_commands)
+    pub fn content_type_breakdown(&self, since: i64) -> Result<Vec<(String, u64, f64, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT content_type, COUNT(*),
+                    CASE WHEN SUM(input_bytes)=0 THEN 0.0
+                         ELSE ROUND(100.0*(1.0 - CAST(SUM(output_bytes) AS REAL)/SUM(input_bytes)),1) END,
+                    COALESCE(GROUP_CONCAT(DISTINCT command), '')
+             FROM distillations WHERE ts >= ?1 AND command != ''
+             GROUP BY content_type ORDER BY COUNT(*) DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![since], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, f64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Multi-period stats: Vec of (period_label, count, input_bytes, output_bytes)
+    pub fn multi_period_stats(&self) -> Result<Vec<(String, u64, u64, u64)>> {
+        let now = chrono::Utc::now().timestamp();
+        let midnight = now - (now % 86400);
+        let week_ago = now - 7 * 86400;
+
+        let mut periods = Vec::new();
+        for (label, since) in [
+            ("Today", midnight),
+            ("This Week", week_ago),
+            ("All Time", 0i64),
+        ] {
+            let (count, input, output, _, _) = self.aggregate_stats(since)?;
+            periods.push((label.to_string(), count, input, output));
+        }
+        Ok(periods)
+    }
+
     pub fn cleanup_old(&self, days: u32) {
         let conn = match self.conn.lock() {
             Ok(c) => c,
