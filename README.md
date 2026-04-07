@@ -1,170 +1,51 @@
 <div align="center">
-  <img src="media/logo.png" alt="OMNI Semantic Signal Engine" width="250" />
-
-  **Less noise. More signal. Right signal. Reduce AI token consumption by up to 90%.**
+  <img src="media/logo.png" alt="OMNI" width="250" />
+  
+  **Less noise. More signal. Cut your AI token consumption by up to 90%.**
 
   [![CI](https://github.com/fajarhide/omni/actions/workflows/ci.yml/badge.svg)](https://github.com/fajarhide/omni/actions/workflows/ci.yml)
   [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
   [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
-  [![Stars](https://img.shields.io/github/stars/fajarhide/omni?style=flat-square)](https://github.com/fajarhide/omni/stargazers)
 </div>
 
 <br/>
 
-> **The Semantic Signal Engine that cuts AI token consumption by up to 90%.**<br/>
-> OMNI acts as a context-aware terminal interceptor—distilling noisy command outputs in real-time into high-density intelligence, ensuring your LLM agents work with **meaning**, not text waste.
+> **OMNI** is a smart terminal interceptor that filters out useless command output before it reaches your AI agent. By giving your AI only the pure signal, you get much higher-quality reasoning while saving massive amounts of token costs.
 
 ---
 
-## Why OMNI?
+## 💡 The Problem: Expensive Tokens & Noisy Outputs
 
-AI agents are drowning in noisy CLI output. A `git diff` can easily eat 10K tokens, while a `cargo test` might dump 25K tokens of redundant noise. Claude and other agents read all of it, but 90% of that data is pure distraction that dilutes reasoning and drains your token budget.
+When you use autonomous AI agents (like Claude Code) in your terminal, they read *everything*. A simple `git diff`, `npm install`, or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context. 
 
-OMNI intercepts terminal output automatically, keeping only what matters for your current task. It’s not just about making output smaller; it’s about making it smarter. By understanding command structures and your active session context, OMNI ensures your agent sees the signal, not the waste.
+This causes three huge problems:
+1. **It's extremely expensive**: You pay real money for every single token of that junk output.
+2. **It makes the AI "dumb"**: Critical errors get buried under megabytes of warning logs and loading bars, confusing the AI and diluting its reasoning.
+3. **Model Lock-in**: Advanced agent frameworks force you to use their most expensive flagship models just to have a context window big enough to handle all that noise.
 
-1.  **Cost & Latency**: Large outputs consume your context window rapidly and increase the cost of every message.
-2.  **Cognitive Dilution**: LLMs can lose track of complex reasoning when buried under megabytes of raw CLI logs.
-3.  **Auto-Truncation**: Claude Code often cuts off large outputs, potentially missing the exact error or diff line it needs to see.
+## The Solution: Omni
 
-**OMNI is the solution.** It acts as a "Sieve" that sits between your terminal and the AI, turning raw data into **Semantic Signals**.
+I built Omni because I wanted to run AI agents efficiently and cheaply every single day in my own workflow. 
 
----
+**Omni acts as the perfect filter between your terminal and your AI.** 
 
-## How It Works: The Signal Lifecycle
+**The result?** You can run your AI agent on a super-advanced framework and feed it *zero noise*. Because the AI is only fed highly focused, straight-to-the-point context, even affordable or ordinary models will perform on-par with expensive flagship models, since they are never distracted by junk data.
 
-OMNI employs a unique, multi-layered native interception strategy to ensure maximum efficiency without losing information:
-
-### 1. Surgical Pre-Hook (`PreToolUse`)
-Intercepts noisy commands (like `git`, `cargo`, `npm`, `pytest`) *before* they execute. By natively rewriting these commands to `omni exec`, OMNI prevents auto-truncation and ensures the AI sees a distilled, high-density stream from the first line.
-
-### 2. Safety-Net Post-Hook (`PostToolUse`)
-Automatically distills output from any tool *after* it runs. This acts as a backup for custom scripts or unknown commands.
-
-<div align="center">
-  <img src="media/omni-terminal-hook-indikator.png" alt="OMNI Terminal Hook" width="700" />
-  <p><i>Real-time ROI feedback on every distilled command.</i></p>
-</div>
-
-### 3. Session Continuity (`SessionStart`)
-When you start a new Claude session, OMNI injects a high-level summary of your *previous* state—hot files, last errors, and active task context—so the agent never reaches for "context" it already had.
-
-### 4. Smart Compaction (`PreCompact`)
-Before Claude prunes its conversation history to save space, OMNI provides a permanent summary of the work done so far, ensuring long-term project memory stays sharp.
+My ultimate passion isn't to monetize this—it's to build the ultimate open-source toolbelt for the Agentic AI era. By aggressively saving token costs, I can develop software robustly and cost-effectively today, and you can too.
 
 ---
 
-### The Impact
-> **Reduce AI Token Usage by up to 90%**  
-> *Zero Information Loss. Native Binary Performance. Real-time ROI Monitoring.*
-<br/>
+## Features Explained
 
-![OMNI Token Savings](media/omni_token_savings_graphic.png)
+- **90% Token Reduction**: Omni acts like a smart sieve. If a test fails, it shows the AI *only* the specific error line and stack trace. No more loading spinners, dependency resolution logs, or useless success banners.
+- **Zero Information Loss**: Worried Omni filtered something important? Don't be. Omni saves the raw output in a local archive (`RewindStore`). If the AI actually needs the full log, it can just automatically ask for it.
+- **Session Intelligence**: Omni remembers what you are doing. It knows which files you are actively editing and stops feeding the AI context it already knows, saving even more tokens over time.
+- **Distill Monitor**: Track your token savings and costs over time. Just run `omni stats` to see how much money and space you've saved.
+- **Visual Impact (`omni diff`)**: See exactly how much money and space you are saving. Just run `omni diff` to see the bulky raw output compared side-by-side to Omni's sleek, filtered version.
 
-## Key Features
-
-<br/>
-
-### RewindStore: Zero Information Loss
-When OMNI distills output, the original raw content isn't discarded—it's archived in the **RewindStore** with a SHA-256 hash. 
-- **Agent Access**: Call `omni_retrieve("hash")` via the MCP tool.
-- **Human Access**: Use `omni rewind list` and `omni rewind show <hash>` to manage your archives locally.
-
-<div align="center">
-  <img src="media/omni-rewind-list.png" alt="OMNI Rewind List" width="700" />
-</div>
-
-### Signal Comparison: `omni diff`
-Instantly visualize the value of OMNI. Run `omni diff` after any command to see a side-by-side comparison of the raw input vs. distilled signal.
-
-<div align="center">
-  <img src="media/omni-diff.png" alt="OMNI Diff" width="700" />
-</div>
-
-### Session Intelligence
-OMNI doesn't just compress; it **understands context**. It tracks which files you are editing ("Hot Files") and which errors are recurring.
-
-<div align="center">
-  <img src="media/omni-session-status.png" alt="OMNI Session" width="700" />
-</div>
-
-### Transcript & Recovery
-OMNI safely persists session transcripts as you work. If your AI agent crashes or gets interrupted, you can seamlessly **resume your session** and pick up right where you left off. OMNI ensures you never lose critical tool calls or outputs. Use `omni session --resume` to recover an interrupted session.
-
-### Pattern Discovery (Learning)
-OMNI automatically collects samples of repetitive noise in the background. Use `omni learn --status` to discover new candidate filters.
-
-<div align="center">
-  <img src="media/omni-learn-status.png" alt="OMNI Learn" width="700" />
-</div>
-
-### The OMNI Philosophy: Deliberate Action
-
-OMNI is designed for **maximum safety and control**. By default, core commands like `init`, `session`, and `learn` will only show a help screen if no flags are provided. This prevents accidental changes to your global configuration.
-
-Every core command follows a consistent **Discovery vs. Action** pattern:
-- **Discovery**: Use `--status` to see what OMNI has found (installation status, session details, or new noise patterns).
-- **Action**: Use explicit flags like `--all`, `--apply`, or `--clear` to commit changes.
-
-
-## Analytics Dashboard
-
-Keep track of your project's efficiency with OMNI's built-in reporting:
-
-<div align="center">
-  <img src="media/omni-stats.png" alt="OMNI Stats" width="700" />
-</div>
-
-## Quick Start
-
-```bash
-# 1. Install via Homebrew (macOS/Linux)
-brew install fajarhide/tap/omni
-
-# 2. Perform Full Setup (Hooks + MCP Server)
-omni init --all
-
-# 3. Verify Installation
-omni doctor
-
-# 4. Or auto-fix any issues
-omni doctor --fix
-
-# 5. Check Current Status
-omni init --status
-```
-
-On universal setup (macOS / Linux / WSL)
-```bash 
-curl -fsSL https://omni.weekndlabs.com/install | bash
-```
-
-On Windows (Native PowerShell)
-```powershell
-irm https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.ps1 | iex
-```
-
-## Custom Filters (TOML)
-
-You can define your own distillation rules for custom internal tools:
-
-```toml
-# ~/.omni/filters/deploy.toml
-schema_version = 1
-
-[filters.deploy]
-description = "Internal deployment tool"
-match_command = "^deploy\\b"
-
-[[filters.deploy.match_output]]
-pattern = "Deployment successful"
-message = "deploy: ✓ success"
-
-strip_lines_matching = ["^\\[DEBUG\\]", "^Connecting"]
-max_lines = 30
-```
-
+---
 ## Architecture
 
 ```mermaid
@@ -204,24 +85,73 @@ flowchart TB
     Comp --> ST
 ```
 
-## Development
+## 🛠 Quick Start & Installation
 
-OMNI is built for high-performance AI workflows with professional standards.
+Omni is incredibly easy to set up. It natively integrates into your terminal.
 
+**macOS / Linux:**
 ```bash
-make ci              # Run fmt, clippy, tests, and security audit
-cargo build          # Build the binary
-cargo test           # Run all 147 tests
-cargo insta review   # Review and accept snapshot changes
+# 1. Install via Homebrew
+brew install fajarhide/tap/omni
+
+# 2. Setup Omni (Hooks + MCP Server)
+omni init --all
+
+# 3. Verify it's working
+omni doctor
+
+# 4. Or auto-fix any issues
+omni doctor --fix
+
+# 5. Check Current Status
+omni init --status
 ```
 
-See [docs/TESTING.md](docs/TESTING.md) for a detailed breakdown of our 190+ test suite covering Context Safety, E2E Hooks, Security, and Performance Assertions.
+**Universal Installer (macOS / Linux / WSL):**
+```bash 
+curl -fsSL omni.weekndlabs.com/install | bash
+```
 
-See [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [Critical Guardrails](tests/README.md#critical-guardrails) for the full contributor guide and architectural rules.
+**Windows (PowerShell):**
+```powershell
+irm omni.weekndlabs.com/install.ps1 | iex
+```
 
+---
 
-## Star History
+## 📖 How to Use It
 
+The best part? **You don't have to do anything special!**
+
+Once installed via `omni init --all`, Omni works invisibly in the background. When your AI Agent runs a terminal command (like `npm install` or `pytest`), Omni automatically jumps in, intercepts the terminal output, cleans up the garbage logs, and hands the clean signal back to the AI. 
+
+To review how many tokens (and how much money) you've saved today, just type:
+```bash
+omni stats
+```
+
+Need to see the filters in action or add your own custom rules?
+You can easily create your own rules using simple TOML files. Check out our `filters/` directory!
+
+---
+
+## ⚡️ Works Even Better with Heimsense
+
+Omni is part of my personal AI toolbelt. If you use `claude-code`, I highly recommend pairing Omni with my other project: **[Heimsense](https://github.com/fajarhide/heimsense)**. 
+
+Heimsense unlocks restricted environments like `claude-code` to run with *any* free or OpenAI-compatible model, rather than forcing you to use expensive Anthropic ones. 
+**Omni + Heimsense** = Run world-class agent frameworks using affordable models with zero noise and pinpoint accuracy.
+
+---
+
+## ❤️ Contributing & License
+
+This is a passion project built for the era of Agentic AI. Whether you're here to save money on tokens, test out free models, or help build the ultimate agentic toolbelt, contributions are always welcome!
+
+- **Development**: Want to build from source? Run `make ci` and `cargo build`. Read our [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+- **License**: [MIT License](LICENSE) © Fajar Hidayat
+
+<!-- Star History -->
 <p align="center">
   <a href="https://star-history.com/#fajarhide/omni&Date">
     <picture>
