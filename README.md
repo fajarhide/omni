@@ -16,7 +16,7 @@
 
 ---
 
-## 💡 The Problem: Expensive Tokens & Noisy Outputs
+## The Problem: Expensive Tokens & Noisy Outputs
 
 When you use autonomous AI agents (like Claude Code) in your terminal, they read *everything*. A simple `git diff`, `npm install`, or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context. 
 
@@ -85,7 +85,7 @@ flowchart TB
     Comp --> ST
 ```
 
-## 🛠 Quick Start & Installation
+## Quick Start & Installation
 
 Omni is incredibly easy to set up. It natively integrates into your terminal.
 
@@ -119,7 +119,7 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
-## 📖 How to Use It
+## How to Use It
 
 The best part? **You don't have to do anything special!**
 
@@ -135,7 +135,7 @@ You can easily create your own rules using simple TOML files. Check out our `fil
 
 ---
 
-## ⚡️ Works Even Better with Heimsense
+## Works Even Better with Heimsense
 
 Omni is part of my personal AI toolbelt. If you use `claude-code`, I highly recommend pairing Omni with my other project: **[Heimsense](https://github.com/fajarhide/heimsense)**. 
 
@@ -144,7 +144,7 @@ Heimsense unlocks restricted environments like `claude-code` to run with *any* f
 
 ---
 
-## ❤️ Contributing & License
+## Contributing & License
 
 This is a passion project built for the era of Agentic AI. Whether you're here to save money on tokens, test out free models, or help build the ultimate agentic toolbelt, contributions are always welcome!
 
