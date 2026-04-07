@@ -8,7 +8,12 @@ impl Distiller for CloudDistiller {
         ContentType::Cloud
     }
 
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         // Dispatch to sub-function based on content analysis
         if input.contains("CONTAINER ID") || input.contains("docker ps") {
             distill_docker_ps(input)

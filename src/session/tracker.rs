@@ -3,6 +3,7 @@ use crate::store::sqlite::Store;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -287,6 +288,42 @@ pub fn infer_domain(session: &SessionState) -> Option<String> {
     parts.last().map(|last| last.to_string())
 }
 
+pub fn detect_js_toolchain(working_dir: &Path) -> Option<String> {
+    if working_dir.join("pnpm-lock.yaml").exists() {
+        return Some("pnpm".into());
+    }
+    if working_dir.join("yarn.lock").exists() {
+        return Some("yarn".into());
+    }
+    if working_dir.join("bun.lockb").exists() {
+        return Some("bun".into());
+    }
+    if working_dir.join("package-lock.json").exists() {
+        return Some("npm".into());
+    }
+    None
+}
+
+pub fn detect_rust_toolchain(working_dir: &Path) -> Option<String> {
+    if working_dir.join("Cargo.toml").exists() {
+        return Some("cargo".into());
+    }
+    None
+}
+
+pub fn detect_python_toolchain(working_dir: &Path) -> Option<String> {
+    if working_dir.join("pyproject.toml").exists() {
+        return Some("poetry".into());
+    }
+    if working_dir.join("requirements.txt").exists() {
+        return Some("pip".into());
+    }
+    if working_dir.join("Pipfile").exists() {
+        return Some("pipenv".into());
+    }
+    None
+}
+
 fn save_async(session: Arc<Mutex<SessionState>>, store: Arc<Store>) {
     thread::spawn(move || {
         let s = match session.lock() {
@@ -399,5 +436,28 @@ mod tests {
         save_async(session, store);
         let elapsed = start.elapsed();
         assert!(elapsed.as_millis() < 200);
+    }
+
+    #[test]
+    fn test_detect_toolchains() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // 1. Rust detection
+        std::fs::write(path.join("Cargo.toml"), "").unwrap();
+        assert_eq!(detect_rust_toolchain(path), Some("cargo".into()));
+
+        // 2. JS detection (pnpm)
+        std::fs::write(path.join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(detect_js_toolchain(path), Some("pnpm".into()));
+
+        // 3. JS detection (yarn) - after removing pnpm to avoid conflict or just check order
+        std::fs::remove_file(path.join("pnpm-lock.yaml")).unwrap();
+        std::fs::write(path.join("yarn.lock"), "").unwrap();
+        assert_eq!(detect_js_toolchain(path), Some("yarn".into()));
+
+        // 4. Python detection (poetry)
+        std::fs::write(path.join("pyproject.toml"), "").unwrap();
+        assert_eq!(detect_python_toolchain(path), Some("poetry".into()));
     }
 }

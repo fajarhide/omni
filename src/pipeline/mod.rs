@@ -153,6 +153,7 @@ pub struct SessionState {
     pub cumulative_input_bytes: u64,
     pub cumulative_output_bytes: u64,
     pub top_command_info: Option<(String, f32)>, // (command, savings_pct)
+    pub toolchain_hints: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

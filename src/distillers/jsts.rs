@@ -9,22 +9,45 @@ impl Distiller for JsTsDistiller {
         ContentType::JsTs
     }
 
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
-        let lines: Vec<&str> = input.lines().collect();
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
+        let mut lines: Vec<&str> = input.lines().collect();
+
+        if let Some(state) = session
+            && let Some(js_pm) = state.toolchain_hints.get("js")
+        {
+            if js_pm == "pnpm" {
+                lines.retain(|l| !l.contains("pnpm: packages are hard linked"));
+            } else if js_pm == "yarn" {
+                lines.retain(|l| !l.contains("yarn install v1."));
+            }
+        }
+
+        let filtered_input = lines.join("\n");
 
         // Dispatch based on content analysis
         if is_vitest_output(&lines) {
-            distill_vitest(input)
+            distill_vitest(&filtered_input)
         } else if is_tsc_output(&lines) {
-            distill_tsc(input)
+            distill_tsc(&filtered_input)
         } else if is_playwright_output(&lines) {
-            distill_playwright(input)
+            distill_playwright(&filtered_input)
         } else if is_eslint_output(&lines) {
-            distill_eslint(input)
+            distill_eslint(&filtered_input)
         } else if is_prettier_output(&lines) {
-            distill_prettier(input)
+            distill_prettier(&filtered_input)
         } else {
-            distill_fallback(segments)
+            // Update segments if lines were dropped, or just use filtered_input
+            if filtered_input.len() < input.len() {
+                // Not perfectly accurate for line ranges, but safe for fallback
+                distill_fallback(segments, session)
+            } else {
+                distill_fallback(segments, session)
+            }
         }
     }
 }
@@ -523,32 +546,129 @@ fn distill_prettier(input: &str) -> String {
 // Fallback
 // ---------------------------------------------------------------------------
 
-fn distill_fallback(segments: &[OutputSegment]) -> String {
+fn distill_fallback(
+    segments: &[OutputSegment],
+    session: Option<&crate::pipeline::SessionState>,
+) -> String {
     let mut out = String::new();
-    let mut lines = 0;
+    let mut lines_count = 0;
+
+    let js_pm = session.and_then(|s| s.toolchain_hints.get("js").map(|v| v.as_str()));
 
     for seg in segments {
         if matches!(seg.tier, SignalTier::Critical | SignalTier::Important) {
             for line in seg.content.lines() {
-                if lines >= 30 {
+                if lines_count >= 30 {
                     break;
                 }
+
+                // Filter toolchain-specific noise if session hint exists
+                if let Some(pm) = js_pm {
+                    if pm == "pnpm" && line.contains("pnpm: packages are hard linked") {
+                        continue;
+                    }
+                    if pm == "yarn" && line.contains("yarn install v1.") {
+                        continue;
+                    }
+                }
+
                 out.push_str(line);
                 out.push('\n');
-                lines += 1;
+                lines_count += 1;
             }
         }
-        if lines >= 30 {
+        if lines_count >= 30 {
             break;
         }
     }
 
     if out.trim().is_empty() {
         for seg in segments.iter().take(10) {
-            out.push_str(&seg.content);
-            out.push('\n');
+            let mut line_added = false;
+            for line in seg.content.lines() {
+                if let Some(pm) = js_pm {
+                    if pm == "pnpm" && line.contains("pnpm: packages are hard linked") {
+                        continue;
+                    }
+                    if pm == "yarn" && line.contains("yarn install v1.") {
+                        continue;
+                    }
+                }
+                out.push_str(line);
+                out.push('\n');
+                line_added = true;
+                break; // only take first line for fallback summary
+            }
+            if !line_added {
+                // if we filtered the only line, just skip
+            }
         }
     }
 
     out.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::{SessionState, SignalTier};
+
+    #[test]
+    fn test_toolchain_filtering() {
+        let distiller = JsTsDistiller;
+        let input = "pnpm: packages are hard linked\n✓ test 1\nyarn install v1.22.19\n✗ test 2";
+        let segments = vec![
+            OutputSegment {
+                content: "pnpm: packages are hard linked".to_string(),
+                tier: SignalTier::Important,
+                base_score: 0.8,
+                context_score: 0.0,
+                line_range: (1, 1),
+            },
+            OutputSegment {
+                content: "✓ test 1".to_string(),
+                tier: SignalTier::Important,
+                base_score: 0.8,
+                context_score: 0.0,
+                line_range: (2, 2),
+            },
+            OutputSegment {
+                content: "yarn install v1.22.19".to_string(),
+                tier: SignalTier::Important,
+                base_score: 0.8,
+                context_score: 0.0,
+                line_range: (3, 3),
+            },
+            OutputSegment {
+                content: "✗ test 2".to_string(),
+                tier: SignalTier::Critical,
+                base_score: 0.9,
+                context_score: 0.0,
+                line_range: (4, 4),
+            },
+        ];
+
+        // 1. Without session, no filtering
+        let output_none = distiller.distill(&segments, input, None);
+        assert!(output_none.contains("pnpm: packages are hard linked"));
+        assert!(output_none.contains("yarn install v1."));
+
+        // 2. With pnpm session
+        let mut state_pnpm = SessionState::new();
+        state_pnpm
+            .toolchain_hints
+            .insert("js".to_string(), "pnpm".to_string());
+        let output_pnpm = distiller.distill(&segments, input, Some(&state_pnpm));
+        assert!(!output_pnpm.contains("pnpm: packages are hard linked"));
+        assert!(output_pnpm.contains("yarn install v1."));
+
+        // 3. With yarn session
+        let mut state_yarn = SessionState::new();
+        state_yarn
+            .toolchain_hints
+            .insert("js".to_string(), "yarn".to_string());
+        let output_yarn = distiller.distill(&segments, input, Some(&state_yarn));
+        assert!(output_yarn.contains("pnpm: packages are hard linked"));
+        assert!(!output_yarn.contains("yarn install v1."));
+    }
 }

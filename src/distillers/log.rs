@@ -8,7 +8,12 @@ impl Distiller for LogDistiller {
         ContentType::LogOutput
     }
 
-    fn distill(&self, segments: &[OutputSegment], _input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        _input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         let mut out = String::new();
         let mut i = 0;
 

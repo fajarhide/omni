@@ -9,7 +9,12 @@ impl Distiller for SystemOpsDistiller {
         ContentType::SystemOps
     }
 
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         let lines: Vec<&str> = input.lines().collect();
         if lines.is_empty() {
             return String::new();

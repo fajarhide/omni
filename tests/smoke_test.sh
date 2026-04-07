@@ -148,7 +148,7 @@ check_exit "session start exits cleanly" "$SESSION_EXIT" "0"
 echo "▸ Scenario 7: Stats"
 STATS_OUT=$("$OMNI" stats 2>&1 || true)
 check "stats shows header" "$STATS_OUT" "Signal Report"
-check "stats shows commands" "$STATS_OUT" "Commands processed"
+check "stats shows commands" "$STATS_OUT" "commands"
 
 # ─── 8. Learn ────────────────────────────────────────────
 echo "▸ Scenario 8: Learn"

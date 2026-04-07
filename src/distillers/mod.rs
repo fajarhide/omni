@@ -13,7 +13,12 @@ pub mod test;
 
 pub trait Distiller: Send + Sync {
     fn content_type(&self) -> ContentType;
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String;
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        session: Option<&crate::pipeline::SessionState>,
+    ) -> String;
 }
 
 pub fn get_distiller(content_type: &ContentType) -> Box<dyn Distiller> {
@@ -45,7 +50,7 @@ mod tests {
                 let input = include_str!(concat!("../../tests/fixtures/", $file));
                 let segments = scorer::score_segments(input, &$ctype, None);
                 let distiller = get_distiller(&$ctype);
-                let output = distiller.distill(&segments, input);
+                let output = distiller.distill(&segments, input, None);
 
                 insta::assert_snapshot!(output);
 

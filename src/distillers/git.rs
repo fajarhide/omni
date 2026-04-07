@@ -8,7 +8,12 @@ impl Distiller for GitDistiller {
         ContentType::GitDiff
     }
 
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         if input.contains("diff --git") {
             distill_diff(segments, input)
         } else if input.contains("On branch") || input.contains("HEAD detached") {

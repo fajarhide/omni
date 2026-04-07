@@ -133,7 +133,11 @@ pub fn process_payload(
 
         let distiller = distillers::get_distiller(&ctype);
         let active_ctype = distiller.content_type();
-        let output = distiller.distill(&scored_segments, &effective_input);
+        let output = distiller.distill(
+            &scored_segments,
+            &effective_input,
+            session.as_ref().and_then(|l| l.lock().ok()).as_deref(),
+        );
         (output, format!("{:?}", active_ctype), Some(active_ctype))
     };
 
