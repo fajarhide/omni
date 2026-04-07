@@ -1,0 +1,76 @@
+schema_version = 1
+
+[filters.jest]
+description = "Filter Jest test noise — strip PASS suites, coverage headers, keep FAIL details and summary"
+match_command = "^(pnpm|yarn|npx|bun)? ?(exec )?jest\\b"
+strip_ansi = true
+confidence = 0.90
+strip_lines_matching = [
+    "^PASS ",
+    "^\\s*✓ ",
+    "^\\s*● Console",
+    "^\\s*console\\.log",
+    "^\\s*------\\|------",
+    "^\\s*File\\s+\\|\\s+% Stmts",
+    "^\\s*All files\\s+\\|",
+    "^\\s*-------\\|-------",
+]
+max_lines = 50
+on_empty = "jest: all passed"
+
+[[tests.jest]]
+name = "mixed pass and fail keeps failure details"
+input = """
+PASS src/__tests__/utils.test.ts
+PASS src/__tests__/api.test.ts
+FAIL src/__tests__/auth.test.ts
+  ● Auth Service › should validate token
+    expect(received).toBe(expected)
+    Expected: true
+    Received: false
+      12 |   const result = validateToken(token);
+      13 |   expect(result).toBe(true);
+         |                  ^
+      14 | });
+      at Object.<anonymous> (src/__tests__/auth.test.ts:13:18)
+
+Test Suites: 1 failed, 2 passed, 3 total
+Tests:       1 failed, 8 passed, 9 total
+Time:        3.456 s
+"""
+expected = """FAIL src/__tests__/auth.test.ts
+  ● Auth Service › should validate token
+    expect(received).toBe(expected)
+    Expected: true
+    Received: false
+      12 |   const result = validateToken(token);
+      13 |   expect(result).toBe(true);
+         |                  ^
+      14 | });
+      at Object.<anonymous> (src/__tests__/auth.test.ts:13:18)
+
+Test Suites: 1 failed, 2 passed, 3 total
+Tests:       1 failed, 8 passed, 9 total
+Time:        3.456 s"""
+
+[[tests.jest]]
+name = "all pass with coverage table stripped"
+input = """
+PASS src/__tests__/utils.test.ts
+  ✓ should add numbers (3ms)
+  ✓ should subtract numbers (1ms)
+PASS src/__tests__/api.test.ts
+  ✓ should fetch data (12ms)
+
+------|------|------|------|------|
+File  | % Stmts | % Branch | % Funcs | % Lines |
+------|------|------|------|------|
+All files |  85.71 |  100 |  75 |  85.71 |
+------|------|------|------|------|
+
+Test Suites: 2 passed, 2 total
+Tests:       3 passed, 3 total
+"""
+expected = """
+Test Suites: 2 passed, 2 total
+Tests:       3 passed, 3 total"""

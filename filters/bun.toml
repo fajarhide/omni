@@ -1,0 +1,72 @@
+schema_version = 1
+
+[filters.bun]
+description = "Filter Bun runtime noise — strip download progress, dependency resolution, keep errors and timing"
+match_command = "^bun\\b"
+strip_ansi = true
+confidence = 0.88
+strip_lines_matching = [
+    "^\\s*$",
+    "^\\s*Resolving dependencies",
+    "^\\s*Resolved, downloaded and extracted",
+    "^\\s*Saved lockfile",
+    "^bun install v",
+    "^\\[\\d+\\.\\d+ms\\] ",
+    "^Packages: \\+\\d+",
+    "^\\s*\\+\\+\\+",
+]
+max_lines = 40
+
+[[filters.bun.match_output]]
+pattern = "\\d+ packages installed"
+message = "bun: install ok"
+unless = "error|warn"
+
+[[tests.bun]]
+name = "install strips dependency noise"
+input = """
+bun install v1.1.0
+
+Resolving dependencies
+Resolved, downloaded and extracted [142]
+Saved lockfile
+
+Packages: +142
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+ + @types/node@20.11.0
+ + typescript@5.3.3
+
+142 packages installed [2.34s]
+"""
+expected = "bun: install ok"
+
+[[tests.bun]]
+name = "install with warnings preserved"
+input = """
+bun install v1.1.0
+
+Resolving dependencies
+warn: deprecated package inflight@1.0.6
+Resolved, downloaded and extracted [89]
+Saved lockfile
+
+89 packages installed [1.87s]
+"""
+expected = """warn: deprecated package inflight@1.0.6
+89 packages installed [1.87s]"""
+
+[[tests.bun]]
+name = "build error preserved"
+input = """
+bun build src/index.ts --outdir dist
+
+error: Could not resolve "missing-module"
+  at src/index.ts:3:8
+
+Build failed: 1 error
+"""
+expected = """bun build src/index.ts --outdir dist
+error: Could not resolve "missing-module"
+  at src/index.ts:3:8
+Build failed: 1 error"""

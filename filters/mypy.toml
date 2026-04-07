@@ -1,0 +1,50 @@
+schema_version = 1
+
+[filters.mypy]
+description = "Filter mypy type checker noise — strip success messages for clean files, keep errors and summary"
+match_command = "^mypy\\b|^python3? -m mypy\\b|^uv run mypy\\b"
+strip_ansi = true
+confidence = 0.90
+strip_lines_matching = [
+    "^\\s*$",
+    "^Success: no issues",
+    "^\\s*\\.\\.\\.$",
+]
+max_lines = 50
+
+[[filters.mypy.match_output]]
+pattern = "Success: no issues found"
+message = "mypy: ok"
+
+[[tests.mypy]]
+name = "errors with file locations"
+input = """
+src/main.py:10: error: Argument 1 to "process" has incompatible type "str"; expected "int"  [arg-type]
+src/main.py:25: error: Name "undefined_var" is not defined  [name-defined]
+src/utils.py:8: error: Incompatible return value type (got "str", expected "int")  [return-value]
+Found 3 errors in 2 files (checked 15 source files)
+"""
+expected = """src/main.py:10: error: Argument 1 to "process" has incompatible type "str"; expected "int"  [arg-type]
+src/main.py:25: error: Name "undefined_var" is not defined  [name-defined]
+src/utils.py:8: error: Incompatible return value type (got "str", expected "int")  [return-value]
+Found 3 errors in 2 files (checked 15 source files)"""
+
+[[tests.mypy]]
+name = "no issues found short-circuits"
+input = """
+Success: no issues found in 15 source files
+"""
+expected = "mypy: ok"
+
+[[tests.mypy]]
+name = "notes and errors mixed"
+input = """
+src/handler.py:12: error: Missing return statement  [return]
+src/handler.py:12: note: See https://mypy.readthedocs.io for more info
+src/models.py:5: error: "Dict" is not subscriptable  [misc]
+Found 2 errors in 2 files (checked 8 source files)
+"""
+expected = """src/handler.py:12: error: Missing return statement  [return]
+src/handler.py:12: note: See https://mypy.readthedocs.io for more info
+src/models.py:5: error: "Dict" is not subscriptable  [misc]
+Found 2 errors in 2 files (checked 8 source files)"""

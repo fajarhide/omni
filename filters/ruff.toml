@@ -1,0 +1,57 @@
+schema_version = 1
+
+[filters.ruff]
+description = "Filter Ruff Python linter noise — strip ok summaries, keep error codes and locations"
+match_command = "^ruff\\b|^python3? -m ruff\\b|^uv run ruff\\b"
+strip_ansi = true
+confidence = 0.90
+strip_lines_matching = [
+    "^\\s*$",
+    "^All checks passed",
+    "^Found 0 errors",
+    "^\\d+ files? already formatted",
+    "^ruff check --fix",
+]
+max_lines = 50
+on_empty = "ruff: ok"
+
+[[filters.ruff.match_output]]
+pattern = "All checks passed"
+message = "ruff: ok"
+
+[[tests.ruff]]
+name = "lint errors with codes and locations"
+input = """
+src/main.py:5:1: F401 [*] `os` imported but unused
+src/main.py:12:80: E501 Line too long (95 > 79)
+src/utils.py:3:1: F401 [*] `sys` imported but unused
+src/utils.py:18:5: E711 Comparison to `None` (use `is None`)
+
+Found 4 errors.
+[*] 2 fixable with the `--fix` option.
+"""
+expected = """src/main.py:5:1: F401 [*] `os` imported but unused
+src/main.py:12:80: E501 Line too long (95 > 79)
+src/utils.py:3:1: F401 [*] `sys` imported but unused
+src/utils.py:18:5: E711 Comparison to `None` (use `is None`)
+Found 4 errors.
+[*] 2 fixable with the `--fix` option."""
+
+[[tests.ruff]]
+name = "all checks passed"
+input = """
+All checks passed!
+"""
+expected = "ruff: ok"
+
+[[tests.ruff]]
+name = "format check with issues"
+input = """
+Would reformat: src/main.py
+Would reformat: src/utils.py
+
+2 files would be reformatted, 8 files already formatted
+"""
+expected = """Would reformat: src/main.py
+Would reformat: src/utils.py
+2 files would be reformatted, 8 files already formatted"""

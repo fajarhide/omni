@@ -1,23 +1,32 @@
 schema_version = 1
 
 [filters.phpunit]
-description = "Filter noise from PHPUnit and Laravel test output"
-match_command = "^phpunit|php artisan test"
+description = "Filter PHPUnit and Laravel test noise — strip dots progress, runtime info, keep failures and summary"
+match_command = "^(php\\s+)?vendor/bin/phpunit\\b|^phpunit\\b|^php artisan test\\b"
 strip_ansi = true
+confidence = 0.92
 strip_lines_matching = [
-    "^\\.*$",
     "^\\s*$",
     "^PHPUnit \\d+",
     "^Runtime:",
+    "^Configuration:",
+    "^Using \\d+ process",
+    "^Remaining:",
 ]
+max_lines = 50
 on_empty = "phpunit: all passed"
 
+[[filters.phpunit.match_output]]
+pattern = "OK \\(\\d+ tests?, \\d+ assertions?\\)"
+message = "phpunit: all passed"
+
 [[tests.phpunit]]
-name = "mixed pass and fail"
+name = "mixed pass and fail keeps failure details"
 input = """
 PHPUnit 10.1.0 by Sebastian Bergmann and contributors.
 
 Runtime:       PHP 8.2.0
+Configuration: /home/user/project/phpunit.xml
 
 ..F..                                                               5 / 5 (100%)
 
@@ -41,3 +50,57 @@ Failed asserting that false is true.
 /home/user/project/tests/Unit/ExampleTest.php:15
 FAILURES!
 Tests: 5, Assertions: 5, Failures: 1."""
+
+[[tests.phpunit]]
+name = "all pass short-circuits"
+input = """
+PHPUnit 10.1.0 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.2.0
+Configuration: /home/user/project/phpunit.xml
+
+..........                                                         10 / 10 (100%)
+
+Time: 00:00.045, Memory: 8.00 MB
+
+OK (10 tests, 25 assertions)
+"""
+expected = "phpunit: all passed"
+
+[[tests.phpunit]]
+name = "error with multiple failures preserved"
+input = """
+PHPUnit 10.1.0 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.2.0
+
+.F.F.                                                               5 / 5 (100%)
+
+Time: 00:00.089, Memory: 10.00 MB
+
+There were 2 failures:
+
+1) Tests\\Unit\\UserTest::test_create_user
+Failed asserting that 403 matches expected 200.
+
+/home/user/project/tests/Unit/UserTest.php:22
+
+2) Tests\\Unit\\AuthTest::test_validate_token
+Failed asserting that null is not null.
+
+/home/user/project/tests/Unit/AuthTest.php:38
+
+FAILURES!
+Tests: 5, Assertions: 5, Failures: 2.
+"""
+expected = """.F.F.                                                               5 / 5 (100%)
+Time: 00:00.089, Memory: 10.00 MB
+There were 2 failures:
+1) Tests\\Unit\\UserTest::test_create_user
+Failed asserting that 403 matches expected 200.
+/home/user/project/tests/Unit/UserTest.php:22
+2) Tests\\Unit\\AuthTest::test_validate_token
+Failed asserting that null is not null.
+/home/user/project/tests/Unit/AuthTest.php:38
+FAILURES!
+Tests: 5, Assertions: 5, Failures: 2."""
