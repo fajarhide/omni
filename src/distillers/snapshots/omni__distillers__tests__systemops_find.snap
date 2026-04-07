@@ -1,0 +1,10 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+find: 65 results
+  .rs: 55, .toml: 4, .txt: 3, (no ext): 1, .lock: 1, .md: 1
+  samples:
+    ./src/main.rs
+    ./src/lib.rs
+    ./src/pipeline/mod.rs

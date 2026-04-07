@@ -104,10 +104,7 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     }
 
     // Fresh session logic
-    let new_state = SessionState::new();
-    store.upsert_session(&new_state);
-    let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
-    store.index_event(&new_state.session_id, "SessionStart", &start_msg);
+    let mut new_state = SessionState::new();
 
     // Initialize transcript for new session
     let cwd = if parsed.working_directory.is_empty() {
@@ -117,6 +114,22 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     } else {
         parsed.working_directory.clone()
     };
+    let cwd_path = std::path::Path::new(&cwd);
+
+    if let Some(pm) = crate::session::tracker::detect_js_toolchain(cwd_path) {
+        new_state.toolchain_hints.insert("js".to_string(), pm);
+    }
+    if let Some(pm) = crate::session::tracker::detect_rust_toolchain(cwd_path) {
+        new_state.toolchain_hints.insert("rust".to_string(), pm);
+    }
+    if let Some(pm) = crate::session::tracker::detect_python_toolchain(cwd_path) {
+        new_state.toolchain_hints.insert("python".to_string(), pm);
+    }
+
+    store.upsert_session(&new_state);
+    let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
+    store.index_event(&new_state.session_id, "SessionStart", &start_msg);
+
     let t = transcript::Transcript::new(&new_state.session_id, &cwd);
     let _ = t.save();
 

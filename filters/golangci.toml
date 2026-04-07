@@ -1,0 +1,49 @@
+schema_version = 1
+
+[filters.golangci]
+description = "Filter golangci-lint noise — strip runner info, keep lint errors with locations"
+match_command = "^golangci-lint\\b"
+strip_ansi = true
+confidence = 0.90
+strip_lines_matching = [
+    "^\\s*$",
+    "^level=info",
+    "^\\[runner\\]",
+    "^Skipping ",
+    "^INFO ",
+    "^WARN ",
+    "^Run this to see ",
+]
+max_lines = 50
+on_empty = "golangci-lint: ok"
+
+[[tests.golangci]]
+name = "lint errors with locations"
+input = """
+level=info msg="[runner] Executing linters"
+level=info msg="[runner] Running default linters"
+
+main.go:15:2: SA4006: this value of `err` is never used (staticcheck)
+	err := doSomething()
+
+pkg/handler.go:42:10: G104: Errors unhandled (gosec)
+	json.NewEncoder(w).Encode(data)
+
+pkg/utils.go:8:6: `helper` is unused (deadcode)
+
+Run this to see full output: golangci-lint run -v
+"""
+expected = """main.go:15:2: SA4006: this value of `err` is never used (staticcheck)
+	err := doSomething()
+pkg/handler.go:42:10: G104: Errors unhandled (gosec)
+	json.NewEncoder(w).Encode(data)
+pkg/utils.go:8:6: `helper` is unused (deadcode)"""
+
+[[tests.golangci]]
+name = "no issues found"
+input = """
+level=info msg="[runner] Executing linters"
+level=info msg="[runner] Running default linters"
+
+"""
+expected = "golangci-lint: ok"

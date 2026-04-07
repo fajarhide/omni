@@ -11,7 +11,7 @@ fn run_pipeline(input: &str) -> (usize, usize, f64) {
 
     // Use the actual distiller logic from post_tool.rs
     let distiller = omni::distillers::get_distiller(&ctype);
-    let output = distiller.distill(&segments, input);
+    let output = distiller.distill(&segments, input, None);
 
     let input_len = input.len();
     let output_len = output.len();
@@ -126,7 +126,7 @@ fn test_pipeline_latency_under_50ms_debug() {
     let ctype = classifier::classify(&input);
     let segments = scorer::score_segments(&input, &ctype, None);
     let distiller = distillers::get_distiller(&ctype);
-    distiller.distill(&segments, &input);
+    distiller.distill(&segments, &input, None);
     let elapsed = start.elapsed();
 
     assert!(

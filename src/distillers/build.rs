@@ -8,7 +8,12 @@ impl Distiller for BuildDistiller {
         ContentType::BuildOutput
     }
 
-    fn distill(&self, segments: &[OutputSegment], _input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        _input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 

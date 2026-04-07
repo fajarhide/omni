@@ -1,0 +1,54 @@
+schema_version = 1
+
+[filters.black]
+description = "Filter Black Python formatter noise — strip individual file names when many, keep summary and errors"
+match_command = "^black\\b|^python3? -m black\\b|^uv run black\\b"
+strip_ansi = true
+confidence = 0.88
+strip_lines_matching = [
+    "^\\s*$",
+    "^reformatted ",
+    "^would reformat ",
+]
+max_lines = 30
+
+[[filters.black.match_output]]
+pattern = "All done!"
+message = "black: ok"
+unless = "reformatted|would reformat|error|Oh no!"
+
+[[tests.black]]
+name = "all files clean"
+input = """
+All done! ✨ 🍰 ✨
+15 files left unchanged.
+"""
+expected = "black: ok"
+
+[[tests.black]]
+name = "multiple files reformatted shows summary only"
+input = """
+reformatted src/main.py
+reformatted src/utils.py
+reformatted src/handler.py
+reformatted src/models.py
+reformatted src/api.py
+reformatted src/services.py
+
+All done! ✨ 🍰 ✨
+6 files reformatted, 9 files left unchanged.
+"""
+expected = """All done! ✨ 🍰 ✨
+6 files reformatted, 9 files left unchanged."""
+
+[[tests.black]]
+name = "error preserved"
+input = """
+error: cannot format src/broken.py: Cannot parse: 1:0: import {
+
+Oh no! 💥 💔 💥
+1 file failed to reformat, 14 files left unchanged.
+"""
+expected = """error: cannot format src/broken.py: Cannot parse: 1:0: import {
+Oh no! 💥 💔 💥
+1 file failed to reformat, 14 files left unchanged."""

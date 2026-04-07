@@ -1,0 +1,75 @@
+schema_version = 1
+
+[filters.prisma]
+description = "Filter Prisma ORM noise — strip schema loading, spinners, keep migrations and errors"
+match_command = "^(pnpm|yarn|npx|bun)? ?(exec )?prisma\\b"
+strip_ansi = true
+confidence = 0.88
+strip_lines_matching = [
+    "^\\s*$",
+    "^Prisma schema loaded from",
+    "^Datasource .* - ",
+    "^Generating\\.\\.\\.",
+    "^✔ Generated Prisma Client",
+    "^Environment variables loaded from",
+    "^Running seeder",
+    "^\\s*⠋",
+    "^\\s*⠙",
+    "^\\s*⠹",
+    "^\\s*⠸",
+    "^\\s*⠼",
+    "^\\s*⠴",
+    "^\\s*⠦",
+    "^\\s*⠧",
+    "^\\s*⠇",
+    "^\\s*⠏",
+]
+max_lines = 40
+on_empty = "prisma: ok"
+
+[[tests.prisma]]
+name = "migrate deploy keeps migration names"
+input = """
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db" - PostgreSQL
+
+3 migrations found in prisma/migrations
+
+Applying migration `20240115_init`
+Applying migration `20240220_add_users`
+Applying migration `20240301_add_roles`
+
+All migrations have been successfully applied.
+"""
+expected = """3 migrations found in prisma/migrations
+Applying migration `20240115_init`
+Applying migration `20240220_add_users`
+Applying migration `20240301_add_roles`
+All migrations have been successfully applied."""
+
+[[tests.prisma]]
+name = "generate strips loading noise"
+input = """
+Prisma schema loaded from prisma/schema.prisma
+Environment variables loaded from .env
+
+Generating...
+
+✔ Generated Prisma Client (v5.10.0) to ./node_modules/@prisma/client in 234ms
+"""
+expected = "prisma: ok"
+
+[[tests.prisma]]
+name = "error preserved"
+input = """
+Prisma schema loaded from prisma/schema.prisma
+
+Error: P3009
+
+migrate found failed migrations in the target database, new migrations will not be applied.
+
+The `20240301_add_roles` migration started at 2024-03-01 failed.
+"""
+expected = """Error: P3009
+migrate found failed migrations in the target database, new migrations will not be applied.
+The `20240301_add_roles` migration started at 2024-03-01 failed."""

@@ -1,0 +1,78 @@
+schema_version = 1
+
+[filters.playwright]
+description = "Filter Playwright test noise — strip browser startup, screenshots, keep failures and summary"
+match_command = "^(pnpm|yarn|npx|bun)? ?(exec )?playwright\\b"
+strip_ansi = true
+confidence = 0.92
+strip_lines_matching = [
+    "^\\s*$",
+    "^\\s*\\[chromium\\] ›",
+    "^\\s*\\[firefox\\] ›",
+    "^\\s*\\[webkit\\] ›",
+    "^\\s*at .*node_modules",
+    "^\\s*Screenshot saved",
+    "^\\s*Video saved",
+    "^\\s*Slow test file",
+    "^\\s*Running \\d+ tests? using",
+    "^\\s*Serving HTML report",
+]
+max_lines = 50
+
+[[tests.playwright]]
+name = "mixed pass and fail keeps failures and summary"
+input = """
+Running 6 tests using 2 workers
+
+  [chromium] › tests/login.spec.ts:5:1 › should login ✓ (2.1s)
+  [chromium] › tests/login.spec.ts:15:1 › should show error ✓ (1.8s)
+  [chromium] › tests/dashboard.spec.ts:5:1 › should load dashboard ✗ (5.2s)
+
+    Error: expect(received).toBeVisible()
+
+    Call log:
+      - waiting for locator('#dashboard-panel')
+
+  Screenshot saved to test-results/dashboard-chromium/screenshot.png
+  Video saved to test-results/dashboard-chromium/video.webm
+
+  6 passed (12.4s)
+  1 failed (5.2s)
+"""
+expected = """    Error: expect(received).toBeVisible()
+    Call log:
+      - waiting for locator('#dashboard-panel')
+  6 passed (12.4s)
+  1 failed (5.2s)"""
+
+[[tests.playwright]]
+name = "all pass shows summary"
+input = """
+Running 4 tests using 2 workers
+
+  [chromium] › tests/login.spec.ts:5:1 › should login ✓ (2.1s)
+  [chromium] › tests/login.spec.ts:15:1 › should show error ✓ (1.8s)
+  [firefox] › tests/api.spec.ts:3:1 › should fetch data ✓ (3.2s)
+  [webkit] › tests/api.spec.ts:10:1 › should post data ✓ (2.5s)
+
+  4 passed (9.6s)
+"""
+expected = "  4 passed (9.6s)"
+
+[[tests.playwright]]
+name = "error with stack trace preserved"
+input = """
+  [chromium] › tests/checkout.spec.ts:8:1 › should complete purchase ✗ (4.1s)
+
+    Error: expect(received).toHaveText('Order confirmed')
+
+    Received: 'Payment failed'
+
+      at tests/checkout.spec.ts:22:5
+
+  1 failed (4.1s)
+"""
+expected = """    Error: expect(received).toHaveText('Order confirmed')
+    Received: 'Payment failed'
+      at tests/checkout.spec.ts:22:5
+  1 failed (4.1s)"""

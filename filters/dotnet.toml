@@ -1,0 +1,85 @@
+schema_version = 1
+
+[filters.dotnet]
+description = "Filter .NET build/test noise — strip banners, restore logs, keep errors and warnings"
+match_command = "^dotnet\\b"
+strip_ansi = true
+confidence = 0.90
+strip_lines_matching = [
+    "^\\s*$",
+    "^Microsoft \\(R\\)",
+    "^Copyright \\(C\\)",
+    "^  Determining projects",
+    "^  Restoring packages",
+    "^  All projects are up-to-date",
+    "^  Restored ",
+    "^  NuGet Config files used",
+    "^  Feeds used",
+    "^  Generating MSBuild file",
+]
+max_lines = 50
+
+[[filters.dotnet.match_output]]
+pattern = "0 Warning\\(s\\)\\n\\s+0 Error\\(s\\)"
+message = "dotnet: build ok"
+
+[[tests.dotnet]]
+name = "successful build short-circuits"
+input = """
+Microsoft (R) Build Engine version 17.8.3+195e7f5a3
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  MyApp -> /home/user/MyApp/bin/Debug/net8.0/MyApp.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.34
+"""
+expected = "dotnet: build ok"
+
+[[tests.dotnet]]
+name = "build with errors preserved"
+input = """
+Microsoft (R) Build Engine version 17.8.3+195e7f5a3
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+  Determining projects to restore...
+src/Program.cs(10,5): error CS1002: ; expected [/home/user/MyApp/MyApp.csproj]
+src/Service.cs(25,12): error CS0246: The type or namespace name 'ILogger' could not be found [/home/user/MyApp/MyApp.csproj]
+
+Build FAILED.
+    0 Warning(s)
+    2 Error(s)
+"""
+expected = """src/Program.cs(10,5): error CS1002: ; expected [/home/user/MyApp/MyApp.csproj]
+src/Service.cs(25,12): error CS0246: The type or namespace name 'ILogger' could not be found [/home/user/MyApp/MyApp.csproj]
+Build FAILED.
+    0 Warning(s)
+    2 Error(s)"""
+
+[[tests.dotnet]]
+name = "build with warnings not short-circuited"
+input = """
+Microsoft (R) Build Engine version 17.8.3+195e7f5a3
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+  Determining projects to restore...
+  MyApp -> /home/user/MyApp/bin/Debug/net8.0/MyApp.dll
+src/Service.cs(8,9): warning CS0168: The variable 'ex' is declared but never used
+
+Build succeeded.
+    1 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.87
+"""
+expected = """  MyApp -> /home/user/MyApp/bin/Debug/net8.0/MyApp.dll
+src/Service.cs(8,9): warning CS0168: The variable 'ex' is declared but never used
+Build succeeded.
+    1 Warning(s)
+    0 Error(s)
+Time Elapsed 00:00:01.87"""

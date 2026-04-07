@@ -8,7 +8,12 @@ impl Distiller for TestDistiller {
         ContentType::TestOutput
     }
 
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         let mut passed = 0;
         let mut failed = 0;
         let mut failure_details = Vec::new();

@@ -38,7 +38,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
             let ctype = classifier::classify(input);
             let segments = scorer::score_segments(input, &ctype, None);
             let distiller = distillers::get_distiller(&ctype);
-            distiller.distill(&segments, input)
+            distiller.distill(&segments, input, None)
         })
     });
 }
@@ -52,7 +52,7 @@ fn bench_hook_roundtrip(c: &mut Criterion) {
             let ctype = classifier::classify(&large_input);
             let segments = scorer::score_segments(&large_input, &ctype, None);
             let distiller = distillers::get_distiller(&ctype);
-            distiller.distill(&segments, &large_input)
+            distiller.distill(&segments, &large_input, None)
         })
     });
 }

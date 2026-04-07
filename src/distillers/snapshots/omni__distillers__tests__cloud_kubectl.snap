@@ -1,0 +1,6 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+k8s: 10 pods | 7 running, 1 pending, 2 error
+Problems: auth-svc-5d4f6c8b99-abc12 (CrashLoopBackOff), db-pod-0 (Pending), logging-fluentd-3k2l4m5n44-mno90 (ImagePullBackOff)

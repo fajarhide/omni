@@ -16,11 +16,30 @@ pub fn format_bytes(n: u64) -> String {
     }
 }
 
+pub fn format_tokens(bytes: u64) -> String {
+    let tokens = bytes / 4;
+    if tokens < 1000 {
+        format!("{}", tokens)
+    } else if tokens < 1_000_000 {
+        format!("{:.0}K", tokens as f64 / 1_000.0)
+    } else {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    }
+}
+
 pub fn format_bar(pct: f64) -> String {
     let width = 20;
     let filled = ((pct / 100.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     "█".repeat(filled)
+}
+
+fn format_bar_with_empty(pct: f64) -> String {
+    let width = 20;
+    let filled = ((pct / 100.0) * width as f64).round() as usize;
+    let filled = filled.min(width);
+    let empty = width - filled;
+    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
 }
 
 pub fn est_cost_usd(bytes_saved: u64) -> f64 {
@@ -41,6 +60,25 @@ fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+fn truncate_commands(commands: &str, max: usize) -> String {
+    let parts: Vec<&str> = commands.split(',').map(|s| s.trim()).collect();
+    if parts.len() <= max {
+        parts.join(", ")
+    } else {
+        let shown: Vec<&str> = parts[..max].to_vec();
+        format!("{}, +{} more", shown.join(", "), parts.len() - max)
+    }
+}
+
+fn print_separator() {
+    println!(
+        "{}",
+        "─────────────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+}
+
 fn print_help() {
     println!(
         "\n{} {} — Token savings analytics",
@@ -51,26 +89,38 @@ fn print_help() {
     println!("  omni {} {}", "stats".cyan(), "[FLAGS]".bright_black());
 
     println!("\n{}", "FLAGS:".bold().bright_white());
-    println!("  {: <12} View today's stats", "--today".cyan());
-    println!("  {: <12} View last 7 days", "--week".cyan());
-    println!("  {: <12} View last 30 days (default)", "--month".cyan());
     println!(
-        "  {: <12} Show detailed session insights",
-        "--session".cyan()
+        "  {: <12} Full technical breakdown (commands, routes, session)",
+        "--detail".cyan()
     );
     println!(
-        "  {: <12} Show unclassified passthrough candidates",
-        "--passthrough".cyan()
+        "  {: <12} Savings breakdown by content type",
+        "--by-type".cyan()
     );
+    println!("  {: <12} Scope to today only", "--today".cyan());
+    println!("  {: <12} Scope to last 7 days", "--week".cyan());
+    println!(
+        "  {: <12} Scope to last 30 days (default for --detail/--by-type)",
+        "--month".cyan()
+    );
+    println!("  {: <12} Machine-readable JSON output", "--json".cyan());
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni stats --today    {} View your savings today",
+        "  omni stats              {} Gain-focused overview",
         "#".bright_black()
     );
     println!(
-        "  omni stats --session  {} View hot files and errors",
+        "  omni stats --detail     {} Full breakdown with commands",
+        "#".bright_black()
+    );
+    println!(
+        "  omni stats --by-type    {} Content type mapping",
+        "#".bright_black()
+    );
+    println!(
+        "  omni stats --json       {} Machine-readable for CI/CD",
         "#".bright_black()
     );
     println!();
@@ -87,21 +137,153 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         return Ok(());
     }
 
-    let show_passthrough = args.iter().any(|a| a == "--passthrough");
-    let show_session = args.iter().any(|a| a == "--session");
+    // Mode detection
+    let mode = if args.iter().any(|a| a == "--detail") {
+        "detail"
+    } else if args.iter().any(|a| a == "--by-type") {
+        "by-type"
+    } else if args.iter().any(|a| a == "--json") {
+        "json"
+    } else {
+        "default"
+    };
 
+    match mode {
+        "detail" => run_detail(args, store),
+        "by-type" => run_by_type(args, store),
+        "json" => run_json(store),
+        _ => run_default(store),
+    }
+}
+
+// ─── Default Mode: Gain-Focused Multi-Period ────────────
+
+fn run_default(store: &Store) -> Result<()> {
+    let periods = store.multi_period_stats()?;
+    let breakdown = store.content_type_breakdown(0)?;
+    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+
+    let has_data = periods.iter().any(|(_, count, _, _)| *count > 0);
+
+    println!();
+    print_separator();
+    println!(" {}", "OMNI Signal Report".bold().bright_white());
+    print_separator();
+
+    if !has_data {
+        println!(
+            "  {}",
+            "No data yet! OMNI tracks savings automatically as you work."
+                .bright_black()
+                .italic()
+        );
+        println!("  {}", "Try: ls -la | omni".bright_cyan().italic());
+        print_separator();
+        println!();
+        return Ok(());
+    }
+
+    // Multi-period rows
+    for (label, count, input, output) in &periods {
+        if *count == 0 && label != "All Time" {
+            continue;
+        }
+
+        let input_tokens = format_tokens(*input);
+        let output_tokens = format_tokens(*output);
+        let reduction_pct = if *input > 0 {
+            100.0 * (1.0 - *output as f64 / *input as f64)
+        } else {
+            0.0
+        };
+        let bytes_saved = input.saturating_sub(*output);
+        let cost = est_cost_usd(bytes_saved);
+
+        let pct_colored = if reduction_pct > 70.0 {
+            format!("{:.1}% saved", reduction_pct).bright_green()
+        } else if reduction_pct > 40.0 {
+            format!("{:.1}% saved", reduction_pct).bright_yellow()
+        } else {
+            format!("{:.1}% saved", reduction_pct).bright_red()
+        };
+
+        println!(
+            "  {:<12} {:>3} commands │ {:>4} → {:<4} tokens │  {} │ ~${:.2}",
+            format!("{}:", label).bright_white().bold(),
+            format_number(*count).cyan(),
+            input_tokens.red(),
+            output_tokens.green(),
+            pct_colored,
+            cost,
+        );
+    }
+
+    // ContentType bars (top 5, skip count < 2)
+    let top_types: Vec<_> = breakdown
+        .iter()
+        .filter(|(_, count, _, _)| *count >= 2)
+        .take(5)
+        .collect();
+
+    if !top_types.is_empty() {
+        println!("\n  {}", "Top Savings by Type:".bold().bright_white());
+        for (content_type, count, pct, _) in &top_types {
+            let bar = format_bar_with_empty(*pct);
+            let bar_colored = if *pct > 80.0 {
+                bar.bright_green()
+            } else if *pct > 40.0 {
+                bar.bright_yellow()
+            } else {
+                bar.bright_red()
+            };
+
+            println!(
+                "    {:<13} {}  {:>5.1}%  ({}x)",
+                content_type.bright_cyan(),
+                bar_colored,
+                pct,
+                count,
+            );
+        }
+    }
+
+    // RewindStore
+    println!(
+        "\n  {:<20} {}",
+        "RewindStore:".bright_black(),
+        format!(
+            "{} archived │ {} retrieved",
+            rewind_stored, rewind_retrieved
+        )
+        .bright_magenta()
+    );
+
+    print_separator();
+    println!(
+        "  💡 {} for full breakdown",
+        "omni stats --detail".bright_cyan()
+    );
+    println!(
+        "  💡 {} for content type mapping",
+        "omni stats --by-type".bright_cyan()
+    );
+    println!();
+    Ok(())
+}
+
+// ─── Detail Mode: Current View (Improved) ───────────────
+
+fn run_detail(args: &[String], store: &Store) -> Result<()> {
     let (period_label, since) = if args.iter().any(|a| a == "--today") {
         let now = chrono::Utc::now().timestamp();
-        let start = now - (now % 86400); // midnight UTC
+        let start = now - (now % 86400);
         ("today", start)
     } else if args.iter().any(|a| a == "--week") {
         ("last 7 days", chrono::Utc::now().timestamp() - 7 * 86400)
     } else {
-        // default --month or no flag
         ("last 30 days", chrono::Utc::now().timestamp() - 30 * 86400)
     };
 
-    // Aggregate
     let (count, input_total, output_total, sum_latency, _max_latency) =
         store.aggregate_stats(since)?;
     let reduction_pct = if input_total > 0 {
@@ -116,26 +298,15 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
     let bytes_saved = input_total.saturating_sub(output_total);
     let cost_saved = est_cost_usd(bytes_saved);
-
-    // Rewind
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
 
-    println!(
-        "\n{}",
-        "─────────────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    println!();
+    print_separator();
     println!(
         " {}",
-        format!("OMNI Signal Report — {}", period_label.bold()).bright_white()
+        format!("OMNI Signal Report — Detail ({})", period_label.bold()).bright_white()
     );
-    println!(
-        "{}",
-        "─────────────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    print_separator();
 
     println!(
         "  {:<20} {}",
@@ -158,7 +329,6 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     } else {
         ratio_msg.bold().bright_red()
     };
-
     println!("  {:<20} {}", "Signal Ratio:".bright_black(), ratio_colored);
     println!(
         "  {:<20} {}",
@@ -170,7 +340,6 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         "Average Latency:".bright_black(),
         format!("{:.1}ms", avg_latency).bright_blue()
     );
-
     println!(
         "  {:<20} {}",
         "RewindStore:".bright_black(),
@@ -199,9 +368,15 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         );
     }
 
-    // Filter breakdown
+    // By Command — top 10, filter 0% savings
     let filters = store.filter_breakdown(since)?;
-    if !filters.is_empty() {
+    let display_filters: Vec<_> = filters
+        .iter()
+        .filter(|(_, _, pct)| *pct > 0.0)
+        .take(10)
+        .collect();
+
+    if !display_filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
         println!(
             "   #  {:<24} {:>7} {:>9}  Signal Strength",
@@ -209,14 +384,14 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         );
         println!("   ── {:─<24} ─────── ───────── ────────────────────", "");
 
-        for (i, (name, cnt, pct)) in filters.iter().enumerate() {
+        for (i, (name, cnt, pct)) in display_filters.iter().enumerate() {
             let bar = format_bar(*pct);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
             } else {
                 bar.bright_yellow()
             };
-            let suffix = if name == "passthrough" || name == "unknown" {
+            let suffix = if *name == "passthrough" || *name == "unknown" {
                 " ← learn?".bright_black().italic()
             } else {
                 "".clear()
@@ -227,7 +402,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
                 s.push_str("...");
                 s
             } else {
-                name.clone()
+                (*name).clone()
             };
 
             println!(
@@ -238,6 +413,18 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
                 pct,
                 bar_colored,
                 suffix
+            );
+        }
+
+        if filters.len() > 10 {
+            println!(
+                "\n   {}",
+                format!(
+                    "Run `omni stats --detail --all-commands` for all {} commands.",
+                    filters.len()
+                )
+                .bright_black()
+                .italic()
             );
         }
     }
@@ -261,7 +448,6 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
                 _ => route.bright_black(),
             };
 
-            // Fix alignment: print name with fixed width before formatting
             let label = format!("{}:", route);
             let padding = " ".repeat(15_usize.saturating_sub(label.len()));
 
@@ -275,27 +461,170 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         }
     }
 
-    // Session insights (--session or default)
-    if show_session || !show_passthrough {
-        let hot_files = store.hot_files_global(since)?;
-        if !hot_files.is_empty() {
-            println!("\n {}", "Session Insights:".bold().bright_white());
-            let files_str: Vec<String> = hot_files
-                .iter()
-                .take(3)
-                .map(|(f, c)| format!("{} ({})", f.bright_cyan(), c.to_string().bright_black()))
-                .collect();
-            println!("  Hot files:  {}", files_str.join(", "));
-        }
+    // Session insights — always shown in detail mode
+    let hot_files = store.hot_files_global(since)?;
+    if !hot_files.is_empty() {
+        println!("\n {}", "Session Insights:".bold().bright_white());
+        let files_str: Vec<String> = hot_files
+            .iter()
+            .take(3)
+            .map(|(f, c)| format!("{} ({})", f.bright_cyan(), c.to_string().bright_black()))
+            .collect();
+        println!("  Hot files:  {}", files_str.join(", "));
+    }
+
+    print_separator();
+    println!();
+    Ok(())
+}
+
+// ─── By-Type Mode: ContentType Explorer ─────────────────
+
+fn run_by_type(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = if args.iter().any(|a| a == "--today") {
+        let now = chrono::Utc::now().timestamp();
+        let start = now - (now % 86400);
+        ("today", start)
+    } else if args.iter().any(|a| a == "--week") {
+        ("last 7 days", chrono::Utc::now().timestamp() - 7 * 86400)
+    } else {
+        ("last 30 days", chrono::Utc::now().timestamp() - 30 * 86400)
+    };
+
+    let breakdown = store.content_type_breakdown(since)?;
+
+    println!();
+    print_separator();
+    println!(
+        " {}",
+        format!(
+            "OMNI Signal Report — By Content Type ({})",
+            period_label.bold()
+        )
+        .bright_white()
+    );
+    print_separator();
+
+    if breakdown.is_empty() {
+        println!(
+            "  {}",
+            "No data yet! OMNI tracks savings automatically as you work."
+                .bright_black()
+                .italic()
+        );
+        print_separator();
+        println!();
+        return Ok(());
     }
 
     println!(
-        "{}",
-        "─────────────────────────────────────────────────"
-            .bright_black()
-            .bold()
+        "  {:<15} {:>6}   {:>8}   {}",
+        "Type".bold().bright_white(),
+        "Count".bold().bright_white(),
+        "Savings".bold().bright_white(),
+        "Commands".bold().bright_white(),
+    );
+    println!(
+        "  {:<15} {:>6}   {:>8}   ─────────────────────",
+        "──────────────", "──────", "────────"
+    );
+
+    for (content_type, count, pct, commands) in &breakdown {
+        let commands_display = truncate_commands(commands, 3);
+
+        let suffix = if content_type == "Unknown" {
+            format!(
+                "{} ← {}",
+                commands_display,
+                "learn?".bright_black().italic()
+            )
+        } else {
+            commands_display
+        };
+
+        let pct_colored = if *pct > 80.0 {
+            format!("{:.1}%", pct).bright_green()
+        } else if *pct > 40.0 {
+            format!("{:.1}%", pct).bright_yellow()
+        } else {
+            format!("{:.1}%", pct).bright_red()
+        };
+
+        println!(
+            "  {:<15} {:>6}   {:>8}   {}",
+            content_type.bright_cyan(),
+            count,
+            pct_colored,
+            suffix.bright_black(),
+        );
+    }
+
+    print_separator();
+    println!(
+        "  💡 Unknown commands can be improved with {}",
+        "omni learn".bright_cyan()
     );
     println!();
+    Ok(())
+}
+
+// ─── JSON Mode: Machine-Readable ────────────────────────
+
+fn run_json(store: &Store) -> Result<()> {
+    let periods = store.multi_period_stats()?;
+    let breakdown = store.content_type_breakdown(0)?;
+    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+
+    let periods_json: Vec<serde_json::Value> = periods
+        .iter()
+        .map(|(label, count, input, output)| {
+            let input_tokens = *input / 4;
+            let output_tokens = *output / 4;
+            let savings_pct = if *input > 0 {
+                (100.0 * (1.0 - *output as f64 / *input as f64) * 10.0).round() / 10.0
+            } else {
+                0.0
+            };
+            let bytes_saved = input.saturating_sub(*output);
+            let usd_saved = est_cost_usd(bytes_saved);
+            serde_json::json!({
+                "label": label.to_lowercase().replace(' ', "_"),
+                "commands": count,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "savings_pct": savings_pct,
+                "usd_saved": (usd_saved * 100.0).round() / 100.0,
+            })
+        })
+        .collect();
+
+    let types_json: Vec<serde_json::Value> = breakdown
+        .iter()
+        .map(|(ct, count, pct, commands)| {
+            let cmd_list: Vec<&str> = commands
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            serde_json::json!({
+                "type": ct,
+                "count": count,
+                "savings_pct": pct,
+                "commands": cmd_list,
+            })
+        })
+        .collect();
+
+    let output = serde_json::json!({
+        "periods": periods_json,
+        "content_types": types_json,
+        "rewind": {
+            "archived": rewind_stored,
+            "retrieved": rewind_retrieved,
+        }
+    });
+
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
 
@@ -316,12 +645,18 @@ mod tests {
     }
 
     #[test]
+    fn test_format_tokens_ranges() {
+        assert_eq!(format_tokens(0), "0");
+        assert_eq!(format_tokens(400), "100"); // 400 bytes / 4 = 100 tokens
+        assert_eq!(format_tokens(40_000), "10K"); // 10K tokens
+        assert_eq!(format_tokens(4_000_000), "1.0M"); // 1M tokens
+    }
+
+    #[test]
     fn test_est_cost_usd_kalkulasi_benar() {
-        // 4M bytes = 1M tokens, cost = $3
         let cost = est_cost_usd(4_000_000);
         assert!((cost - 3.0).abs() < 0.01);
 
-        // 400K bytes = 100K tokens = $0.30
         let cost2 = est_cost_usd(400_000);
         assert!((cost2 - 0.30).abs() < 0.01);
 
@@ -329,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_tidak_crash_jika_db_kosong() {
+    fn test_stats_default_tidak_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into()];
@@ -338,10 +673,28 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_passthrough_menampilkan_candidates() {
+    fn test_stats_detail_tidak_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
-        let args: Vec<String> = vec!["stats".into(), "--passthrough".into()];
+        let args: Vec<String> = vec!["stats".into(), "--detail".into()];
+        let result = run(&args, &store);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stats_by_type_tidak_crash_jika_db_kosong() {
+        let tmp = NamedTempFile::new().unwrap();
+        let store = Store::open_path(tmp.path()).unwrap();
+        let args: Vec<String> = vec!["stats".into(), "--by-type".into()];
+        let result = run(&args, &store);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_stats_json_tidak_crash_jika_db_kosong() {
+        let tmp = NamedTempFile::new().unwrap();
+        let store = Store::open_path(tmp.path()).unwrap();
+        let args: Vec<String> = vec!["stats".into(), "--json".into()];
         let result = run(&args, &store);
         assert!(result.is_ok());
     }
@@ -354,10 +707,27 @@ mod tests {
     }
 
     #[test]
+    fn test_format_bar_with_empty() {
+        assert_eq!(format_bar_with_empty(100.0), "████████████████████");
+        assert_eq!(format_bar_with_empty(50.0), "██████████░░░░░░░░░░");
+        assert_eq!(format_bar_with_empty(0.0), "░░░░░░░░░░░░░░░░░░░░");
+    }
+
+    #[test]
     fn test_format_number() {
         assert_eq!(format_number(0), "0");
         assert_eq!(format_number(999), "999");
         assert_eq!(format_number(1000), "1,000");
         assert_eq!(format_number(1247000), "1,247,000");
+    }
+
+    #[test]
+    fn test_truncate_commands() {
+        assert_eq!(
+            truncate_commands("git diff, git log", 3),
+            "git diff, git log"
+        );
+        assert_eq!(truncate_commands("a, b, c, d, e", 3), "a, b, c, +2 more");
+        assert_eq!(truncate_commands("single", 3), "single");
     }
 }

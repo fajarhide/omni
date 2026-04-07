@@ -1,0 +1,76 @@
+schema_version = 1
+
+[filters.cypress]
+description = "Filter Cypress e2e test noise — strip browser launch, timing, keep failing tests and errors"
+match_command = "^(pnpm|yarn|npx)? ?(exec )?cypress\\b"
+strip_ansi = true
+confidence = 0.90
+strip_lines_matching = [
+    "^\\s*$",
+    "^\\s*Running:",
+    "^\\s*Estimated:",
+    "^\\s*Browser:",
+    "^\\s*Spec Ran:",
+    "^\\s*Video:",
+    "^\\s*Screenshots:",
+    "^\\s*Compression:",
+    "^\\s*Duration:",
+    "^\\s*/cypress/screenshots/",
+    "^\\s*/cypress/videos/",
+    "^\\s*── .*──",
+    "^\\s*✓ ",
+    "^\\s+\\w+ Tests$",
+    "^\\s*\\d+ passing",
+]
+max_lines = 50
+on_empty = "cypress: all passed"
+
+[[tests.cypress]]
+name = "mixed pass fail keeps failures and summary"
+input = """
+  Running:  auth.cy.ts
+
+  Browser:  Chrome 120 (headless)
+
+  Auth Tests
+    ✓ should login with valid credentials (1245ms)
+    ✓ should show error for invalid password (854ms)
+    ✗ should redirect after login (2341ms)
+
+      AssertionError: expected '/dashboard' to equal '/home'
+      at Context.eval (auth.cy.ts:25:12)
+
+  Screenshots:
+    /cypress/screenshots/auth.cy.ts/should redirect after login (failed).png
+
+  Video:
+    /cypress/videos/auth.cy.ts.mp4
+
+  Duration:  4.2s
+  Spec Ran:  auth.cy.ts
+
+  2 passing (2.1s)
+  1 failing
+"""
+expected = """    ✗ should redirect after login (2341ms)
+      AssertionError: expected '/dashboard' to equal '/home'
+      at Context.eval (auth.cy.ts:25:12)
+  1 failing"""
+
+[[tests.cypress]]
+name = "all pass"
+input = """
+  Running:  login.cy.ts
+
+  Browser:  Chrome 120 (headless)
+
+  Login Tests
+    ✓ should display login form (456ms)
+    ✓ should validate email format (312ms)
+
+  Duration:  0.8s
+  Spec Ran:  login.cy.ts
+
+  2 passing (0.8s)
+"""
+expected = "cypress: all passed"

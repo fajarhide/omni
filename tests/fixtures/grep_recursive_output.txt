@@ -1,0 +1,33 @@
+src/pipeline/classifier.rs:15:    if line.contains("error") {
+src/pipeline/classifier.rs:28:    // Check for error patterns
+src/pipeline/classifier.rs:45:    let error_count = lines.iter().filter(|l| l.contains("error")).count();
+src/pipeline/classifier.rs:89:    fn classify_error_output() {
+src/pipeline/scorer.rs:12:    // Score error lines higher
+src/pipeline/scorer.rs:34:    if content.contains("error") || content.contains("Error") {
+src/pipeline/scorer.rs:67:    fn test_error_scoring() {
+src/distillers/build.rs:8:    // Extract error messages
+src/distillers/build.rs:23:    if line.contains("error[E") {
+src/distillers/build.rs:47:    fn distill_build_errors() {
+src/distillers/test.rs:15:    // Count test failures as errors
+src/distillers/test.rs:31:    for line in input.lines() {
+src/distillers/test.rs:45:    if line.contains("FAILED") || line.contains("error") {
+src/hooks/post_tool.rs:78:    // Handle error cases gracefully
+src/hooks/post_tool.rs:92:    eprintln!("Pipeline error: {}", e);
+src/hooks/post_tool.rs:115:    fn test_error_passthrough() {
+src/main.rs:45:    if let Err(e) = run() {
+src/main.rs:47:        eprintln!("Error: {}", e);
+src/store/sqlite.rs:89:    // Handle migration errors
+src/store/sqlite.rs:134:    if let Err(e) = conn.execute(sql, []) {
+src/store/sqlite.rs:201:    fn test_store_error_handling() {
+src/guard/trust.rs:12:    // Verify trust, return error if invalid
+src/guard/trust.rs:34:    Err(TrustError::InvalidHash)
+src/session/tracker.rs:56:    pub fn add_error(&mut self, error: &str) {
+src/session/tracker.rs:78:    // Track error frequency for adaptive scoring
+src/session/correction.rs:23:    // Correct common error patterns
+src/session/correction.rs:45:    if pattern.contains("error") && self.seen_count > 3 {
+src/cli/doctor.rs:18:    // Check for common errors
+src/cli/doctor.rs:89:    println!("No errors found!");
+tests/integration_test.rs:45:    fn test_error_recovery() {
+tests/integration_test.rs:67:    assert!(result.is_ok(), "Should not error on valid input");
+tests/integration_test.rs:89:    fn test_panic_error_handling() {
+Cargo.toml:3:name = "omni"

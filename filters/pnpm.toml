@@ -1,0 +1,73 @@
+schema_version = 1
+
+[filters.pnpm]
+description = "Filter pnpm-specific noise — strip hard link messages, progress, lockfile patterns, keep errors and counts"
+match_command = "^pnpm\\s+(install|add|remove|update|i)\\b"
+strip_ansi = true
+confidence = 0.92
+strip_lines_matching = [
+    "^\\s*$",
+    "^Packages are hard linked",
+    "^packages are hard linked",
+    "^Progress:",
+    "^\\s*\\.package-lock\\.json",
+    "^Lockfile is up to date",
+    "^Already up to date",
+    "^Packages: \\+\\d+",
+    "^\\s*WARN.*deprecated",
+    "^\\s*\\+\\+\\+",
+    "^\\s*Done in",
+]
+max_lines = 30
+
+[[filters.pnpm.match_output]]
+pattern = "Already up to date"
+message = "pnpm: up to date"
+
+[[tests.pnpm]]
+name = "clean install strips hard link noise"
+input = """
+Packages: +142
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Progress: resolved 142, reused 140, downloaded 2, added 142, done
+
+packages are hard linked from the content-addressable store
+
+dependencies:
++ react 18.2.0
++ react-dom 18.2.0
+
+Done in 3.2s
+"""
+expected = """dependencies:
++ react 18.2.0
++ react-dom 18.2.0"""
+
+[[tests.pnpm]]
+name = "already up to date"
+input = """
+Already up to date
+"""
+expected = "pnpm: up to date"
+
+[[tests.pnpm]]
+name = "error preserved"
+input = """
+Progress: resolved 42, reused 40, downloaded 0, added 0
+
+ ERR_PNPM_PEER_DEP_ISSUES Unmet peer dependencies
+
+├── ✗ unmet peer react@"^17.0.0": found 18.2.0
+└── ✗ unmet peer typescript@">=4.7": found 4.5.0
+
+Peer dependencies that should be installed:
+  react@"^17.0.0"
+
+Done in 1.5s
+"""
+expected = """ ERR_PNPM_PEER_DEP_ISSUES Unmet peer dependencies
+├── ✗ unmet peer react@"^17.0.0": found 18.2.0
+└── ✗ unmet peer typescript@">=4.7": found 4.5.0
+Peer dependencies that should be installed:
+  react@"^17.0.0\""""

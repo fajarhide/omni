@@ -1,0 +1,11 @@
+NAME                               READY   STATUS             RESTARTS   AGE
+api-gateway-7fb96c846b-f4jnm       1/1     Running            0          5d
+api-gateway-7fb96c846b-x9kpl       1/1     Running            0          5d
+auth-svc-5d4f6c8b99-abc12          0/1     CrashLoopBackOff   15         2h
+payment-svc-6e5f7d9c00-def34       1/1     Running            0          3d
+db-pod-0                           0/1     Pending            0          10m
+notification-svc-8g7h0e1f22-ghi56  1/1     Running            0          1d
+cache-redis-0                      1/1     Running            2          7d
+worker-batch-9i8j1f2g33-jkl78      1/1     Running            0          4d
+monitoring-prometheus-0             1/1     Running            0          7d
+logging-fluentd-3k2l4m5n44-mno90   0/1     ImagePullBackOff   0          30m

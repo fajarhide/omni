@@ -1,0 +1,33 @@
+Terraform used the selected providers to generate the following execution plan.
+Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_instance.web will be created
+  + resource "aws_instance" "web" {
+      + ami           = "ami-0abcdef1234567890"
+      + instance_type = "t3.micro"
+    }
+
+  # aws_s3_bucket.assets will be created
+  + resource "aws_s3_bucket" "assets" {
+      + bucket = "myapp-assets-prod"
+    }
+
+  # aws_security_group.web_sg will be updated in-place
+  ~ resource "aws_security_group" "web_sg" {
+      ~ ingress {
+          + cidr_blocks = ["10.0.0.0/8"]
+        }
+    }
+
+  # aws_instance.old_worker will be destroyed
+  - resource "aws_instance" "old_worker" {
+      - ami           = "ami-0old1234567890abc"
+      - instance_type = "t2.micro"
+    }
+
+Plan: 2 to add, 1 to change, 1 to destroy.

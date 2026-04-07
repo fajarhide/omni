@@ -1,0 +1,9 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+terraform: +2 ~1 -1 resources
++ aws_instance.web
++ aws_s3_bucket.assets
+~ aws_security_group.web_sg
+- aws_instance.old_worker

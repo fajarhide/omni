@@ -8,7 +8,12 @@ impl Distiller for InfraDistiller {
         ContentType::InfraOutput
     }
 
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
+    fn distill(
+        &self,
+        segments: &[OutputSegment],
+        input: &str,
+        _session: Option<&crate::pipeline::SessionState>,
+    ) -> String {
         if input.contains("kubectl")
             || (input.contains("READY") && input.contains("STATUS") && input.contains("RESTARTS"))
         {

@@ -1,0 +1,6 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+eslint: 2 errors, 1 warnings in 3 files
+  top rules: @typescript-eslint/explicit-module-boundary-types: 1, @typescript-eslint/no-console: 1

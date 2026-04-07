@@ -1,0 +1,10 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+tsc: 5 errors in 5 files
+  Button.tsx: 1 errors [TS2741:l10]
+  api.ts: 1 errors [TS2769:l25]
+  app.ts: 1 errors [TS2307]
+  helpers.ts: 1 errors [TS2339]
+  index.ts: 1 errors [TS2552]

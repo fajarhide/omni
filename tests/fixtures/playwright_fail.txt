@@ -1,0 +1,58 @@
+Running 24 tests using 4 workers
+
+  ✓  1 [chromium] › tests/home.spec.ts:5:1 › home page loads (1.2s)
+  ✓  2 [chromium] › tests/home.spec.ts:15:1 › shows navigation menu (890ms)
+  ✓  3 [chromium] › tests/home.spec.ts:25:1 › search box is accessible (450ms)
+  ✓  4 [firefox] › tests/home.spec.ts:5:1 › home page loads (2.1s)
+  ✓  5 [firefox] › tests/home.spec.ts:15:1 › shows navigation menu (1.5s)
+  ✓  6 [firefox] › tests/home.spec.ts:25:1 › search box is accessible (780ms)
+  ✓  7 [chromium] › tests/login.spec.ts:5:1 › displays login form (560ms)
+  ✓  8 [chromium] › tests/login.spec.ts:12:1 › validates email format (340ms)
+  ✗  9 [chromium] › tests/login.spec.ts:20:1 › submits valid credentials (5.0s)
+
+     Error: Timed out 5000ms waiting for expect(locator).toBeVisible()
+
+     Locator: getByTestId('dashboard-welcome')
+
+       18 |   await page.fill('[name="password"]', 'testpass123');
+       19 |   await page.click('button[type="submit"]');
+     > 20 |   await expect(page.getByTestId('dashboard-welcome')).toBeVisible();
+         |                                                        ^
+       21 |
+
+     at tests/login.spec.ts:20:56
+
+  ✓ 10 [firefox] › tests/login.spec.ts:5:1 › displays login form (890ms)
+  ✓ 11 [firefox] › tests/login.spec.ts:12:1 › validates email format (670ms)
+  ✓ 12 [firefox] › tests/login.spec.ts:20:1 › submits valid credentials (2.3s)
+  ✓ 13 [chromium] › tests/dashboard.spec.ts:5:1 › shows user stats (1.8s)
+  ✗ 14 [chromium] › tests/dashboard.spec.ts:15:1 › chart renders correctly (3.0s)
+
+     Error: expect(received).toHaveScreenshot()
+
+     Screenshot comparison failed:
+     Expected: tests/dashboard.spec.ts-snapshots/chart-chromium.png
+     Received: test-results/dashboard-chart-renders-correctly-chromium/actual.png
+     Diff: test-results/dashboard-chart-renders-correctly-chromium/diff.png
+
+       13 |   await page.waitForSelector('.chart-container');
+       14 |   await page.waitForTimeout(1000);
+     > 15 |   await expect(page).toHaveScreenshot();
+         |                       ^
+       16 |
+
+     at tests/dashboard.spec.ts:15:23
+
+  ✓ 15 [firefox] › tests/dashboard.spec.ts:5:1 › shows user stats (2.4s)
+  ✓ 16 [firefox] › tests/dashboard.spec.ts:15:1 › chart renders correctly (2.8s)
+  ✓ 17 [chromium] › tests/settings.spec.ts:5:1 › loads settings page (780ms)
+  ✓ 18 [chromium] › tests/settings.spec.ts:12:1 › updates user name (1.2s)
+  ✓ 19 [chromium] › tests/settings.spec.ts:22:1 › toggles dark mode (560ms)
+  ✓ 20 [firefox] › tests/settings.spec.ts:5:1 › loads settings page (1.1s)
+  ✓ 21 [firefox] › tests/settings.spec.ts:12:1 › updates user name (1.8s)
+  ✓ 22 [firefox] › tests/settings.spec.ts:22:1 › toggles dark mode (890ms)
+  ✓ 23 [chromium] › tests/api.spec.ts:5:1 › fetches user data (340ms)
+  ✓ 24 [chromium] › tests/api.spec.ts:12:1 › handles 404 (230ms)
+
+  2 failed
+  22 passed (45.2s)
