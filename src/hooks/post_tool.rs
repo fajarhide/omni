@@ -115,7 +115,7 @@ pub fn process_payload(
         (output, fname, None)
     } else {
         // Fallback to Rust distiller pipeline
-        let ctype = classifier::classify(&content);
+        let ctype = classifier::classify(&content, Some(&command));
 
         // Pre-processing: collapse repetitive lines before scoring
         let collapse_result = collapse::collapse(&content, &ctype);
@@ -158,28 +158,35 @@ pub fn process_payload(
 
         let decision = composer::decide_rewind(&scored_segments, ctype);
 
-        if decision.should_store {
-            if let Some(ref s) = store {
-                let hash = s.store_rewind(&content);
-                let dropped_lines = scored_segments
-                    .iter()
-                    .filter(|s| s.final_score() < decision.threshold)
-                    .map(|s| s.content.lines().count())
-                    .sum::<usize>();
+        let dropped_lines = scored_segments
+            .iter()
+            .filter(|s| s.final_score() < decision.threshold)
+            .map(|s| s.content.lines().count())
+            .sum::<usize>();
 
-                final_out.push_str(&format!(
-                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
-                    dropped_lines, hash
-                ));
-                rewind_hash = hash;
-            } else {
-                let dropped_lines = scored_segments
-                    .iter()
-                    .filter(|s| s.final_score() < decision.threshold)
-                    .map(|s| s.content.lines().count())
-                    .sum::<usize>();
-                final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
-            }
+        // Trigger Auto-Learn
+        crate::pipeline::composer::evaluate_learning(
+            ctype,
+            &content,
+            scored_segments.len(),
+            scored_segments
+                .iter()
+                .filter(|s| s.final_score() < decision.threshold)
+                .count(),
+            &command,
+        );
+
+        if decision.should_store
+            && let Some(ref s) = store
+        {
+            let hash = s.store_rewind(&content);
+            final_out.push_str(&format!(
+                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
+                dropped_lines, hash
+            ));
+            rewind_hash = hash;
+        } else if decision.should_store {
+            final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
         }
 
         // Update session state (only for Rust pipeline)
@@ -241,6 +248,13 @@ pub fn process_payload(
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
             tracker.track_command(&command, &content, &result);
         }
+    }
+
+    // Safety Truncation
+    let max_chars = composer::ComposeConfig::default().max_output_chars;
+    if final_out.len() > max_chars {
+        final_out.truncate(max_chars);
+        final_out.push_str("\n[OMNI: output truncated]");
     }
 
     serde_json::to_string(&HookOutput {

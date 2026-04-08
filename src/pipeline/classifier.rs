@@ -10,9 +10,215 @@ lazy_static! {
     static ref RE_LOG_SEV: Regex =
         Regex::new(r"(?i)\[?(INFO|ERROR|WARN|WARNING|DEBUG|FATAL)\]?[:\s]").unwrap();
     static ref RE_TABULAR_SPACES: Regex = Regex::new(r" {2,}").unwrap();
+    static ref RE_GIT_DIFF_STAT: Regex =
+        Regex::new(r"\d+ files? changed, \d+ insertions?\(\+\), \d+ deletions?\(-\)").unwrap();
+    static ref RE_GIT_BRANCH_LIST: Regex = Regex::new(r"^\*? +[a-zA-Z0-9/_.-]+").unwrap();
 }
 
-pub fn classify(input: &str) -> ContentType {
+pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
+    // Stage 0: Pre-Stage: Command-Aware Heuristics
+    // Moved to top so re-classification works even if input is empty
+    if let Some(command_name) = command_name {
+        let cmd_low = command_name.to_lowercase();
+        let cmd_full = cmd_low.split_whitespace().next().unwrap_or(&cmd_low);
+
+        // Handle absolute paths (e.g., /usr/bin/git -> git)
+        let cmd_base = std::path::Path::new(cmd_full)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(cmd_full);
+
+        // Subcommand awareness for Git
+        if cmd_base == "git" {
+            let parts: Vec<&str> = cmd_low.split_whitespace().collect();
+            if parts.len() > 1 {
+                let sub = parts[1];
+                // Status & Metadata (Branch, Tag, etc.)
+                if [
+                    "status",
+                    "branch",
+                    "tag",
+                    "remote",
+                    "show-ref",
+                    "rev-parse",
+                    "symbolic-ref",
+                    "checkout",
+                    "stash",
+                    "config",
+                ]
+                .contains(&sub)
+                {
+                    return ContentType::GitStatus;
+                }
+                // Diffs
+                if ["diff", "show", "whatchanged"].contains(&sub) {
+                    // git diff --stat is metadata
+                    if cmd_low.contains("--stat") {
+                        return ContentType::GitStatus;
+                    }
+                    return ContentType::GitDiff;
+                }
+                // Logs
+                if ["log", "shortlog", "reflog"].contains(&sub) {
+                    return ContentType::GitLog;
+                }
+            }
+        }
+
+        // Broad SystemOps Bias
+        let sys_cmds = [
+            "ls",
+            "tree",
+            "pwd",
+            "cd",
+            "cp",
+            "mv",
+            "rm",
+            "mkdir",
+            "rmdir",
+            "touch",
+            "ln",
+            "stat",
+            "file",
+            "cat",
+            "less",
+            "more",
+            "head",
+            "tail",
+            "nl",
+            "grep",
+            "egrep",
+            "fgrep",
+            "rg",
+            "awk",
+            "sed",
+            "cut",
+            "sort",
+            "uniq",
+            "wc",
+            "tr",
+            "xargs",
+            "find",
+            "locate",
+            "which",
+            "whereis",
+            "ps",
+            "top",
+            "htop",
+            "free",
+            "uptime",
+            "df",
+            "du",
+            "uname",
+            "hostname",
+            "kill",
+            "killall",
+            "pkill",
+            "bg",
+            "fg",
+            "jobs",
+            "nohup",
+            "nice",
+            "renice",
+            "watch",
+            "whoami",
+            "who",
+            "id",
+            "chmod",
+            "chown",
+            "groups",
+            "env",
+            "printenv",
+            "export",
+            "unset",
+            "alias",
+            "source",
+            "ifconfig",
+            "ip",
+            "netstat",
+            "ss",
+            "lsof",
+            "ping",
+            "traceroute",
+            "curl",
+            "wget",
+            "dig",
+            "nslookup",
+            "host",
+            "whois",
+            "nc",
+            "telnet",
+            "tar",
+            "gzip",
+            "gunzip",
+            "zip",
+            "unzip",
+            "mount",
+            "umount",
+            "lsblk",
+            "blkid",
+            "apt",
+            "apt-get",
+            "yum",
+            "dnf",
+            "pacman",
+            "snap",
+            "brew",
+            "clear",
+            "reset",
+            "time",
+            "date",
+            "sleep",
+            "history",
+        ];
+        if sys_cmds.contains(&cmd_base) || sys_cmds.iter().any(|&sc| cmd_low.starts_with(sc)) {
+            return ContentType::SystemOps;
+        }
+
+        // Build Tools Bias
+        let build_cmds = [
+            "make", "cmake", "cargo", "rustc", "go", "python", "python3", "pip", "pip3", "java",
+            "javac", "gcc", "g++", "clang", "gcc", "g++",
+        ];
+        if build_cmds.contains(&cmd_base) || build_cmds.iter().any(|&bc| cmd_low.starts_with(bc)) {
+            return ContentType::BuildOutput;
+        }
+
+        // Web Tools Bias
+        let web_cmds = [
+            "node",
+            "npm",
+            "npx",
+            "yarn",
+            "pnpm",
+            "vitest",
+            "playwright",
+            "tsc",
+            "eslint",
+            "prettier",
+            "esbuild",
+            "vite",
+        ];
+        if web_cmds.contains(&cmd_base) || web_cmds.iter().any(|&wc| cmd_low.starts_with(wc)) {
+            return ContentType::JsTs;
+        }
+
+        // Cloud & Infra Bias
+        let cloud_cmds = [
+            "docker",
+            "kubectl",
+            "terraform",
+            "helm",
+            "aws",
+            "gcloud",
+            "az",
+            "doctl",
+        ];
+        if cloud_cmds.contains(&cmd_base) || cloud_cmds.iter().any(|&cc| cmd_low.starts_with(cc)) {
+            return ContentType::Cloud;
+        }
+    }
+
     // Stage 1 restrictions: Only check first 50 lines max for speed
     let mut lines_iter = input.lines().take(50).peekable();
     if lines_iter.peek().is_none() {
@@ -300,110 +506,126 @@ mod tests {
     #[test]
     fn test_classify_git_diff_output() {
         let input = "diff --git a/src/main.rs b/src/main.rs\nindex 123..456 100644\n--- a/src/main.rs\n+++ b/src/main.rs";
-        assert_eq!(classify(input), ContentType::GitDiff);
+        assert_eq!(classify(input, None), ContentType::GitDiff);
 
         let patch = "@@ -1,5 +1,6 @@\n fn main() {}";
-        assert_eq!(classify(patch), ContentType::GitDiff);
+        assert_eq!(classify(patch, None), ContentType::GitDiff);
     }
 
     #[test]
     fn test_classify_git_status_dirty() {
         let input =
             "On branch feature/omni\nChanges not staged for commit:\n  modified:   src/main.rs";
-        assert_eq!(classify(input), ContentType::GitStatus);
+        assert_eq!(classify(input, None), ContentType::GitStatus);
+    }
+
+    #[test]
+    fn test_classify_git_branch_command_aware() {
+        let input = "  main\n* feature/omni\n  develop";
+        // Without command context, this might be Unknown or TabularData
+        assert_eq!(classify(input, Some("git branch")), ContentType::GitStatus);
+    }
+
+    #[test]
+    fn test_classify_git_diff_stat_command_aware() {
+        let input = " src/main.rs | 10 +++++++++-\n README.md   |  2 +-\n 2 files changed, 10 insertions(+), 2 deletions(-)";
+        assert_eq!(
+            classify(input, Some("git diff --stat")),
+            ContentType::GitStatus
+        );
     }
 
     #[test]
     fn test_classify_git_log() {
         let input = "commit 3e51feb6f039a4a4ef493ea4a4ef493ea4a4ef49\nAuthor: John\nDate: Mon";
-        assert_eq!(classify(input), ContentType::GitLog);
+        assert_eq!(classify(input, None), ContentType::GitLog);
 
         let short = "3e51feb Fix bug\na4a4ef4 Add feature\n3e51feb Fix bug\na4a4ef4 Add feature\n3e51feb Fix bug";
-        assert_eq!(classify(short), ContentType::GitLog);
+        assert_eq!(classify(short, None), ContentType::GitLog);
     }
 
     #[test]
     fn test_classify_cargo_build_with_errors() {
         let rust_err = "error[E0432]: unresolved import `std::collections`\n  --> src/main.rs:1:5";
-        assert_eq!(classify(rust_err), ContentType::BuildOutput);
+        assert_eq!(classify(rust_err, None), ContentType::BuildOutput);
 
         let building = "Compiling omni v0.5.0\nFinished `dev` profile";
-        assert_eq!(classify(building), ContentType::BuildOutput);
+        assert_eq!(classify(building, None), ContentType::BuildOutput);
     }
 
     #[test]
     fn test_classify_pytest_output_with_failures() {
         let py = "================ test session starts ================\npytest 7.0.1\nFAILED tests/test_core.py";
-        assert_eq!(classify(py), ContentType::TestOutput);
+        assert_eq!(classify(py, None), ContentType::TestOutput);
 
         let cargo_test = "running 15 tests\ntest foo ... ok\ntest result: ok. 15 passed";
-        assert_eq!(classify(cargo_test), ContentType::TestOutput);
+        assert_eq!(classify(cargo_test, None), ContentType::TestOutput);
 
         let cargo_test_diff = "running 1 test\ntest my_test ... FAILED\n\nfailures:\n\n---- my_test stdout ----\nthread 'my_test' panicked at ...\n@@ -1,5 +1,6 @@\n+ foo\n- bar";
-        assert_eq!(classify(cargo_test_diff), ContentType::TestOutput);
+        assert_eq!(classify(cargo_test_diff, None), ContentType::TestOutput);
     }
 
     #[test]
     fn test_classify_go_test_output() {
         let go_test =
             "ok  \tgithub.com/user/pkg1\t0.123s\nFAIL\tgithub.com/user/pkg2\t0.456s\nFAIL";
-        assert_eq!(classify(go_test), ContentType::TestOutput);
+        assert_eq!(classify(go_test, None), ContentType::TestOutput);
 
         let go_fail = "FAIL\tgithub.com/user/pkg\t0.123s";
-        assert_eq!(classify(go_fail), ContentType::TestOutput);
+        assert_eq!(classify(go_fail, None), ContentType::TestOutput);
     }
 
     #[test]
     fn test_classify_kubectl_get_pods() {
         let kube = "NAME                               READY   STATUS    RESTARTS   AGE\nnginx-deployment-7fb96c846b-f4jnm   1/1     Running   0          5d";
-        assert_eq!(classify(kube), ContentType::Cloud); // Kubectl specific is now Cloud
+        assert_eq!(classify(kube, None), ContentType::Cloud); // Kubectl specific is now Cloud
     }
 
     #[test]
     fn test_classify_docker_build_output() {
         let docker =
             "Step 1/5 : FROM alpine:latest\n ---> 49f356fa4eb1\nStep 2/5 : RUN apk add curl";
-        assert_eq!(classify(docker), ContentType::InfraOutput); // Still infra output right now
+        assert_eq!(classify(docker, None), ContentType::InfraOutput); // Still infra output right now
 
         let terra = "Terraform will perform the following actions:";
-        assert_eq!(classify(terra), ContentType::InfraOutput);
+        assert_eq!(classify(terra, None), ContentType::InfraOutput);
     }
 
     #[test]
     fn test_classify_nginx_access_log() {
         let access = "127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] \"GET /apache_pb.gif HTTP/1.0\" 200 2326\n127.0.0.1 - - [10/Oct/2000:14:55:36 -0700]";
-        assert_eq!(classify(access), ContentType::LogOutput); // Contains date pattern
+        assert_eq!(classify(access, None), ContentType::LogOutput); // Contains date pattern
 
         let app_log = "[INFO] Starting application server...\n[ERROR] Failed to bind port 8080";
-        assert_eq!(classify(app_log), ContentType::LogOutput);
+        assert_eq!(classify(app_log, None), ContentType::LogOutput);
     }
 
     #[test]
     fn test_classify_tabular_data() {
         let table = "Header1      Header2      Header3\nRow1Val1     Row1Val2     Row1Val3\nRow2Val1     Row2Val2     Row2Val3";
-        assert_eq!(classify(table), ContentType::TabularData);
+        assert_eq!(classify(table, None), ContentType::TabularData);
     }
 
     #[test]
     fn test_classify_json_output() {
         let obj = "{\n  \"status\": \"ok\",\n  \"data\": []\n}";
-        assert_eq!(classify(obj), ContentType::StructuredData);
+        assert_eq!(classify(obj, None), ContentType::StructuredData);
 
         let arr = "[\n  1,\n  2,\n  3\n]";
-        assert_eq!(classify(arr), ContentType::StructuredData);
+        assert_eq!(classify(arr, None), ContentType::StructuredData);
     }
 
     #[test]
     fn test_classify_unknown_random_text() {
         let text = "Did you hear the tragedy of Darth Plagueis The Wise?\nI thought not.\nIt's not a story the Jedi would tell you.";
-        assert_eq!(classify(text), ContentType::Unknown);
+        assert_eq!(classify(text, None), ContentType::Unknown);
     }
 
     #[test]
     fn test_classify_short_output_to_unknown() {
         let short = "foo";
         // It should match Unknown, unless it looks like structured data e.g. "{}".
-        assert_eq!(classify(short), ContentType::Unknown);
+        assert_eq!(classify(short, None), ContentType::Unknown);
     }
 
     #[test]
@@ -413,7 +635,7 @@ mod tests {
         let start = Instant::now();
         let iters = 10_000;
         for _ in 0..iters {
-            std::hint::black_box(classify(&input));
+            std::hint::black_box(classify(&input, None));
         }
         let elapsed_us = start.elapsed().as_micros();
         let per_iter_us = elapsed_us / iters;
@@ -437,7 +659,7 @@ mod tests {
         let start = Instant::now();
         let iters = 1_000;
         for _ in 0..iters {
-            std::hint::black_box(classify(&input));
+            std::hint::black_box(classify(&input, None));
         }
         let elapsed_us = start.elapsed().as_micros();
         let per_iter_us = elapsed_us / iters;

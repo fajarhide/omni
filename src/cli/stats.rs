@@ -137,13 +137,21 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         return Ok(());
     }
 
-    // Mode detection
-    let mode = if args.iter().any(|a| a == "--detail") {
+    let detail_flag = args.iter().any(|a| a == "--detail");
+    let type_flag = args.iter().any(|a| a == "--by-type");
+    let json_flag = args.iter().any(|a| a == "--json");
+    let filter_flag = args
+        .iter()
+        .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
+
+    let mode = if detail_flag {
         "detail"
-    } else if args.iter().any(|a| a == "--by-type") {
+    } else if type_flag {
         "by-type"
-    } else if args.iter().any(|a| a == "--json") {
+    } else if json_flag {
         "json"
+    } else if filter_flag {
+        "detail" // Implicit detail mode for scoped queries
     } else {
         "default"
     };
@@ -227,7 +235,7 @@ fn run_default(store: &Store) -> Result<()> {
 
     if !top_types.is_empty() {
         println!("\n  {}", "Top Savings by Type:".bold().bright_white());
-        for (content_type, count, pct, _) in &top_types {
+        for (content_type, count, pct, _commands) in &top_types {
             let bar = format_bar_with_empty(*pct);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
@@ -237,12 +245,14 @@ fn run_default(store: &Store) -> Result<()> {
                 bar.bright_red()
             };
 
+            let label_display = content_type.clone();
+
             println!(
                 "    {:<13} {}  {:>5.1}%  ({}x)",
-                content_type.bright_cyan(),
+                label_display.bright_cyan(),
                 bar_colored,
                 pct,
-                count,
+                count
             );
         }
     }
@@ -267,6 +277,19 @@ fn run_default(store: &Store) -> Result<()> {
         "  💡 {} for content type mapping",
         "omni stats --by-type".bright_cyan()
     );
+
+    if store.has_upgradable_history() {
+        println!(
+            "  💡 Run {} to upgrade historical stats",
+            "omni doctor --fix".bright_cyan()
+        );
+    }
+
+    // Update Notification (4h cache)
+    if let Some(latest) = crate::guard::update::check() {
+        crate::guard::update::print_notification(&latest);
+    }
+
     println!();
     Ok(())
 }
@@ -368,13 +391,18 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         );
     }
 
-    // By Command — top 10, filter 0% savings
+    // By Command — top 10 (or all if requested), filter 0% savings
     let filters = store.filter_breakdown(since)?;
-    let display_filters: Vec<_> = filters
-        .iter()
-        .filter(|(_, _, pct)| *pct > 0.0)
-        .take(10)
-        .collect();
+    let all_flag = args.iter().any(|a| a == "--all-commands");
+    let display_filters: Vec<_> = if all_flag {
+        filters.iter().collect()
+    } else {
+        filters
+            .iter()
+            .filter(|(_, _, pct)| *pct > 0.0)
+            .take(10)
+            .collect()
+    };
 
     if !display_filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
@@ -416,16 +444,30 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             );
         }
 
-        if filters.len() > 10 {
-            println!(
-                "\n   {}",
-                format!(
-                    "Run `omni stats --detail --all-commands` for all {} commands.",
-                    filters.len()
-                )
-                .bright_black()
-                .italic()
-            );
+        if !all_flag {
+            let filtered_count = filters.iter().filter(|(_, _, pct)| *pct > 0.0).count();
+            let hidden_zero = filters.len() - filtered_count;
+
+            if filtered_count > 10 {
+                println!(
+                    "\n   {}",
+                    format!(
+                        "Showing top 10 of {} commands with active savings.",
+                        filtered_count
+                    )
+                    .bright_black()
+                    .italic()
+                );
+            }
+
+            if hidden_zero > 0 {
+                println!(
+                     "   {}",
+                     format!("({} noise commands with 0% savings hidden. Use --all-commands to see all).", hidden_zero)
+                         .bright_black()
+                         .italic()
+                 );
+            }
         }
     }
 
