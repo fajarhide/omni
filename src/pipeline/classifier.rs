@@ -16,56 +16,57 @@ lazy_static! {
 }
 
 pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
-    // Stage 1 restrictions: Only check first 50 lines max for speed
-    let mut lines_iter = input.lines().take(50).peekable();
-    if lines_iter.peek().is_none() {
-        return ContentType::Unknown;
-    }
+    // Stage 0: Pre-Stage: Command-Aware Heuristics
+    // Moved to top so re-classification works even if input is empty
+    if let Some(command_name) = command_name {
+        let cmd_low = command_name.to_lowercase();
+        let cmd_full = cmd_low.split_whitespace().next().unwrap_or(&cmd_low);
 
-    let trimmed = input.trim();
-    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
-    {
-        return ContentType::StructuredData;
-    }
+        // Handle absolute paths (e.g., /usr/bin/git -> git)
+        let cmd_base = std::path::Path::new(cmd_full)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(cmd_full);
 
-    let lines: Vec<&str> = lines_iter.collect();
-
-    // 0. Pre-Stage: Command-Aware Heuristics
-    if let Some(cmd) = command_name {
-        let cmd_low = cmd.to_lowercase();
-
-        // Git branch / checkout
-        if (cmd_low.contains("git branch") || cmd_low.contains("git checkout"))
-            && lines.iter().any(|l| RE_GIT_BRANCH_LIST.is_match(l))
-        {
-            return ContentType::GitStatus;
-        }
-
-        // Git diff --stat
-        if cmd_low.contains("git diff")
-            && cmd_low.contains("--stat")
-            && lines.iter().any(|l| RE_GIT_DIFF_STAT.is_match(l))
-        {
-            return ContentType::GitStatus; // Grouped with status/metadata
-        }
-
-        // Generic Git catch-all
-        if cmd_low.starts_with("git ") {
-            let git_keywords = ["On branch", "Changes", "Untracked", "commit", "Author:"];
-            if lines
-                .iter()
-                .any(|l| git_keywords.iter().any(|k| l.contains(k)))
-            {
-                return ContentType::GitStatus;
+        // Subcommand awareness for Git
+        if cmd_base == "git" {
+            let parts: Vec<&str> = cmd_low.split_whitespace().collect();
+            if parts.len() > 1 {
+                let sub = parts[1];
+                // Status & Metadata (Branch, Tag, etc.)
+                if [
+                    "status",
+                    "branch",
+                    "tag",
+                    "remote",
+                    "show-ref",
+                    "rev-parse",
+                    "symbolic-ref",
+                    "checkout",
+                    "stash",
+                    "config",
+                ]
+                .contains(&sub)
+                {
+                    return ContentType::GitStatus;
+                }
+                // Diffs
+                if ["diff", "show", "whatchanged"].contains(&sub) {
+                    // git diff --stat is metadata
+                    if cmd_low.contains("--stat") {
+                        return ContentType::GitStatus;
+                    }
+                    return ContentType::GitDiff;
+                }
+                // Logs
+                if ["log", "shortlog", "reflog"].contains(&sub) {
+                    return ContentType::GitLog;
+                }
             }
         }
 
-        // =========================================================
-        // SystemOps Bias (Operations, Exploration, Networking, etc.)
-        // =========================================================
+        // Broad SystemOps Bias
         let sys_cmds = [
-            // File & Directory
             "ls",
             "tree",
             "pwd",
@@ -79,14 +80,12 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "ln",
             "stat",
             "file",
-            // File Viewing / Reading
             "cat",
             "less",
             "more",
             "head",
             "tail",
             "nl",
-            // Text Processing / Parsing
             "grep",
             "egrep",
             "fgrep",
@@ -99,12 +98,10 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "wc",
             "tr",
             "xargs",
-            // Search
             "find",
             "locate",
             "which",
             "whereis",
-            // System Info
             "ps",
             "top",
             "htop",
@@ -114,7 +111,6 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "du",
             "uname",
             "hostname",
-            // Process Control
             "kill",
             "killall",
             "pkill",
@@ -125,21 +121,18 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "nice",
             "renice",
             "watch",
-            // Users / Permissions
             "whoami",
             "who",
             "id",
             "chmod",
             "chown",
             "groups",
-            // Environment
             "env",
             "printenv",
             "export",
             "unset",
             "alias",
             "source",
-            // Networking
             "ifconfig",
             "ip",
             "netstat",
@@ -155,18 +148,15 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "whois",
             "nc",
             "telnet",
-            // Archive / Compression
             "tar",
             "gzip",
             "gunzip",
             "zip",
             "unzip",
-            // Disk / Hardware
             "mount",
             "umount",
             "lsblk",
             "blkid",
-            // Package Managers
             "apt",
             "apt-get",
             "yum",
@@ -174,7 +164,6 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "pacman",
             "snap",
             "brew",
-            // Misc Utilities
             "clear",
             "reset",
             "time",
@@ -182,25 +171,20 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "sleep",
             "history",
         ];
-        if sys_cmds.iter().any(|&sc| cmd_low.starts_with(sc)) {
+        if sys_cmds.contains(&cmd_base) || sys_cmds.iter().any(|&sc| cmd_low.starts_with(sc)) {
             return ContentType::SystemOps;
         }
 
-        // =========================================================
-        // Build & Dev Bias (Compiler, Runtimes, Build Tools)
-        // =========================================================
+        // Build Tools Bias
         let build_cmds = [
             "make", "cmake", "cargo", "rustc", "go", "python", "python3", "pip", "pip3", "java",
-            "javac", "gcc", "g++", "clang",
+            "javac", "gcc", "g++", "clang", "gcc", "g++",
         ];
-        if build_cmds.iter().any(|&bc| cmd_low.starts_with(bc)) {
-            // Bias towards BuildOutput but let Stage 4 do heavy lifting if needed
+        if build_cmds.contains(&cmd_base) || build_cmds.iter().any(|&bc| cmd_low.starts_with(bc)) {
             return ContentType::BuildOutput;
         }
 
-        // =========================================================
-        // Web & JS/TS Bias
-        // =========================================================
+        // Web Tools Bias
         let web_cmds = [
             "node",
             "npm",
@@ -211,11 +195,44 @@ pub fn classify(input: &str, command_name: Option<&str>) -> ContentType {
             "playwright",
             "tsc",
             "eslint",
+            "prettier",
+            "esbuild",
+            "vite",
         ];
-        if web_cmds.iter().any(|&wc| cmd_low.starts_with(wc)) {
+        if web_cmds.contains(&cmd_base) || web_cmds.iter().any(|&wc| cmd_low.starts_with(wc)) {
             return ContentType::JsTs;
         }
+
+        // Cloud & Infra Bias
+        let cloud_cmds = [
+            "docker",
+            "kubectl",
+            "terraform",
+            "helm",
+            "aws",
+            "gcloud",
+            "az",
+            "doctl",
+        ];
+        if cloud_cmds.contains(&cmd_base) || cloud_cmds.iter().any(|&cc| cmd_low.starts_with(cc)) {
+            return ContentType::Cloud;
+        }
     }
+
+    // Stage 1 restrictions: Only check first 50 lines max for speed
+    let mut lines_iter = input.lines().take(50).peekable();
+    if lines_iter.peek().is_none() {
+        return ContentType::Unknown;
+    }
+
+    let trimmed = input.trim();
+    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    {
+        return ContentType::StructuredData;
+    }
+
+    let lines: Vec<&str> = lines_iter.collect();
 
     // 1. GitDiff
     if let Some(&first) = lines.first() {

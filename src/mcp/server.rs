@@ -63,12 +63,12 @@ impl OmniServer {
         // 3. If apply=true: write to ~/.omni/filters/learned.toml
         if apply {
             let filter_name = format!("learned_{}", chrono::Utc::now().timestamp());
-            let _toml_content = generate_toml(&candidates, &filter_name);
+            let _toml_content = generate_toml(&candidates, &filter_name, None);
 
             let config_path = crate::paths::learned_filters_path();
             let _ = crate::paths::ensure_omni_home();
 
-            match apply_to_config(&candidates, &filter_name, &config_path) {
+            match apply_to_config(&candidates, &filter_name, &config_path, None) {
                 Ok(added) => {
                     report.push_str(&format!(
                         "\n✓ Applied {} filters to {}\n  Run: omni doctor to verify",

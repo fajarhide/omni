@@ -235,7 +235,7 @@ fn run_default(store: &Store) -> Result<()> {
 
     if !top_types.is_empty() {
         println!("\n  {}", "Top Savings by Type:".bold().bright_white());
-        for (content_type, count, pct, commands) in &top_types {
+        for (content_type, count, pct, _commands) in &top_types {
             let bar = format_bar_with_empty(*pct);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
@@ -245,16 +245,7 @@ fn run_default(store: &Store) -> Result<()> {
                 bar.bright_red()
             };
 
-            let label_display = if content_type == "Unknown" {
-                let cmds = truncate_commands(commands, 2);
-                if !cmds.is_empty() {
-                    format!("Unknown ({})", cmds)
-                } else {
-                    "Unknown".to_string()
-                }
-            } else {
-                content_type.clone()
-            };
+            let label_display = content_type.clone();
 
             println!(
                 "    {:<13} {}  {:>5.1}%  ({}x)",
@@ -286,6 +277,14 @@ fn run_default(store: &Store) -> Result<()> {
         "  💡 {} for content type mapping",
         "omni stats --by-type".bright_cyan()
     );
+
+    if store.has_upgradable_history() {
+        println!(
+            "  💡 Run {} to upgrade historical stats",
+            "omni doctor --fix".bright_cyan()
+        );
+    }
+
     println!();
     Ok(())
 }

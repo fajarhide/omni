@@ -236,8 +236,11 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     let filter_name = format!("learned_{}", Utc::now().timestamp());
 
+    let command_hint = executions.first().map(|e| e.command.as_str());
+
     if dry_run {
-        let generated = crate::session::learn::generate_toml(&candidates, &filter_name);
+        let generated =
+            crate::session::learn::generate_toml(&candidates, &filter_name, command_hint);
         println!(
             "\n{}",
             "─────────────────────────────────────────"
@@ -264,7 +267,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
     } else if apply {
         let path = crate::paths::learned_filters_path();
         let _ = crate::paths::ensure_omni_home();
-        let added = apply_to_config(&candidates, &filter_name, &path)?;
+        let added = apply_to_config(&candidates, &filter_name, &path, command_hint)?;
         if added > 0 {
             println!(
                 "\n{}",

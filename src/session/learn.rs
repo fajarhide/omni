@@ -82,10 +82,23 @@ pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
     candidates.into_iter().take(16).collect()
 }
 
-pub fn generate_toml(candidates: &[PatternCandidate], filter_name: &str) -> String {
+pub fn generate_toml(
+    candidates: &[PatternCandidate],
+    filter_name: &str,
+    command: Option<&str>,
+) -> String {
     let mut toml = format!("\n[filters.{}]\n", filter_name);
-    toml.push_str("description = \"Auto-learned filter\"\n");
-    toml.push_str(&format!("match_command = \"{}.*\"\n", filter_name));
+    toml.push_str(&format!(
+        "description = \"Auto-learned filter for {}\"\n",
+        command.unwrap_or("general output")
+    ));
+
+    if let Some(cmd) = command {
+        // Create a simple prefix-based match for the command
+        let cmd_base = cmd.split_whitespace().next().unwrap_or(cmd);
+        toml.push_str(&format!("match_command = \"{}.*\"\n", cmd_base));
+    }
+
     toml.push_str("strip_ansi = true\n");
     toml.push_str("confidence = 0.85\n\n");
 
@@ -146,6 +159,7 @@ pub fn apply_to_config(
     candidates: &[PatternCandidate],
     filter_name: &str,
     config_path: &Path,
+    command: Option<&str>,
 ) -> anyhow::Result<usize> {
     if candidates.is_empty() {
         return Ok(0);
@@ -189,7 +203,7 @@ pub fn apply_to_config(
         return Ok(0);
     }
 
-    let generated = generate_toml(&new_candidates, filter_name);
+    let generated = generate_toml(&new_candidates, filter_name, command);
 
     if !config_path.exists() {
         if let Some(p) = config_path.parent() {
@@ -275,7 +289,7 @@ mod tests {
             confidence: 0.9,
             suggested_action: LearnAction::Strip,
         }];
-        let toml = generate_toml(&c, "gen_test");
+        let toml = generate_toml(&c, "gen_test", None);
         // schema_version is now handled by apply_to_config, not generation
         assert!(toml.contains("[filters.gen_test]"));
         assert!(toml.contains("\"^Test Prefix Gen\""));
@@ -291,7 +305,7 @@ mod tests {
             confidence: 0.9,
             suggested_action: LearnAction::Strip,
         }];
-        apply_to_config(&c, "dummy", file.path()).unwrap();
+        apply_to_config(&c, "dummy", file.path(), None).unwrap();
         let content = fs::read_to_string(file.path()).unwrap();
         assert!(content.contains("[filters.dummy]"));
     }

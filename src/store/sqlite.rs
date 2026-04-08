@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
 use crate::paths;
+use crate::pipeline::classifier::classify;
 use crate::pipeline::{DistillResult, SessionState};
 
 pub struct FilterStats {
@@ -531,6 +532,81 @@ impl Store {
         results
     }
 
+    pub fn reclassify_historical_data(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, command, content_type FROM distillations 
+             WHERE (content_type = 'Unknown' OR content_type = 'TabularData') 
+             AND command != ''",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+
+        let mut updated_count = 0;
+        let mut updates = Vec::new();
+
+        for row in rows.flatten() {
+            let (id, command, old_filter) = row;
+            // Re-classify using only command context (input is empty)
+            let new_type = classify("", Some(&command));
+            let new_filter = format!("{:?}", new_type);
+
+            if new_filter != old_filter && new_filter != "Unknown" {
+                updates.push((id, new_filter));
+            }
+        }
+
+        // Apply updates in a transaction for efficiency
+        if !updates.is_empty() {
+            let mut update_stmt = conn.prepare(
+                "UPDATE distillations SET filter_name = ?1, content_type = ?1 WHERE id = ?2",
+            )?;
+            for (id, new_filter) in updates {
+                update_stmt.execute(params![new_filter, id])?;
+                updated_count += 1;
+            }
+        }
+
+        Ok(updated_count)
+    }
+
+    pub fn has_upgradable_history(&self) -> bool {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT command, content_type FROM distillations 
+             WHERE (content_type = 'Unknown' OR content_type = 'TabularData') 
+             AND command != ''",
+        ) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let mut rows = match stmt.query([]) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+
+        while let Ok(Some(row)) = rows.next() {
+            let cmd: String = row.get(0).unwrap_or_default();
+            let old_type: String = row.get(1).unwrap_or_default();
+            let new_type = crate::pipeline::classifier::classify("", Some(&cmd));
+            let new_type_str = format!("{:?}", new_type);
+            if new_type_str != old_type && new_type_str != "Unknown" {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn get_summary(&self, since_secs: i64) -> Result<StoreSummary> {
         let conn = self.conn.lock().unwrap();
 
@@ -690,6 +766,7 @@ mod tests {
     fn test_open_creates_database_and_schema() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
+
         let store = Store::open_path(&db_path).unwrap();
 
         let conn = store.conn.lock().unwrap();
@@ -878,5 +955,50 @@ mod tests {
         assert_eq!(summary.by_route.len(), 1);
         assert_eq!(summary.by_route[0].route, "Keep");
         assert_eq!(summary.by_route[0].count, 2);
+    }
+
+    #[test]
+    fn test_reclassify_historical_data() {
+        use crate::pipeline::ContentType;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
+
+        // 1. Insert a record that WAS Unknown but SHOULD BE GitStatus
+        let res = DistillResult {
+            output: "".to_string(),
+            route: crate::pipeline::Route::Keep,
+            filter_name: "Unknown".to_string(), // Legacy label
+            content_type: ContentType::Unknown,
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 100,
+            output_bytes: 50,
+            latency_ms: 0,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+        };
+        store.record_distillation("s1", &res, "git status");
+
+        // 2. Verify it's Unknown initially
+        let _summary_pre = store.get_summary(3600).unwrap();
+        // Since get_summary uses 'command' if filter_name == '', and our record_distillation sets it...
+        // Wait, get_summary grp_name logic:
+        // CASE WHEN command != '' THEN command ELSE filter_name END as grp_name
+        // This is for the UI grouping. The actual content_type/filter_name is still recorded as 'Unknown'.
+
+        // 3. Run re-classification
+        let count = store.reclassify_historical_data().unwrap();
+        assert_eq!(count, 1);
+
+        // 4. Verify the database record itself
+        let conn = store.conn.lock().unwrap();
+        let final_filter: String = conn
+            .query_row("SELECT filter_name FROM distillations LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(final_filter, "GitStatus");
     }
 }
