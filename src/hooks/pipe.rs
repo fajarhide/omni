@@ -179,47 +179,65 @@ fn distill(
         }
     }
 
-    let (output, filter_name, ctype, rewind_hash, kept_count, dropped_count) =
-        if let Some(filter) = matched_toml {
-            let out = filter.apply(&input_text);
-            (out, filter.name.clone(), ContentType::Unknown, None, 0, 0)
-        } else {
-            let c = classifier::classify(&input_text);
+    let (output, filter_name, ctype, rewind_hash, kept_count, dropped_count) = if let Some(filter) =
+        matched_toml
+    {
+        let out = filter.apply(&input_text);
+        (out, filter.name.clone(), ContentType::Unknown, None, 0, 0)
+    } else {
+        let c = classifier::classify(&input_text, command_name);
 
-            let collapse_result = collapse::collapse(&input_text, &c);
-            let effective_input = collapse_result.collapsed_lines.join("\n");
+        let collapse_result = collapse::collapse(&input_text, &c);
+        let effective_input = collapse_result.collapsed_lines.join("\n");
 
-            let active_session_opt = session.as_ref().and_then(|m| m.lock().ok());
-            let scored_segments =
-                scorer::score_segments(&effective_input, &c, active_session_opt.as_deref());
-            drop(active_session_opt);
+        let active_session_opt = session.as_ref().and_then(|m| m.lock().ok());
+        let scored_segments =
+            scorer::score_segments(&effective_input, &c, active_session_opt.as_deref());
 
-            let compose_config = composer::ComposeConfig::default();
-            let decision = composer::decide_rewind(&scored_segments, &c);
+        let distiller = crate::distillers::get_distiller(&c);
+        let mut out =
+            distiller.distill(&scored_segments, &input_text, active_session_opt.as_deref());
 
-            let k_count = scored_segments
-                .iter()
-                .filter(|s| s.final_score() >= compose_config.threshold)
-                .count();
-            let d_count = scored_segments.len() - k_count;
+        let compose_config = composer::ComposeConfig::default();
+        let decision = composer::decide_rewind(&scored_segments, &c);
 
-            let store_for_compose = if decision.should_store { store } else { None };
+        let k_count = scored_segments
+            .iter()
+            .filter(|s| s.final_score() >= compose_config.threshold)
+            .count();
+        let d_count = scored_segments.len() - k_count;
 
-            let (out, r_hash) = composer::compose(
-                scored_segments,
-                if decision.should_store {
-                    Some(input_text.clone())
-                } else {
-                    None
-                }, // Temporary clone for compose drops
-                &compose_config,
-                store_for_compose,
-                &input_text,
-                &c,
-            );
+        crate::pipeline::composer::evaluate_learning(
+            &c,
+            &input_text,
+            scored_segments.len(),
+            d_count,
+            command_name.unwrap_or(""),
+        );
 
-            (out, format!("{:?}", c), c, r_hash, k_count, d_count)
-        };
+        let mut r_hash = None;
+        if decision.should_store
+            && let Some(s) = store
+        {
+            let hash = s.store_rewind(&input_text);
+            out.push_str(&format!(
+                "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
+                "⏺".cyan(),
+                "OMNI".bold().bright_white(),
+                "distilled".bright_green(),
+                d_count,
+                hash.cyan().bold()
+            ));
+            r_hash = Some(hash);
+        }
+
+        if out.len() > compose_config.max_output_chars {
+            out.truncate(compose_config.max_output_chars);
+            out.push_str("\n[OMNI: output truncated]\n");
+        }
+
+        (out, format!("{:?}", c), c, r_hash, k_count, d_count)
+    };
 
     PipelineResult {
         session_id,

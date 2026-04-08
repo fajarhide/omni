@@ -98,7 +98,7 @@ impl OmniServer {
         description = "Measure how much signal vs noise in text"
     )]
     pub async fn omni_density(&self, #[tool(param)] text: String) -> String {
-        let content_type = classify(&text);
+        let content_type = classify(&text, None);
         let current_session = self.session.lock().unwrap().clone();
 
         let segments = score_segments(&text, &content_type, Some(&current_session));

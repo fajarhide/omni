@@ -607,8 +607,8 @@ impl Store {
             "SELECT content_type, COUNT(*),
                     CASE WHEN SUM(input_bytes)=0 THEN 0.0
                          ELSE ROUND(100.0*(1.0 - CAST(SUM(output_bytes) AS REAL)/SUM(input_bytes)),1) END,
-                    COALESCE(GROUP_CONCAT(DISTINCT command), '')
-             FROM distillations WHERE ts >= ?1 AND command != ''
+                    COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN command != '' THEN command END), '[pipe]')
+             FROM distillations WHERE ts >= ?1
              GROUP BY content_type ORDER BY COUNT(*) DESC",
         )?;
         let rows = stmt

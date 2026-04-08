@@ -3,10 +3,10 @@ use omni::distillers;
 ///
 /// This integration test runs the full pipeline (classify → score → compose) on real
 /// fixture files and asserts each achieves a minimum savings percentage.
-use omni::pipeline::{classifier, composer, scorer};
+use omni::pipeline::{classifier, scorer};
 use std::time::Instant;
 fn run_pipeline(input: &str) -> (usize, usize, f64) {
-    let ctype = classifier::classify(input);
+    let ctype = classifier::classify(input, None);
     let segments = scorer::score_segments(input, &ctype, None);
 
     // Use the actual distiller logic from post_tool.rs
@@ -123,7 +123,7 @@ fn test_pipeline_latency_under_50ms_debug() {
     let input = include_str!("../tests/fixtures/git_diff_multi_file.txt").repeat(3); // ~30KB input
 
     let start = Instant::now();
-    let ctype = classifier::classify(&input);
+    let ctype = classifier::classify(&input, None);
     let segments = scorer::score_segments(&input, &ctype, None);
     let distiller = distillers::get_distiller(&ctype);
     distiller.distill(&segments, &input, None);
@@ -142,7 +142,7 @@ fn test_classifier_latency_under_5ms_debug() {
 
     let start = Instant::now();
     for _ in 0..10 {
-        classifier::classify(&input);
+        classifier::classify(&input, None);
     }
     let elapsed = start.elapsed();
     let avg_ms = elapsed.as_millis() / 10;
@@ -159,11 +159,11 @@ fn test_hook_no_panic_on_large_input() {
     // Safety: 500KB input harus tidak crash
     let large = "error: cannot find type\n".repeat(20000);
 
-    let ctype = classifier::classify(&large);
+    let ctype = classifier::classify(&large, None);
     let segments = scorer::score_segments(&large, &ctype, None);
 
-    let config = composer::ComposeConfig::default();
-    let (output, _) = composer::compose(segments, None, &config, None, &large, &ctype);
+    let distiller = omni::distillers::get_distiller(&ctype);
+    let output = distiller.distill(&segments, &large, None);
 
     assert!(!output.is_empty());
 }

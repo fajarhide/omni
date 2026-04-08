@@ -1,12 +1,11 @@
 /// Security tests — verify OMNI does not introduce attack vectors.
-use omni::pipeline::{classifier, composer, scorer};
+use omni::pipeline::{classifier, scorer};
 
 fn run_pipeline(input: &str) -> String {
-    let ctype = classifier::classify(input);
+    let ctype = classifier::classify(input, None);
     let segments = scorer::score_segments(input, &ctype, None);
-    let config = composer::ComposeConfig::default();
-    let (output, _) = composer::compose(segments, None, &config, None, input, &ctype);
-    output
+    let distiller = omni::distillers::get_distiller(&ctype);
+    distiller.distill(&segments, input, None)
 }
 
 #[test]
