@@ -32,10 +32,10 @@ pub fn get_status() -> Status {
         .unwrap_or_default()
         .as_secs();
 
-    // Try to get latest version from cache or fetch it
+    // Try to get latest version from cache or fetch it (Cache: 4 hours)
     let latest = if let Ok(content) = fs::read_to_string(&cache_path)
         && let Ok(cache) = serde_json::from_str::<UpdateCache>(&content)
-        && now < cache.last_checked + 86400
+        && now < cache.last_checked + 14400
     {
         Some(cache.latest_version)
     } else {

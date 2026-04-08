@@ -285,6 +285,11 @@ fn run_default(store: &Store) -> Result<()> {
         );
     }
 
+    // Update Notification (4h cache)
+    if let Some(latest) = crate::guard::update::check() {
+        crate::guard::update::print_notification(&latest);
+    }
+
     println!();
     Ok(())
 }
