@@ -145,7 +145,19 @@ omni stats
 ```
 
 Need to see the filters in action or add your own custom rules?
-You can easily create your own rules using simple TOML files. Check out our `filters/` directory!
+You can easily create your own rules using simple TOML files.
+
+### Documentation Index
+
+**For Users:**
+- [The Ultimate Guide (HOW_TO_USE.md)](docs/HOW_TO_USE.md) — Everything you need: Installation, `omni learn`, Custom TOML Filters, and CLI Commands.
+
+**For Developers & System Integrators:**
+- [Development Guide](docs/DEVELOPMENT.md) — How to build and contribute to the OMNI codebase.
+- [Testing Architecture](docs/TESTING.md) — Quality assurance and context safety.
+- [Session Continuity](docs/SESSION.md) — Deep dive into OMNI's working memory.
+- [Roadmap](docs/ROADMAP.md) — Current development status and upcoming features.
+- [Migration Guide](docs/MIGRATION.md) — Notes on upgrading from Node/Zig to the Rust version.
 
 ---
 
