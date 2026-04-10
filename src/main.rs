@@ -94,6 +94,10 @@ fn print_help() {
         "  {: <12} View and manage archived content",
         "rewind".cyan()
     );
+    println!(
+        "  {: <12} Analyze which tools have good/poor filter coverage",
+        "discover".cyan()
+    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -259,6 +263,19 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for rewind: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "discover" | "coverage" => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::discover::run(&args, &store) {
+                            eprintln!("[omni] Discover error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for discover: {}", e);
                         std::process::exit(1);
                     }
                 },

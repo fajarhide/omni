@@ -29,6 +29,15 @@ pub struct StoreSummary {
     pub passthrough_commands: Vec<(String, u32)>, // (command, count)
 }
 
+pub struct CoverageRecord {
+    pub command: String,
+    pub content_type: String,
+    pub call_count: u32,
+    pub avg_reduction_pct: f64,
+    pub total_input_bytes: u64,
+    pub total_output_bytes: u64,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
 }
@@ -717,6 +726,43 @@ impl Store {
             periods.push((label.to_string(), count, input, output));
         }
         Ok(periods)
+    }
+
+    pub fn coverage_analysis(&self, since: i64) -> anyhow::Result<Vec<CoverageRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                CASE WHEN command != '' THEN command ELSE '[pipe]' END as cmd,
+                content_type,
+                COUNT(*) as calls,
+                CASE
+                    WHEN SUM(input_bytes) = 0 THEN 0.0
+                    ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
+                END as avg_reduction,
+                SUM(input_bytes) as total_input,
+                SUM(output_bytes) as total_output
+            FROM distillations
+            WHERE ts >= ?1
+            GROUP BY cmd, content_type
+            ORDER BY calls DESC
+            LIMIT 100"
+        )?;
+
+        let records = stmt
+            .query_map([since], |row| {
+                Ok(CoverageRecord {
+                    command: row.get(0)?,
+                    content_type: row.get(1)?,
+                    call_count: row.get(2)?,
+                    avg_reduction_pct: row.get(3)?,
+                    total_input_bytes: row.get(4)?,
+                    total_output_bytes: row.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(records)
     }
 
     pub fn cleanup_old(&self, days: u32) {
