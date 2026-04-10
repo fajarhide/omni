@@ -21,6 +21,8 @@ struct ToolInput {
 #[derive(Deserialize)]
 struct ToolResponse {
     content: Option<serde_json::Value>,
+    stdout: Option<String>,
+    stderr: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -62,6 +64,35 @@ fn extract_content(value: &serde_json::Value) -> Option<String> {
     None
 }
 
+/// Extracts content from tool_response, trying `content` first (Cursor, Windsurf)
+/// then falling back to `stdout`/`stderr` (Claude Code format).
+fn extract_tool_content(input: &HookInput) -> Option<String> {
+    let response = input.tool_response.as_ref()?;
+
+    // Try structured `content` field first
+    if let Some(ref val) = response.content
+        && let Some(s) = extract_content(val)
+    {
+        return Some(s);
+    }
+
+    // Fall back to stdout/stderr (Claude Code format)
+    if let Some(ref stdout) = response.stdout
+        && !stdout.is_empty()
+    {
+        let mut result = stdout.clone();
+        if let Some(ref stderr) = response.stderr
+            && !stderr.is_empty()
+        {
+            result.push_str("\n[stderr]\n");
+            result.push_str(stderr);
+        }
+        return Some(result);
+    }
+
+    None
+}
+
 pub fn process_payload(
     input_str: &str,
     store: Option<Arc<Store>>,
@@ -79,12 +110,7 @@ pub fn process_payload(
         return None;
     }
 
-    let raw_val = parsed
-        .tool_response
-        .as_ref()
-        .and_then(|r| r.content.as_ref())?;
-
-    let content = extract_content(raw_val)?;
+    let content = extract_tool_content(&parsed)?;
 
     if content.len() < 50 {
         return None;
@@ -356,5 +382,93 @@ mod tests {
         assert!(extracted.contains("hello"));
         assert!(extracted.contains("world world"));
         assert!(extracted.ends_with("!"));
+    }
+
+    #[test]
+    fn test_claude_code_stdout_format() {
+        let mut big_output =
+            "total 42\ndrwxr-xr-x  15 user  staff  480 Apr 10 10:00 .\n".to_string();
+        for i in 0..30 {
+            big_output.push_str(&format!(
+                "-rw-r--r--   1 user  staff  {} Apr 10 10:00 file{}.rs\n",
+                i * 100,
+                i
+            ));
+        }
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "ls -la" },
+            "tool_response": {
+                "stdout": big_output,
+                "stderr": "",
+                "interrupted": false,
+                "isImage": false,
+                "noOutputExpected": false
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some(), "Claude Code stdout format must be processed");
+        let res = out.expect("must succeed");
+        assert!(res.contains("PostToolUse"));
+    }
+
+    #[test]
+    fn test_claude_code_stdout_with_stderr() {
+        let mut big_output = String::new();
+        for i in 0..30 {
+            big_output.push_str(&format!("line {} of output\n", i));
+        }
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "cargo build" },
+            "tool_response": {
+                "stdout": big_output,
+                "stderr": "warning: unused variable",
+                "interrupted": false
+            }
+        });
+        let parsed: HookInput = serde_json::from_value(input).expect("must parse");
+        let content = extract_tool_content(&parsed).expect("must extract");
+        assert!(content.contains("line 0 of output"));
+        assert!(content.contains("[stderr]"));
+        assert!(content.contains("warning: unused variable"));
+    }
+
+    #[test]
+    fn test_claude_code_empty_stdout_ignored() {
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "true" },
+            "tool_response": {
+                "stdout": "",
+                "stderr": "",
+                "interrupted": false
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_none(), "Empty stdout should exit early");
+    }
+
+    #[test]
+    fn test_content_field_still_preferred_over_stdout() {
+        let mut big_diff = "diff --git a/test.txt b/test.txt\nindex 123..456 100644\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n+new line 2\n".to_string();
+        for _ in 0..50 {
+            big_diff.push_str(" \n");
+        }
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "git diff" },
+            "tool_response": {
+                "content": big_diff,
+                "stdout": "should be ignored when content is present"
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some());
+        let res = out.expect("must succeed");
+        assert!(
+            res.contains("test.txt"),
+            "content field should be used, not stdout"
+        );
     }
 }

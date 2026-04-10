@@ -748,6 +748,21 @@ impl Store {
             params![ts_threshold],
         );
     }
+
+    /// Test that the database is actually writable (catches sandbox restrictions)
+    pub fn test_write(&self) -> bool {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        match conn.execute("CREATE TABLE IF NOT EXISTS _write_test (id INTEGER)", []) {
+            Ok(_) => {
+                let _ = conn.execute("DROP TABLE IF EXISTS _write_test", []);
+                true
+            }
+            Err(_) => false,
+        }
+    }
 }
 
 #[cfg(test)]
