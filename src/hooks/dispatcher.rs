@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize)]
 struct HookPeeker {
-    #[serde(rename = "hookEventName")]
+    #[serde(rename = "hookEventName", alias = "hook_event_name")]
     hook_event_name: Option<String>,
 }
 

@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 #[derive(Deserialize)]
 struct HookInput {
-    #[serde(rename = "hookEventName")]
+    #[serde(rename = "hookEventName", alias = "hook_event_name")]
     hook_event_name: String,
-    #[serde(rename = "sessionId")]
+    #[serde(rename = "sessionId", alias = "session_id")]
     session_id: String,
-    #[serde(rename = "workingDirectory")]
+    #[serde(rename = "workingDirectory", alias = "working_directory")]
     working_directory: String,
 }
 

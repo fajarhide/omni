@@ -103,20 +103,34 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     println!("  {:<15} {}", "Binary:".bright_black(), version_info);
 
-    // 2. Config Dir
+    // 2. Config Dir (with actual write test for sandbox detection)
     let conf_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".omni");
-    if conf_dir.exists()
-        && fs::metadata(&conf_dir)
-            .map(|m| !m.permissions().readonly())
-            .unwrap_or(false)
-    {
-        println!(
-            "  {:<15} ~/.omni/ {}",
-            "Config dir:".bright_black(),
-            "[OK]".green().bold()
-        );
+    if conf_dir.exists() {
+        // Actual write test catches sandbox restrictions
+        let test_file = conf_dir.join(".write_test");
+        match fs::write(&test_file, "ok") {
+            Ok(_) => {
+                let _ = fs::remove_file(&test_file);
+                println!(
+                    "  {:<15} ~/.omni/ {}",
+                    "Config dir:".bright_black(),
+                    "[OK]".green().bold()
+                );
+            }
+            Err(_) => {
+                println!(
+                    "  {:<15} ~/.omni/ {}",
+                    "Config dir:".bright_black(),
+                    "[ERROR]".red().bold()
+                );
+                warnings.push(
+                    "Cannot write to ~/.omni/. If using Claude Code, add ~/.omni to sandbox.filesystem.allowWrite in ~/.claude/settings.json",
+                );
+                all_ok = false;
+            }
+        }
     } else {
         if fix_mode && fs::create_dir_all(&conf_dir).is_ok() {
             println!(
@@ -145,6 +159,25 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 sessions.to_string().yellow(),
                 "[OK]".green().bold()
             );
+
+            // DB write test (catches sandbox restrictions on the database itself)
+            if store.test_write() {
+                println!(
+                    "  {:<15} writable {}",
+                    "DB Write:".bright_black(),
+                    "[OK]".green().bold()
+                );
+            } else {
+                println!(
+                    "  {:<15} read-only {}",
+                    "DB Write:".bright_black(),
+                    "[ERROR]".red().bold()
+                );
+                warnings.push(
+                    "Database is read-only. Claude Code sandbox may be blocking writes to ~/.omni/omni.db. Add ~/.omni to sandbox.filesystem.allowWrite in ~/.claude/settings.json",
+                );
+                all_ok = false;
+            }
 
             if store.check_fts5() {
                 println!(
