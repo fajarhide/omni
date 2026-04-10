@@ -51,11 +51,19 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
             "poor": poor.iter().map(|r| serde_json::json!({
                 "command": r.command, "calls": r.call_count,
                 "reduction_pct": r.avg_reduction_pct,
-                "suggestion": format!("omni learn --from-history {}", r.command.split_whitespace().next().unwrap_or(""))
+                "suggestion": if r.command == "Piped Input" {
+                    "omni learn".to_string()
+                } else {
+                    format!("omni learn --command {}", r.command.split_whitespace().next().unwrap_or(""))
+                }
             })).collect::<Vec<_>>(),
             "unknown": unknown.iter().map(|r| serde_json::json!({
                 "command": r.command, "calls": r.call_count,
-                "suggestion": format!("omni learn --from-history {}", r.command.split_whitespace().next().unwrap_or(""))
+                "suggestion": if r.command == "Piped Input" {
+                    "omni learn".to_string()
+                } else {
+                    format!("omni learn --command {}", r.command.split_whitespace().next().unwrap_or(""))
+                }
             })).collect::<Vec<_>>()
         });
         println!("{}", serde_json::to_string_pretty(&json)?);
@@ -64,7 +72,7 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
 
     // Human-readable output
     println!("─────────────────────────────────────────────────────");
-    println!(" OMNI Coverage Analysis — last {} days", since_days);
+    println!(" OMNI Filter Coverage Analysis — last {} days", since_days);
     println!("─────────────────────────────────────────────────────");
     println!();
 
@@ -100,7 +108,11 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
                 r.avg_reduction_pct,
                 r.call_count
             );
-            println!("    → Suggestion: omni learn --from-history {}", cmd_base);
+            if r.command == "Piped Input" {
+                println!("    → Fix: omni learn");
+            } else {
+                println!("    → Fix: omni learn --command {}", cmd_base);
+            }
         }
         println!();
     }
@@ -119,7 +131,11 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
                 r.call_count,
                 total_wasted_tokens
             );
-            println!("    → Fix: omni learn --from-history {}", cmd_base);
+            if r.command == "Piped Input" {
+                println!("    → Fix: omni learn");
+            } else {
+                println!("    → Fix: omni learn --command {}", cmd_base);
+            }
         }
         println!();
     }
@@ -131,9 +147,9 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
 
     println!("─────────────────────────────────────────────────────");
     println!(" Tips:");
-    println!("  omni discover --days 30    Show last 30 days");
-    println!("  omni discover --json       Machine-readable output");
-    println!("  omni discover --all        Show all commands (not just top)");
+    println!("  omni coverage --days 30    Show last 30 days");
+    println!("  omni coverage --json       Machine-readable output");
+    println!("  omni coverage --all        Show all commands (not just top)");
     println!("─────────────────────────────────────────────────────");
 
     Ok(())
@@ -192,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn test_discover_categorizes_correctly() {
+    fn test_coverage_categorizes_correctly() {
         let (store, _dir) = make_store();
 
         // Excellent: 80% reduction (input=1000, output=200)
@@ -268,14 +284,14 @@ mod tests {
     }
 
     #[test]
-    fn test_discover_json_mode_runs() {
+    fn test_coverage_json_mode_runs() {
         let (store, _dir) = make_store();
         insert_distillation(&store, "git log", ContentType::GitStatus, 2000, 400);
         insert_distillation(&store, "git log", ContentType::GitStatus, 2000, 400);
 
         let args = vec![
             "omni".to_string(),
-            "discover".to_string(),
+            "coverage".to_string(),
             "--json".to_string(),
         ];
         let result = run(&args, &store);

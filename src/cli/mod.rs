@@ -1,5 +1,5 @@
 pub mod diff;
-pub mod discover;
+pub mod coverage;
 pub mod doctor;
 pub mod exec;
 pub mod init;

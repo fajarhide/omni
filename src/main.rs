@@ -95,8 +95,8 @@ fn print_help() {
         "rewind".cyan()
     );
     println!(
-        "  {: <12} Analyze which tools have good/poor filter coverage",
-        "discover".cyan()
+        "  {: <12} Analyze filter efficiency and coverage",
+        "coverage".cyan()
     );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
@@ -267,15 +267,15 @@ fn main() {
                     }
                 },
 
-                "discover" | "coverage" => match Store::open() {
+                "coverage" => match Store::open() {
                     Ok(store) => {
-                        if let Err(e) = cli::discover::run(&args, &store) {
-                            eprintln!("[omni] Discover error: {}", e);
+                        if let Err(e) = cli::coverage::run(&args, &store) {
+                            eprintln!("[omni] Coverage error: {}", e);
                             std::process::exit(1);
                         }
                     }
                     Err(e) => {
-                        eprintln!("[omni] Cannot open database for discover: {}", e);
+                        eprintln!("[omni] Cannot open database for coverage: {}", e);
                         std::process::exit(1);
                     }
                 },
