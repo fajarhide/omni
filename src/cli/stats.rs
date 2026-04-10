@@ -27,6 +27,17 @@ pub fn format_tokens(bytes: u64) -> String {
     }
 }
 
+/// Format a raw token count (NOT bytes — already in tokens).
+fn format_token_count(tokens: usize) -> String {
+    if tokens < 1000 {
+        format!("{}", tokens)
+    } else if tokens < 1_000_000 {
+        format!("{:.0}K", tokens as f64 / 1_000.0)
+    } else {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    }
+}
+
 pub fn format_bar(pct: f64) -> String {
     let width = 20;
     let filled = ((pct / 100.0) * width as f64).round() as usize;
@@ -104,6 +115,10 @@ fn print_help() {
         "--month".cyan()
     );
     println!("  {: <12} Machine-readable JSON output", "--json".cyan());
+    println!(
+        "  {: <12} Dollar cost analysis (requires: npm install -g ccusage)",
+        "--economics".cyan()
+    );
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -123,6 +138,10 @@ fn print_help() {
         "  omni stats --json       {} Machine-readable for CI/CD",
         "#".bright_black()
     );
+    println!(
+        "  omni stats --economics  {} Dollar savings vs Claude Code spending",
+        "#".bright_black()
+    );
     println!();
 }
 
@@ -140,11 +159,14 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let detail_flag = args.iter().any(|a| a == "--detail");
     let type_flag = args.iter().any(|a| a == "--by-type");
     let json_flag = args.iter().any(|a| a == "--json");
+    let economics_flag = args.iter().any(|a| a == "--economics");
     let filter_flag = args
         .iter()
         .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
 
-    let mode = if detail_flag {
+    let mode = if economics_flag {
+        "economics"
+    } else if detail_flag {
         "detail"
     } else if type_flag {
         "by-type"
@@ -157,6 +179,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "economics" => run_economics(args, store),
         "detail" => run_detail(args, store),
         "by-type" => run_by_type(args, store),
         "json" => run_json(store),
@@ -610,6 +633,155 @@ fn run_by_type(args: &[String], store: &Store) -> Result<()> {
     Ok(())
 }
 
+// ─── Economics Mode: Dollar Cost Analysis ───────────────
+
+fn run_economics(_args: &[String], store: &Store) -> Result<()> {
+    use crate::analytics::ccusage;
+
+    let ccusage_available = ccusage::is_ccusage_available();
+
+    // Time boundaries
+    let now = chrono::Utc::now().timestamp();
+    let today_since = now - (now % 86400); // midnight UTC
+    let week_since = now - 7 * 86400;
+
+    // OMNI data from SQLite
+    let (today_count, today_input, today_output, _, _) = store.aggregate_stats(today_since)?;
+    let (week_count, week_input, week_output, _, _) = store.aggregate_stats(week_since)?;
+    let (all_count, all_input, all_output, _, _) = store.aggregate_stats(0)?;
+
+    // Fetch ccusage metrics (graceful None when unavailable)
+    let cc_today = if ccusage_available {
+        ccusage::fetch_with_cache("today")
+    } else {
+        None
+    };
+    let cc_week = if ccusage_available {
+        ccusage::fetch_with_cache("week")
+    } else {
+        None
+    };
+    let cc_all = if ccusage_available {
+        ccusage::fetch_with_cache("all")
+    } else {
+        None
+    };
+
+    // Helper to compute reduction %
+    let reduction_pct = |input: u64, output: u64| -> f64 {
+        if input > 0 {
+            (1.0 - output as f64 / input as f64) * 100.0
+        } else {
+            0.0
+        }
+    };
+
+    // Build PeriodEconomics for each window
+    let periods = vec![
+        ccusage::build_period_economics(
+            "Today",
+            today_count as usize,
+            today_input.saturating_sub(today_output) as usize,
+            reduction_pct(today_input, today_output),
+            cc_today,
+        ),
+        ccusage::build_period_economics(
+            "This Week",
+            week_count as usize,
+            week_input.saturating_sub(week_output) as usize,
+            reduction_pct(week_input, week_output),
+            cc_week,
+        ),
+        ccusage::build_period_economics(
+            "All Time",
+            all_count as usize,
+            all_input.saturating_sub(all_output) as usize,
+            reduction_pct(all_input, all_output),
+            cc_all,
+        ),
+    ];
+
+    // ── Output ───────────────────────────────────────────
+    println!();
+    print_separator();
+    println!(" {}", "OMNI Economics Report".bold().bright_white());
+    if !ccusage_available {
+        println!(
+            " {} ccusage not found — dollar estimates unavailable",
+            "⚠".bright_yellow()
+        );
+        println!(
+            "   Install: {}",
+            "npm install -g ccusage".bright_cyan().italic()
+        );
+    }
+    print_separator();
+    println!();
+
+    for period in &periods {
+        let savings_pct = period.omni_reduction_pct.unwrap_or(0.0);
+        let saved_tokens = period.omni_saved_bytes.unwrap_or(0) / 4;
+
+        let pct_colored = if savings_pct > 70.0 {
+            format!("{:.1}%", savings_pct).bright_green()
+        } else if savings_pct > 40.0 {
+            format!("{:.1}%", savings_pct).bright_yellow()
+        } else {
+            format!("{:.1}%", savings_pct).bright_red()
+        };
+
+        if let Some(dollar) = period.dollar_saved {
+            println!(
+                "  {:12} {:>4} cmds │ {} reduced │ ~{} tokens │ ~{} saved",
+                format!("{}:", period.label).bright_white().bold(),
+                period.omni_commands.unwrap_or(0).to_string().cyan(),
+                pct_colored,
+                format_token_count(saved_tokens).bright_green(),
+                format!("${:.3}", dollar).bold().bright_green(),
+            );
+            if let Some(cost) = period.cc_cost {
+                let roi = if cost > 0.0 { dollar / cost } else { 0.0 };
+                println!(
+                    "               CC spent: {} │ OMNI ROI: {}",
+                    format!("${:.3}", cost).bright_red(),
+                    format!("{:.1}x", roi).bright_cyan().bold(),
+                );
+            }
+        } else {
+            // Graceful degradation: show without dollar figures
+            println!(
+                "  {:12} {:>4} cmds │ {} reduced │ ~{} tokens saved",
+                format!("{}:", period.label).bright_white().bold(),
+                period.omni_commands.unwrap_or(0).to_string().cyan(),
+                pct_colored,
+                format_token_count(saved_tokens).bright_green(),
+            );
+        }
+        println!();
+    }
+
+    if ccusage_available && let Some(cpt) = periods.first().and_then(|p| p.weighted_input_cpt) {
+        println!(
+            "  Weighted input CPT: {}",
+            format!("${:.8}/token", cpt).bright_cyan()
+        );
+        println!(
+            "  {}",
+            "Formula: input + 5×output + 1.25×cache_write + 0.1×cache_read".bright_black()
+        );
+    }
+
+    print_separator();
+    if !ccusage_available {
+        println!(
+            "  💡 Install {} to unlock dollar savings analysis",
+            "ccusage".bright_cyan()
+        );
+    }
+    println!();
+    Ok(())
+}
+
 // ─── JSON Mode: Machine-Readable ────────────────────────
 
 fn run_json(store: &Store) -> Result<()> {
@@ -771,5 +943,22 @@ mod tests {
         );
         assert_eq!(truncate_commands("a, b, c, d, e", 3), "a, b, c, +2 more");
         assert_eq!(truncate_commands("single", 3), "single");
+    }
+
+    #[test]
+    fn test_stats_economics_tidak_crash_jika_db_kosong() {
+        let tmp = NamedTempFile::new().unwrap();
+        let store = Store::open_path(tmp.path()).unwrap();
+        let args: Vec<String> = vec!["stats".into(), "--economics".into()];
+        let result = run(&args, &store);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_format_token_count() {
+        assert_eq!(format_token_count(0), "0");
+        assert_eq!(format_token_count(500), "500");
+        assert_eq!(format_token_count(12500), "12K");
+        assert_eq!(format_token_count(1_500_000), "1.5M");
     }
 }

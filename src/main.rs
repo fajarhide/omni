@@ -1,3 +1,4 @@
+mod analytics;
 mod cli;
 mod distillers;
 mod guard;
