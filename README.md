@@ -12,8 +12,9 @@
 
 <br/>
 
-> **OMNI** is a smart terminal interceptor that filters out useless command output before it reaches your AI agent. By giving your AI only the pure signal, you get much higher-quality reasoning while saving massive amounts of token costs.
-
+> **OMNI** is a smart terminal layer that intelligently filters and prioritizes command output before it reaches your AI agent. By preventing your AI from getting confused by noisy output, you get accurate answers faster while saving massive amounts of token costs.
+> 
+> *Fully transparent. You're always in control.*
 ---
 
 ## The Problem: Expensive Tokens & Noisy Outputs
@@ -53,7 +54,8 @@ AI agents like Claude are only as smart as the context you feed them. When you f
 
 ## Features Explained
 
-- **90% Token Reduction**: Omni acts like a smart sieve. If a test fails, it shows the AI *only* the specific error line and stack trace. No more loading spinners, dependency resolution logs, or useless success banners.
+- **No More AI Confusion**: Omni acts like a smart sieve. If a test fails, it shows the AI *only* the specific error line and stack trace. Your AI stops getting distracted by loading spinners or noisy dependency logs, allowing it to focus directly on the real problem.
+- **90% Token Reduction**: By completely eliminating useless terminal noise, you drastically cut your agentic API bills instantly.
 - **Zero Information Loss**: Worried Omni filtered something important? Don't be. Omni saves the raw output in a local archive (`RewindStore`). If the AI actually needs the full log, it can just automatically ask for it.
 - **Session Intelligence**: Omni remembers what you are doing. It knows which files you are actively editing and stops feeding the AI context it already knows, saving even more tokens over time.
 - **Distill Monitor**: Track your token savings and costs over time. Just run `omni stats` to see how much money and space you've saved.
@@ -137,7 +139,7 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 The best part? **You don't have to do anything special!**
 
-Once installed via `omni init --all`, Omni works invisibly in the background. When your AI Agent runs a terminal command (like `npm install` or `pytest`), Omni automatically jumps in, intercepts the terminal output, cleans up the garbage logs, and hands the clean signal back to the AI. 
+Once installed via `omni init --all`, Omni works invisibly in the background. When your AI Agent runs a terminal command (like `npm install` or `pytest`), Omni automatically jumps in as a transparent layer, intelligently filters the terminal output, removes the noisy logs, and hands the clean signal back to the AI. 
 
 To review how many tokens (and how much money) you've saved today, just type:
 ```bash
