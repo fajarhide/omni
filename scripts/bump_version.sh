@@ -31,11 +31,15 @@ rm -f Cargo.toml.bak
 # 3. Update Cargo.lock
 cargo check --quiet 2>/dev/null || true
 
-# 4. Verify build
+# 4. Update openclaw plugin version
+sed -i.bak "s/^version = \".*\"/version = \"$NEW\"/" integrations/openclaw/openclaw.plugin.json
+rm -f integrations/openclaw/openclaw.plugin.json.bak
+
+# 5. Verify build
 echo "Verifying build..."
 cargo build --quiet
 
-# 5. Verify version output
+# 6. Verify version output
 ACTUAL=$(./target/debug/omni version 2>&1)
 if echo "$ACTUAL" | grep -q "$NEW"; then
     echo "✓ Version output: $ACTUAL"
@@ -45,7 +49,7 @@ else
 fi
 
 # 6. Stage and commit
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock integrations/openclaw/openclaw.plugin.json
 git commit -m "chore: bump version to $NEW"
 
 echo ""
