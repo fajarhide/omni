@@ -1,5 +1,98 @@
 use crate::pipeline::{ContentType, OutputSegment, SessionState, SignalTier};
 
+pub fn command_to_content_type(command: &str) -> ContentType {
+    if command.is_empty() {
+        return ContentType::Unknown;
+    }
+
+    // Strip absolute paths: /usr/bin/git → git
+    let cmd = command.trim();
+    let base = {
+        let first_word = cmd.split_whitespace().next().unwrap_or(cmd);
+        std::path::Path::new(first_word)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(first_word)
+    };
+    let cmd_lower = cmd.to_lowercase();
+
+    // Git — subcommand aware
+    if base == "git" {
+        let parts: Vec<&str> = cmd_lower.split_whitespace().collect();
+        let sub = parts.get(1).copied().unwrap_or("");
+        return match sub {
+            "diff" | "show" | "whatchanged" | "status" => {
+                if cmd_lower.contains("--stat") { ContentType::GitStatus }
+                else { ContentType::GitDiff }
+            }
+            "log" | "shortlog" | "reflog" => ContentType::GitLog,
+            _ => ContentType::GitStatus, // status, branch, tag, remote, stash, config, checkout
+        };
+    }
+
+    // Build tools
+    if matches!(base, "cargo" | "rustc" | "make" | "cmake" | "gcc" | "g++" | "clang") {
+        return ContentType::BuildOutput;
+    }
+    if base == "go" && cmd_lower.contains("build") { return ContentType::BuildOutput; }
+    if base == "go" && cmd_lower.contains("test")  { return ContentType::TestOutput; }
+
+    // Test runners
+    if matches!(base, "pytest" | "rspec" | "phpunit" | "jest") {
+        return ContentType::TestOutput;
+    }
+    if base == "cargo" && cmd_lower.contains("test") { return ContentType::TestOutput; }
+
+    // JS/TS toolchain
+    if matches!(base, "vitest" | "playwright" | "tsc" | "eslint" | "prettier"
+              | "node" | "npm" | "npx" | "yarn" | "pnpm" | "bun" | "esbuild" | "vite") {
+        return ContentType::JsTs;
+    }
+
+    // Cloud & infra
+    if matches!(base, "docker" | "podman" | "kubectl" | "helm"
+              | "terraform" | "tofu" | "aws" | "gcloud" | "az" | "doctl") {
+        return ContentType::Cloud;
+    }
+
+    // System ops — 85+ commands (lightweight: just match base)
+    if matches!(base,
+        "ls" | "tree" | "find" | "grep" | "rg" | "awk" | "sed" | "cat" | "head" | "tail"
+      | "ps" | "top" | "htop" | "df" | "du" | "env" | "printenv" | "which" | "stat"
+      | "curl" | "wget" | "ping" | "ip" | "netstat" | "ss" | "lsof"
+      | "tar" | "gzip" | "zip" | "unzip" | "chmod" | "chown" | "wc" | "sort" | "uniq"
+      | "apt" | "apt-get" | "yum" | "dnf" | "brew" | "pacman"
+    ) {
+        return ContentType::SystemOps;
+    }
+
+    // Python tools
+    if matches!(base, "pip" | "pip3" | "poetry" | "uv" | "ruff" | "mypy" | "black") {
+        return ContentType::BuildOutput;
+    }
+
+    // Ruby tools
+    if matches!(base, "ruby" | "rake" | "rubocop" | "bundle") {
+        return ContentType::BuildOutput;
+    }
+
+    ContentType::Unknown
+}
+
+pub fn score_with_command(
+    input: &str,
+    command: &str,
+    session: Option<&crate::pipeline::SessionState>,
+) -> (Vec<crate::pipeline::OutputSegment>, ContentType) {
+    // 1. Infer content type dari command (O(1) — fast path)
+    let content_type = command_to_content_type(command);
+
+    // 2. Score segments (existing logic, no change)
+    let segments = score_segments(input, &content_type, session);
+
+    (segments, content_type)
+}
+
 fn contains_any(trimmed: &str, keywords: &[&str]) -> bool {
     keywords.iter().any(|k| trimmed.contains(k))
 }
