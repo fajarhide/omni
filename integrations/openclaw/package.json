@@ -1,0 +1,21 @@
+{
+  "name": "@fajarhide/omni-signal-engine",
+  "version": "0.5.9",
+  "description": "Local-only semantic context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.49"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "compat": {
+      "pluginApi": ">=2026.4.11"
+    },
+    "build": {
+      "openclawVersion": "2026.4.11"
+    }
+  }
+}

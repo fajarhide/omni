@@ -1,0 +1,9 @@
+{
+  "extends": "../../../../../../04_SANDBOX/openclaw/extensions/tsconfig.package-boundary.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist"
+  },
+  "include": ["./*.ts"],
+  "exclude": ["./**/*.test.ts", "./dist/**", "./node_modules/**"]
+}
