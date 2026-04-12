@@ -265,6 +265,52 @@ impl Store {
             "#,
         )?;
 
+        // Safe migration: check for legacy content_type (v0.5.6 migration)
+        let has_content_type = {
+            let mut stmt = conn.prepare("PRAGMA table_info(distillations)")?;
+            let mut rows = stmt.query([])?;
+            let mut found = false;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(1)?;
+                if name == "content_type" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+
+        if has_content_type {
+            // Recreate table to remove legacy NOT NULL content_type column
+            conn.execute_batch(
+                r#"
+                ALTER TABLE distillations RENAME TO distillations_old;
+                CREATE TABLE distillations (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id   TEXT NOT NULL,
+                    ts           INTEGER NOT NULL,
+                    filter_name  TEXT NOT NULL,
+                    input_bytes  INTEGER NOT NULL,
+                    output_bytes INTEGER NOT NULL,
+                    route        TEXT NOT NULL,
+                    score        REAL NOT NULL DEFAULT 0.0,
+                    context_score REAL NOT NULL DEFAULT 0.0,
+                    latency_ms   INTEGER NOT NULL,
+                    rewind_hash  TEXT DEFAULT '',
+                    command      TEXT DEFAULT ''
+                );
+                INSERT INTO distillations 
+                (id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command)
+                SELECT id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command 
+                FROM distillations_old;
+                DROP TABLE distillations_old;
+                CREATE INDEX idx_dist_ts ON distillations(ts);
+                CREATE INDEX idx_dist_session ON distillations(session_id);
+                CREATE INDEX idx_dist_filter ON distillations(filter_name);
+                "#,
+            )?;
+        }
+
         // Safe migration: add collapse columns if not present
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN collapse_original INTEGER DEFAULT 0",
@@ -286,7 +332,7 @@ impl Store {
 
         let ts = chrono::Utc::now().timestamp();
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
-        let _ = conn.execute(
+        let res = conn.execute(
             "INSERT INTO distillations 
              (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
@@ -306,6 +352,16 @@ impl Store {
                 col_to as i64,
             ],
         );
+
+        if let Err(e) = res {
+            // Log to stderr for visibility during development/debugging
+            eprintln!("[omni:error] failed to record distillation: {}", e);
+            if e.to_string().contains("NOT NULL constraint failed") {
+                eprintln!(
+                    "[omni:error] hint: legacy 'content_type' column may be blocking inserts. OMNI will attempt auto-migration on next startup."
+                );
+            }
+        }
     }
 
     pub fn store_rewind(&self, content: &str) -> String {

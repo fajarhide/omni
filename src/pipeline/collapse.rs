@@ -281,7 +281,6 @@ const MIN_LINES_FOR_COLLAPSE: usize = 10;
 
 /// Main entry: collapse repetitive lines, preserving critical-tier content.
 ///
-/// Deterministic: same input + content_type = same output.
 /// Panic-safe: any internal failure returns the input as-is.
 pub fn collapse(input: &str, mode: &CollapseMode) -> CollapseResult {
     let result =
