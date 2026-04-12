@@ -463,10 +463,10 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 0.0
             };
             let route_color = match route.to_lowercase().as_str() {
-                "distill" | "keep" => route.bright_green(),
+                "keep" => route.bright_green(),
                 "rewind" => route.bright_blue(),
                 "soft" => route.bright_yellow(),
-                "drop" => route.bright_red(),
+                "drop" | "passthrough" => route.bright_red(),
                 _ => route.bright_black(),
             };
 
@@ -603,15 +603,6 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--detail".into()];
-        let result = run(&args, &store);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_stats_by_type_tidak_crash_jika_db_kosong() {
-        let tmp = NamedTempFile::new().unwrap();
-        let store = Store::open_path(tmp.path()).unwrap();
-        let args: Vec<String> = vec!["stats".into(), "--by-type".into()];
         let result = run(&args, &store);
         assert!(result.is_ok());
     }

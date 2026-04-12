@@ -134,7 +134,7 @@ pub fn process_payload(
     let toml_match = toml_filters.iter().find(|f| f.matches(clean_command));
 
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
-
+    let mut collapse_savings_data = None;
     let (final_out, filter_name) = if let Some(filter) = toml_match {
         let output = filter.apply(&content);
         (output, filter.name.clone())
@@ -148,6 +148,11 @@ pub fn process_payload(
 
         // 2. Collapse repetitive lines SEBELUM distill
         let collapse_result = collapse::collapse(&content, &profile.collapse);
+        collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to {
+            Some((collapse_result.original_lines, collapse_result.collapsed_to))
+        } else {
+            None
+        };
         let effective_input = collapse_result.collapsed_lines.join("\n");
 
         // 3. Re-score dengan collapsed input jika ada savings signifikan
@@ -216,12 +221,12 @@ pub fn process_payload(
         if let Some(ref s) = store {
             let hash = s.store_rewind(&content);
             final_out.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
+                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
                 dropped_lines, hash
             ));
             rewind_hash = hash;
         } else {
-            final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
+            final_out.push_str(&format!("\n[OMNI: {} lines omitted]\n", dropped_lines));
         }
     }
 
@@ -247,6 +252,7 @@ pub fn process_payload(
     let latency_ms = start.elapsed().as_millis() as u32;
 
     if let Some(ref s) = store {
+        let kept = check_segments.len() - noise_count;
         let result = DistillResult {
             output: final_out.clone(),
             route: if rewind_hash.is_empty() {
@@ -265,9 +271,9 @@ pub fn process_payload(
             } else {
                 Some(rewind_hash)
             },
-            segments_kept: 0,
-            segments_dropped: 0,
-            collapse_savings: None,
+            segments_kept: kept,
+            segments_dropped: noise_count,
+            collapse_savings: collapse_savings_data,
         };
         let session_id = session
             .as_ref()

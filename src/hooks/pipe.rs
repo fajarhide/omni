@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::Colorize;
+use is_terminal::IsTerminal;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -30,6 +31,7 @@ struct PipelineResult {
     segments_dropped: usize,
     input_text: String,
     start_time: Instant,
+    collapse_savings: Option<(usize, usize)>,
 }
 
 impl PipelineResult {
@@ -176,11 +178,11 @@ fn distill(
         }
     }
 
-    let (output, filter_name, rewind_hash, kept_count, dropped_count) = if let Some(filter) =
+    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings) = if let Some(filter) =
         matched_toml
     {
         let out = filter.apply(&input_text);
-        (out, filter.name.clone(), None, 0, 0)
+        (out, filter.name.clone(), None, 0, 0, None)
     } else {
         let cmd = command_name.unwrap_or("");
 
@@ -196,6 +198,11 @@ fn distill(
 
         // 2. Collapse
         let collapse_result = collapse::collapse(&input_text, &profile.collapse);
+        let collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to {
+            Some((collapse_result.original_lines, collapse_result.collapsed_to))
+        } else {
+            None
+        };
         let effective_input = collapse_result.collapsed_lines.join("\n");
 
         // 3. Re-score
@@ -228,6 +235,12 @@ fn distill(
         let d_count = noise_count;
         let k_count = final_segments.len() - d_count;
 
+        let dropped_lines: usize = final_segments
+            .iter()
+            .filter(|s| s.final_score() < 0.3)
+            .map(|s| s.content.lines().count())
+            .sum();
+
         // Auto-learn trigger
         if !cmd.is_empty() && input_text.len() > 100 {
             let poor = final_segments.len() > 5
@@ -240,14 +253,21 @@ fn distill(
         let mut r_hash = None;
         if should_store && let Some(s) = store {
             let hash = s.store_rewind(&input_text);
-            out.push_str(&format!(
-                "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
-                "⏺".cyan(),
-                "OMNI".bold().bright_white(),
-                "distilled".bright_green(),
-                d_count,
-                hash.cyan().bold()
-            ));
+            if std::io::stdout().is_terminal() {
+                out.push_str(&format!(
+                    "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
+                    "⏺".cyan(),
+                    "OMNI".bold().bright_white(),
+                    "distilled".bright_green(),
+                    dropped_lines,
+                    hash.cyan().bold()
+                ));
+            } else {
+                out.push_str(&format!(
+                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
+                    dropped_lines, hash
+                ));
+            }
             r_hash = Some(hash);
         }
 
@@ -264,6 +284,7 @@ fn distill(
             r_hash,
             k_count,
             d_count,
+            collapse_savings_data,
         )
     };
 
@@ -276,6 +297,7 @@ fn distill(
         segments_dropped: dropped_count,
         input_text,
         start_time,
+        collapse_savings,
     }
 }
 
@@ -304,7 +326,7 @@ fn persist<E: Write>(
             rewind_hash: result.rewind_hash.clone(),
             segments_kept: result.segments_kept,
             segments_dropped: result.segments_dropped,
-            collapse_savings: None,
+            collapse_savings: result.collapse_savings,
         };
 
         s.record_distillation(
