@@ -1171,4 +1171,16 @@ omni doctor --fix  # Self-repair
 
 ---
 
+## 15. Integrations
+
+OMNI is designed to be the "Intelligence Layer" for multiple agent frameworks.
+
+### OpenClaw
+You can use OMNI natively with OpenClaw by installing the official skill from ClawHub:
+- **ClawHub**: [OMNI Semantic Signal Engine](https://clawhub.ai/fajarhide/omni-signal-engine)
+- **Install Command**: `clawhub install omni-signal-engine`
+- **Manual Install**: `openclaw plugins install ./integrations/openclaw`
+
+---
+
 *This is a living document. OMNI is under active development — check the [CHANGELOG](https://github.com/fajarhide/omni/blob/main/CHANGELOG.md) for updates after each release.*

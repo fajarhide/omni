@@ -151,7 +151,7 @@ You can easily create your own rules using simple TOML files.
 
 **For Users:**
 - [The Ultimate Guide (HOW_TO_USE.md)](docs/HOW_TO_USE.md) — Everything you need: Installation, `omni learn`, Custom TOML Filters, and CLI Commands.
-- [OpenClaw Integration](integrations/openclaw/README.md) — How to use OMNI with the OpenClaw agent framework.
+- [OpenClaw Integration](https://clawhub.ai/fajarhide/omni-signal-engine) — Official OpenClaw skill for native OMNI distillation.
 
 **For Developers & System Integrators:**
 - [Development Guide](docs/DEVELOPMENT.md) — How to build and contribute to the OMNI codebase.

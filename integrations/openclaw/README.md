@@ -1,14 +1,25 @@
-# OMNI Integration for OpenClaw
+# OMNI Semantic Signal Engine for OpenClaw
 
-This plugin integrates **OMNI** into the **OpenClaw** agent framework, allowing OpenClaw agents to intelligently filter terminal output, reducing token consumption by up to 90% while improving context quality.
+This plugin provides a secure bridge between your OpenClaw agent and the [OMNI Signal Engine](https://github.com/fajarhide/omni). 
+
+> [!IMPORTANT]
+> **Dependency Required**: This plugin is a wrapper and requires the `omni` CLI binary to be installed on your local system path.
+
+## Setup
 
 ## Prerequisites
 
 - **OMNI** must be installed and available in your PATH.
 - **OpenClaw** (Gateway) must be installed.
 
-## Installation
+### Installation
 
+**Option A: via ClawHub (Recommended)**
+```bash
+clawhub install omni-signal-engine
+```
+
+**Option B: Manual Install**
 1. Clone or copy the OMNI repository.
 2. Navigate to the OMNI directory.
 3. Install the plugin into OpenClaw:
@@ -32,9 +43,9 @@ plugins:
 
 ## Usage
 
-Once installed, your OpenClaw agent will have access to two new tools:
+Once installed, your OpenClaw agent will have access toD dua new tools:
 
-### `omni_shell`
+### `omni_cmd`
 Use this exactly like the standard `shell` or `bash` tool. 
 - **Input**: `{ "command": "npm install" }`
 - **Behavior**: Runs the command via `omni exec`, filtering out noise and keeping only the signal (errors, summaries).
@@ -45,13 +56,20 @@ If OMNI omits a large block of text and provides a hash (e.g., `[OMNI: 847 lines
 
 ## Monitoring Savings
 
-You can track how many tokens and how much money the OpenClaw plugin is saving you by running the following command in your terminal:
+You can track your token and cost savings by running:
 
 ```bash
 omni stats --today
 ```
 
-This will show a detailed breakdown of all commands processed for your OpenClaw session, including the signal reduction percentage.
+## Security & Privacy (Trust Model)
+
+OMNI is built with a **Privacy-First** design intent. This plugin acts as a secure proxy to facilitate safe execution:
+
+- **Node-Level Sanitization**: This plugin explicitly strips ~25 dangerous environment variables (like `LD_PRELOAD`, `NODE_OPTIONS`, `BASH_ENV`) at the process level before execution.
+- **Local-Only Architecture**: The OMNI engine is designed for local processing. No terminal output is ever sent to external cloud services by the engine.
+- **Local Persistence**: Usage statistics and archived contexts are stored strictly in a local SQLite database at `~/.omni/omni.db`.
+- **Trust & Verification**: As OMNI is a tool for developers, we encourage you to audit the full source code and security policies at the [OMNI GitHub Repository](https://github.com/fajarhide/omni/blob/main/SECURITY.md) to verify these claims for yourself.
 
 ## Benefits
 - **Cheaper Tasks**: Massive savings on API bills for long-running autonomous tasks.

@@ -1,9 +1,12 @@
 {
-  "id": "omni-signal-engine",
-  "name": "OMNI Signal Engine",
-  "version": "0.5.6-rc2",
-  "description": "Intelligent context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output.",
-  "author": "OMNI Team",
+  "id": "omni-se-engine",
+  "name": "OMNI Semantic Signal Engine",
+  "version": "0.5.9",
+  "description": "Local-only semantic context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output without data exfiltration.",
+  "requiredBinaries": [
+    "omni"
+  ],
+  "author": "Fajar Hidayat",
   "configSchema": {
     "type": "object",
     "properties": {
