@@ -16,9 +16,8 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
 
     // Kategorisasi:
     // Excellent: avg_reduction > 70% → filter bekerja dengan baik
-    // Poor: avg_reduction 10-40% dan content_type != Unknown → filter suboptimal
+    // Poor: avg_reduction <= 70% dan content_type != Unknown → filter suboptimal
     // Unknown: content_type == "Unknown" → belum ada filter
-    // Passthrough: avg_reduction == 0% → tidak tersentuh filter
 
     let excellent: Vec<_> = records
         .iter()
@@ -28,8 +27,7 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
     let poor: Vec<_> = records
         .iter()
         .filter(|r| {
-            r.avg_reduction_pct > 0.0
-                && r.avg_reduction_pct <= 40.0
+            r.avg_reduction_pct <= 70.0
                 && r.content_type != "Unknown"
                 && r.call_count >= 3
         })
@@ -50,20 +48,12 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
             })).collect::<Vec<_>>(),
             "poor": poor.iter().map(|r| serde_json::json!({
                 "command": r.command, "calls": r.call_count,
-                "reduction_pct": r.avg_reduction_pct,
-                "suggestion": if r.command == "Piped Input" {
-                    "omni learn".to_string()
-                } else {
-                    format!("omni learn --command {}", r.command.split_whitespace().next().unwrap_or(""))
-                }
+                "reduction_pct": r.avg_reduction_pct, "content_type": r.content_type,
+                "suggestion": "omni learn discover".to_string()
             })).collect::<Vec<_>>(),
             "unknown": unknown.iter().map(|r| serde_json::json!({
-                "command": r.command, "calls": r.call_count,
-                "suggestion": if r.command == "Piped Input" {
-                    "omni learn".to_string()
-                } else {
-                    format!("omni learn --command {}", r.command.split_whitespace().next().unwrap_or(""))
-                }
+                "command": r.command, "calls": r.call_count, "content_type": r.content_type,
+                "suggestion": "omni learn discover".to_string()
             })).collect::<Vec<_>>()
         });
         println!("{}", serde_json::to_string_pretty(&json)?);
@@ -81,9 +71,14 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
         println!(" ✓  Excellent Coverage (>70% reduction):");
         for r in excellent.iter().take(if show_all { 100 } else { 8 }) {
             let bar = bar_str(r.avg_reduction_pct, 20);
+            let display_cmd = if r.command == "[pipe]" && r.content_type != "Unknown" {
+                format!("[pipe: {}]", r.content_type)
+            } else {
+                r.command.clone()
+            };
             println!(
                 "    {:30} {} {:.1}%  ({} calls)",
-                truncate(&r.command, 30),
+                truncate(&display_cmd, 30),
                 bar,
                 r.avg_reduction_pct,
                 r.call_count
@@ -97,21 +92,26 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
 
     // Poor section — actionable!
     if !poor.is_empty() {
-        println!(" ⚠  Poor Distillation (<40% reduction, 3+ calls):");
+        println!(" ⚠  Poor Distillation (<=70% reduction, 3+ calls):");
         println!("    These tools are being filtered but with low effectiveness.");
         println!();
         for r in &poor {
             let cmd_base = r.command.split_whitespace().next().unwrap_or("");
+            let display_cmd = if r.command == "[pipe]" && r.content_type != "Unknown" {
+                format!("[pipe: {}]", r.content_type)
+            } else {
+                r.command.clone()
+            };
             println!(
                 "    {:30} {:.1}% reduction  ({} calls)",
-                truncate(&r.command, 30),
+                truncate(&display_cmd, 30),
                 r.avg_reduction_pct,
                 r.call_count
             );
-            if r.command == "Piped Input" {
-                println!("    → Fix: omni learn");
+            if r.command == "Piped Input" || r.command == "[pipe]" {
+                println!("    → Fix: omni learn discover");
             } else {
-                println!("    → Fix: omni learn --command {}", cmd_base);
+                println!("    → Fix: {} | omni learn discover", cmd_base);
             }
         }
         println!();
@@ -125,16 +125,22 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
         for r in &unknown {
             let total_wasted_tokens = (r.total_input_bytes / 4) as f64 / 1000.0;
             let cmd_base = r.command.split_whitespace().next().unwrap_or("");
+            let display_cmd = if r.command == "[pipe]" {
+                // Keep it as just [pipe] here because the section already denotes Unknown type
+                r.command.clone()
+            } else {
+                r.command.clone()
+            };
             println!(
                 "    {:30}  ({} calls, ~{:.0}K tokens unfiltered)",
-                truncate(&r.command, 30),
+                truncate(&display_cmd, 30),
                 r.call_count,
                 total_wasted_tokens
             );
-            if r.command == "Piped Input" {
-                println!("    → Fix: omni learn");
+            if r.command == "Piped Input" || r.command == "[pipe]" {
+                println!("    → Fix: omni learn discover");
             } else {
-                println!("    → Fix: omni learn --command {}", cmd_base);
+                println!("    → Fix: {} | omni learn discover", cmd_base);
             }
         }
         println!();
@@ -147,9 +153,9 @@ pub fn run(args: &[String], store: &Store) -> anyhow::Result<()> {
 
     println!("─────────────────────────────────────────────────────");
     println!(" Tips:");
-    println!("  omni coverage --days 30    Show last 30 days");
-    println!("  omni coverage --json       Machine-readable output");
-    println!("  omni coverage --all        Show all commands (not just top)");
+    println!("  omni learn coverage --days 30    Show last 30 days");
+    println!("  omni learn coverage --json       Machine-readable output");
+    println!("  omni learn coverage --all        Show all commands (not just top)");
     println!("─────────────────────────────────────────────────────");
 
     Ok(())
@@ -236,8 +242,7 @@ mod tests {
         let poor: Vec<_> = records
             .iter()
             .filter(|r| {
-                r.avg_reduction_pct > 0.0
-                    && r.avg_reduction_pct <= 40.0
+                r.avg_reduction_pct <= 70.0
                     && r.content_type != "Unknown"
                     && r.call_count >= 3
             })

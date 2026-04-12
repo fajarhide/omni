@@ -13,17 +13,27 @@ fn print_help() {
         "learn".bold().yellow()
     );
     println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni learn {}", "[FLAGS]".bright_black());
+    println!("  omni learn {}", "<COMMAND> [FLAGS]".bright_black());
 
-    println!("\n{}", "FLAGS:".bold().bright_white());
+    println!("\n{}", "COMMANDS:".bold().bright_white());
+    println!(
+        "  {: <12} Analyze filter efficiency and coverage",
+        "coverage".cyan()
+    );
     println!(
         "  {: <12} Discover and view candidate patterns",
-        "--status".cyan()
+        "discover".cyan()
     );
     println!(
         "  {: <12} Automatically append new filters to config",
-        "--apply".cyan()
+        "apply".cyan()
     );
+    println!(
+        "  {: <12} Run inline tests for all existing filters",
+        "verify".cyan()
+    );
+
+    println!("\n{}", "FLAGS:".bold().bright_white());
     println!(
         "  {: <12} Preview the generated TOML without writing",
         "--dry-run".cyan()
@@ -32,32 +42,20 @@ fn print_help() {
         "  {: <12} Use background learning queue as source",
         "--from-queue".cyan()
     );
-    println!(
-        "  {: <12} Run inline tests for all existing filters",
-        "--verify".cyan()
-    );
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni learn --status   {}",
+        "  omni learn coverage   {}",
+        "# View your filter health".bright_black()
+    );
+    println!(
+        "  omni learn discover   {}",
         "# Search for new noise patterns".bright_black()
     );
     println!(
-        "  omni learn --dry-run  {}",
-        "# Preview suggested filters".bright_black()
-    );
-    println!(
-        "  omni learn --apply    {}",
+        "  omni learn apply      {}",
         "# Commit suggestions to config".bright_black()
-    );
-    println!(
-        "  omni learn --from-queue --dry-run {}",
-        "# Learn from recent history".bright_black()
-    );
-    println!(
-        "  omni learn --verify   {}",
-        "# Test existing filters".bright_black()
     );
     println!();
 }
@@ -71,17 +69,31 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let apply = args.iter().any(|a| a == "--apply");
+    let subcommand = args.get(2).map(|s| s.as_str()).unwrap_or("");
+
+    match subcommand {
+        "coverage" => {
+            if let Ok(store) = crate::store::sqlite::Store::open() {
+                // Pass args to allow `--days` and `--json` to work
+                crate::cli::coverage::run(args, &store)?;
+            } else {
+                eprintln!("[omni] Cannot open database for coverage");
+            }
+            return Ok(());
+        }
+        "discover" | "apply" | "verify" => {}
+        _ => {
+            print_help();
+            return Ok(());
+        }
+    }
+
+    let apply = subcommand == "apply";
+    let is_status = subcommand == "discover";
+    let verify = subcommand == "verify";
+
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let from_queue = args.iter().any(|a| a == "--from-queue");
-    let verify = args.iter().any(|a| a == "--verify");
-    let is_status = args.iter().any(|a| a == "--status");
-
-    // If no flags, show help
-    if !apply && !dry_run && !from_queue && !verify && !is_status {
-        print_help();
-        return Ok(());
-    }
 
     if verify {
         println!(
@@ -298,12 +310,12 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         println!(
             "  {} Run {} to commit these filters.",
             "→".yellow(),
-            "omni learn --apply".cyan().bold()
+            "omni learn apply".cyan().bold()
         );
         println!(
             "  {} Run {} to preview TOML configuration.",
             "→".yellow(),
-            "omni learn --dry-run".cyan().bold()
+            "omni learn discover --dry-run".cyan().bold()
         );
         println!(
             "{}",

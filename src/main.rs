@@ -94,10 +94,6 @@ fn print_help() {
         "  {: <12} View and manage archived content",
         "rewind".cyan()
     );
-    println!(
-        "  {: <12} Analyze filter efficiency and coverage",
-        "coverage".cyan()
-    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -263,19 +259,6 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for rewind: {}", e);
-                        std::process::exit(1);
-                    }
-                },
-
-                "coverage" => match Store::open() {
-                    Ok(store) => {
-                        if let Err(e) = cli::coverage::run(&args, &store) {
-                            eprintln!("[omni] Coverage error: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[omni] Cannot open database for coverage: {}", e);
                         std::process::exit(1);
                     }
                 },
