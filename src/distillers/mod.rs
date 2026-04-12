@@ -21,6 +21,79 @@ pub trait Distiller: Send + Sync {
     ) -> String;
 }
 
+/// Dispatch distiller by command string, fallback to ContentType.
+/// Ini adalah preferred API untuk post_tool.rs dan pipe.rs.
+/// Command-first → lebih akurat karena ground truth.
+pub fn distill_with_command(
+    segments: &[crate::pipeline::OutputSegment],
+    input: &str,
+    command: &str,
+    content_type: &ContentType,
+    session: Option<&crate::pipeline::SessionState>,
+) -> String {
+    // Phase 1: Try exact command prefix match
+    let base = {
+        let first = command.split_whitespace().next().unwrap_or("");
+        std::path::Path::new(first)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(first)
+    };
+    let cmd_lower = command.to_lowercase();
+
+    // Git subcommand routing (paling granular — git punya 3 distiller targets)
+    if base == "git" {
+        return Box::new(git::GitDistiller).distill(segments, input, session);
+    }
+
+    // Build tools → BuildDistiller
+    if matches!(base, "cargo" | "make" | "cmake" | "gcc" | "g++" | "clang" | "rustc"
+              | "go" | "pip" | "pip3" | "ruff" | "mypy" | "black"
+              | "ruby" | "rake" | "rubocop" | "dotnet" | "gradle" | "mvn") {
+        // Tapi test → TestDistiller
+        if cmd_lower.contains("test") || cmd_lower.contains("pytest")
+            || matches!(base, "pytest" | "rspec" | "phpunit")
+        {
+            return Box::new(test::TestDistiller).distill(segments, input, session);
+        }
+        return Box::new(build::BuildDistiller).distill(segments, input, session);
+    }
+
+    // JS/TS ecosystem → JsTsDistiller
+    if matches!(base, "vitest" | "playwright" | "tsc" | "eslint" | "prettier"
+              | "jest" | "esbuild" | "vite") {
+        return Box::new(jsts::JsTsDistiller).distill(segments, input, session);
+    }
+    // npm/pnpm/yarn/bun: check subcommand
+    if matches!(base, "npm" | "npx" | "pnpm" | "yarn" | "bun") {
+        if cmd_lower.contains("test") || cmd_lower.contains("vitest")
+            || cmd_lower.contains("jest") || cmd_lower.contains("playwright")
+        {
+            return Box::new(jsts::JsTsDistiller).distill(segments, input, session);
+        }
+        // install/build → still JsTs ecosystem (pnpm install, npm run build)
+        return Box::new(jsts::JsTsDistiller).distill(segments, input, session);
+    }
+
+    // Cloud & infra → CloudDistiller
+    if matches!(base, "docker" | "podman" | "kubectl" | "helm"
+              | "terraform" | "tofu" | "aws" | "gcloud" | "az" | "doctl") {
+        return Box::new(cloud::CloudDistiller).distill(segments, input, session);
+    }
+
+    // System ops → SystemOpsDistiller
+    if matches!(base, "ls" | "tree" | "find" | "grep" | "rg" | "ps" | "df"
+              | "du" | "env" | "stat" | "cat" | "head" | "tail" | "curl" | "wget"
+              | "wc" | "sort" | "uniq" | "awk" | "sed" | "tar" | "zip" | "unzip"
+              | "apt" | "apt-get" | "brew" | "yum" | "dnf"
+    ) {
+        return Box::new(system_ops::SystemOpsDistiller).distill(segments, input, session);
+    }
+
+    // Phase 2: Fallback to ContentType-based dispatch (existing behavior)
+    get_distiller(content_type).distill(segments, input, session)
+}
+
 pub fn get_distiller(content_type: &ContentType) -> Box<dyn Distiller> {
     match content_type {
         ContentType::GitDiff | ContentType::GitStatus | ContentType::GitLog => {
