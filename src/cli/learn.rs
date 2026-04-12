@@ -18,7 +18,7 @@ fn print_help() {
     println!("\n{}", "FLAGS:".bold().bright_white());
     println!(
         "  {: <12} Discover and view candidate patterns",
-        "--status".cyan()
+        "--discover".cyan()
     );
     println!(
         "  {: <12} Automatically append new filters to config",
@@ -40,7 +40,7 @@ fn print_help() {
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni learn --status   {}",
+        "  omni learn --discover {}",
         "# Search for new noise patterns".bright_black()
     );
     println!(
@@ -75,10 +75,10 @@ pub fn run_learn(args: &[String]) -> Result<()> {
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let from_queue = args.iter().any(|a| a == "--from-queue");
     let verify = args.iter().any(|a| a == "--verify");
-    let is_status = args.iter().any(|a| a == "--status");
+    let is_discover = args.iter().any(|a| a == "--discover");
 
     // If no flags, show help
-    if !apply && !dry_run && !from_queue && !verify && !is_status {
+    if !apply && !dry_run && !from_queue && !verify && !is_discover {
         print_help();
         return Ok(());
     }
@@ -117,7 +117,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     // In terminal mode, if an action is used without --from-queue, default to queue
     let mut use_queue = from_queue;
-    let is_action = is_status || dry_run || apply;
+    let is_action = is_discover || dry_run || apply;
     if is_action && !from_queue && io::stdin().is_terminal() {
         use_queue = true;
     }

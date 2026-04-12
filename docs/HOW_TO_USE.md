@@ -71,7 +71,7 @@ flowchart TD
     Work --> Learn
 
     subgraph Learn [When Output Isn't Filtered Well]
-        LearnStatus["omni learn --status"] --> DryRun["omni learn --dry-run"]
+        LearnStatus["omni learn --discover"] --> DryRun["omni learn --dry-run"]
         DryRun --> Apply["omni learn --apply"]
     end
 
@@ -396,7 +396,7 @@ Whenever OMNI runs as a hook (e.g., inside Claude Code), it silently monitors fo
 
 You can process this queue by discovering patterns first:
 ```bash
-omni learn --status
+omni learn --discover
 ```
 
 Then preview or apply:
@@ -409,7 +409,7 @@ omni learn --dry-run
 If you have a log file or a command output that is very noisy, you can pipe it directly into OMNI to generate a filter:
 
 ```bash
-cat build.log | omni learn --status
+cat build.log | omni learn --discover
 ```
 
 ### 3. Applying Learned Filters
@@ -710,7 +710,7 @@ expected = "2024-01-15 10:30:03 ERROR Connection timeout to redis-primary"
 omni learn --verify
 
 # Discovery: search for patterns in a log file
-omni learn --status < output.log
+omni learn --discover < output.log
 
 # Preview: show generated TOML
 omni learn --dry-run < output.log
