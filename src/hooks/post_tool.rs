@@ -1,6 +1,6 @@
 use crate::distillers;
 use crate::pipeline::toml_filter;
-use crate::pipeline::{DistillResult, Route, SessionState, classifier, collapse, composer, scorer};
+use crate::pipeline::{DistillResult, Route, SessionState, collapse, scorer};
 use crate::store::sqlite::Store;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -134,97 +134,91 @@ pub fn process_payload(
     let toml_filters = toml_filter::load_all_filters();
     let toml_match = toml_filters.iter().find(|f| f.matches(clean_command));
 
-    let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
-        // Use TOML filter
-        let output = filter.apply(&content);
-        let fname = filter.name.clone();
-        (output, fname, None)
-    } else {
-        // Fallback to Rust distiller pipeline
-        let ctype = classifier::classify(&content, Some(&command));
+    let session_guard = session.as_ref().and_then(|l| l.lock().ok());
 
-        // Pre-processing: collapse repetitive lines before scoring
-        let collapse_result = collapse::collapse(&content, &ctype);
+    let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
+        let output = filter.apply(&content);
+        (output, filter.name.clone(), None)
+    } else {
+        // Command-first pipeline: scorer infers ContentType dari command
+        let (segments, content_type) = scorer::score_with_command(
+            &content,
+            clean_command,
+            session_guard.as_deref(),
+        );
+
+        // Collapse repetitive lines SEBELUM distill (sudah ada, tetap pakai)
+        let collapse_result = collapse::collapse(&content, &content_type);
         let effective_input = collapse_result.collapsed_lines.join("\n");
 
-        let scored_segments = if let Some(ref lock) = session {
-            if let Ok(state) = lock.lock() {
-                scorer::score_segments(&effective_input, &ctype, Some(&*state))
-            } else {
-                scorer::score_segments(&effective_input, &ctype, None)
-            }
+        // Re-score dengan collapsed input jika ada savings signifikan
+        let final_segments = if collapse_result.savings_pct > 0.1 {
+            scorer::score_with_command(&effective_input, clean_command, session_guard.as_deref()).0
         } else {
-            scorer::score_segments(&effective_input, &ctype, None)
+            segments
         };
 
-        let distiller = distillers::get_distiller(&ctype);
-        let active_ctype = distiller.content_type();
-        let output = distiller.distill(
-            &scored_segments,
+        // Distill: command-first dispatch
+        let output = crate::distillers::distill_with_command(
+            &final_segments,
             &effective_input,
-            session.as_ref().and_then(|l| l.lock().ok()).as_deref(),
+            clean_command,
+            &content_type,
+            session_guard.as_deref(),
         );
-        (output, format!("{:?}", active_ctype), Some(active_ctype))
+
+        (output, clean_command.split_whitespace().next().unwrap_or("omni").to_string(), Some(content_type))
     };
+
+    drop(session_guard); // Release lock ASAP sebelum rewind check
 
     // Check for rewind decision (only for Rust pipeline)
     let mut final_out = final_out;
     let mut rewind_hash = String::new();
 
     if let Some(ref ctype) = ctype {
-        let scored_segments = if let Some(ref lock) = session {
-            if let Ok(state) = lock.lock() {
-                scorer::score_segments(&content, ctype, Some(&*state))
-            } else {
-                scorer::score_segments(&content, ctype, None)
-            }
-        } else {
-            scorer::score_segments(&content, ctype, None)
-        };
+        // Quick re-score untuk rewind decision (reuse segments dari tadi)
+        let check_segments = scorer::score_with_command(&content, clean_command, None).0;
+        let noise_count = check_segments.iter().filter(|s| s.final_score() < 0.3).count();
+        let should_store = noise_count as f32 / check_segments.len().max(1) as f32 > 0.4
+            && check_segments.len() > 20;
 
-        let decision = composer::decide_rewind(&scored_segments, ctype);
-
-        let dropped_lines = scored_segments
-            .iter()
-            .filter(|s| s.final_score() < decision.threshold)
+        let dropped_lines: usize = check_segments.iter()
+            .filter(|s| s.final_score() < 0.3)
             .map(|s| s.content.lines().count())
-            .sum::<usize>();
+            .sum();
 
-        // Trigger Auto-Learn
-        crate::pipeline::composer::evaluate_learning(
-            ctype,
-            &content,
-            scored_segments.len(),
-            scored_segments
-                .iter()
-                .filter(|s| s.final_score() < decision.threshold)
-                .count(),
-            &command,
-        );
-
-        if decision.should_store
-            && let Some(ref s) = store
-        {
-            let hash = s.store_rewind(&content);
-            final_out.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
-                dropped_lines, hash
-            ));
-            rewind_hash = hash;
-        } else if decision.should_store {
-            final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
+        // Auto-learn trigger (was in composer::evaluate_learning)
+        if !clean_command.is_empty() && content.len() > 100 {
+            let total = check_segments.len();
+            let dropped = noise_count;
+            let poor = total > 5 && (dropped as f32 / total.max(1) as f32) < 0.3;
+            if poor || matches!(ctype, crate::pipeline::ContentType::Unknown) {
+                crate::session::learn::queue_for_learn(&content, clean_command);
+            }
         }
 
-        // Update session state (only for Rust pipeline)
-        if let Some(ref lock) = session
-            && let Ok(mut state) = lock.lock()
-        {
-            if !command.is_empty() {
-                state.add_command(&command);
+        if should_store {
+            if let Some(ref s) = store {
+                let hash = s.store_rewind(&content);
+                final_out.push_str(&format!(
+                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
+                    dropped_lines, hash
+                ));
+                rewind_hash = hash;
+            } else {
+                final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
             }
-            for seg in &scored_segments {
-                if seg.tier == crate::pipeline::SignalTier::Critical {
-                    state.add_error(&seg.content);
+        }
+
+        // Update session state
+        if let Some(ref lock) = session {
+            if let Ok(mut state) = lock.lock() {
+                if !command.is_empty() { state.add_command(&command); }
+                for seg in &check_segments {
+                    if seg.tier == crate::pipeline::SignalTier::Critical {
+                        state.add_error(&seg.content);
+                    }
                 }
             }
         }
@@ -277,7 +271,7 @@ pub fn process_payload(
     }
 
     // Safety Truncation
-    let max_chars = composer::ComposeConfig::default().max_output_chars;
+    let max_chars = 50_000;
     if final_out.len() > max_chars {
         final_out.truncate(max_chars);
         final_out.push_str("\n[OMNI: output truncated]");
