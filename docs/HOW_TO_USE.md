@@ -953,7 +953,7 @@ omni session --transcript # View transcript of recent session
 Auto-generate TOML filters from passthrough output.
 
 ```bash
-omni learn --status     # Discovery: Search for new noise patterns
+omni learn --discovery     # Discovery: Search for new noise patterns
 omni learn --dry-run    # Preview: Show suggested TOML
 omni learn --apply      # Action: Commit to learned.toml
 omni learn --verify     # Test: Run inline tests on all filters
@@ -1116,7 +1116,7 @@ omni doctor --fix  # Self-repair
 
 ### Weekly / Ongoing
 - [ ] Run `omni stats` to review savings
-- [ ] Run `omni learn --status` to check for new noise patterns to filter
+- [ ] Run `omni learn --discovery` to check for new noise patterns to filter
 - [ ] Run `omni learn --dry-run` if there are patterns
 - [ ] Run `omni learn --apply` if the dry-run looks good
 - [ ] Run `omni learn --verify` after applying any filters
