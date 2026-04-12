@@ -14,7 +14,7 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 # --- Private Internal ---
-internal
+internal*
 tmp/
 # --- Rust Build Outputs ---
 target/
