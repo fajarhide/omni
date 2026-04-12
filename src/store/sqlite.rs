@@ -100,12 +100,11 @@ impl Store {
     }
 
     /// Per-filter breakdown: (filter_name, count, avg_reduction_pct)
-    pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
+    pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), 
-                    CASE WHEN SUM(input_bytes)=0 THEN 0.0 
-                         ELSE ROUND(100.0*(1.0 - CAST(SUM(output_bytes) AS REAL)/SUM(input_bytes)),1) END
+                    COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0)
              FROM distillations WHERE ts >= ?1 GROUP BY grp_name ORDER BY COUNT(*) DESC"
         )?;
         let rows = stmt
@@ -113,7 +112,8 @@ impl Store {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, u64>(1)?,
-                    row.get::<_, f64>(2)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u64>(3)?,
                 ))
             })?
             .filter_map(|r| r.ok())
@@ -544,22 +544,19 @@ impl Store {
         &self,
         since: i64,
         limit: usize,
-    ) -> Result<Vec<(String, u64, f64)>> {
+    ) -> Result<Vec<(String, u64, u64, u64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT
                 command,
                 COUNT(*) as calls,
-                CASE
-                    WHEN SUM(input_bytes) = 0 THEN 0.0
-                    ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
-                END as avg_reduction
+                COALESCE(SUM(input_bytes), 0) as total_input,
+                COALESCE(SUM(output_bytes), 0) as total_output
             FROM distillations
             WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
             GROUP BY command
-            HAVING avg_reduction > 0
             ORDER BY calls DESC
-            LIMIT ?2"
+            LIMIT ?2",
         )?;
 
         let rows = stmt
@@ -567,7 +564,8 @@ impl Store {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, u64>(1)?,
-                    row.get::<_, f64>(2)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u64>(3)?,
                 ))
             })?
             .filter_map(|r| r.ok())
