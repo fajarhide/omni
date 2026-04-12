@@ -111,7 +111,7 @@ read -r -p "Proceed with release? [y/N] " confirm
 [ "$confirm" = "y" ] || { echo "Aborted."; exit 0; }
 
 git tag -a "${TAG}" -m "Release ${TAG}"
-git push origin "${TAG}"
+git push origin "${BRANCH}" "${TAG}"
 
 echo ""
 ok "Tag ${TAG} pushed! Monitor: https://github.com/fajarhide/omni/actions"

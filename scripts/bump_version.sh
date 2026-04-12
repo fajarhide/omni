@@ -49,8 +49,7 @@ git add Cargo.toml Cargo.lock
 git commit -m "chore: bump version to $NEW"
 
 echo ""
-echo "Done! Version bumped to $NEW"
+echo "Done! Version bumped to $NEW (commit is local)"
 echo "Next steps:"
-echo "  git push"
-echo "  git tag v$NEW"
-echo "  git push --tags  # triggers release workflow"
+echo "  Run: ./scripts/omni-release.sh $NEW"
+echo "  (This will validate the build and push the branch + tag together)"
