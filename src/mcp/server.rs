@@ -97,10 +97,14 @@ impl OmniServer {
         description = "Measure how much signal vs noise in text"
     )]
     pub async fn omni_density(&self, #[tool(param)] text: String) -> String {
-        let content_type = crate::pipeline::ContentType::Unknown;
         let current_session = self.session.lock().unwrap().clone();
 
-        let segments = score_segments(&text, &content_type, Some(&current_session));
+        // Use generic Line segmentation for density analysis
+        let segments = score_segments(
+            &text,
+            crate::pipeline::SegmentationMode::Line,
+            Some(&current_session),
+        );
 
         let mut critical_lines = 0;
         let mut important_lines = 0;

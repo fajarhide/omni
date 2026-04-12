@@ -2,9 +2,8 @@
 use omni::pipeline::scorer;
 
 fn run_pipeline(input: &str) -> String {
-    let (segments, ctype) = scorer::score_with_command(input, "", None);
-    let distiller = omni::distillers::get_distiller(&ctype);
-    distiller.distill(&segments, input, None)
+    let segments = scorer::score_with_command(input, "", None);
+    omni::distillers::distill_with_command(&segments, input, "", None)
 }
 
 #[test]

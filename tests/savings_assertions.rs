@@ -4,11 +4,12 @@
 /// fixture files and asserts each achieves a minimum savings percentage.
 use omni::pipeline::scorer;
 use std::time::Instant;
-fn run_pipeline(input: &str, command: &str) -> (usize, usize, f64) {
-    let (segments, ctype) = scorer::score_with_command(input, command, None);
 
-    // Use the actual distiller logic from post_tool.rs
-    let output = omni::distillers::distill_with_command(&segments, input, command, &ctype, None);
+fn run_pipeline(input: &str, command: &str) -> (usize, usize, f64) {
+    let segments = scorer::score_with_command(input, command, None);
+
+    // Use the actual distiller logic
+    let output = omni::distillers::distill_with_command(&segments, input, command, None);
 
     let input_len = input.len();
     let output_len = output.len();
@@ -21,8 +22,6 @@ fn run_pipeline(input: &str, command: &str) -> (usize, usize, f64) {
 }
 
 /// Fixtures paired with: (filter_name, path, min_savings_pct_if_large_enough)
-/// Small fixtures (<500 bytes) may not achieve significant reduction, so we skip threshold
-/// assertion for those and just verify no-crash + valid output.
 const FIXTURES: &[(&str, &str, f64, &str)] = &[
     (
         "git",
@@ -60,7 +59,7 @@ const FIXTURES: &[(&str, &str, f64, &str)] = &[
         "tests/fixtures/heavy_noise.txt",
         90.0,
         "docker build",
-    ), // infra fallback
+    ),
 ];
 
 #[test]
@@ -74,7 +73,6 @@ fn test_savings_thresholds() {
             filter, input_len, output_len, actual_pct
         );
 
-        // Always verify: output should not be larger than input + small overhead
         assert!(
             output_len <= input_len + 100,
             "{} on {}: output ({}) should not massively exceed input ({})",
@@ -84,7 +82,6 @@ fn test_savings_thresholds() {
             input_len
         );
 
-        // For files > 500 bytes, check savings threshold
         if input_len > 500 && *min_pct > 0.0 {
             assert!(
                 actual_pct >= *min_pct,
@@ -111,9 +108,7 @@ fn test_all_fixtures_produce_nonempty_output() {
             if input.is_empty() {
                 continue;
             }
-            let (_, output_len, _) = run_pipeline(&input, "git status"); // Generic non-empty dummy
-            // Pipeline should never produce completely empty output from non-empty input
-            // (at minimum it passes through or produces a summary)
+            let (_, output_len, _) = run_pipeline(&input, "git status");
             assert!(
                 output_len > 0 || input.trim().is_empty(),
                 "Fixture {:?} produced empty output from {} bytes input",
@@ -128,7 +123,6 @@ fn test_all_fixtures_produce_nonempty_output() {
 fn test_short_input_not_over_expanded() {
     let short = "hello world";
     let (input_len, output_len, _) = run_pipeline(short, "echo");
-    // Short input should never expand significantly
     assert!(
         output_len <= input_len + 50,
         "Short input expanded from {} to {} bytes",
@@ -145,82 +139,43 @@ fn test_empty_input_no_crash() {
 
 #[test]
 fn test_pipeline_latency_under_50ms_debug() {
-    // Debug mode bisa 3-5x lebih lambat dari release
-    // Release claim: <10ms -> debug threshold: <50ms
-    let input = include_str!("../tests/fixtures/git_diff_multi_file.txt").repeat(3); // ~30KB input
+    let input = include_str!("../tests/fixtures/git_diff_multi_file.txt").repeat(3);
 
     let start = Instant::now();
-    let (segments, ctype) = scorer::score_with_command(&input, "git diff", None);
-    omni::distillers::distill_with_command(&segments, &input, "git diff", &ctype, None);
+    let segments = scorer::score_with_command(&input, "git diff", None);
+    omni::distillers::distill_with_command(&segments, &input, "git diff", None);
     let elapsed = start.elapsed();
 
     assert!(
         elapsed.as_millis() < 50,
-        "Pipeline took {}ms in debug mode (should be <50ms; release target is <10ms)",
+        "Pipeline took {}ms (should be <50ms in debug)",
         elapsed.as_millis()
     );
 }
 
 #[test]
 fn test_hook_no_panic_on_large_input() {
-    // Safety: 500KB input harus tidak crash
     let large = "error: cannot find type\n".repeat(20000);
-
-    let (segments, ctype) = scorer::score_with_command(&large, "cargo test", None);
-
-    let output =
-        omni::distillers::distill_with_command(&segments, &large, "cargo test", &ctype, None);
-
+    let segments = scorer::score_with_command(&large, "cargo test", None);
+    let output = omni::distillers::distill_with_command(&segments, &large, "cargo test", None);
     assert!(!output.is_empty());
-}
-
-#[test]
-fn test_command_to_content_type_cargo_build() {
-    use omni::pipeline::ContentType;
-    use omni::pipeline::scorer::command_to_content_type;
-    assert_eq!(
-        command_to_content_type("cargo build"),
-        ContentType::BuildOutput
-    );
-    assert_eq!(
-        command_to_content_type("cargo test --release"),
-        ContentType::TestOutput
-    );
-    assert_eq!(
-        command_to_content_type("git diff HEAD~1"),
-        ContentType::GitDiff
-    );
-    assert_eq!(
-        command_to_content_type("git branch -a"),
-        ContentType::GitStatus
-    );
-    assert_eq!(command_to_content_type("docker ps"), ContentType::Cloud);
-    assert_eq!(command_to_content_type("ls -la"), ContentType::SystemOps);
-    assert_eq!(
-        command_to_content_type("/usr/bin/git status"),
-        ContentType::GitStatus
-    );
-    assert_eq!(command_to_content_type(""), ContentType::Unknown);
 }
 
 #[test]
 fn test_score_with_command_returns_segments() {
     use omni::pipeline::scorer::score_with_command;
     let input = "error[E0382]: use of moved value\n   --> src/main.rs:10:5\nCompiling omni v0.5.6";
-    let (segments, ctype) = score_with_command(input, "cargo build", None);
+    let segments = score_with_command(input, "cargo build", None);
     assert!(!segments.is_empty());
-    // Error line harus Critical
     let has_critical = segments
         .iter()
         .any(|s| s.tier == omni::pipeline::SignalTier::Critical);
     assert!(has_critical, "Error line harus jadi Critical");
-    // ContentType harus BuildOutput
-    assert_eq!(ctype, omni::pipeline::ContentType::BuildOutput);
 }
 
 #[test]
 fn test_omni_stats_shows_command_not_content_type() {
-    use omni::pipeline::{ContentType, DistillResult, Route};
+    use omni::pipeline::{DistillResult, Route};
     use omni::store::sqlite::Store;
     use tempfile::tempdir;
 
@@ -230,8 +185,7 @@ fn test_omni_stats_shows_command_not_content_type() {
     let result = DistillResult {
         output: "cargo build: ok".to_string(),
         route: Route::Keep,
-        filter_name: "cargo".to_string(), // v0.5.6: command base
-        content_type: ContentType::BuildOutput,
+        filter_name: "cargo".to_string(),
         score: 0.9,
         context_score: 0.0,
         input_bytes: 1000,

@@ -1,5 +1,5 @@
 pub mod collapse;
-
+pub mod registry;
 pub mod scorer;
 pub mod toml_filter;
 
@@ -7,22 +7,22 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
-// 1. Content type — hasil Stage 1 classifier
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ContentType {
-    GitDiff,
-    GitStatus,
-    GitLog,
-    BuildOutput,    // cargo, npm, pip, make, compilation errors
-    TestOutput,     // pytest, cargo test, go test (non-JS)
-    InfraOutput,    // legacy — general infra, non-cloud
-    Cloud, // docker ps/build/logs, kubectl get/describe/apply, terraform apply, helm, aws cli
-    SystemOps, // ls, grep/rg, find, tree, env, cat (system exploration)
-    JsTs,  // vitest, tsc, playwright, eslint, prettier, esbuild output
-    LogOutput, // access log, error log, syslog
-    TabularData, // column-aligned tabular data
-    StructuredData, // JSON output for CLI
-    Unknown,
+// 1. Segmentation Strategy — how to split tokens
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SegmentationMode {
+    Line,      // Default: line by line
+    GitHunk,   // Git diff format: split by @@ or diff lines
+    TestGroup, // Test runners: group test cases
+}
+
+// 2. Collapse Strategy — how to group repetitive lines
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CollapseMode {
+    Generic,
+    Build,
+    Test,
+    Infra,
+    Log,
 }
 
 // 2. Signal tier — how important this segment is
@@ -53,13 +53,6 @@ impl fmt::Display for Route {
             Route::Rewind => write!(f, "Rewind"),
             Route::Error => write!(f, "Error"),
         }
-    }
-}
-
-// Implement Display for ContentType (optional but useful for logging)
-impl fmt::Display for ContentType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
     }
 }
 
@@ -100,7 +93,6 @@ pub struct DistillResult {
     pub output: String,
     pub route: Route,
     pub filter_name: String,
-    pub content_type: ContentType,
     pub score: f32,
     pub context_score: f32, // for session scorer
     pub input_bytes: usize,
@@ -158,7 +150,6 @@ pub struct SessionState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistillSummary {
     pub command: String,
-    pub content_type: ContentType,
     pub route: Route,
     pub input_bytes: usize,
     pub output_bytes: usize,
@@ -246,7 +237,6 @@ mod tests {
             output: String::new(),
             route: Route::Keep,
             filter_name: String::new(),
-            content_type: ContentType::Unknown,
             score: 0.0,
             context_score: 0.0,
             input_bytes: 100,
@@ -273,7 +263,6 @@ mod tests {
             output: String::new(),
             route: Route::Keep,
             filter_name: String::new(),
-            content_type: ContentType::Unknown,
             score: 0.0,
             context_score: 0.0,
             input_bytes: 100,

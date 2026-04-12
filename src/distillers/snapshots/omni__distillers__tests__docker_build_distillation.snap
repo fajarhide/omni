@@ -2,4 +2,4 @@
 source: src/distillers/mod.rs
 expression: output
 ---
-docker: 5 steps | 1 cached | Successfully built 9b9c9d09a123
+docker build: ✓ complete (5 layers, 1 cached)

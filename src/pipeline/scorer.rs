@@ -1,172 +1,16 @@
-use crate::pipeline::{ContentType, OutputSegment, SessionState, SignalTier};
-
-pub fn command_to_content_type(command: &str) -> ContentType {
-    if command.is_empty() {
-        return ContentType::Unknown;
-    }
-
-    // Strip absolute paths: /usr/bin/git → git
-    let cmd = command.trim();
-    let base = {
-        let first_word = cmd.split_whitespace().next().unwrap_or(cmd);
-        std::path::Path::new(first_word)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(first_word)
-    };
-    let cmd_lower = cmd.to_lowercase();
-
-    // Git — subcommand aware
-    if base == "git" {
-        let parts: Vec<&str> = cmd_lower.split_whitespace().collect();
-        let sub = parts.get(1).copied().unwrap_or("");
-        return match sub {
-            "diff" | "show" | "whatchanged" => {
-                if cmd_lower.contains("--stat") {
-                    ContentType::GitStatus
-                } else {
-                    ContentType::GitDiff
-                }
-            }
-            "log" | "shortlog" | "reflog" => ContentType::GitLog,
-            _ => ContentType::GitStatus, // status, branch, tag, remote, stash, config, checkout
-        };
-    }
-
-    // Test runners (must be before generic build tools to catch cargo test and go test)
-    if matches!(base, "pytest" | "rspec" | "phpunit" | "jest") {
-        return ContentType::TestOutput;
-    }
-    if base == "cargo" && cmd_lower.contains("test") {
-        return ContentType::TestOutput;
-    }
-    if base == "go" && cmd_lower.contains("test") {
-        return ContentType::TestOutput;
-    }
-
-    // Build tools
-    if matches!(
-        base,
-        "cargo" | "rustc" | "make" | "cmake" | "gcc" | "g++" | "clang"
-    ) {
-        return ContentType::BuildOutput;
-    }
-    if base == "go" && cmd_lower.contains("build") {
-        return ContentType::BuildOutput;
-    }
-
-    // JS/TS toolchain
-    if matches!(
-        base,
-        "vitest"
-            | "playwright"
-            | "tsc"
-            | "eslint"
-            | "prettier"
-            | "node"
-            | "npm"
-            | "npx"
-            | "yarn"
-            | "pnpm"
-            | "bun"
-            | "esbuild"
-            | "vite"
-    ) {
-        return ContentType::JsTs;
-    }
-
-    // Cloud & infra
-    if matches!(
-        base,
-        "docker"
-            | "podman"
-            | "kubectl"
-            | "helm"
-            | "terraform"
-            | "tofu"
-            | "aws"
-            | "gcloud"
-            | "az"
-            | "doctl"
-    ) {
-        return ContentType::Cloud;
-    }
-
-    // System ops — 85+ commands (lightweight: just match base)
-    if matches!(
-        base,
-        "ls" | "tree"
-            | "find"
-            | "grep"
-            | "rg"
-            | "awk"
-            | "sed"
-            | "cat"
-            | "head"
-            | "tail"
-            | "ps"
-            | "top"
-            | "htop"
-            | "df"
-            | "du"
-            | "env"
-            | "printenv"
-            | "which"
-            | "stat"
-            | "curl"
-            | "wget"
-            | "ping"
-            | "ip"
-            | "netstat"
-            | "ss"
-            | "lsof"
-            | "tar"
-            | "gzip"
-            | "zip"
-            | "unzip"
-            | "chmod"
-            | "chown"
-            | "wc"
-            | "sort"
-            | "uniq"
-            | "apt"
-            | "apt-get"
-            | "yum"
-            | "dnf"
-            | "brew"
-            | "pacman"
-    ) {
-        return ContentType::SystemOps;
-    }
-
-    // Python tools
-    if matches!(
-        base,
-        "pip" | "pip3" | "poetry" | "uv" | "ruff" | "mypy" | "black"
-    ) {
-        return ContentType::BuildOutput;
-    }
-
-    // Ruby tools
-    if matches!(base, "ruby" | "rake" | "rubocop" | "bundle") {
-        return ContentType::BuildOutput;
-    }
-
-    ContentType::Unknown
-}
+use crate::pipeline::registry;
+use crate::pipeline::{OutputSegment, SegmentationMode, SessionState, SignalTier};
 
 pub fn score_with_command(
     input: &str,
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
-) -> (Vec<crate::pipeline::OutputSegment>, ContentType) {
-    // 1. Infer content type dari command (O(1) — fast path)
-    let content_type = command_to_content_type(command);
+) -> Vec<crate::pipeline::OutputSegment> {
+    // 1. Resolve pipeline profile from command
+    let profile = registry::resolve_profile(command);
 
-    // 2. Score segments (existing logic, no change)
-    let segments = score_segments(input, &content_type, session);
-
-    (segments, content_type)
+    // 2. Score segments based on segmentation mode
+    score_segments(input, profile.segmentation, session)
 }
 
 fn contains_any(trimmed: &str, keywords: &[&str]) -> bool {
@@ -306,13 +150,13 @@ fn split_into_hunks(input: &str) -> Vec<(String, usize, usize)> {
 
 pub fn score_segments(
     input: &str,
-    content_type: &ContentType,
+    mode: SegmentationMode,
     session: Option<&SessionState>,
 ) -> Vec<OutputSegment> {
     let mut segments = Vec::new();
 
-    match content_type {
-        ContentType::GitDiff => {
+    match mode {
+        SegmentationMode::GitHunk => {
             let hunks = split_into_hunks(input);
             for (content, start_line, end_line) in hunks {
                 let tier = classify_line(&content);
@@ -333,7 +177,7 @@ pub fn score_segments(
                 });
             }
         }
-        ContentType::TestOutput => {
+        SegmentationMode::TestGroup => {
             let mut current_chunk = String::new();
             let mut start_line = 1;
             let mut line_num = 1;
@@ -397,7 +241,7 @@ pub fn score_segments(
                 });
             }
         }
-        _ => {
+        SegmentationMode::Line => {
             // Segment per line
             let mut line_num = 1;
             for line in input.lines() {
@@ -502,7 +346,7 @@ mod tests {
     #[test]
     fn test_score_segments_returns_correct_count() {
         let input = "line 1\nline 2\nline 3";
-        let segments = score_segments(input, &ContentType::Unknown, None);
+        let segments = score_segments(input, SegmentationMode::Line, None);
         assert_eq!(segments.len(), 3);
         assert_eq!(segments[0].line_range, (1, 1));
         assert_eq!(segments[2].line_range, (3, 3));
@@ -511,7 +355,7 @@ mod tests {
     #[test]
     fn test_score_segments_git_diff_split_by_hunk() {
         let diff = "diff --git a/file.txt b/file.txt\nindex 1234..5678\n@@ -1,3 +1,4 @@\n line1\n line2\n@@ -10,2 +11,3 @@\n line10\n line11";
-        let segments = score_segments(diff, &ContentType::GitDiff, None);
+        let segments = score_segments(diff, SegmentationMode::GitHunk, None);
 
         assert_eq!(segments.len(), 3);
         // Header

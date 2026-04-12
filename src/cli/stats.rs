@@ -103,14 +103,10 @@ fn print_help() {
         "  {: <12} Full technical breakdown (commands, routes, session)",
         "--detail".cyan()
     );
-    println!(
-        "  {: <12} Savings breakdown by content type",
-        "--by-type".cyan()
-    );
     println!("  {: <12} Scope to today only", "--today".cyan());
     println!("  {: <12} Scope to last 7 days", "--week".cyan());
     println!(
-        "  {: <12} Scope to last 30 days (default for --detail/--by-type)",
+        "  {: <12} Scope to last 30 days (default for --detail)",
         "--month".cyan()
     );
     println!("  {: <12} Machine-readable JSON output", "--json".cyan());
@@ -268,13 +264,6 @@ fn run_default(store: &Store) -> Result<()> {
         "  💡 {} for full breakdown",
         "omni stats --detail".bright_cyan()
     );
-
-    if store.has_upgradable_history() {
-        println!(
-            "  💡 Run {} to upgrade historical stats",
-            "omni doctor --fix".bright_cyan()
-        );
-    }
 
     // Update Notification (4h cache)
     if let Some(latest) = crate::guard::update::check() {

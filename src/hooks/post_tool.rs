@@ -135,31 +135,37 @@ pub fn process_payload(
 
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
 
-    let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
+    let (final_out, filter_name) = if let Some(filter) = toml_match {
         let output = filter.apply(&content);
-        (output, filter.name.clone(), None)
+        (output, filter.name.clone())
     } else {
-        // Command-first pipeline: scorer infers ContentType dari command
-        let (segments, content_type) =
-            scorer::score_with_command(&content, clean_command, session_guard.as_deref());
+        // Pure Command Architecture: Resolve profile once
+        let profile = crate::pipeline::registry::resolve_profile(clean_command);
 
-        // Collapse repetitive lines SEBELUM distill (sudah ada, tetap pakai)
-        let collapse_result = collapse::collapse(&content, &content_type);
+        // 1. Initial Scoring (to evaluate learning/stats)
+        let segments =
+            scorer::score_segments(&content, profile.segmentation, session_guard.as_deref());
+
+        // 2. Collapse repetitive lines SEBELUM distill
+        let collapse_result = collapse::collapse(&content, &profile.collapse);
         let effective_input = collapse_result.collapsed_lines.join("\n");
 
-        // Re-score dengan collapsed input jika ada savings signifikan
+        // 3. Re-score dengan collapsed input jika ada savings signifikan
         let final_segments = if collapse_result.savings_pct > 0.1 {
-            scorer::score_with_command(&effective_input, clean_command, session_guard.as_deref()).0
+            scorer::score_segments(
+                &effective_input,
+                profile.segmentation,
+                session_guard.as_deref(),
+            )
         } else {
             segments
         };
 
-        // Distill: command-first dispatch
+        // 4. Distill: command-first dispatch
         let output = crate::distillers::distill_with_command(
             &final_segments,
             &effective_input,
             clean_command,
-            &content_type,
             session_guard.as_deref(),
         );
 
@@ -170,66 +176,65 @@ pub fn process_payload(
                 .next()
                 .unwrap_or("omni")
                 .to_string(),
-            Some(content_type),
         )
     };
 
     drop(session_guard); // Release lock ASAP sebelum rewind check
 
-    // Check for rewind decision (only for Rust pipeline)
+    // Check for rewind decision
     let mut final_out = final_out;
     let mut rewind_hash = String::new();
 
-    if let Some(ref ctype) = ctype {
-        // Quick re-score untuk rewind decision (reuse segments dari tadi)
-        let check_segments = scorer::score_with_command(&content, clean_command, None).0;
-        let noise_count = check_segments
-            .iter()
-            .filter(|s| s.final_score() < 0.3)
-            .count();
-        let should_store = noise_count as f32 / check_segments.len().max(1) as f32 > 0.4
-            && check_segments.len() > 20;
+    // Re-check segments from content for metadata/learning
+    let profile = crate::pipeline::registry::resolve_profile(clean_command);
+    let check_segments = scorer::score_segments(&content, profile.segmentation, None);
 
-        let dropped_lines: usize = check_segments
-            .iter()
-            .filter(|s| s.final_score() < 0.3)
-            .map(|s| s.content.lines().count())
-            .sum();
+    let noise_count = check_segments
+        .iter()
+        .filter(|s| s.final_score() < 0.3)
+        .count();
+    let should_store =
+        noise_count as f32 / check_segments.len().max(1) as f32 > 0.4 && check_segments.len() > 20;
 
-        // Auto-learn trigger (was in composer::evaluate_learning)
-        if !clean_command.is_empty() && content.len() > 100 {
-            let total = check_segments.len();
-            let dropped = noise_count;
-            let poor = total > 5 && (dropped as f32 / total.max(1) as f32) < 0.3;
-            if poor || matches!(ctype, crate::pipeline::ContentType::Unknown) {
-                crate::session::learn::queue_for_learn(&content, clean_command);
-            }
+    let dropped_lines: usize = check_segments
+        .iter()
+        .filter(|s| s.final_score() < 0.3)
+        .map(|s| s.content.lines().count())
+        .sum();
+
+    // Auto-learn trigger
+    if !clean_command.is_empty() && content.len() > 100 {
+        let total = check_segments.len();
+        let dropped = noise_count;
+        let poor = total > 5 && (dropped as f32 / total.max(1) as f32) < 0.3;
+        if poor {
+            crate::session::learn::queue_for_learn(&content, clean_command);
         }
+    }
 
-        if should_store {
-            if let Some(ref s) = store {
-                let hash = s.store_rewind(&content);
-                final_out.push_str(&format!(
-                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
-                    dropped_lines, hash
-                ));
-                rewind_hash = hash;
-            } else {
-                final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
-            }
+    if should_store {
+        if let Some(ref s) = store {
+            let hash = s.store_rewind(&content);
+            final_out.push_str(&format!(
+                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
+                dropped_lines, hash
+            ));
+            rewind_hash = hash;
+        } else {
+            final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
         }
+    }
 
-        // Update session state
-        if let Some(ref lock) = session
-            && let Ok(mut state) = lock.lock()
-        {
-            if !command.is_empty() {
-                state.add_command(&command);
-            }
-            for seg in &check_segments {
-                if seg.tier == crate::pipeline::SignalTier::Critical {
-                    state.add_error(&seg.content);
-                }
+    // Update session state
+    if let Some(ref lock) = session
+        && let Ok(mut state) = lock.lock()
+    {
+        if !command.is_empty() {
+            state.add_command(&command);
+        }
+        for seg in &check_segments {
+            if seg.tier == crate::pipeline::SignalTier::Critical {
+                state.add_error(&seg.content);
             }
         }
     }
@@ -250,9 +255,6 @@ pub fn process_payload(
                 Route::Rewind
             },
             filter_name: filter_name.clone(),
-            content_type: ctype
-                .clone()
-                .unwrap_or(crate::pipeline::ContentType::Unknown),
             score: 0.0,
             context_score: 0.0,
             input_bytes: content.len(),

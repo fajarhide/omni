@@ -1,5 +1,5 @@
 use crate::pipeline::scorer::classify_line;
-use crate::pipeline::{ContentType, SignalTier};
+use crate::pipeline::{CollapseMode, SignalTier};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -87,14 +87,14 @@ fn normalize_structural(trimmed: &str) -> String {
 
 /// Content-type aware normalization. For test/build output, use a more
 /// aggressive "template extraction" that groups lines with the same structure.
-fn normalize_for_content(clean: &str, content_type: &ContentType) -> String {
+fn normalize_for_content(clean: &str, mode: &CollapseMode) -> String {
     let trimmed = clean.trim();
 
-    match content_type {
-        ContentType::TestOutput => normalize_test_line(trimmed),
-        ContentType::BuildOutput => normalize_build_line(trimmed),
-        ContentType::InfraOutput => normalize_infra_line(trimmed),
-        ContentType::LogOutput => normalize_log_line(trimmed),
+    match mode {
+        CollapseMode::Test => normalize_test_line(trimmed),
+        CollapseMode::Build => normalize_build_line(trimmed),
+        CollapseMode::Infra => normalize_infra_line(trimmed),
+        CollapseMode::Log => normalize_log_line(trimmed),
         _ => normalize_structural(trimmed),
     }
 }
@@ -175,11 +175,11 @@ fn normalize_log_line(trimmed: &str) -> String {
 
 // ─── Content-Type Specific Summaries ────────────────────
 
-fn format_summary(group: &CollapseGroup, content_type: &ContentType) -> String {
+fn format_summary(group: &CollapseGroup, mode: &CollapseMode) -> String {
     let pat = &group.pattern;
 
-    match content_type {
-        ContentType::TestOutput => {
+    match mode {
+        CollapseMode::Test => {
             if pat.contains("test _") && pat.contains("... ok") {
                 return format!(
                     "{} tests passed ✓ (collapsed from {} lines)",
@@ -193,7 +193,7 @@ fn format_summary(group: &CollapseGroup, content_type: &ContentType) -> String {
                 );
             }
         }
-        ContentType::BuildOutput => {
+        CollapseMode::Build => {
             if pat == "compiling _" {
                 return format!(
                     "{} crates compiled (collapsed from {} lines)",
@@ -219,7 +219,7 @@ fn format_summary(group: &CollapseGroup, content_type: &ContentType) -> String {
                 );
             }
         }
-        ContentType::InfraOutput => {
+        CollapseMode::Infra => {
             if pat == "-> using cache" {
                 return format!(
                     "{} cached layers (collapsed from {} lines)",
@@ -239,7 +239,7 @@ fn format_summary(group: &CollapseGroup, content_type: &ContentType) -> String {
                 );
             }
         }
-        ContentType::LogOutput => {
+        CollapseMode::Log => {
             if pat == "info: _" {
                 return format!(
                     "{} INFO entries (collapsed from {} lines)",
@@ -283,10 +283,9 @@ const MIN_LINES_FOR_COLLAPSE: usize = 10;
 ///
 /// Deterministic: same input + content_type = same output.
 /// Panic-safe: any internal failure returns the input as-is.
-pub fn collapse(input: &str, content_type: &ContentType) -> CollapseResult {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        collapse_inner(input, content_type)
-    }));
+pub fn collapse(input: &str, mode: &CollapseMode) -> CollapseResult {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| collapse_inner(input, mode)));
 
     match result {
         Ok(r) => r,
@@ -304,7 +303,7 @@ pub fn collapse(input: &str, content_type: &ContentType) -> CollapseResult {
     }
 }
 
-fn collapse_inner(input: &str, content_type: &ContentType) -> CollapseResult {
+fn collapse_inner(input: &str, mode: &CollapseMode) -> CollapseResult {
     let raw_lines: Vec<&str> = input.lines().collect();
     let original_count = raw_lines.len();
 
@@ -330,7 +329,7 @@ fn collapse_inner(input: &str, content_type: &ContentType) -> CollapseResult {
             normals.push(String::new());
             is_critical.push(true);
         } else {
-            normals.push(normalize_for_content(&clean, content_type));
+            normals.push(normalize_for_content(&clean, mode));
             is_critical.push(false);
         }
     }
@@ -350,11 +349,8 @@ fn collapse_inner(input: &str, content_type: &ContentType) -> CollapseResult {
 
     // Phase 3: Determine which groups to collapse
     let has_specific_handler = matches!(
-        content_type,
-        ContentType::TestOutput
-            | ContentType::BuildOutput
-            | ContentType::InfraOutput
-            | ContentType::LogOutput
+        mode,
+        CollapseMode::Test | CollapseMode::Build | CollapseMode::Infra | CollapseMode::Log
     );
 
     let collapsable_count: usize = pattern_groups
@@ -397,7 +393,7 @@ fn collapse_inner(input: &str, content_type: &ContentType) -> CollapseResult {
             last_line: last + 1,
         };
 
-        let summary = format_summary(&group, content_type);
+        let summary = format_summary(&group, mode);
         groups.push(group);
 
         for &idx in indices {
@@ -477,8 +473,8 @@ mod tests {
     fn test_normalize_deterministic() {
         let line = "test module::submod::test_case_42 ... ok";
         assert_eq!(
-            normalize_for_content(line, &ContentType::TestOutput),
-            normalize_for_content(line, &ContentType::TestOutput)
+            normalize_for_content(line, &CollapseMode::Test),
+            normalize_for_content(line, &CollapseMode::Test)
         );
     }
 
@@ -496,7 +492,7 @@ mod tests {
         lines.push("test result: FAILED. 45 passed; 5 failed; 0 ignored".to_string());
         let input = lines.join("\n");
 
-        let result = collapse(&input, &ContentType::TestOutput);
+        let result = collapse(&input, &CollapseMode::Test);
 
         assert!(
             result.collapsed_to < result.original_lines,
@@ -531,7 +527,7 @@ mod tests {
         lines.push("error[E0432]: unresolved import".to_string());
         let input = lines.join("\n");
 
-        let result = collapse(&input, &ContentType::BuildOutput);
+        let result = collapse(&input, &CollapseMode::Build);
 
         assert!(result.collapsed_to < result.original_lines);
         let output = result.collapsed_lines.join("\n");
@@ -552,7 +548,7 @@ mod tests {
         lines.push("panic: runtime error".to_string());
         let input = lines.join("\n");
 
-        let result = collapse(&input, &ContentType::LogOutput);
+        let result = collapse(&input, &CollapseMode::Log);
         let output = result.collapsed_lines.join("\n");
 
         assert!(output.contains("ERROR: Critical failure"));
@@ -565,7 +561,7 @@ mod tests {
     #[test]
     fn test_collapse_noop_for_short_input() {
         let input = "line 1\nline 2\nline 3";
-        let result = collapse(input, &ContentType::Unknown);
+        let result = collapse(input, &CollapseMode::Generic);
         assert_eq!(result.original_lines, 3);
         assert_eq!(result.collapsed_to, 3);
         assert!(result.groups.is_empty());
@@ -581,8 +577,8 @@ mod tests {
         }
         let input = lines.join("\n");
 
-        let r1 = collapse(&input, &ContentType::BuildOutput);
-        let r2 = collapse(&input, &ContentType::BuildOutput);
+        let r1 = collapse(&input, &CollapseMode::Build);
+        let r2 = collapse(&input, &CollapseMode::Build);
 
         assert_eq!(r1.collapsed_lines, r2.collapsed_lines);
         assert_eq!(r1.collapsed_to, r2.collapsed_to);
@@ -601,7 +597,7 @@ mod tests {
         }
         let input = lines.join("\n");
 
-        let result = collapse(&input, &ContentType::Unknown);
+        let result = collapse(&input, &CollapseMode::Generic);
         assert!(
             result.collapsed_to < result.original_lines,
             "Expected collapse for 80% repetition: {} lines -> {}",
@@ -618,7 +614,7 @@ mod tests {
         }
         let input = lines.join("\n");
 
-        let result = collapse(&input, &ContentType::Unknown);
+        let result = collapse(&input, &CollapseMode::Generic);
         assert_eq!(result.collapsed_to, result.original_lines);
     }
 
@@ -626,7 +622,7 @@ mod tests {
 
     #[test]
     fn test_collapse_empty_input() {
-        let result = collapse("", &ContentType::Unknown);
+        let result = collapse("", &CollapseMode::Generic);
         assert_eq!(result.original_lines, 0);
         assert_eq!(result.collapsed_to, 0);
     }
@@ -645,7 +641,7 @@ mod tests {
         lines.push("Successfully built abc123def456".to_string());
         let input = lines.join("\n");
 
-        let result = collapse(&input, &ContentType::InfraOutput);
+        let result = collapse(&input, &CollapseMode::Infra);
         assert!(result.collapsed_to < result.original_lines);
         let output = result.collapsed_lines.join("\n");
         assert!(output.contains("Successfully built"));
@@ -667,7 +663,7 @@ mod tests {
         let start = std::time::Instant::now();
         let iters = 100;
         for _ in 0..iters {
-            std::hint::black_box(collapse(&input, &ContentType::TestOutput));
+            std::hint::black_box(collapse(&input, &CollapseMode::Test));
         }
         let elapsed_us = start.elapsed().as_micros();
         let per_iter_us = elapsed_us / iters;
@@ -692,7 +688,7 @@ mod tests {
     #[test]
     fn test_collapse_cargo_test_500_fixture() {
         let input = include_str!("../../tests/fixtures/cargo_test_500.txt");
-        let result = collapse(input, &ContentType::TestOutput);
+        let result = collapse(input, &CollapseMode::Test);
 
         assert!(
             result.savings_pct > 50.0,
@@ -710,7 +706,7 @@ mod tests {
     #[test]
     fn test_collapse_cargo_build_fixture() {
         let input = include_str!("../../tests/fixtures/cargo_build_large.txt");
-        let result = collapse(input, &ContentType::BuildOutput);
+        let result = collapse(input, &CollapseMode::Build);
 
         assert!(
             result.savings_pct > 40.0,

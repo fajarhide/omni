@@ -4,8 +4,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
 use crate::paths;
-use crate::pipeline::scorer::command_to_content_type;
-use crate::pipeline::{DistillResult, SessionState};
+use crate::pipeline::DistillResult;
+use crate::pipeline::SessionState;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -222,7 +222,6 @@ impl Store {
                 session_id   TEXT NOT NULL,
                 ts           INTEGER NOT NULL,
                 filter_name  TEXT NOT NULL,
-                content_type TEXT NOT NULL,
                 input_bytes  INTEGER NOT NULL,
                 output_bytes INTEGER NOT NULL,
                 route        TEXT NOT NULL,
@@ -289,13 +288,12 @@ impl Store {
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
         let _ = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, content_type, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 session_id,
                 ts,
                 result.filter_name,
-                result.content_type.to_string(),
                 result.input_bytes,
                 result.output_bytes,
                 result.route.to_string(),
@@ -473,81 +471,6 @@ impl Store {
         results
     }
 
-    pub fn reclassify_historical_data(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, command, content_type FROM distillations 
-             WHERE (content_type = 'Unknown' OR content_type = 'TabularData') 
-             AND command != ''",
-        )?;
-
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-
-        let mut updated_count = 0;
-        let mut updates = Vec::new();
-
-        for row in rows.flatten() {
-            let (id, command, old_filter) = row;
-            // Re-classify using only command context (input is empty)
-            let new_type = command_to_content_type(&command);
-            let new_filter = format!("{:?}", new_type);
-
-            if new_filter != old_filter && new_filter != "Unknown" {
-                updates.push((id, new_filter));
-            }
-        }
-
-        // Apply updates in a transaction for efficiency
-        if !updates.is_empty() {
-            let mut update_stmt = conn.prepare(
-                "UPDATE distillations SET filter_name = ?1, content_type = ?1 WHERE id = ?2",
-            )?;
-            for (id, new_filter) in updates {
-                update_stmt.execute(params![new_filter, id])?;
-                updated_count += 1;
-            }
-        }
-
-        Ok(updated_count)
-    }
-
-    pub fn has_upgradable_history(&self) -> bool {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        let mut stmt = match conn.prepare(
-            "SELECT command, content_type FROM distillations 
-             WHERE (content_type = 'Unknown' OR content_type = 'TabularData') 
-             AND command != ''",
-        ) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-
-        let mut rows = match stmt.query([]) {
-            Ok(r) => r,
-            Err(_) => return false,
-        };
-
-        while let Ok(Some(row)) = rows.next() {
-            let cmd: String = row.get(0).unwrap_or_default();
-            let old_type: String = row.get(1).unwrap_or_default();
-            let new_type = crate::pipeline::scorer::command_to_content_type(&cmd);
-            let new_type_str = format!("{:?}", new_type);
-            if new_type_str != old_type && new_type_str != "Unknown" {
-                return true;
-            }
-        }
-        false
-    }
-
     pub fn get_per_command_stats(
         &self,
         since: i64,
@@ -651,7 +574,6 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::ContentType;
     use tempfile::tempdir;
 
     fn get_temp_store() -> (Store, tempfile::TempDir) {
@@ -691,7 +613,6 @@ mod tests {
             output: "hello".to_string(),
             route: crate::pipeline::Route::Keep,
             filter_name: "test_filter".to_string(),
-            content_type: ContentType::TestOutput,
             score: 0.8,
             context_score: 0.1,
             input_bytes: 100,
@@ -768,7 +689,7 @@ mod tests {
         let old_ts = chrono::Utc::now().timestamp() - (5 * 86400); // 5 days ago
 
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO distillations (session_id, ts, filter_name, content_type, input_bytes, output_bytes, route, latency_ms) VALUES ('sess_1', ?1, 'f', 't', 1, 1, 'K', 1)", [old_ts]).unwrap();
+        conn.execute("INSERT INTO distillations (session_id, ts, filter_name, input_bytes, output_bytes, route, latency_ms) VALUES ('sess_1', ?1, 'f', 1, 1, 'K', 1)", [old_ts]).unwrap();
         drop(conn);
 
         store.cleanup_old(2); // keep last 2 days
@@ -778,43 +699,5 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM distillations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_reclassify_historical_data() {
-        use crate::pipeline::ContentType;
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
-
-        // 1. Insert a record that WAS Unknown but SHOULD BE GitStatus
-        let res = DistillResult {
-            output: "".to_string(),
-            route: crate::pipeline::Route::Keep,
-            filter_name: "Unknown".to_string(), // Legacy label
-            content_type: ContentType::Unknown,
-            score: 0.0,
-            context_score: 0.0,
-            input_bytes: 100,
-            output_bytes: 50,
-            latency_ms: 0,
-            rewind_hash: None,
-            segments_kept: 0,
-            segments_dropped: 0,
-            collapse_savings: None,
-        };
-        store.record_distillation("s1", &res, "git status");
-
-        // 2. Run re-classification
-        let count = store.reclassify_historical_data().unwrap();
-        assert_eq!(count, 1);
-
-        // 3. Verify the database record itself
-        let conn = store.conn.lock().unwrap();
-        let final_filter: String = conn
-            .query_row("SELECT filter_name FROM distillations LIMIT 1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(final_filter, "GitStatus");
     }
 }

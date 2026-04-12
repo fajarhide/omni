@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::pipeline::{ContentType, Route, SessionState, collapse, scorer, toml_filter};
+use crate::pipeline::{Route, SessionState, collapse, scorer, toml_filter};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
@@ -25,7 +25,6 @@ struct PipelineResult {
     session_id: String,
     output: String,
     filter_name: String,
-    content_type: ContentType,
     rewind_hash: Option<String>,
     segments_kept: usize,
     segments_dropped: usize,
@@ -177,60 +176,63 @@ fn distill(
         }
     }
 
-    let (output, filter_name, ctype, rewind_hash, kept_count, dropped_count) = if let Some(filter) =
+    let (output, filter_name, rewind_hash, kept_count, dropped_count) = if let Some(filter) =
         matched_toml
     {
         let out = filter.apply(&input_text);
-        (out, filter.name.clone(), ContentType::Unknown, None, 0, 0)
+        (out, filter.name.clone(), None, 0, 0)
     } else {
         let cmd = command_name.unwrap_or("");
 
-        // Command-first scoring (new unified API)
-        let (segments, c) = scorer::score_with_command(
+        // Pure Command Architecture: Resolve profile
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+
+        // 1. Initial Scoring
+        let segments = scorer::score_segments(
             &input_text,
-            cmd,
+            profile.segmentation,
             session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
         );
 
-        // Collapse
-        let collapse_result = collapse::collapse(&input_text, &c);
+        // 2. Collapse
+        let collapse_result = collapse::collapse(&input_text, &profile.collapse);
         let effective_input = collapse_result.collapsed_lines.join("\n");
 
+        // 3. Re-score
         let final_segments = if collapse_result.savings_pct > 0.1 {
-            scorer::score_with_command(
+            scorer::score_segments(
                 &effective_input,
-                cmd,
+                profile.segmentation,
                 session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
             )
-            .0
         } else {
             segments
         };
 
-        // Distill with command context
+        // 4. Distill
         let mut out = crate::distillers::distill_with_command(
             &final_segments,
             &effective_input,
             cmd,
-            &c,
             session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
         );
 
-        // Rewind decision — inline (no composer needed)
+        // Rewind decision
         let noise_count = final_segments
             .iter()
             .filter(|s| s.final_score() < 0.3)
             .count();
         let should_store = noise_count as f32 / final_segments.len().max(1) as f32 > 0.4
             && final_segments.len() > 20;
+
         let d_count = noise_count;
         let k_count = final_segments.len() - d_count;
 
-        // Auto-learn trigger (inline)
+        // Auto-learn trigger
         if !cmd.is_empty() && input_text.len() > 100 {
             let poor = final_segments.len() > 5
                 && (d_count as f32 / final_segments.len().max(1) as f32) < 0.3;
-            if poor || matches!(c, ContentType::Unknown) {
+            if poor {
                 crate::session::learn::queue_for_learn(&input_text, cmd);
             }
         }
@@ -249,7 +251,7 @@ fn distill(
             r_hash = Some(hash);
         }
 
-        // Safety truncation (was in composer::ComposeConfig::default().max_output_chars)
+        // Safety truncation
         const MAX_OUTPUT: usize = 50_000;
         if out.len() > MAX_OUTPUT {
             out.truncate(MAX_OUTPUT);
@@ -259,7 +261,6 @@ fn distill(
         (
             out,
             cmd.split_whitespace().next().unwrap_or("omni").to_string(),
-            c,
             r_hash,
             k_count,
             d_count,
@@ -270,7 +271,6 @@ fn distill(
         session_id,
         output,
         filter_name,
-        content_type: ctype,
         rewind_hash,
         segments_kept: kept_count,
         segments_dropped: dropped_count,
@@ -296,7 +296,6 @@ fn persist<E: Write>(
                 Route::Keep
             },
             filter_name: result.filter_name.clone(),
-            content_type: result.content_type.clone(),
             score: 0.0,
             context_score: 0.0,
             input_bytes: result.input_text.len(),
