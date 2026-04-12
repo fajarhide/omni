@@ -111,7 +111,10 @@ fn print_help() {
         "--month".cyan()
     );
     println!("  {: <12} Machine-readable JSON output", "--json".cyan());
-    println!("  {: <12} Display breakdown per project path", "--project".cyan());
+    println!(
+        "  {: <12} Display breakdown per project path",
+        "--project".cyan()
+    );
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -582,7 +585,11 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
     };
 
     let projects = store.get_project_stats(since)?;
-    println!("\n  {} — {} Breakdown", "OMNI Project Analytics".bold().bright_white(), period_label);
+    println!(
+        "\n  {} — {} Breakdown",
+        "OMNI Project Analytics".bold().bright_white(),
+        period_label
+    );
     print_separator();
 
     if projects.is_empty() {
@@ -600,12 +607,19 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
         let display_path = if path.chars().count() > 30 {
             let mut s: String = path.chars().take(12).collect();
             s.push_str("...");
-            s.extend(path.chars().rev().take(15).collect::<String>().chars().rev());
+            s.extend(
+                path.chars()
+                    .rev()
+                    .take(15)
+                    .collect::<String>()
+                    .chars()
+                    .rev(),
+            );
             s
         } else {
             path
         };
-        
+
         let bar = format_bar(savings);
         let bar_colored = if savings > 80.0 {
             bar.bright_green()

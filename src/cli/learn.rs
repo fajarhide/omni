@@ -91,7 +91,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bright_white()
         );
         let report = crate::pipeline::toml_filter::run_inline_tests(
-            &crate::pipeline::toml_filter::load_all_filters(),
+            crate::pipeline::toml_filter::load_all_filters(),
         );
         let total = report.passes + report.failures.len();
 

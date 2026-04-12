@@ -1,6 +1,6 @@
+use crate::paths;
 use serde::Deserialize;
 use std::fs;
-use crate::paths;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct OmniConfig {

@@ -220,7 +220,6 @@ pub fn process_payload(
         }
     }
 
-
     if should_store {
         if let Some(ref s) = store {
             let hash = s.store_rewind(&content);

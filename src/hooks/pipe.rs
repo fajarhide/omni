@@ -186,98 +186,97 @@ fn distill(
         }
     }
 
-    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) = if let Some(filter) =
-        matched_toml
-    {
-        let out = filter.apply(&input_text);
-        (out, filter.name.clone(), None, 0, 0, None, Route::Keep)
-    } else {
-        let cmd = command_name.unwrap_or("");
-
-        // Pure Command Architecture: Resolve profile
-        let profile = crate::pipeline::registry::resolve_profile(cmd);
-
-        // 1. Initial Scoring
-        let segments = scorer::score_segments(
-            &input_text,
-            profile.segmentation,
-            session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-        );
-
-        // 2. Collapse
-        let collapse_result = collapse::collapse(&input_text, &profile.collapse);
-        let collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to {
-            Some((collapse_result.original_lines, collapse_result.collapsed_to))
+    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
+        if let Some(filter) = matched_toml {
+            let out = filter.apply(&input_text);
+            (out, filter.name.clone(), None, 0, 0, None, Route::Keep)
         } else {
-            None
-        };
-        let effective_input = collapse_result.collapsed_lines.join("\n");
+            let cmd = command_name.unwrap_or("");
 
-        // 3. Re-score
-        let final_segments = if collapse_result.savings_pct > 0.1 {
-            scorer::score_segments(
-                &effective_input,
+            // Pure Command Architecture: Resolve profile
+            let profile = crate::pipeline::registry::resolve_profile(cmd);
+
+            // 1. Initial Scoring
+            let segments = scorer::score_segments(
+                &input_text,
                 profile.segmentation,
                 session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-            )
-        } else {
-            segments
-        };
+            );
 
-        // 4. Distill
-        let mut out = crate::distillers::distill_with_command(
-            &final_segments,
-            &effective_input,
-            cmd,
-            session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-        );
+            // 2. Collapse
+            let collapse_result = collapse::collapse(&input_text, &profile.collapse);
+            let collapse_savings_data =
+                if collapse_result.original_lines > collapse_result.collapsed_to {
+                    Some((collapse_result.original_lines, collapse_result.collapsed_to))
+                } else {
+                    None
+                };
+            let effective_input = collapse_result.collapsed_lines.join("\n");
 
-        // Rewind decision
-        let noise_count = final_segments
-            .iter()
-            .filter(|s| s.final_score() < 0.3)
-            .count();
-        let should_store = noise_count as f32 / final_segments.len().max(1) as f32 > 0.4
-            && final_segments.len() > 20;
+            // 3. Re-score
+            let final_segments = if collapse_result.savings_pct > 0.1 {
+                scorer::score_segments(
+                    &effective_input,
+                    profile.segmentation,
+                    session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+                )
+            } else {
+                segments
+            };
 
-        let d_count = noise_count;
-        let k_count = final_segments.len() - d_count;
+            // 4. Distill
+            let mut out = crate::distillers::distill_with_command(
+                &final_segments,
+                &effective_input,
+                cmd,
+                session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+            );
 
-        let dropped_lines: usize = final_segments
-            .iter()
-            .filter(|s| s.final_score() < 0.3)
-            .map(|s| s.content.lines().count())
-            .sum();
+            // Rewind decision
+            let noise_count = final_segments
+                .iter()
+                .filter(|s| s.final_score() < 0.3)
+                .count();
+            let should_store = noise_count as f32 / final_segments.len().max(1) as f32 > 0.4
+                && final_segments.len() > 20;
 
-        // Auto-learn trigger
-        if !cmd.is_empty() && input_text.len() > 100 {
-            let poor = final_segments.len() > 5
-                && (d_count as f32 / final_segments.len().max(1) as f32) < 0.3;
-            if poor {
-                crate::session::learn::queue_for_learn(&input_text, cmd);
+            let d_count = noise_count;
+            let k_count = final_segments.len() - d_count;
+
+            let dropped_lines: usize = final_segments
+                .iter()
+                .filter(|s| s.final_score() < 0.3)
+                .map(|s| s.content.lines().count())
+                .sum();
+
+            // Auto-learn trigger
+            if !cmd.is_empty() && input_text.len() > 100 {
+                let poor = final_segments.len() > 5
+                    && (d_count as f32 / final_segments.len().max(1) as f32) < 0.3;
+                if poor {
+                    crate::session::learn::queue_for_learn(&input_text, cmd);
+                }
             }
-        }
 
-        let mut r_hash = None;
+            let mut r_hash = None;
 
-        // Determine Route
-        let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
-        let mut route = if r_hash.is_some() {
-            Route::Rewind
-        } else if ratio >= 0.7 {
-            Route::Keep
-        } else if ratio >= 0.3 {
-            Route::Soft
-        } else {
-            Route::Passthrough
-        };
+            // Determine Route
+            let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
+            let mut route = if r_hash.is_some() {
+                Route::Rewind
+            } else if ratio >= 0.7 {
+                Route::Keep
+            } else if ratio >= 0.3 {
+                Route::Soft
+            } else {
+                Route::Passthrough
+            };
 
-        if route == Route::Soft {
-            out.push_str("\n[Partial signal - omni learn recommended]\n");
-        }
+            if route == Route::Soft {
+                out.push_str("\n[Partial signal - omni learn recommended]\n");
+            }
 
-        if should_store {
-            if let Some(s) = store {
+            if should_store && let Some(s) = store {
                 let hash = s.store_rewind(&input_text);
                 if std::io::stdout().is_terminal() {
                     out.push_str(&format!(
@@ -297,25 +296,24 @@ fn distill(
                 r_hash = Some(hash);
                 route = Route::Rewind; // Override if stored in rewind
             }
-        }
 
-        // Safety truncation
-        const MAX_OUTPUT: usize = 50_000;
-        if out.len() > MAX_OUTPUT {
-            out.truncate(MAX_OUTPUT);
-            out.push_str("\n[OMNI: output truncated]\n");
-        }
+            // Safety truncation
+            const MAX_OUTPUT: usize = 50_000;
+            if out.len() > MAX_OUTPUT {
+                out.truncate(MAX_OUTPUT);
+                out.push_str("\n[OMNI: output truncated]\n");
+            }
 
-        (
-            out,
-            cmd.split_whitespace().next().unwrap_or("omni").to_string(),
-            r_hash,
-            k_count,
-            d_count,
-            collapse_savings_data,
-            route,
-        )
-    };
+            (
+                out,
+                cmd.split_whitespace().next().unwrap_or("omni").to_string(),
+                r_hash,
+                k_count,
+                d_count,
+                collapse_savings_data,
+                route,
+            )
+        };
 
     PipelineResult {
         session_id,
