@@ -1,0 +1,22 @@
+{
+  "id": "omni-signal-engine",
+  "name": "OMNI Signal Engine",
+  "version": "0.5.6-rc1",
+  "description": "Intelligent context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output.",
+  "author": "OMNI Team",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "omniPath": {
+        "type": "string",
+        "description": "Path to the omni binary (defaults to 'omni' in PATH)",
+        "default": "omni"
+      },
+      "forceDistill": {
+        "type": "boolean",
+        "description": "If true, overrides the default shell tool (experimental)",
+        "default": false
+      }
+    }
+  }
+}

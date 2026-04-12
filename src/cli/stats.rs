@@ -1,6 +1,7 @@
 use crate::store::sqlite::Store;
 use anyhow::Result;
 use colored::*;
+use std::collections::HashMap;
 
 // ─── Helper Functions ───────────────────────────────────
 
@@ -61,10 +62,46 @@ fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+fn group_and_calculate_stats(
+    items: Vec<(String, u64, u64, u64)>,
+    limit: usize,
+) -> Vec<(String, u64, f64)> {
+    let mut grouped: HashMap<String, (u64, u64, u64)> = HashMap::new();
+
+    for (cmd, calls, input, output) in items {
+        // Group by the shortened version so things like "npm install x" and "npm install y" combine
+        let key = shorten_command(&cmd, 18);
+        let entry = grouped.entry(key).or_insert((0, 0, 0));
+        entry.0 += calls;
+        entry.1 += input;
+        entry.2 += output;
+    }
+
+    let mut result: Vec<(String, u64, f64)> = grouped
+        .into_iter()
+        .map(|(cmd, (calls, input, output))| {
+            let pct = if input > 0 {
+                100.0 * (1.0 - output as f64 / input as f64)
+            } else {
+                0.0
+            };
+            (cmd, calls, pct)
+        })
+        .collect();
+
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    if limit > 0 {
+        result.truncate(limit);
+    }
+    result
+}
+
 fn get_top_commands(store: &Store, since: i64, limit: usize) -> Vec<(String, u64, f64)> {
-    store
-        .get_per_command_stats(since, limit)
-        .unwrap_or_default()
+    let raw = store
+        .get_per_command_stats(since, limit * 3)
+        .unwrap_or_default();
+
+    group_and_calculate_stats(raw, limit)
 }
 
 fn shorten_command(cmd: &str, max_len: usize) -> String {
@@ -381,15 +418,18 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     }
 
     // By Command — top 10 (or all if requested), filter 0% savings
-    let filters = store.filter_breakdown(since)?;
+    let raw_filters = store.filter_breakdown(since)?;
     let all_flag = args.iter().any(|a| a == "--all-commands");
+    let grouped_filters = group_and_calculate_stats(raw_filters, 0);
+
     let display_filters: Vec<_> = if all_flag {
-        filters.iter().collect()
+        grouped_filters.clone()
     } else {
-        filters
+        grouped_filters
             .iter()
             .filter(|(_, _, pct)| *pct > 0.0)
             .take(10)
+            .cloned()
             .collect()
     };
 
@@ -434,8 +474,11 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         }
 
         if !all_flag {
-            let filtered_count = filters.iter().filter(|(_, _, pct)| *pct > 0.0).count();
-            let hidden_zero = filters.len() - filtered_count;
+            let filtered_count = grouped_filters
+                .iter()
+                .filter(|(_, _, pct)| *pct > 0.0)
+                .count();
+            let hidden_zero = grouped_filters.len() - filtered_count;
 
             if filtered_count > 10 {
                 println!(

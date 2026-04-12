@@ -295,7 +295,7 @@ pub fn process_payload(
             .and_then(|lock| lock.lock().ok())
             .map(|s| s.session_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
-        s.record_distillation(&session_id, &result, &command, &project_path);
+        s.record_distillation(&session_id, &result, clean_command, &project_path);
 
         if let Some(ref sess) = session {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());

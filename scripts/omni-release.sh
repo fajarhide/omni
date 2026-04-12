@@ -34,13 +34,20 @@ if [ "$CARGO_VERSION" != "$VERSION" ]; then
 fi
 ok "Cargo.toml version: $CARGO_VERSION"
 
-# 2. Git status check
+# 2. Verify version in openclaw.plugin.json
+OPENCLAW_VERSION=$(grep '^version' integrations/openclaw/openclaw.plugin.json | head -1 | sed 's/version = "\(.*\)"/\1/')
+if [ "$OPENCLAW_VERSION" != "$VERSION" ]; then
+    fail "openclaw.plugin.json version ($OPENCLAW_VERSION) ≠ release version ($VERSION)\n  Fix: edit openclaw.plugin.json version field, or run: ./scripts/bump_version.sh $VERSION"
+fi
+ok "openclaw.plugin.json version: $OPENCLAW_VERSION"
+
+# 3. Git status check
 if ! git diff --quiet HEAD; then
     fail "Working directory is not clean. Commit or stash changes first."
 fi
 ok "Git working directory: clean"
 
-# 3. Branch check
+# 4. Branch check
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "homebrew_fix" ]; then
     warn "Not on main branch (on: $BRANCH). Continue? [y/N]"
@@ -49,7 +56,7 @@ if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "homebrew_fix" ]; then
 fi
 ok "Branch: $BRANCH"
 
-# 4. Tag check
+# 5. Tag check
 if git tag --list | grep -q "^${TAG}$"; then
     fail "Tag ${TAG} already exists"
 fi
@@ -60,21 +67,21 @@ ok "Tag ${TAG}: not yet created"
 echo ""
 info "Build validation"
 
-# 5. cargo fmt check
+# 6. cargo fmt check
 cargo fmt --check || fail "cargo fmt check failed. Run: cargo fmt"
 ok "cargo fmt: clean"
 
-# 6. cargo clippy
+# 7. cargo clippy
 echo "   Running clippy..."
 cargo clippy --all-targets -- -D warnings > /tmp/omni-clippy 2>&1 || { cat /tmp/omni-clippy && fail "clippy warnings found"; }
 ok "cargo clippy: no warnings"
 
-# 7. cargo test
+# 8. cargo test
 echo "   Running tests..."
 cargo test --all > /tmp/omni-test 2>&1 || { tail -n 20 /tmp/omni-test && fail "tests failed"; }
 ok "cargo test: all pass"
 
-# 8. Release build
+# 9. Release build
 echo "   Building release..."
 cargo build --release > /tmp/omni-build 2>&1 || { tail -n 20 /tmp/omni-build && fail "release build failed"; }
 BINARY_SIZE=$(du -k target/release/omni | cut -f1)
@@ -83,7 +90,7 @@ if [ "$BINARY_SIZE" -gt 5120 ]; then
     warn "Binary size ${BINARY_SIZE}KB exceeds 5MB target"
 fi
 
-# 9. Smoke test
+# 10. Smoke test
 if [ -x tests/smoke_test.sh ]; then
     echo "   Running smoke tests..."
     bash tests/smoke_test.sh ./target/release/omni > /tmp/omni-smoke 2>&1 || { cat /tmp/omni-smoke && fail "smoke test failed"; }

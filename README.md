@@ -66,7 +66,7 @@ AI agents like Claude are only as smart as the context you feed them. When you f
 
 ```mermaid
 flowchart TB
-    Agent["Claude Code / MCP Agent"]
+    Agent["Claude Code / OpenClaw / MCP Agent"]
     
     subgraph Hooks["Native Hook Layer (Transparent)"]
         Pre["Pre-Hook\n(Rewriter)"]
@@ -151,6 +151,7 @@ You can easily create your own rules using simple TOML files.
 
 **For Users:**
 - [The Ultimate Guide (HOW_TO_USE.md)](docs/HOW_TO_USE.md) — Everything you need: Installation, `omni learn`, Custom TOML Filters, and CLI Commands.
+- [OpenClaw Integration](integrations/openclaw/README.md) — How to use OMNI with the OpenClaw agent framework.
 
 **For Developers & System Integrators:**
 - [Development Guide](docs/DEVELOPMENT.md) — How to build and contribute to the OMNI codebase.

@@ -201,7 +201,7 @@ fn test_omni_stats_shows_command_not_content_type() {
 
     let stats = store.get_per_command_stats(0, 10).unwrap();
     assert!(!stats.is_empty());
-    let (cmd, count, _) = &stats[0];
+    let (cmd, count, _, _) = &stats[0];
     assert!(
         cmd.contains("cargo"),
         "Command column harus berisi command asli, got: {}",
