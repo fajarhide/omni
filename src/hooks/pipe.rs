@@ -32,6 +32,8 @@ struct PipelineResult {
     input_text: String,
     start_time: Instant,
     collapse_savings: Option<(usize, usize)>,
+    project_path: String,
+    route: Route,
 }
 
 impl PipelineResult {
@@ -76,6 +78,10 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     }
 
     // Phase 3: Transcript Begin
+    let project_path = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
     let command_stripped = command_name.map(|c| {
         if let Some(stripped) = c.strip_prefix("omni exec ") {
             stripped
@@ -92,6 +98,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         command_stripped,
         start_time,
         store.as_deref(),
+        project_path,
     );
 
     // Phase 5: Persist
@@ -166,6 +173,7 @@ fn distill(
     command_name: Option<&str>,
     start_time: Instant,
     store: Option<&Store>,
+    project_path: String,
 ) -> PipelineResult {
     let session_id = with_session(session, |g| g.session_id.clone())
         .unwrap_or_else(|| "pipe_session".to_string());
@@ -178,11 +186,11 @@ fn distill(
         }
     }
 
-    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings) = if let Some(filter) =
+    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) = if let Some(filter) =
         matched_toml
     {
         let out = filter.apply(&input_text);
-        (out, filter.name.clone(), None, 0, 0, None)
+        (out, filter.name.clone(), None, 0, 0, None, Route::Keep)
     } else {
         let cmd = command_name.unwrap_or("");
 
@@ -251,24 +259,44 @@ fn distill(
         }
 
         let mut r_hash = None;
-        if should_store && let Some(s) = store {
-            let hash = s.store_rewind(&input_text);
-            if std::io::stdout().is_terminal() {
-                out.push_str(&format!(
-                    "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
-                    "⏺".cyan(),
-                    "OMNI".bold().bright_white(),
-                    "distilled".bright_green(),
-                    dropped_lines,
-                    hash.cyan().bold()
-                ));
-            } else {
-                out.push_str(&format!(
-                    "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
-                    dropped_lines, hash
-                ));
+
+        // Determine Route
+        let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
+        let mut route = if r_hash.is_some() {
+            Route::Rewind
+        } else if ratio >= 0.7 {
+            Route::Keep
+        } else if ratio >= 0.3 {
+            Route::Soft
+        } else {
+            Route::Passthrough
+        };
+
+        if route == Route::Soft {
+            out.push_str("\n[Partial signal - omni learn recommended]\n");
+        }
+
+        if should_store {
+            if let Some(s) = store {
+                let hash = s.store_rewind(&input_text);
+                if std::io::stdout().is_terminal() {
+                    out.push_str(&format!(
+                        "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
+                        "⏺".cyan(),
+                        "OMNI".bold().bright_white(),
+                        "distilled".bright_green(),
+                        dropped_lines,
+                        hash.cyan().bold()
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
+                        dropped_lines, hash
+                    ));
+                }
+                r_hash = Some(hash);
+                route = Route::Rewind; // Override if stored in rewind
             }
-            r_hash = Some(hash);
         }
 
         // Safety truncation
@@ -285,6 +313,7 @@ fn distill(
             k_count,
             d_count,
             collapse_savings_data,
+            route,
         )
     };
 
@@ -298,6 +327,8 @@ fn distill(
         input_text,
         start_time,
         collapse_savings,
+        project_path,
+        route,
     }
 }
 
@@ -312,11 +343,7 @@ fn persist<E: Write>(
         use crate::pipeline::DistillResult;
         let distill_result = DistillResult {
             output: result.best_output().to_string(), // use the best output for persistence
-            route: if result.rewind_hash.is_some() {
-                Route::Rewind
-            } else {
-                Route::Keep
-            },
+            route: result.route.clone(),
             filter_name: result.filter_name.clone(),
             score: 0.0,
             context_score: 0.0,
@@ -333,6 +360,7 @@ fn persist<E: Write>(
             &result.session_id,
             &distill_result,
             command_name.unwrap_or(""),
+            &result.project_path,
         );
 
         if let Some(sess) = session {

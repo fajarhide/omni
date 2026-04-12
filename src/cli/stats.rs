@@ -43,9 +43,10 @@ fn format_bar_with_empty(pct: f64) -> String {
 }
 
 pub fn est_cost_usd(bytes_saved: u64) -> f64 {
-    // ~4 chars per token, $3 per 1M tokens
+    let price = crate::guard::config::get_input_cost();
+    // ~4 chars per token
     let tokens = bytes_saved as f64 / 4.0;
-    (tokens / 1_000_000.0) * 3.0
+    (tokens / 1_000_000.0) * price
 }
 
 fn format_number(n: u64) -> String {
@@ -110,6 +111,7 @@ fn print_help() {
         "--month".cyan()
     );
     println!("  {: <12} Machine-readable JSON output", "--json".cyan());
+    println!("  {: <12} Display breakdown per project path", "--project".cyan());
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -141,6 +143,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
     let detail_flag = args.iter().any(|a| a == "--detail");
     let json_flag = args.iter().any(|a| a == "--json");
+    let project_flag = args.iter().any(|a| a == "--project");
     let filter_flag = args
         .iter()
         .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
@@ -149,6 +152,8 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         "detail"
     } else if json_flag {
         "json"
+    } else if project_flag {
+        "project"
     } else if filter_flag {
         "detail"
     } else {
@@ -156,6 +161,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
         "json" => run_json(store),
         _ => run_default(store),
@@ -506,6 +512,13 @@ fn run_json(store: &Store) -> Result<()> {
     let periods = store.multi_period_stats()?;
     let top_commands = get_top_commands(store, 0, 100);
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+    let (count, _, _, sum_latency, _) = store.aggregate_stats(0)?;
+
+    let avg_latency = if count > 0 {
+        sum_latency as f64 / count as f64
+    } else {
+        0.0
+    };
 
     let periods_json: Vec<serde_json::Value> = periods
         .iter()
@@ -547,10 +560,70 @@ fn run_json(store: &Store) -> Result<()> {
         "rewind": {
             "archived": rewind_stored,
             "retrieved": rewind_retrieved,
-        }
+        },
+        "avg_latency_ms": (avg_latency * 10.0).round() / 10.0,
     });
 
     println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
+    let today_flag = args.iter().any(|a| a == "--today");
+    let week_flag = args.iter().any(|a| a == "--week");
+
+    let now = chrono::Utc::now().timestamp();
+    let (since, period_label) = if today_flag {
+        (now - (now % 86400), "Today")
+    } else if week_flag {
+        (now - 7 * 86400, "Last 7 Days")
+    } else {
+        (now - 30 * 86400, "Last 30 Days")
+    };
+
+    let projects = store.get_project_stats(since)?;
+    println!("\n  {} — {} Breakdown", "OMNI Project Analytics".bold().bright_white(), period_label);
+    print_separator();
+
+    if projects.is_empty() {
+        println!("  No project data recorded yet for this period.");
+        return Ok(());
+    }
+
+    println!(
+        "  {:<30} {:>7} {:>9}  Signal Strength",
+        "Project Directory", "Count", "Savings"
+    );
+    println!("  ── {:─<30} ─────── ───────── ────────────────────", "");
+
+    for (path, count, savings) in projects {
+        let display_path = if path.chars().count() > 30 {
+            let mut s: String = path.chars().take(12).collect();
+            s.push_str("...");
+            s.extend(path.chars().rev().take(15).collect::<String>().chars().rev());
+            s
+        } else {
+            path
+        };
+        
+        let bar = format_bar(savings);
+        let bar_colored = if savings > 80.0 {
+            bar.bright_green()
+        } else if savings > 40.0 {
+            bar.bright_yellow()
+        } else {
+            bar.bright_red()
+        };
+
+        println!(
+            "  {:<30} {:>6}x  {:>7.1}%  {}",
+            display_path.cyan(),
+            count,
+            savings,
+            bar_colored
+        );
+    }
+    println!();
     Ok(())
 }
 
@@ -590,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_default_tidak_crash_jika_db_kosong() {
+    fn test_stats_default_not_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into()];
@@ -599,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_detail_tidak_crash_jika_db_kosong() {
+    fn test_stats_detail_not_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--detail".into()];
@@ -608,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_json_tidak_crash_jika_db_kosong() {
+    fn test_stats_json_not_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--json".into()];

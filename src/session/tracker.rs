@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_save_tidak_block_caller() {
+    fn test_background_save_not_block_caller() {
         let dir = tempdir().unwrap();
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
         let session = Arc::new(Mutex::new(SessionState::new()));

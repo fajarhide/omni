@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 #[derive(RustEmbed)]
 #[folder = "filters/"]
@@ -431,47 +432,51 @@ pub fn run_inline_tests(filters: &[TomlFilter]) -> TestReport {
     TestReport { passes, failures }
 }
 
-pub fn load_all_filters() -> Vec<TomlFilter> {
-    let mut all = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+static ALL_FILTERS_CACHE: OnceLock<Vec<TomlFilter>> = OnceLock::new();
 
-    // 1. .omni/filters/*.toml (project-local, if trusted)
-    if let Ok(cwd) = std::env::current_dir() {
-        let local_filters_dir = cwd.join(".omni").join("filters");
-        if local_filters_dir.exists() {
-            let config_path = cwd.join("omni_config.json");
-            if crate::guard::trust::is_trusted(&config_path) {
-                for f in load_from_dir(&local_filters_dir) {
-                    if !seen.contains(&f.name) {
-                        seen.insert(f.name.clone());
-                        all.push(f);
+pub fn load_all_filters() -> &'static [TomlFilter] {
+    ALL_FILTERS_CACHE.get_or_init(|| {
+        let mut all = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // 1. .omni/filters/*.toml (project-local, if trusted)
+        if let Ok(cwd) = std::env::current_dir() {
+            let local_filters_dir = cwd.join(".omni").join("filters");
+            if local_filters_dir.exists() {
+                let config_path = cwd.join("omni_config.json");
+                if crate::guard::trust::is_trusted(&config_path) {
+                    for f in load_from_dir(&local_filters_dir) {
+                        if !seen.contains(&f.name) {
+                            seen.insert(f.name.clone());
+                            all.push(f);
+                        }
                     }
                 }
             }
         }
-    }
 
-    // 2. ~/.omni/filters/*.toml (user-global)
-    if let Some(mut home) = dirs::home_dir() {
-        home.push(".omni");
-        home.push("filters");
-        for f in load_from_dir(&home) {
+        // 2. ~/.omni/filters/*.toml (user-global)
+        if let Some(mut home) = dirs::home_dir() {
+            home.push(".omni");
+            home.push("filters");
+            for f in load_from_dir(&home) {
+                if !seen.contains(&f.name) {
+                    seen.insert(f.name.clone());
+                    all.push(f);
+                }
+            }
+        }
+
+        // 3. Built-in filters (embedded)
+        for f in load_embedded_filters() {
             if !seen.contains(&f.name) {
                 seen.insert(f.name.clone());
                 all.push(f);
             }
         }
-    }
 
-    // 3. Built-in filters (embedded)
-    for f in load_embedded_filters() {
-        if !seen.contains(&f.name) {
-            seen.insert(f.name.clone());
-            all.push(f);
-        }
-    }
-
-    all
+        all
+    })
 }
 
 pub fn get_filters_by_source() -> (Vec<TomlFilter>, Vec<TomlFilter>, Vec<TomlFilter>) {
@@ -659,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_filters_tidak_dimuat_jika_tidak_trusted() {
+    fn test_project_filters_not_dimuat_jika_not_trusted() {
         // Mocking an untrusted `.omni/filters` configuration.
         // Because trust evaluates `is_trusted` false by default locally for unknown bounfores.
         // The project local load won't pick up mock files if `omni_config.json` doesn't exist/trust.

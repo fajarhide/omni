@@ -229,7 +229,8 @@ impl Store {
                 context_score REAL NOT NULL DEFAULT 0.0,
                 latency_ms   INTEGER NOT NULL,
                 rewind_hash  TEXT DEFAULT '',
-                command      TEXT DEFAULT ''
+                command      TEXT DEFAULT '',
+                project_path TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_dist_ts ON distillations(ts);
             CREATE INDEX IF NOT EXISTS idx_dist_session ON distillations(session_id);
@@ -297,11 +298,12 @@ impl Store {
                     context_score REAL NOT NULL DEFAULT 0.0,
                     latency_ms   INTEGER NOT NULL,
                     rewind_hash  TEXT DEFAULT '',
-                    command      TEXT DEFAULT ''
+                    command      TEXT DEFAULT '',
+                    project_path TEXT DEFAULT ''
                 );
                 INSERT INTO distillations 
-                (id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command)
-                SELECT id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command 
+                (id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, project_path)
+                SELECT id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, '' 
                 FROM distillations_old;
                 DROP TABLE distillations_old;
                 CREATE INDEX idx_dist_ts ON distillations(ts);
@@ -320,11 +322,21 @@ impl Store {
             "ALTER TABLE distillations ADD COLUMN collapse_to INTEGER DEFAULT 0",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN project_path TEXT DEFAULT ''",
+            [],
+        );
 
         Ok(())
     }
 
-    pub fn record_distillation(&self, session_id: &str, result: &DistillResult, command: &str) {
+    pub fn record_distillation(
+        &self,
+        session_id: &str,
+        result: &DistillResult,
+        command: &str,
+        project_path: &str,
+    ) {
         let conn = match self.conn.lock() {
             Ok(c) => c,
             Err(_) => return,
@@ -334,8 +346,8 @@ impl Store {
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
         let res = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 session_id,
                 ts,
@@ -350,6 +362,7 @@ impl Store {
                 command,
                 col_orig as i64,
                 col_to as i64,
+                project_path,
             ],
         );
 
@@ -581,6 +594,36 @@ impl Store {
         Ok(periods)
     }
 
+    pub fn get_project_stats(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT 
+                project_path, 
+                COUNT(*) as count,
+                CASE 
+                    WHEN SUM(input_bytes) = 0 THEN 0.0 
+                    ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
+                END as savings
+             FROM distillations 
+             WHERE ts >= ?1 AND project_path != ''
+             GROUP BY project_path 
+             ORDER BY count DESC"
+        )?;
+
+        let rows = stmt
+            .query_map(params![since], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, f64>(2)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     pub fn cleanup_old(&self, days: u32) {
         let conn = match self.conn.lock() {
             Ok(c) => c,
@@ -663,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn test_record_distillation_fire_and_forget_tidak_panic() {
+    fn test_record_distillation_fire_and_forget_not_panic() {
         let (store, _dir) = get_temp_store();
         let res = DistillResult {
             output: "hello".to_string(),
@@ -680,7 +723,7 @@ mod tests {
             collapse_savings: None,
         };
         // Should not panic
-        store.record_distillation("sess_123", &res, "npm start");
+        store.record_distillation("sess_123", &res, "npm start", "");
     }
 
     #[test]
@@ -707,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_rewind_hash_tidak_error() {
+    fn test_duplicate_rewind_hash_not_error() {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
         let hash1 = store.store_rewind(content);

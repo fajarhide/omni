@@ -197,7 +197,7 @@ fn test_omni_stats_shows_command_not_content_type() {
         collapse_savings: None,
     };
 
-    store.record_distillation("sess_1", &result, "cargo build --release");
+    store.record_distillation("sess_1", &result, "cargo build --release", "");
 
     let stats = store.get_per_command_stats(0, 10).unwrap();
     assert!(!stats.is_empty());

@@ -128,6 +128,9 @@ pub fn process_payload(
     };
 
     let start = Instant::now();
+    let project_path = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
 
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
@@ -217,6 +220,7 @@ pub fn process_payload(
         }
     }
 
+
     if should_store {
         if let Some(ref s) = store {
             let hash = s.store_rewind(&content);
@@ -244,6 +248,22 @@ pub fn process_payload(
         }
     }
 
+    // Determine Route
+    let ratio = 1.0 - (final_out.len() as f32 / content.len().max(1) as f32);
+    let route = if !rewind_hash.is_empty() {
+        Route::Rewind
+    } else if ratio >= 0.7 {
+        Route::Keep
+    } else if ratio >= 0.3 {
+        Route::Soft
+    } else {
+        Route::Passthrough
+    };
+
+    if route == Route::Soft {
+        final_out.push_str("\n[Partial signal - omni learn recommended]\n");
+    }
+
     // Measure ratio strictly
     if final_out.len() >= content.len() * 9 / 10 {
         return None;
@@ -255,11 +275,7 @@ pub fn process_payload(
         let kept = check_segments.len() - noise_count;
         let result = DistillResult {
             output: final_out.clone(),
-            route: if rewind_hash.is_empty() {
-                Route::Keep
-            } else {
-                Route::Rewind
-            },
+            route: route.clone(),
             filter_name: filter_name.clone(),
             score: 0.0,
             context_score: 0.0,
@@ -280,7 +296,7 @@ pub fn process_payload(
             .and_then(|lock| lock.lock().ok())
             .map(|s| s.session_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
-        s.record_distillation(&session_id, &result, &command);
+        s.record_distillation(&session_id, &result, &command, &project_path);
 
         if let Some(ref sess) = session {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());

@@ -136,16 +136,16 @@ fn test_env_sanitization_removes_dangerous_vars() {
 fn test_hook_handles_null_bytes_gracefully() {
     use omni::hooks::post_tool::process_payload;
 
-    // Input dengan null bytes tidak boleh crash
+    // Input dengan null bytes not boleh crash
     let malicious = "{\"tool_name\":\"Bash\",\"tool_response\":{\"content\":\"hello\0world\"}}";
     let result = process_payload(malicious, None, None);
-    // Tidak crash adalah acceptance criteria — result bisa None atau Some
+    // not crash adalah acceptance criteria — result bisa None atau Some
     let _ = result;
 }
 
 #[test]
 fn test_dispatcher_catch_unwind_works() {
-    // Test bahwa panic di dalam handler tidak propagate
+    // Test bahwa panic di dalam handler not propagate
     // Kita simulasi behavior catch_unwind di dispatcher.rs
     let result = std::panic::catch_unwind(|| {
         panic!("intentional panic for test");

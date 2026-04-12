@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_boost_tidak_exceed_0_4() {
+    fn test_context_boost_not_exceed_0_4() {
         let mut session = SessionState::new();
         for _ in 0..50 {
             session.add_hot_file("src/main.rs");
