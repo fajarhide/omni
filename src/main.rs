@@ -46,6 +46,10 @@ fn detect_mode(args: &[String]) -> Mode {
     Mode::Cli
 }
 
+fn detect_pipe_command() -> Option<String> {
+    env::var("OMNI_CMD").ok().or_else(|| env::var("CMD").ok())
+}
+
 // ─── Engine / Globals ───────────────────────────────────
 
 fn init_globals() -> (Option<Arc<Store>>, Option<Arc<Mutex<SessionState>>>) {
@@ -191,7 +195,8 @@ fn main() {
                 let session = s.find_latest_session().unwrap_or_else(SessionState::new);
                 Arc::new(Mutex::new(session))
             });
-            if let Err(e) = hooks::pipe::run(store_arc, session_arc, None) {
+            let cmd_name = detect_pipe_command();
+            if let Err(e) = hooks::pipe::run(store_arc, session_arc, cmd_name.as_deref()) {
                 eprintln!("[omni] Pipe engine error: {}", e);
                 std::process::exit(1);
             }

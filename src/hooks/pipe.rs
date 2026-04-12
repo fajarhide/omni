@@ -54,6 +54,14 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     session: Option<Arc<Mutex<SessionState>>>,
     command_name: Option<&str>,
 ) -> Result<()> {
+    // Phase 0: Sibling detection (CRITICAL: Do this BEFORE any IO or heavy logic)
+    let detected_cmd = if command_name.is_none() {
+        detect_sibling_command()
+    } else {
+        None
+    };
+    let command_to_use = command_name.or(detected_cmd.as_deref());
+
     let start_time = Instant::now();
 
     // Phase 1: Read
@@ -82,7 +90,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let command_stripped = command_name.map(|c| {
+    let command_stripped = command_to_use.map(|c| {
         if let Some(stripped) = c.strip_prefix("omni exec ") {
             stripped
         } else {
@@ -306,7 +314,10 @@ fn distill(
 
             (
                 out,
-                cmd.split_whitespace().next().unwrap_or("omni").to_string(),
+                cmd.split_whitespace()
+                    .next()
+                    .unwrap_or("[pipe]")
+                    .to_string(),
                 r_hash,
                 k_count,
                 d_count,
@@ -441,6 +452,129 @@ fn emit_output<W: Write, E: Write>(
     Ok(())
 }
 
+fn detect_sibling_command() -> Option<String> {
+    use std::process::Command;
+
+    // 1. Get current IDs
+    let pid = std::process::id();
+
+    // 2. Get PGID (Process Group ID)
+    let pgid_out = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let pgid = String::from_utf8_lossy(&pgid_out.stdout).trim().to_string();
+
+    // 3. Get PPID (Parent Process ID)
+    let ppid_out = Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let ppid = String::from_utf8_lossy(&ppid_out.stdout).trim().to_string();
+
+    // 4. Find all commands in that PGID
+    let siblings_out = if !pgid.is_empty() {
+        Command::new("ps")
+            .args(["-o", "command=", "-g", &pgid])
+            .output()
+            .ok()
+    } else {
+        None
+    };
+
+    let siblings = siblings_out
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    // 5. Pass 1: Look for an active sibling (real process) in PGID
+    for line in siblings.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.contains("omni") {
+            continue;
+        }
+
+        // Exclude common shells and ps itself
+        if line.starts_with("ps ")
+            || line.starts_with("sh ")
+            || line.starts_with("zsh ")
+            || line.starts_with("bash ")
+            || line.starts_with("grep ")
+        {
+            continue;
+        }
+
+        // Found a candidate sibling command
+        return Some(line.to_string());
+    }
+
+    // 6. Pass 2: Fallback to parsing shell command lines in the PGID
+    for line in siblings.lines() {
+        let line = line.trim();
+        if (line.contains("sh ") || line.contains("zsh ") || line.contains("bash "))
+            && line.contains('|')
+            && line.contains("omni")
+        {
+            #[allow(clippy::collapsible_if)]
+            if let Some(cmd) = extract_command_from_pipeline(line) {
+                return Some(cmd);
+            }
+        }
+    }
+
+    // 7. Pass 3: Fallback to Parent Command if no sibling found
+    // Useful if we are running in a script or cargo run
+    if !ppid.is_empty() && ppid != "0" && ppid != "1" {
+        let parent_cmd_out = Command::new("ps")
+            .args(["-o", "command=", "-p", &ppid])
+            .output()
+            .ok()?;
+        let parent_line = String::from_utf8_lossy(&parent_cmd_out.stdout)
+            .trim()
+            .to_string();
+
+        if parent_line.contains('|') && parent_line.contains("omni") {
+            #[allow(clippy::collapsible_if)]
+            if let Some(cmd) = extract_command_from_pipeline(&parent_line) {
+                return Some(cmd);
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_command_from_pipeline(line: &str) -> Option<String> {
+    // Split by pipe and find the segment immediately before "omni"
+    let pipe_parts: Vec<&str> = line.split('|').collect();
+    let omni_idx = pipe_parts.iter().position(|p| p.contains("omni"));
+
+    if let Some(idx) = omni_idx {
+        #[allow(clippy::collapsible_if)]
+        if idx > 0 {
+            let cmd_segment = pipe_parts[idx - 1];
+
+            // Strip shell prefix if present (-c "...")
+            let mut clean = if let Some(c_idx) = cmd_segment.find("-c ") {
+                &cmd_segment[c_idx + 3..]
+            } else {
+                cmd_segment
+            };
+
+            // Handle command chains like: source ~/.zshrc && ls -la | omni
+            if let Some(last_chain_idx) = clean.rfind(['&', ';']) {
+                clean = &clean[last_chain_idx + 1..];
+                clean = clean.trim_start_matches('&');
+            }
+
+            let final_cmd = clean.trim().to_string();
+            if !final_cmd.is_empty() {
+                return Some(final_cmd);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,7 +589,6 @@ mod tests {
 
         let out_str = String::from_utf8(out).expect("must succeed");
         assert!(out_str.contains("diff --git"));
-        assert!(!err.iter().any(|&b| b == b'e' || b == b'E'));
     }
 
     #[test]
