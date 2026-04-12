@@ -1,13 +1,9 @@
 use crate::distillers::Distiller;
-use crate::pipeline::{ContentType, OutputSegment};
+use crate::pipeline::OutputSegment;
 
 pub struct GenericDistiller;
 
 impl Distiller for GenericDistiller {
-    fn content_type(&self) -> ContentType {
-        ContentType::Unknown
-    }
-
     fn distill(
         &self,
         segments: &[OutputSegment],

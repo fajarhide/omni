@@ -12,8 +12,6 @@ pub mod tabular;
 pub mod test;
 
 pub trait Distiller: Send + Sync {
-    #[allow(dead_code)]
-    fn content_type(&self) -> ContentType;
     fn distill(
         &self,
         segments: &[OutputSegment],

@@ -1,13 +1,9 @@
 use crate::distillers::Distiller;
-use crate::pipeline::{ContentType, OutputSegment};
+use crate::pipeline::OutputSegment;
 
 pub struct TabularDistiller;
 
 impl Distiller for TabularDistiller {
-    fn content_type(&self) -> ContentType {
-        ContentType::TabularData
-    }
-
     fn distill(
         &self,
         segments: &[OutputSegment],

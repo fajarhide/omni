@@ -1,13 +1,9 @@
 use crate::distillers::Distiller;
-use crate::pipeline::{ContentType, OutputSegment, SignalTier};
+use crate::pipeline::{OutputSegment, SignalTier};
 
 pub struct BuildDistiller;
 
 impl Distiller for BuildDistiller {
-    fn content_type(&self) -> ContentType {
-        ContentType::BuildOutput
-    }
-
     fn distill(
         &self,
         segments: &[OutputSegment],

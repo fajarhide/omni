@@ -268,10 +268,6 @@ fn run_default(store: &Store) -> Result<()> {
         "  💡 {} for full breakdown",
         "omni stats --detail".bright_cyan()
     );
-    println!(
-        "  💡 {} for content type mapping",
-        "omni stats --by-type".bright_cyan()
-    );
 
     if store.has_upgradable_history() {
         println!(

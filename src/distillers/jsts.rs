@@ -1,14 +1,10 @@
 use crate::distillers::Distiller;
-use crate::pipeline::{ContentType, OutputSegment, SignalTier};
+use crate::pipeline::{OutputSegment, SignalTier};
 use std::collections::BTreeMap;
 
 pub struct JsTsDistiller;
 
 impl Distiller for JsTsDistiller {
-    fn content_type(&self) -> ContentType {
-        ContentType::JsTs
-    }
-
     fn distill(
         &self,
         segments: &[OutputSegment],
