@@ -3,6 +3,7 @@
 *.log
 actual_stdout.txt
 *.py
+node_modules/
 # --- Environment & Configuration ---
 .env
 .env.*

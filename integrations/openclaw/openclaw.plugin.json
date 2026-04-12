@@ -1,24 +1,18 @@
 {
-  "id": "omni-se-engine",
+  "id": "omni-signal-engine",
   "name": "OMNI Semantic Signal Engine",
   "version": "0.5.9",
-  "description": "Local-only semantic context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output without data exfiltration.",
-  "requiredBinaries": [
-    "omni"
-  ],
+  "description": "Local-only semantic context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output.",
+  "requiredBinaries": ["omni"],
   "author": "Fajar Hidayat",
+  "homepage": "https://github.com/fajarhide/omni",
   "configSchema": {
     "type": "object",
+    "additionalProperties": false,
     "properties": {
       "omniPath": {
         "type": "string",
-        "description": "Path to the omni binary (defaults to 'omni' in PATH)",
-        "default": "omni"
-      },
-      "forceDistill": {
-        "type": "boolean",
-        "description": "If true, overrides the default shell tool (experimental)",
-        "default": false
+        "description": "Path to the omni binary (defaults to 'omni' in PATH)"
       }
     }
   }
