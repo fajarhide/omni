@@ -1,6 +1,20 @@
 # OMNI Roadmap
 
-## Current: v0.5.0 (Rust Rewrite)
+## Current: v0.5.6-rc1 (Efficiency Layer)
+
+**Status: In Progress** 🏗️
+
+Focusing on architectural refinement and automatic context capture.
+
+### What's New
+- **Command-First Architecture**: Removal of legacy Classifier/Composer for a simplified Registry/Scorer model.
+- **Automatic Pipe Capture**: PGID-based sibling detection for manual pipelines.
+- **Configurable Pricing**: Custom cost-per-token tracking in `config.toml`.
+- **OnceLock Caching**: Dramatic reduction in disk I/O for filter lookups.
+
+---
+
+## v0.5.0 (Rust Rewrite)
 
 **Status: Complete** ✅
 

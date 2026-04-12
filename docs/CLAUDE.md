@@ -21,10 +21,9 @@ src/
 ├── main.rs              # CLI dispatch (Mode enum → match)
 ├── lib.rs               # Library re-exports for integration tests
 ├── pipeline/
-│   ├── mod.rs           # Core types: ContentType, OutputSegment, DistillResult, SessionState
-│   ├── classifier.rs    # Stage 1: Content type detection (10 types)
+│   ├── mod.rs           # Core types: OutputSegment, DistillResult, SessionState
+│   ├── registry.rs      # Stage 1: Pipeline profiles and command matching
 │   ├── scorer.rs        # Stage 2: Semantic signal scoring with context boost
-│   ├── composer.rs      # Stage 4-5: Threshold filtering + RewindStore
 │   └── toml_filter.rs   # TOML filter engine (user-defined filters)
 ├── distillers/
 │   ├── mod.rs           # Distiller trait + dispatch + snapshot tests
@@ -67,45 +66,45 @@ Input (raw tool output)
   │
   ▼
 ┌─────────────────────────────────────────────┐
-│ Stage 1: Classifier                         │
-│ classifier::classify(input) → ContentType   │
-│ (GitDiff, BuildOutput, TestOutput, etc.)    │
+│ Stage 1: Registry                           │
+│ registry::resolve_profile(command)          │
+│ (Matches command to specialized distiller)  │
 └─────────────┬───────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────┐
 │ Stage 2: Scorer                             │
-│ scorer::score_segments(input, type, session) │
+│ scorer::score_with_command(input, cmd, sess)│
 │ → Vec<OutputSegment> with relevance scores  │
-│ (Critical=1.0, Important=0.7, Noise=0.1)   │
+│ (Critical=1.0, Important=0.7, Noise=0.1)    │
 └─────────────┬───────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────┐
-│ Stage 4-5: Composer                         │
-│ composer::compose(segments, config, store)   │
+│ Stage 3: Distiller                          │
+│ distillers::distill_with_command(...)       │
 │ → (output_string, Option<rewind_hash>)      │
-│ Filters segments < 0.3 threshold            │
-│ Stores dropped content in RewindStore       │
+│ Filters noise + Archives to RewindStore     │
 └─────────────┬───────────────────────────────┘
               │
               ▼
-Output (distilled, with optional rewind notice)
+Output (distilled signal)
 ```
-
-## How to Add a New Distiller
 
 1. Create `src/distillers/my_type.rs`:
 ```rust
-use crate::pipeline::{ContentType, OutputSegment};
+use crate::pipeline::{OutputSegment, SessionState};
 use super::Distiller;
 
 pub struct MyDistiller;
 
 impl Distiller for MyDistiller {
-    fn content_type(&self) -> ContentType { ContentType::MyType }
-
-    fn distill(&self, segments: &[OutputSegment], input: &str) -> String {
+    fn distill(
+        &self, 
+        segments: &[OutputSegment], 
+        input: &str,
+        session: Option<&SessionState>,
+    ) -> String {
         // Extract and summarize the critical information
         todo!()
     }

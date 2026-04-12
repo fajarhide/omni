@@ -82,10 +82,10 @@ flowchart TB
 
     subgraph OMNI_Engine["OMNI — Semantic Signal Engine"]
         direction LR
-        C["Classifier"]
+        R["Registry\n(Filters)"]
         S["Scorer\n(Context Boost)"]
-        R["Composer\n(Signal Tiering)"]
-        C --> S --> R
+        D["Distiller\n(Semantic Magic)"]
+        R --> S --> D
     end
 
     Post --> OMNI_Engine
@@ -137,9 +137,7 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ## How to Use It
 
-The best part? **You don't have to do anything special!**
-
-Once installed via `omni init --all`, Omni works invisibly in the background. When your AI Agent runs a terminal command (like `npm install` or `pytest`), Omni automatically jumps in as a transparent layer, intelligently filters the terminal output, removes the noisy logs, and hands the clean signal back to the AI. 
+Once installed via `omni init --all`, OMNI works invisibly in the background. Whether your AI Agent runs a terminal command via MCP or you manually pipe output (`ls | omni`), OMNI automatically jumps in as a transparent layer. It intelligently filters terminal output, removes the noisy logs, and hands the clean signal back to the AI.
 
 To review how many tokens (and how much money) you've saved today, just type:
 ```bash

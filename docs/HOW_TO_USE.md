@@ -36,9 +36,9 @@ With OMNI:     AI sees 800 tokens of pure signal → sharp, cheap
 │       ▼                                                                 │
 │  [Post-Hook] ──── OMNI intercepts the output                            │
 │       │                                                                 │
-│       ├── Classify: "This looks like a cargo build output"              │
-│       ├── Score: "These 3 lines are CRITICAL (errors)"                  │
-│       │          "These 200 lines are NOISE (Compiling...)"             │
+│       ├── Registry: "This is a cargo build output"                      │
+│       ├── Scorer: "These 3 lines are CRITICAL (errors)"                 │
+│       │           "These 200 lines are NOISE (Compiling...)"            │
 │       ├── Distill: Keep errors. Drop noise. Archive the rest.           │
 │       │                                                                 │
 │       ▼                                                                 │
@@ -297,6 +297,16 @@ omni stats --month      # Last 30 days (explicit)
 ```
 
 **Passthrough** means OMNI didn't have a filter for that tool yet. Those get queued for learning (see Section 6).
+
+### Custom Pricing Configuration
+By default, OMNI estimates savings at **$0.43 / 100K tokens**. You can customize this in `~/.omni/config.toml`:
+
+```toml
+[pricing]
+# Example: Claude 3.5 Sonnet pricing
+input_price_per_1m = 3.0
+output_price_per_1m = 15.0
+```
 
 ---
 

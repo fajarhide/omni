@@ -1,6 +1,17 @@
-# OMNI Migration Guide: 0.4.x → 0.5.0
+# OMNI Migration Guide
 
-## What's New in 0.5.0
+## [0.5.6-rc1] - 2026-04-12
+
+### Transition to "Command-First" Architecture
+We have simplified the OMNI pipeline by removing the legacy `Classifier` and `Composer` modules. The engine now uses a more robust **Registry & Scorer** model.
+- **Impact:** None for users. Custom TOML filters remain 100% compatible.
+- **Benefit:** Faster startup and lower memory footprint.
+
+### Automatic Pipe Detection
+Manual pipes (e.g., `ls | omni`) are now automatically labeled in `omni stats` without needing `OMNI_CMD`.
+- **Note:** `OMNI_CMD` is still supported for manual overrides.
+
+## 0.4.x → 0.5.0
 
 OMNI 0.5.0 is a **full rewrite in Rust** — replacing the previous Node.js + Zig hybrid architecture with a single static binary. This brings:
 
