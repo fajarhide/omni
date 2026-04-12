@@ -36,7 +36,9 @@ const OmniCmdParams = Type.Object({
   command: Type.String({ description: "The terminal command to execute (e.g. 'npm install' or 'git diff')" })
 });
 
-function createOmniCmdTool(): AnyAgentTool {
+type PluginConfig = { omniPath?: string };
+
+function createOmniCmdTool(api: OpenClawPluginApi): AnyAgentTool {
   return {
     name: "omni_cmd",
     label: "OMNI Command",
@@ -44,7 +46,8 @@ function createOmniCmdTool(): AnyAgentTool {
     parameters: OmniCmdParams,
     async execute(_toolCallId: string, params: Record<string, unknown>) {
       const command = params.command as string;
-      const omniPath = "omni";
+      const config = (api.pluginConfig ?? {}) as PluginConfig;
+      const omniPath = config.omniPath || "omni";
 
       try {
         const { stdout, stderr, code } = await runOmni(omniPath, ["exec", "--", command]);
@@ -81,6 +84,6 @@ export default definePluginEntry({
     if (api.registrationMode !== "full") {
       return;
     }
-    api.registerTool(createOmniCmdTool() as OpenClawPluginToolFactory, { optional: true });
+    api.registerTool(createOmniCmdTool(api) as OpenClawPluginToolFactory, { optional: true });
   }
 });

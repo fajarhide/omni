@@ -61,10 +61,12 @@ omni stats --today
 
 OMNI is built with a **Privacy-First** design intent. This plugin acts as a secure proxy to facilitate safe execution:
 
-- **Node-Level Sanitization**: This plugin explicitly strips ~25 dangerous environment variables (like `LD_PRELOAD`, `NODE_OPTIONS`, `BASH_ENV`) at the process level before execution.
+- **Node-Level Sanitization**: This plugin explicitly strips ~25 dangerous environment variables (like `LD_PRELOAD`, `NODE_OPTIONS`, `BASH_ENV`) at the process level before execution. Other environment variables are passed through to the command.
 - **Local-Only Architecture**: The OMNI engine is designed for local processing. No terminal output is ever sent to external cloud services by the engine.
 - **Local Persistence**: Usage statistics are stored strictly in a local SQLite database at `~/.omni/omni.db`.
 - **Trust & Verification**: As OMNI is a tool for developers, we encourage you to audit the full source code and security policies at the [OMNI GitHub Repository](https://github.com/fajarhide/omni/blob/main/SECURITY.md) to verify these claims for yourself.
+
+> ⚠️ **Note**: This plugin passes through most environment variables to the invoked command. If you run untrusted commands, consider doing so in a restricted environment (container, CI runner, or limited account) with minimal secrets in the environment.
 
 ## Benefits
 - **Cheaper Tasks**: Massive savings on API bills for long-running autonomous tasks.
