@@ -4,30 +4,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
 use crate::paths;
-use crate::pipeline::classifier::classify;
-use crate::pipeline::{DistillResult, SessionState};
-
-pub struct FilterStats {
-    pub filter_name: String,
-    pub total_input_bytes: u64,
-    pub total_output_bytes: u64,
-    pub count: u32,
-}
-
-pub struct RouteStats {
-    pub route: String,
-    pub count: u32,
-}
-
-pub struct StoreSummary {
-    pub total_sessions: u32,
-    pub total_distillations: u32,
-    pub total_input_bytes: u64,
-    pub total_output_bytes: u64,
-    pub by_filter: Vec<FilterStats>,
-    pub by_route: Vec<RouteStats>,
-    pub passthrough_commands: Vec<(String, u32)>, // (command, count)
-}
+use crate::pipeline::DistillResult;
+use crate::pipeline::SessionState;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -198,21 +176,6 @@ impl Store {
         Ok(out)
     }
 
-    /// Passthrough candidates: commands that went through without filter
-    pub fn passthrough_candidates(&self, since: i64) -> Result<Vec<(String, u64)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT command, COUNT(*) as cnt FROM distillations WHERE ts >= ?1 AND route = 'Passthrough' AND command != '' GROUP BY command ORDER BY cnt DESC LIMIT 10"
-        )?;
-        let rows = stmt
-            .query_map(params![since], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
-    }
-
     /// Hot files for session insight
     pub fn hot_files_global(&self, since: i64) -> Result<Vec<(String, u64)>> {
         let conn = self.conn.lock().unwrap();
@@ -259,7 +222,6 @@ impl Store {
                 session_id   TEXT NOT NULL,
                 ts           INTEGER NOT NULL,
                 filter_name  TEXT NOT NULL,
-                content_type TEXT NOT NULL,
                 input_bytes  INTEGER NOT NULL,
                 output_bytes INTEGER NOT NULL,
                 route        TEXT NOT NULL,
@@ -267,7 +229,8 @@ impl Store {
                 context_score REAL NOT NULL DEFAULT 0.0,
                 latency_ms   INTEGER NOT NULL,
                 rewind_hash  TEXT DEFAULT '',
-                command      TEXT DEFAULT ''
+                command      TEXT DEFAULT '',
+                project_path TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_dist_ts ON distillations(ts);
             CREATE INDEX IF NOT EXISTS idx_dist_session ON distillations(session_id);
@@ -303,6 +266,53 @@ impl Store {
             "#,
         )?;
 
+        // Safe migration: check for legacy content_type (v0.5.6 migration)
+        let has_content_type = {
+            let mut stmt = conn.prepare("PRAGMA table_info(distillations)")?;
+            let mut rows = stmt.query([])?;
+            let mut found = false;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(1)?;
+                if name == "content_type" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+
+        if has_content_type {
+            // Recreate table to remove legacy NOT NULL content_type column
+            conn.execute_batch(
+                r#"
+                ALTER TABLE distillations RENAME TO distillations_old;
+                CREATE TABLE distillations (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id   TEXT NOT NULL,
+                    ts           INTEGER NOT NULL,
+                    filter_name  TEXT NOT NULL,
+                    input_bytes  INTEGER NOT NULL,
+                    output_bytes INTEGER NOT NULL,
+                    route        TEXT NOT NULL,
+                    score        REAL NOT NULL DEFAULT 0.0,
+                    context_score REAL NOT NULL DEFAULT 0.0,
+                    latency_ms   INTEGER NOT NULL,
+                    rewind_hash  TEXT DEFAULT '',
+                    command      TEXT DEFAULT '',
+                    project_path TEXT DEFAULT ''
+                );
+                INSERT INTO distillations 
+                (id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, project_path)
+                SELECT id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, '' 
+                FROM distillations_old;
+                DROP TABLE distillations_old;
+                CREATE INDEX idx_dist_ts ON distillations(ts);
+                CREATE INDEX idx_dist_session ON distillations(session_id);
+                CREATE INDEX idx_dist_filter ON distillations(filter_name);
+                "#,
+            )?;
+        }
+
         // Safe migration: add collapse columns if not present
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN collapse_original INTEGER DEFAULT 0",
@@ -312,11 +322,21 @@ impl Store {
             "ALTER TABLE distillations ADD COLUMN collapse_to INTEGER DEFAULT 0",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN project_path TEXT DEFAULT ''",
+            [],
+        );
 
         Ok(())
     }
 
-    pub fn record_distillation(&self, session_id: &str, result: &DistillResult, command: &str) {
+    pub fn record_distillation(
+        &self,
+        session_id: &str,
+        result: &DistillResult,
+        command: &str,
+        project_path: &str,
+    ) {
         let conn = match self.conn.lock() {
             Ok(c) => c,
             Err(_) => return,
@@ -324,15 +344,14 @@ impl Store {
 
         let ts = chrono::Utc::now().timestamp();
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
-        let _ = conn.execute(
+        let res = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, content_type, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to)
+             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 session_id,
                 ts,
                 result.filter_name,
-                result.content_type.to_string(),
                 result.input_bytes,
                 result.output_bytes,
                 result.route.to_string(),
@@ -343,8 +362,19 @@ impl Store {
                 command,
                 col_orig as i64,
                 col_to as i64,
+                project_path,
             ],
         );
+
+        if let Err(e) = res {
+            // Log to stderr for visibility during development/debugging
+            eprintln!("[omni:error] failed to record distillation: {}", e);
+            if e.to_string().contains("NOT NULL constraint failed") {
+                eprintln!(
+                    "[omni:error] hint: legacy 'content_type' column may be blocking inserts. OMNI will attempt auto-migration on next startup."
+                );
+            }
+        }
     }
 
     pub fn store_rewind(&self, content: &str) -> String {
@@ -443,28 +473,6 @@ impl Store {
         );
     }
 
-    pub fn load_session(&self, session_id: &str) -> Option<SessionState> {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-
-        let state_json: Option<String> = conn
-            .query_row(
-                "SELECT state_json FROM sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap_or(None);
-
-        if let Some(json) = state_json {
-            serde_json::from_str(&json).ok()
-        } else {
-            None
-        }
-    }
-
     pub fn find_latest_session(&self) -> Option<SessionState> {
         let conn = match self.conn.lock() {
             Ok(c) => c,
@@ -532,172 +540,39 @@ impl Store {
         results
     }
 
-    pub fn reclassify_historical_data(&self) -> Result<usize> {
+    pub fn get_per_command_stats(
+        &self,
+        since: i64,
+        limit: usize,
+    ) -> Result<Vec<(String, u64, f64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, command, content_type FROM distillations 
-             WHERE (content_type = 'Unknown' OR content_type = 'TabularData') 
-             AND command != ''",
+            "SELECT
+                command,
+                COUNT(*) as calls,
+                CASE
+                    WHEN SUM(input_bytes) = 0 THEN 0.0
+                    ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
+                END as avg_reduction
+            FROM distillations
+            WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
+            GROUP BY command
+            HAVING avg_reduction > 0
+            ORDER BY calls DESC
+            LIMIT ?2"
         )?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-
-        let mut updated_count = 0;
-        let mut updates = Vec::new();
-
-        for row in rows.flatten() {
-            let (id, command, old_filter) = row;
-            // Re-classify using only command context (input is empty)
-            let new_type = classify("", Some(&command));
-            let new_filter = format!("{:?}", new_type);
-
-            if new_filter != old_filter && new_filter != "Unknown" {
-                updates.push((id, new_filter));
-            }
-        }
-
-        // Apply updates in a transaction for efficiency
-        if !updates.is_empty() {
-            let mut update_stmt = conn.prepare(
-                "UPDATE distillations SET filter_name = ?1, content_type = ?1 WHERE id = ?2",
-            )?;
-            for (id, new_filter) in updates {
-                update_stmt.execute(params![new_filter, id])?;
-                updated_count += 1;
-            }
-        }
-
-        Ok(updated_count)
-    }
-
-    pub fn has_upgradable_history(&self) -> bool {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        let mut stmt = match conn.prepare(
-            "SELECT command, content_type FROM distillations 
-             WHERE (content_type = 'Unknown' OR content_type = 'TabularData') 
-             AND command != ''",
-        ) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-
-        let mut rows = match stmt.query([]) {
-            Ok(r) => r,
-            Err(_) => return false,
-        };
-
-        while let Ok(Some(row)) = rows.next() {
-            let cmd: String = row.get(0).unwrap_or_default();
-            let old_type: String = row.get(1).unwrap_or_default();
-            let new_type = crate::pipeline::classifier::classify("", Some(&cmd));
-            let new_type_str = format!("{:?}", new_type);
-            if new_type_str != old_type && new_type_str != "Unknown" {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn get_summary(&self, since_secs: i64) -> Result<StoreSummary> {
-        let conn = self.conn.lock().unwrap();
-
-        let ts_threshold = chrono::Utc::now().timestamp() - since_secs;
-
-        let total_sessions: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM sessions WHERE started_at >= ?1",
-            params![ts_threshold],
-            |row| row.get(0),
-        )?;
-
-        let (total_distillations, total_input_bytes, total_output_bytes): (u32, i64, i64) = conn.query_row(
-            "SELECT COUNT(*), COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0) FROM distillations WHERE ts >= ?1",
-            params![ts_threshold],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-
-        let mut by_filter = Vec::new();
-        let mut stmt = conn.prepare(
-            "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0) 
-             FROM distillations WHERE ts >= ?1 GROUP BY grp_name"
-        )?;
-        let rows = stmt.query_map(params![ts_threshold], |row| {
-            Ok(FilterStats {
-                filter_name: row.get(0)?,
-                count: row.get(1)?,
-                total_input_bytes: row.get(2)?,
-                total_output_bytes: row.get(3)?,
-            })
-        })?;
-        for stats in rows.flatten() {
-            by_filter.push(stats);
-        }
-
-        let mut by_route = Vec::new();
-        let mut stmt = conn
-            .prepare("SELECT route, COUNT(*) FROM distillations WHERE ts >= ?1 GROUP BY route")?;
-        let rows = stmt.query_map(params![ts_threshold], |row| {
-            Ok(RouteStats {
-                route: row.get(0)?,
-                count: row.get(1)?,
-            })
-        })?;
-        for stats in rows.flatten() {
-            by_route.push(stats);
-        }
-
-        let mut passthrough_commands = Vec::new();
-        let mut stmt = conn.prepare(
-            "SELECT command, COUNT(*) as c FROM distillations 
-             WHERE ts >= ?1 AND route = 'Passthrough' AND command != '' 
-             GROUP BY command ORDER BY c DESC LIMIT 10",
-        )?;
-        let rows = stmt.query_map(params![ts_threshold], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        for stats in rows.flatten() {
-            passthrough_commands.push(stats);
-        }
-
-        Ok(StoreSummary {
-            total_sessions,
-            total_distillations,
-            total_input_bytes: total_input_bytes as u64,
-            total_output_bytes: total_output_bytes as u64,
-            by_filter,
-            by_route,
-            passthrough_commands,
-        })
-    }
-
-    /// Content type breakdown: (content_type, count, avg_reduction_pct, comma_separated_commands)
-    pub fn content_type_breakdown(&self, since: i64) -> Result<Vec<(String, u64, f64, String)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT content_type, COUNT(*),
-                    CASE WHEN SUM(input_bytes)=0 THEN 0.0
-                         ELSE ROUND(100.0*(1.0 - CAST(SUM(output_bytes) AS REAL)/SUM(input_bytes)),1) END,
-                    COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN command != '' THEN command END), '[pipe]')
-             FROM distillations WHERE ts >= ?1
-             GROUP BY content_type ORDER BY COUNT(*) DESC",
-        )?;
         let rows = stmt
-            .query_map(params![since], |row| {
+            .query_map(params![since, limit as i64], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, u64>(1)?,
                     row.get::<_, f64>(2)?,
-                    row.get::<_, String>(3)?,
                 ))
             })?
             .filter_map(|r| r.ok())
             .collect();
+
         Ok(rows)
     }
 
@@ -717,6 +592,36 @@ impl Store {
             periods.push((label.to_string(), count, input, output));
         }
         Ok(periods)
+    }
+
+    pub fn get_project_stats(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT 
+                project_path, 
+                COUNT(*) as count,
+                CASE 
+                    WHEN SUM(input_bytes) = 0 THEN 0.0 
+                    ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
+                END as savings
+             FROM distillations 
+             WHERE ts >= ?1 AND project_path != ''
+             GROUP BY project_path 
+             ORDER BY count DESC"
+        )?;
+
+        let rows = stmt
+            .query_map(params![since], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, f64>(2)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
     }
 
     pub fn cleanup_old(&self, days: u32) {
@@ -768,7 +673,6 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::ContentType;
     use tempfile::tempdir;
 
     fn get_temp_store() -> (Store, tempfile::TempDir) {
@@ -802,13 +706,12 @@ mod tests {
     }
 
     #[test]
-    fn test_record_distillation_fire_and_forget_tidak_panic() {
+    fn test_record_distillation_fire_and_forget_not_panic() {
         let (store, _dir) = get_temp_store();
         let res = DistillResult {
             output: "hello".to_string(),
             route: crate::pipeline::Route::Keep,
             filter_name: "test_filter".to_string(),
-            content_type: ContentType::TestOutput,
             score: 0.8,
             context_score: 0.1,
             input_bytes: 100,
@@ -820,7 +723,7 @@ mod tests {
             collapse_savings: None,
         };
         // Should not panic
-        store.record_distillation("sess_123", &res, "npm start");
+        store.record_distillation("sess_123", &res, "npm start", "");
     }
 
     #[test]
@@ -847,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_rewind_hash_tidak_error() {
+    fn test_duplicate_rewind_hash_not_error() {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
         let hash1 = store.store_rewind(content);
@@ -885,7 +788,7 @@ mod tests {
         let old_ts = chrono::Utc::now().timestamp() - (5 * 86400); // 5 days ago
 
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO distillations (session_id, ts, filter_name, content_type, input_bytes, output_bytes, route, latency_ms) VALUES ('sess_1', ?1, 'f', 't', 1, 1, 'K', 1)", [old_ts]).unwrap();
+        conn.execute("INSERT INTO distillations (session_id, ts, filter_name, input_bytes, output_bytes, route, latency_ms) VALUES ('sess_1', ?1, 'f', 1, 1, 'K', 1)", [old_ts]).unwrap();
         drop(conn);
 
         store.cleanup_old(2); // keep last 2 days
@@ -895,125 +798,5 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM distillations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_upsert_session_and_load_session_roundtrip() {
-        let (store, _dir) = get_temp_store();
-        let mut state = SessionState::new();
-        state.inferred_task = Some("fixing bugs".to_string());
-
-        store.upsert_session(&state);
-
-        let loaded = store.load_session(&state.session_id).unwrap();
-        assert_eq!(loaded.inferred_task, Some("fixing bugs".to_string()));
-    }
-
-    #[test]
-    fn test_get_summary_kalkulasi_benar() {
-        let (store, _dir) = get_temp_store();
-
-        let mut state = SessionState::new();
-        state.session_id = "sess_1".to_string();
-        store.upsert_session(&state);
-
-        let res1 = DistillResult {
-            output: "".to_string(),
-            route: crate::pipeline::Route::Keep,
-            filter_name: "f1".to_string(),
-            content_type: ContentType::Unknown,
-            score: 0.9,
-            context_score: 0.1,
-            input_bytes: 100,
-            output_bytes: 50,
-            latency_ms: 10,
-            rewind_hash: None,
-            segments_kept: 1,
-            segments_dropped: 0,
-            collapse_savings: None,
-        };
-        store.record_distillation("sess_1", &res1, "cmd1");
-
-        let res2 = DistillResult {
-            output: "".to_string(),
-            route: crate::pipeline::Route::Keep,
-            filter_name: "f1".to_string(),
-            content_type: ContentType::Unknown,
-            score: 0.9,
-            context_score: 0.1,
-            input_bytes: 200,
-            output_bytes: 50,
-            latency_ms: 10,
-            rewind_hash: None,
-            segments_kept: 1,
-            segments_dropped: 0,
-            collapse_savings: None,
-        };
-        store.record_distillation("sess_1", &res2, "cmd2");
-
-        let summary = store.get_summary(3600).unwrap();
-        assert_eq!(summary.total_sessions, 1);
-        assert_eq!(summary.total_distillations, 2);
-        assert_eq!(summary.total_input_bytes, 300);
-        assert_eq!(summary.total_output_bytes, 100);
-
-        assert_eq!(summary.by_filter.len(), 2);
-        // Groups are "cmd1" and "cmd2"
-        let group_names: Vec<String> = summary
-            .by_filter
-            .iter()
-            .map(|f| f.filter_name.clone())
-            .collect();
-        assert!(group_names.contains(&"cmd1".to_string()));
-        assert!(group_names.contains(&"cmd2".to_string()));
-
-        assert_eq!(summary.by_route.len(), 1);
-        assert_eq!(summary.by_route[0].route, "Keep");
-        assert_eq!(summary.by_route[0].count, 2);
-    }
-
-    #[test]
-    fn test_reclassify_historical_data() {
-        use crate::pipeline::ContentType;
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
-
-        // 1. Insert a record that WAS Unknown but SHOULD BE GitStatus
-        let res = DistillResult {
-            output: "".to_string(),
-            route: crate::pipeline::Route::Keep,
-            filter_name: "Unknown".to_string(), // Legacy label
-            content_type: ContentType::Unknown,
-            score: 0.0,
-            context_score: 0.0,
-            input_bytes: 100,
-            output_bytes: 50,
-            latency_ms: 0,
-            rewind_hash: None,
-            segments_kept: 0,
-            segments_dropped: 0,
-            collapse_savings: None,
-        };
-        store.record_distillation("s1", &res, "git status");
-
-        // 2. Verify it's Unknown initially
-        let _summary_pre = store.get_summary(3600).unwrap();
-        // Since get_summary uses 'command' if filter_name == '', and our record_distillation sets it...
-        // Wait, get_summary grp_name logic:
-        // CASE WHEN command != '' THEN command ELSE filter_name END as grp_name
-        // This is for the UI grouping. The actual content_type/filter_name is still recorded as 'Unknown'.
-
-        // 3. Run re-classification
-        let count = store.reclassify_historical_data().unwrap();
-        assert_eq!(count, 1);
-
-        // 4. Verify the database record itself
-        let conn = store.conn.lock().unwrap();
-        let final_filter: String = conn
-            .query_row("SELECT filter_name FROM distillations LIMIT 1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(final_filter, "GitStatus");
     }
 }

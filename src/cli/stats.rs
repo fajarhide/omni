@@ -43,9 +43,10 @@ fn format_bar_with_empty(pct: f64) -> String {
 }
 
 pub fn est_cost_usd(bytes_saved: u64) -> f64 {
-    // ~4 chars per token, $3 per 1M tokens
+    let price = crate::guard::config::get_input_cost();
+    // ~4 chars per token
     let tokens = bytes_saved as f64 / 4.0;
-    (tokens / 1_000_000.0) * 3.0
+    (tokens / 1_000_000.0) * price
 }
 
 fn format_number(n: u64) -> String {
@@ -60,13 +61,23 @@ fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
-fn truncate_commands(commands: &str, max: usize) -> String {
-    let parts: Vec<&str> = commands.split(',').map(|s| s.trim()).collect();
-    if parts.len() <= max {
-        parts.join(", ")
+fn get_top_commands(store: &Store, since: i64, limit: usize) -> Vec<(String, u64, f64)> {
+    store
+        .get_per_command_stats(since, limit)
+        .unwrap_or_default()
+}
+
+fn shorten_command(cmd: &str, max_len: usize) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let short = match parts.len() {
+        0 => return "[pipe]".to_string(),
+        1 => parts[0].to_string(),
+        _ => format!("{} {}", parts[0], parts[1]),
+    };
+    if short.len() <= max_len {
+        short
     } else {
-        let shown: Vec<&str> = parts[..max].to_vec();
-        format!("{}, +{} more", shown.join(", "), parts.len() - max)
+        format!("{}...", &short[..max_len.saturating_sub(3)])
     }
 }
 
@@ -93,17 +104,17 @@ fn print_help() {
         "  {: <12} Full technical breakdown (commands, routes, session)",
         "--detail".cyan()
     );
-    println!(
-        "  {: <12} Savings breakdown by content type",
-        "--by-type".cyan()
-    );
     println!("  {: <12} Scope to today only", "--today".cyan());
     println!("  {: <12} Scope to last 7 days", "--week".cyan());
     println!(
-        "  {: <12} Scope to last 30 days (default for --detail/--by-type)",
+        "  {: <12} Scope to last 30 days (default for --detail)",
         "--month".cyan()
     );
     println!("  {: <12} Machine-readable JSON output", "--json".cyan());
+    println!(
+        "  {: <12} Display breakdown per project path",
+        "--project".cyan()
+    );
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -113,10 +124,6 @@ fn print_help() {
     );
     println!(
         "  omni stats --detail     {} Full breakdown with commands",
-        "#".bright_black()
-    );
-    println!(
-        "  omni stats --by-type    {} Content type mapping",
         "#".bright_black()
     );
     println!(
@@ -138,27 +145,27 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     }
 
     let detail_flag = args.iter().any(|a| a == "--detail");
-    let type_flag = args.iter().any(|a| a == "--by-type");
     let json_flag = args.iter().any(|a| a == "--json");
+    let project_flag = args.iter().any(|a| a == "--project");
     let filter_flag = args
         .iter()
         .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
 
     let mode = if detail_flag {
         "detail"
-    } else if type_flag {
-        "by-type"
     } else if json_flag {
         "json"
+    } else if project_flag {
+        "project"
     } else if filter_flag {
-        "detail" // Implicit detail mode for scoped queries
+        "detail"
     } else {
         "default"
     };
 
     match mode {
+        "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
-        "by-type" => run_by_type(args, store),
         "json" => run_json(store),
         _ => run_default(store),
     }
@@ -168,7 +175,6 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
 fn run_default(store: &Store) -> Result<()> {
     let periods = store.multi_period_stats()?;
-    let breakdown = store.content_type_breakdown(0)?;
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
 
     let has_data = periods.iter().any(|(_, count, _, _)| *count > 0);
@@ -226,16 +232,12 @@ fn run_default(store: &Store) -> Result<()> {
         );
     }
 
-    // ContentType bars (top 5, skip count < 2)
-    let top_types: Vec<_> = breakdown
-        .iter()
-        .filter(|(_, count, _, _)| *count >= 2)
-        .take(5)
-        .collect();
+    let top_commands = get_top_commands(store, 0, 8);
 
-    if !top_types.is_empty() {
-        println!("\n  {}", "Top Savings by Type:".bold().bright_white());
-        for (content_type, count, pct, _commands) in &top_types {
+    if !top_commands.is_empty() {
+        println!("\n  {}", "Top Commands:".bold().bright_white());
+        for (cmd, count, pct) in &top_commands {
+            let short_cmd = shorten_command(cmd, 18);
             let bar = format_bar_with_empty(*pct);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
@@ -245,11 +247,9 @@ fn run_default(store: &Store) -> Result<()> {
                 bar.bright_red()
             };
 
-            let label_display = content_type.clone();
-
             println!(
-                "    {:<13} {}  {:>5.1}%  ({}x)",
-                label_display.bright_cyan(),
+                "    {:<18} {}  {:>5.1}%  ({:>2}x)",
+                short_cmd.bright_cyan(),
                 bar_colored,
                 pct,
                 count
@@ -273,17 +273,6 @@ fn run_default(store: &Store) -> Result<()> {
         "  💡 {} for full breakdown",
         "omni stats --detail".bright_cyan()
     );
-    println!(
-        "  💡 {} for content type mapping",
-        "omni stats --by-type".bright_cyan()
-    );
-
-    if store.has_upgradable_history() {
-        println!(
-            "  💡 Run {} to upgrade historical stats",
-            "omni doctor --fix".bright_cyan()
-        );
-    }
 
     // Update Notification (4h cache)
     if let Some(latest) = crate::guard::update::check() {
@@ -483,10 +472,10 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 0.0
             };
             let route_color = match route.to_lowercase().as_str() {
-                "distill" | "keep" => route.bright_green(),
+                "keep" => route.bright_green(),
                 "rewind" => route.bright_blue(),
                 "soft" => route.bright_yellow(),
-                "drop" => route.bright_red(),
+                "drop" | "passthrough" => route.bright_red(),
                 _ => route.bright_black(),
             };
 
@@ -520,102 +509,19 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     Ok(())
 }
 
-// ─── By-Type Mode: ContentType Explorer ─────────────────
-
-fn run_by_type(args: &[String], store: &Store) -> Result<()> {
-    let (period_label, since) = if args.iter().any(|a| a == "--today") {
-        let now = chrono::Utc::now().timestamp();
-        let start = now - (now % 86400);
-        ("today", start)
-    } else if args.iter().any(|a| a == "--week") {
-        ("last 7 days", chrono::Utc::now().timestamp() - 7 * 86400)
-    } else {
-        ("last 30 days", chrono::Utc::now().timestamp() - 30 * 86400)
-    };
-
-    let breakdown = store.content_type_breakdown(since)?;
-
-    println!();
-    print_separator();
-    println!(
-        " {}",
-        format!(
-            "OMNI Signal Report — By Content Type ({})",
-            period_label.bold()
-        )
-        .bright_white()
-    );
-    print_separator();
-
-    if breakdown.is_empty() {
-        println!(
-            "  {}",
-            "No data yet! OMNI tracks savings automatically as you work."
-                .bright_black()
-                .italic()
-        );
-        print_separator();
-        println!();
-        return Ok(());
-    }
-
-    println!(
-        "  {:<15} {:>6}   {:>8}   {}",
-        "Type".bold().bright_white(),
-        "Count".bold().bright_white(),
-        "Savings".bold().bright_white(),
-        "Commands".bold().bright_white(),
-    );
-    println!(
-        "  {:<15} {:>6}   {:>8}   ─────────────────────",
-        "──────────────", "──────", "────────"
-    );
-
-    for (content_type, count, pct, commands) in &breakdown {
-        let commands_display = truncate_commands(commands, 3);
-
-        let suffix = if content_type == "Unknown" {
-            format!(
-                "{} ← {}",
-                commands_display,
-                "learn?".bright_black().italic()
-            )
-        } else {
-            commands_display
-        };
-
-        let pct_colored = if *pct > 80.0 {
-            format!("{:.1}%", pct).bright_green()
-        } else if *pct > 40.0 {
-            format!("{:.1}%", pct).bright_yellow()
-        } else {
-            format!("{:.1}%", pct).bright_red()
-        };
-
-        println!(
-            "  {:<15} {:>6}   {:>8}   {}",
-            content_type.bright_cyan(),
-            count,
-            pct_colored,
-            suffix.bright_black(),
-        );
-    }
-
-    print_separator();
-    println!(
-        "  💡 Unknown commands can be improved with {}",
-        "omni learn".bright_cyan()
-    );
-    println!();
-    Ok(())
-}
-
 // ─── JSON Mode: Machine-Readable ────────────────────────
 
 fn run_json(store: &Store) -> Result<()> {
     let periods = store.multi_period_stats()?;
-    let breakdown = store.content_type_breakdown(0)?;
+    let top_commands = get_top_commands(store, 0, 100);
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+    let (count, _, _, sum_latency, _) = store.aggregate_stats(0)?;
+
+    let avg_latency = if count > 0 {
+        sum_latency as f64 / count as f64
+    } else {
+        0.0
+    };
 
     let periods_json: Vec<serde_json::Value> = periods
         .iter()
@@ -640,33 +546,98 @@ fn run_json(store: &Store) -> Result<()> {
         })
         .collect();
 
-    let types_json: Vec<serde_json::Value> = breakdown
+    let commands_json: Vec<serde_json::Value> = top_commands
         .iter()
-        .map(|(ct, count, pct, commands)| {
-            let cmd_list: Vec<&str> = commands
-                .split(',')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect();
+        .map(|(cmd, count, pct)| {
             serde_json::json!({
-                "type": ct,
+                "command": cmd,
                 "count": count,
                 "savings_pct": pct,
-                "commands": cmd_list,
             })
         })
         .collect();
 
     let output = serde_json::json!({
         "periods": periods_json,
-        "content_types": types_json,
+        "commands": commands_json,
         "rewind": {
             "archived": rewind_stored,
             "retrieved": rewind_retrieved,
-        }
+        },
+        "avg_latency_ms": (avg_latency * 10.0).round() / 10.0,
     });
 
     println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
+    let today_flag = args.iter().any(|a| a == "--today");
+    let week_flag = args.iter().any(|a| a == "--week");
+
+    let now = chrono::Utc::now().timestamp();
+    let (since, period_label) = if today_flag {
+        (now - (now % 86400), "Today")
+    } else if week_flag {
+        (now - 7 * 86400, "Last 7 Days")
+    } else {
+        (now - 30 * 86400, "Last 30 Days")
+    };
+
+    let projects = store.get_project_stats(since)?;
+    println!(
+        "\n  {} — {} Breakdown",
+        "OMNI Project Analytics".bold().bright_white(),
+        period_label
+    );
+    print_separator();
+
+    if projects.is_empty() {
+        println!("  No project data recorded yet for this period.");
+        return Ok(());
+    }
+
+    println!(
+        "  {:<30} {:>7} {:>9}  Signal Strength",
+        "Project Directory", "Count", "Savings"
+    );
+    println!("  ── {:─<30} ─────── ───────── ────────────────────", "");
+
+    for (path, count, savings) in projects {
+        let display_path = if path.chars().count() > 30 {
+            let mut s: String = path.chars().take(12).collect();
+            s.push_str("...");
+            s.extend(
+                path.chars()
+                    .rev()
+                    .take(15)
+                    .collect::<String>()
+                    .chars()
+                    .rev(),
+            );
+            s
+        } else {
+            path
+        };
+
+        let bar = format_bar(savings);
+        let bar_colored = if savings > 80.0 {
+            bar.bright_green()
+        } else if savings > 40.0 {
+            bar.bright_yellow()
+        } else {
+            bar.bright_red()
+        };
+
+        println!(
+            "  {:<30} {:>6}x  {:>7.1}%  {}",
+            display_path.cyan(),
+            count,
+            savings,
+            bar_colored
+        );
+    }
+    println!();
     Ok(())
 }
 
@@ -706,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_default_tidak_crash_jika_db_kosong() {
+    fn test_stats_default_not_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into()];
@@ -715,7 +686,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_detail_tidak_crash_jika_db_kosong() {
+    fn test_stats_detail_not_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--detail".into()];
@@ -724,16 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_by_type_tidak_crash_jika_db_kosong() {
-        let tmp = NamedTempFile::new().unwrap();
-        let store = Store::open_path(tmp.path()).unwrap();
-        let args: Vec<String> = vec!["stats".into(), "--by-type".into()];
-        let result = run(&args, &store);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_stats_json_tidak_crash_jika_db_kosong() {
+    fn test_stats_json_not_crash_jika_db_kosong() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--json".into()];
@@ -761,15 +723,5 @@ mod tests {
         assert_eq!(format_number(999), "999");
         assert_eq!(format_number(1000), "1,000");
         assert_eq!(format_number(1247000), "1,247,000");
-    }
-
-    #[test]
-    fn test_truncate_commands() {
-        assert_eq!(
-            truncate_commands("git diff, git log", 3),
-            "git diff, git log"
-        );
-        assert_eq!(truncate_commands("a, b, c, d, e", 3), "a, b, c, +2 more");
-        assert_eq!(truncate_commands("single", 3), "single");
     }
 }

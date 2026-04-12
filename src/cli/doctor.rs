@@ -463,47 +463,6 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!("   {:<15} none", "Project:".bright_black());
     }
 
-    // 10. Intelligence Consistency
-    println!("\n {}", "Intelligence:".bold().bright_white());
-    if let Ok(store) = Store::open() {
-        if fix_mode {
-            match store.reclassify_historical_data() {
-                Ok(count) => {
-                    if count > 0 {
-                        println!(
-                            "   {:<15} {} records upgraded to new categories {}",
-                            "Upgrade:".bright_black(),
-                            count.to_string().yellow().bold(),
-                            "[FIXED]".green().bold()
-                        );
-                    } else {
-                        println!(
-                            "   {:<15} historical statistics are up to date {}",
-                            "Status:".bright_black(),
-                            "[OK]".green().bold()
-                        );
-                    }
-                }
-                Err(e) => {
-                    println!(
-                        "   {:<15} upgrade failed: {} {}",
-                        "Upgrade:".bright_black(),
-                        e,
-                        "[ERROR]".red().bold()
-                    );
-                }
-            }
-        } else {
-            // Diagnostic mode: check how many could be upgraded
-            // For now, simpler to just say 'Run with --fix to upgrade'
-            println!(
-                "   {:<15} Run with {} to upgrade historical stats",
-                "Status:".bright_black(),
-                "--fix".cyan()
-            );
-        }
-    }
-
     if let Some(latest) = crate::guard::update::check() {
         crate::guard::update::print_notification(&latest);
     }

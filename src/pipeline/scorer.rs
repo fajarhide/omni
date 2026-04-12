@@ -1,4 +1,17 @@
-use crate::pipeline::{ContentType, OutputSegment, SessionState, SignalTier};
+use crate::pipeline::registry;
+use crate::pipeline::{OutputSegment, SegmentationMode, SessionState, SignalTier};
+
+pub fn score_with_command(
+    input: &str,
+    command: &str,
+    session: Option<&crate::pipeline::SessionState>,
+) -> Vec<crate::pipeline::OutputSegment> {
+    // 1. Resolve pipeline profile from command
+    let profile = registry::resolve_profile(command);
+
+    // 2. Score segments based on segmentation mode
+    score_segments(input, profile.segmentation, session)
+}
 
 fn contains_any(trimmed: &str, keywords: &[&str]) -> bool {
     keywords.iter().any(|k| trimmed.contains(k))
@@ -137,13 +150,13 @@ fn split_into_hunks(input: &str) -> Vec<(String, usize, usize)> {
 
 pub fn score_segments(
     input: &str,
-    content_type: &ContentType,
+    mode: SegmentationMode,
     session: Option<&SessionState>,
 ) -> Vec<OutputSegment> {
     let mut segments = Vec::new();
 
-    match content_type {
-        ContentType::GitDiff => {
+    match mode {
+        SegmentationMode::GitHunk => {
             let hunks = split_into_hunks(input);
             for (content, start_line, end_line) in hunks {
                 let tier = classify_line(&content);
@@ -164,7 +177,7 @@ pub fn score_segments(
                 });
             }
         }
-        ContentType::TestOutput => {
+        SegmentationMode::TestGroup => {
             let mut current_chunk = String::new();
             let mut start_line = 1;
             let mut line_num = 1;
@@ -228,7 +241,7 @@ pub fn score_segments(
                 });
             }
         }
-        _ => {
+        SegmentationMode::Line => {
             // Segment per line
             let mut line_num = 1;
             for line in input.lines() {
@@ -333,7 +346,7 @@ mod tests {
     #[test]
     fn test_score_segments_returns_correct_count() {
         let input = "line 1\nline 2\nline 3";
-        let segments = score_segments(input, &ContentType::Unknown, None);
+        let segments = score_segments(input, SegmentationMode::Line, None);
         assert_eq!(segments.len(), 3);
         assert_eq!(segments[0].line_range, (1, 1));
         assert_eq!(segments[2].line_range, (3, 3));
@@ -342,7 +355,7 @@ mod tests {
     #[test]
     fn test_score_segments_git_diff_split_by_hunk() {
         let diff = "diff --git a/file.txt b/file.txt\nindex 1234..5678\n@@ -1,3 +1,4 @@\n line1\n line2\n@@ -10,2 +11,3 @@\n line10\n line11";
-        let segments = score_segments(diff, &ContentType::GitDiff, None);
+        let segments = score_segments(diff, SegmentationMode::GitHunk, None);
 
         assert_eq!(segments.len(), 3);
         // Header
@@ -357,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_boost_tidak_exceed_0_4() {
+    fn test_context_boost_not_exceed_0_4() {
         let mut session = SessionState::new();
         for _ in 0..50 {
             session.add_hot_file("src/main.rs");

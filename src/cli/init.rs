@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn test_init_hook_idempotent_run_2x_tidak_duplicate() {
+    fn test_init_hook_idempotent_run_2x_not_duplicate() {
         let mut val = json!({});
         install_omni_hooks(&mut val, "/usr/bin/omni");
 

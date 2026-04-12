@@ -2,5 +2,5 @@
 source: src/distillers/mod.rs
 expression: output
 ---
-k8s: 4 pods | 2 running, 1 pending, 1 failed
-Non-running: api-deployment-86d88f9855-abcde (CrashLoopBackOff), worker-deployment-99c8f99-pqr34 (Pending)
+k8s: 4 pods | 2 running, 1 pending, 1 error
+Problems: api-deployment-86d88f9855-abcde (CrashLoopBackOff), worker-deployment-99c8f99-pqr34 (Pending)

@@ -64,7 +64,6 @@ impl SessionTracker {
             {
                 let summary = crate::pipeline::DistillSummary {
                     command: cmd.clone(),
-                    content_type: result_clone.content_type,
                     route: result_clone.route,
                     input_bytes: result_clone.input_bytes,
                     output_bytes: result_clone.output_bytes,
@@ -408,7 +407,6 @@ mod tests {
             output: "".to_string(),
             route: crate::pipeline::Route::Keep,
             filter_name: "".to_string(),
-            content_type: crate::pipeline::ContentType::Unknown,
             score: 0.0,
             context_score: 0.0,
             input_bytes: 0,
@@ -427,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_save_tidak_block_caller() {
+    fn test_background_save_not_block_caller() {
         let dir = tempdir().unwrap();
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
         let session = Arc::new(Mutex::new(SessionState::new()));

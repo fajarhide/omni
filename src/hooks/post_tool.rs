@@ -1,6 +1,5 @@
-use crate::distillers;
 use crate::pipeline::toml_filter;
-use crate::pipeline::{DistillResult, Route, SessionState, classifier, collapse, composer, scorer};
+use crate::pipeline::{DistillResult, Route, SessionState, collapse, scorer};
 use crate::store::sqlite::Store;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -129,105 +128,139 @@ pub fn process_payload(
     };
 
     let start = Instant::now();
+    let project_path = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
 
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
     let toml_match = toml_filters.iter().find(|f| f.matches(clean_command));
 
-    let (final_out, filter_name, ctype) = if let Some(filter) = toml_match {
-        // Use TOML filter
+    let session_guard = session.as_ref().and_then(|l| l.lock().ok());
+    let mut collapse_savings_data = None;
+    let (final_out, filter_name) = if let Some(filter) = toml_match {
         let output = filter.apply(&content);
-        let fname = filter.name.clone();
-        (output, fname, None)
+        (output, filter.name.clone())
     } else {
-        // Fallback to Rust distiller pipeline
-        let ctype = classifier::classify(&content, Some(&command));
+        // Pure Command Architecture: Resolve profile once
+        let profile = crate::pipeline::registry::resolve_profile(clean_command);
 
-        // Pre-processing: collapse repetitive lines before scoring
-        let collapse_result = collapse::collapse(&content, &ctype);
+        // 1. Initial Scoring (to evaluate learning/stats)
+        let segments =
+            scorer::score_segments(&content, profile.segmentation, session_guard.as_deref());
+
+        // 2. Collapse repetitive lines SEBELUM distill
+        let collapse_result = collapse::collapse(&content, &profile.collapse);
+        collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to {
+            Some((collapse_result.original_lines, collapse_result.collapsed_to))
+        } else {
+            None
+        };
         let effective_input = collapse_result.collapsed_lines.join("\n");
 
-        let scored_segments = if let Some(ref lock) = session {
-            if let Ok(state) = lock.lock() {
-                scorer::score_segments(&effective_input, &ctype, Some(&*state))
-            } else {
-                scorer::score_segments(&effective_input, &ctype, None)
-            }
+        // 3. Re-score dengan collapsed input jika ada savings signifikan
+        let final_segments = if collapse_result.savings_pct > 0.1 {
+            scorer::score_segments(
+                &effective_input,
+                profile.segmentation,
+                session_guard.as_deref(),
+            )
         } else {
-            scorer::score_segments(&effective_input, &ctype, None)
+            segments
         };
 
-        let distiller = distillers::get_distiller(&ctype);
-        let active_ctype = distiller.content_type();
-        let output = distiller.distill(
-            &scored_segments,
+        // 4. Distill: command-first dispatch
+        let output = crate::distillers::distill_with_command(
+            &final_segments,
             &effective_input,
-            session.as_ref().and_then(|l| l.lock().ok()).as_deref(),
+            clean_command,
+            session_guard.as_deref(),
         );
-        (output, format!("{:?}", active_ctype), Some(active_ctype))
+
+        (
+            output,
+            clean_command
+                .split_whitespace()
+                .next()
+                .unwrap_or("omni")
+                .to_string(),
+        )
     };
 
-    // Check for rewind decision (only for Rust pipeline)
+    drop(session_guard); // Release lock ASAP sebelum rewind check
+
+    // Check for rewind decision
     let mut final_out = final_out;
     let mut rewind_hash = String::new();
 
-    if let Some(ref ctype) = ctype {
-        let scored_segments = if let Some(ref lock) = session {
-            if let Ok(state) = lock.lock() {
-                scorer::score_segments(&content, ctype, Some(&*state))
-            } else {
-                scorer::score_segments(&content, ctype, None)
-            }
-        } else {
-            scorer::score_segments(&content, ctype, None)
-        };
+    // Re-check segments from content for metadata/learning
+    let profile = crate::pipeline::registry::resolve_profile(clean_command);
+    let check_segments = scorer::score_segments(&content, profile.segmentation, None);
 
-        let decision = composer::decide_rewind(&scored_segments, ctype);
+    let noise_count = check_segments
+        .iter()
+        .filter(|s| s.final_score() < 0.3)
+        .count();
+    let should_store =
+        noise_count as f32 / check_segments.len().max(1) as f32 > 0.4 && check_segments.len() > 20;
 
-        let dropped_lines = scored_segments
-            .iter()
-            .filter(|s| s.final_score() < decision.threshold)
-            .map(|s| s.content.lines().count())
-            .sum::<usize>();
+    let dropped_lines: usize = check_segments
+        .iter()
+        .filter(|s| s.final_score() < 0.3)
+        .map(|s| s.content.lines().count())
+        .sum();
 
-        // Trigger Auto-Learn
-        crate::pipeline::composer::evaluate_learning(
-            ctype,
-            &content,
-            scored_segments.len(),
-            scored_segments
-                .iter()
-                .filter(|s| s.final_score() < decision.threshold)
-                .count(),
-            &command,
-        );
+    // Auto-learn trigger
+    if !clean_command.is_empty() && content.len() > 100 {
+        let total = check_segments.len();
+        let dropped = noise_count;
+        let poor = total > 5 && (dropped as f32 / total.max(1) as f32) < 0.3;
+        if poor {
+            crate::session::learn::queue_for_learn(&content, clean_command);
+        }
+    }
 
-        if decision.should_store
-            && let Some(ref s) = store
-        {
+    if should_store {
+        if let Some(ref s) = store {
             let hash = s.store_rewind(&content);
             final_out.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]",
+                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
                 dropped_lines, hash
             ));
             rewind_hash = hash;
-        } else if decision.should_store {
-            final_out.push_str(&format!("\n[OMNI: {} lines omitted]", dropped_lines));
+        } else {
+            final_out.push_str(&format!("\n[OMNI: {} lines omitted]\n", dropped_lines));
         }
+    }
 
-        // Update session state (only for Rust pipeline)
-        if let Some(ref lock) = session
-            && let Ok(mut state) = lock.lock()
-        {
-            if !command.is_empty() {
-                state.add_command(&command);
-            }
-            for seg in &scored_segments {
-                if seg.tier == crate::pipeline::SignalTier::Critical {
-                    state.add_error(&seg.content);
-                }
+    // Update session state
+    if let Some(ref lock) = session
+        && let Ok(mut state) = lock.lock()
+    {
+        if !command.is_empty() {
+            state.add_command(&command);
+        }
+        for seg in &check_segments {
+            if seg.tier == crate::pipeline::SignalTier::Critical {
+                state.add_error(&seg.content);
             }
         }
+    }
+
+    // Determine Route
+    let ratio = 1.0 - (final_out.len() as f32 / content.len().max(1) as f32);
+    let route = if !rewind_hash.is_empty() {
+        Route::Rewind
+    } else if ratio >= 0.7 {
+        Route::Keep
+    } else if ratio >= 0.3 {
+        Route::Soft
+    } else {
+        Route::Passthrough
+    };
+
+    if route == Route::Soft {
+        final_out.push_str("\n[Partial signal - omni learn recommended]\n");
     }
 
     // Measure ratio strictly
@@ -238,17 +271,11 @@ pub fn process_payload(
     let latency_ms = start.elapsed().as_millis() as u32;
 
     if let Some(ref s) = store {
+        let kept = check_segments.len() - noise_count;
         let result = DistillResult {
             output: final_out.clone(),
-            route: if rewind_hash.is_empty() {
-                Route::Keep
-            } else {
-                Route::Rewind
-            },
+            route: route.clone(),
             filter_name: filter_name.clone(),
-            content_type: ctype
-                .clone()
-                .unwrap_or(crate::pipeline::ContentType::Unknown),
             score: 0.0,
             context_score: 0.0,
             input_bytes: content.len(),
@@ -259,16 +286,16 @@ pub fn process_payload(
             } else {
                 Some(rewind_hash)
             },
-            segments_kept: 0,
-            segments_dropped: 0,
-            collapse_savings: None,
+            segments_kept: kept,
+            segments_dropped: noise_count,
+            collapse_savings: collapse_savings_data,
         };
         let session_id = session
             .as_ref()
             .and_then(|lock| lock.lock().ok())
             .map(|s| s.session_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
-        s.record_distillation(&session_id, &result, &command);
+        s.record_distillation(&session_id, &result, &command, &project_path);
 
         if let Some(ref sess) = session {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
@@ -277,7 +304,7 @@ pub fn process_payload(
     }
 
     // Safety Truncation
-    let max_chars = composer::ComposeConfig::default().max_output_chars;
+    let max_chars = 50_000;
     if final_out.len() > max_chars {
         final_out.truncate(max_chars);
         final_out.push_str("\n[OMNI: output truncated]");

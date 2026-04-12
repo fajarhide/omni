@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_error_exit_0_tidak_crash() {
+    fn test_parse_error_exit_0_not_crash() {
         let (store, _dir) = get_store();
         let out = process_payload("NOT JSON", store, default_config());
         assert!(out.is_none());

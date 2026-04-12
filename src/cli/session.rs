@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_command_tidak_crash_jika_tidak_ada_session() {
+    fn test_session_command_not_crash_jika_not_ada_session() {
         let (store, _dir) = get_store();
         let args = vec!["session".to_string()];
         let res = run_session(&args, store);

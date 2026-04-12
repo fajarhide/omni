@@ -296,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_to_config_tidak_duplicate_trigger() {
+    fn test_apply_to_config_not_duplicate_trigger() {
         let file = NamedTempFile::new().unwrap();
         let c = vec![PatternCandidate {
             trigger_prefix: "Test".to_string(),

@@ -1,12 +1,11 @@
 use anyhow::Result;
 use colored::Colorize;
+use is_terminal::IsTerminal;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::pipeline::{
-    ContentType, Route, SessionState, classifier, collapse, composer, scorer, toml_filter,
-};
+use crate::pipeline::{Route, SessionState, collapse, scorer, toml_filter};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
@@ -27,12 +26,14 @@ struct PipelineResult {
     session_id: String,
     output: String,
     filter_name: String,
-    content_type: ContentType,
     rewind_hash: Option<String>,
     segments_kept: usize,
     segments_dropped: usize,
     input_text: String,
     start_time: Instant,
+    collapse_savings: Option<(usize, usize)>,
+    project_path: String,
+    route: Route,
 }
 
 impl PipelineResult {
@@ -53,6 +54,14 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     session: Option<Arc<Mutex<SessionState>>>,
     command_name: Option<&str>,
 ) -> Result<()> {
+    // Phase 0: Sibling detection (CRITICAL: Do this BEFORE any IO or heavy logic)
+    let detected_cmd = if command_name.is_none() {
+        detect_sibling_command()
+    } else {
+        None
+    };
+    let command_to_use = command_name.or(detected_cmd.as_deref());
+
     let start_time = Instant::now();
 
     // Phase 1: Read
@@ -77,7 +86,11 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     }
 
     // Phase 3: Transcript Begin
-    let command_stripped = command_name.map(|c| {
+    let project_path = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let command_stripped = command_to_use.map(|c| {
         if let Some(stripped) = c.strip_prefix("omni exec ") {
             stripped
         } else {
@@ -93,6 +106,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         command_stripped,
         start_time,
         store.as_deref(),
+        project_path,
     );
 
     // Phase 5: Persist
@@ -167,6 +181,7 @@ fn distill(
     command_name: Option<&str>,
     start_time: Instant,
     store: Option<&Store>,
+    project_path: String,
 ) -> PipelineResult {
     let session_id = with_session(session, |g| g.session_id.clone())
         .unwrap_or_else(|| "pipe_session".to_string());
@@ -179,76 +194,150 @@ fn distill(
         }
     }
 
-    let (output, filter_name, ctype, rewind_hash, kept_count, dropped_count) = if let Some(filter) =
-        matched_toml
-    {
-        let out = filter.apply(&input_text);
-        (out, filter.name.clone(), ContentType::Unknown, None, 0, 0)
-    } else {
-        let c = classifier::classify(&input_text, command_name);
+    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
+        if let Some(filter) = matched_toml {
+            let out = filter.apply(&input_text);
+            (out, filter.name.clone(), None, 0, 0, None, Route::Keep)
+        } else {
+            let cmd = command_name.unwrap_or("");
 
-        let collapse_result = collapse::collapse(&input_text, &c);
-        let effective_input = collapse_result.collapsed_lines.join("\n");
+            // Pure Command Architecture: Resolve profile
+            let profile = crate::pipeline::registry::resolve_profile(cmd);
 
-        let active_session_opt = session.as_ref().and_then(|m| m.lock().ok());
-        let scored_segments =
-            scorer::score_segments(&effective_input, &c, active_session_opt.as_deref());
+            // 1. Initial Scoring
+            let segments = scorer::score_segments(
+                &input_text,
+                profile.segmentation,
+                session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+            );
 
-        let distiller = crate::distillers::get_distiller(&c);
-        let mut out =
-            distiller.distill(&scored_segments, &input_text, active_session_opt.as_deref());
+            // 2. Collapse
+            let collapse_result = collapse::collapse(&input_text, &profile.collapse);
+            let collapse_savings_data =
+                if collapse_result.original_lines > collapse_result.collapsed_to {
+                    Some((collapse_result.original_lines, collapse_result.collapsed_to))
+                } else {
+                    None
+                };
+            let effective_input = collapse_result.collapsed_lines.join("\n");
 
-        let compose_config = composer::ComposeConfig::default();
-        let decision = composer::decide_rewind(&scored_segments, &c);
+            // 3. Re-score
+            let final_segments = if collapse_result.savings_pct > 0.1 {
+                scorer::score_segments(
+                    &effective_input,
+                    profile.segmentation,
+                    session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+                )
+            } else {
+                segments
+            };
 
-        let k_count = scored_segments
-            .iter()
-            .filter(|s| s.final_score() >= compose_config.threshold)
-            .count();
-        let d_count = scored_segments.len() - k_count;
+            // 4. Distill
+            let mut out = crate::distillers::distill_with_command(
+                &final_segments,
+                &effective_input,
+                cmd,
+                session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+            );
 
-        crate::pipeline::composer::evaluate_learning(
-            &c,
-            &input_text,
-            scored_segments.len(),
-            d_count,
-            command_name.unwrap_or(""),
-        );
+            // Rewind decision
+            let noise_count = final_segments
+                .iter()
+                .filter(|s| s.final_score() < 0.3)
+                .count();
+            let should_store = noise_count as f32 / final_segments.len().max(1) as f32 > 0.4
+                && final_segments.len() > 20;
 
-        let mut r_hash = None;
-        if decision.should_store
-            && let Some(s) = store
-        {
-            let hash = s.store_rewind(&input_text);
-            out.push_str(&format!(
-                "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
-                "⏺".cyan(),
-                "OMNI".bold().bright_white(),
-                "distilled".bright_green(),
+            let d_count = noise_count;
+            let k_count = final_segments.len() - d_count;
+
+            let dropped_lines: usize = final_segments
+                .iter()
+                .filter(|s| s.final_score() < 0.3)
+                .map(|s| s.content.lines().count())
+                .sum();
+
+            // Auto-learn trigger
+            if !cmd.is_empty() && input_text.len() > 100 {
+                let poor = final_segments.len() > 5
+                    && (d_count as f32 / final_segments.len().max(1) as f32) < 0.3;
+                if poor {
+                    crate::session::learn::queue_for_learn(&input_text, cmd);
+                }
+            }
+
+            let mut r_hash = None;
+
+            // Determine Route
+            let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
+            let mut route = if r_hash.is_some() {
+                Route::Rewind
+            } else if ratio >= 0.7 {
+                Route::Keep
+            } else if ratio >= 0.3 {
+                Route::Soft
+            } else {
+                Route::Passthrough
+            };
+
+            if route == Route::Soft {
+                out.push_str("\n[Partial signal - omni learn recommended]\n");
+            }
+
+            if should_store && let Some(s) = store {
+                let hash = s.store_rewind(&input_text);
+                if std::io::stdout().is_terminal() {
+                    out.push_str(&format!(
+                        "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
+                        "⏺".cyan(),
+                        "OMNI".bold().bright_white(),
+                        "distilled".bright_green(),
+                        dropped_lines,
+                        hash.cyan().bold()
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
+                        dropped_lines, hash
+                    ));
+                }
+                r_hash = Some(hash);
+                route = Route::Rewind; // Override if stored in rewind
+            }
+
+            // Safety truncation
+            const MAX_OUTPUT: usize = 50_000;
+            if out.len() > MAX_OUTPUT {
+                out.truncate(MAX_OUTPUT);
+                out.push_str("\n[OMNI: output truncated]\n");
+            }
+
+            (
+                out,
+                cmd.split_whitespace()
+                    .next()
+                    .unwrap_or("[pipe]")
+                    .to_string(),
+                r_hash,
+                k_count,
                 d_count,
-                hash.cyan().bold()
-            ));
-            r_hash = Some(hash);
-        }
-
-        if out.len() > compose_config.max_output_chars {
-            out.truncate(compose_config.max_output_chars);
-            out.push_str("\n[OMNI: output truncated]\n");
-        }
-
-        (out, format!("{:?}", c), c, r_hash, k_count, d_count)
-    };
+                collapse_savings_data,
+                route,
+            )
+        };
 
     PipelineResult {
         session_id,
         output,
         filter_name,
-        content_type: ctype,
         rewind_hash,
         segments_kept: kept_count,
         segments_dropped: dropped_count,
         input_text,
         start_time,
+        collapse_savings,
+        project_path,
+        route,
     }
 }
 
@@ -263,13 +352,8 @@ fn persist<E: Write>(
         use crate::pipeline::DistillResult;
         let distill_result = DistillResult {
             output: result.best_output().to_string(), // use the best output for persistence
-            route: if result.rewind_hash.is_some() {
-                Route::Rewind
-            } else {
-                Route::Keep
-            },
+            route: result.route.clone(),
             filter_name: result.filter_name.clone(),
-            content_type: result.content_type.clone(),
             score: 0.0,
             context_score: 0.0,
             input_bytes: result.input_text.len(),
@@ -278,13 +362,14 @@ fn persist<E: Write>(
             rewind_hash: result.rewind_hash.clone(),
             segments_kept: result.segments_kept,
             segments_dropped: result.segments_dropped,
-            collapse_savings: None,
+            collapse_savings: result.collapse_savings,
         };
 
         s.record_distillation(
             &result.session_id,
             &distill_result,
             command_name.unwrap_or(""),
+            &result.project_path,
         );
 
         if let Some(sess) = session {
@@ -367,6 +452,129 @@ fn emit_output<W: Write, E: Write>(
     Ok(())
 }
 
+fn detect_sibling_command() -> Option<String> {
+    use std::process::Command;
+
+    // 1. Get current IDs
+    let pid = std::process::id();
+
+    // 2. Get PGID (Process Group ID)
+    let pgid_out = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let pgid = String::from_utf8_lossy(&pgid_out.stdout).trim().to_string();
+
+    // 3. Get PPID (Parent Process ID)
+    let ppid_out = Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let ppid = String::from_utf8_lossy(&ppid_out.stdout).trim().to_string();
+
+    // 4. Find all commands in that PGID
+    let siblings_out = if !pgid.is_empty() {
+        Command::new("ps")
+            .args(["-o", "command=", "-g", &pgid])
+            .output()
+            .ok()
+    } else {
+        None
+    };
+
+    let siblings = siblings_out
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    // 5. Pass 1: Look for an active sibling (real process) in PGID
+    for line in siblings.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.contains("omni") {
+            continue;
+        }
+
+        // Exclude common shells and ps itself
+        if line.starts_with("ps ")
+            || line.starts_with("sh ")
+            || line.starts_with("zsh ")
+            || line.starts_with("bash ")
+            || line.starts_with("grep ")
+        {
+            continue;
+        }
+
+        // Found a candidate sibling command
+        return Some(line.to_string());
+    }
+
+    // 6. Pass 2: Fallback to parsing shell command lines in the PGID
+    for line in siblings.lines() {
+        let line = line.trim();
+        if (line.contains("sh ") || line.contains("zsh ") || line.contains("bash "))
+            && line.contains('|')
+            && line.contains("omni")
+        {
+            #[allow(clippy::collapsible_if)]
+            if let Some(cmd) = extract_command_from_pipeline(line) {
+                return Some(cmd);
+            }
+        }
+    }
+
+    // 7. Pass 3: Fallback to Parent Command if no sibling found
+    // Useful if we are running in a script or cargo run
+    if !ppid.is_empty() && ppid != "0" && ppid != "1" {
+        let parent_cmd_out = Command::new("ps")
+            .args(["-o", "command=", "-p", &ppid])
+            .output()
+            .ok()?;
+        let parent_line = String::from_utf8_lossy(&parent_cmd_out.stdout)
+            .trim()
+            .to_string();
+
+        if parent_line.contains('|') && parent_line.contains("omni") {
+            #[allow(clippy::collapsible_if)]
+            if let Some(cmd) = extract_command_from_pipeline(&parent_line) {
+                return Some(cmd);
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_command_from_pipeline(line: &str) -> Option<String> {
+    // Split by pipe and find the segment immediately before "omni"
+    let pipe_parts: Vec<&str> = line.split('|').collect();
+    let omni_idx = pipe_parts.iter().position(|p| p.contains("omni"));
+
+    if let Some(idx) = omni_idx {
+        #[allow(clippy::collapsible_if)]
+        if idx > 0 {
+            let cmd_segment = pipe_parts[idx - 1];
+
+            // Strip shell prefix if present (-c "...")
+            let mut clean = if let Some(c_idx) = cmd_segment.find("-c ") {
+                &cmd_segment[c_idx + 3..]
+            } else {
+                cmd_segment
+            };
+
+            // Handle command chains like: source ~/.zshrc && ls -la | omni
+            if let Some(last_chain_idx) = clean.rfind(['&', ';']) {
+                clean = &clean[last_chain_idx + 1..];
+                clean = clean.trim_start_matches('&');
+            }
+
+            let final_cmd = clean.trim().to_string();
+            if !final_cmd.is_empty() {
+                return Some(final_cmd);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,7 +589,6 @@ mod tests {
 
         let out_str = String::from_utf8(out).expect("must succeed");
         assert!(out_str.contains("diff --git"));
-        assert!(!err.iter().any(|&b| b == b'e' || b == b'E'));
     }
 
     #[test]

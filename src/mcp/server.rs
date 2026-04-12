@@ -1,4 +1,3 @@
-use crate::pipeline::classifier::classify;
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
 use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
@@ -98,10 +97,14 @@ impl OmniServer {
         description = "Measure how much signal vs noise in text"
     )]
     pub async fn omni_density(&self, #[tool(param)] text: String) -> String {
-        let content_type = classify(&text, None);
         let current_session = self.session.lock().unwrap().clone();
 
-        let segments = score_segments(&text, &content_type, Some(&current_session));
+        // Use generic Line segmentation for density analysis
+        let segments = score_segments(
+            &text,
+            crate::pipeline::SegmentationMode::Line,
+            Some(&current_session),
+        );
 
         let mut critical_lines = 0;
         let mut important_lines = 0;
@@ -230,6 +233,26 @@ impl OmniServer {
             _ => "Unknown action. Use status, context, or clear.".to_string(),
         }
     }
+    #[tool(
+        name = "omni_search",
+        description = "Search current session history (logs, outputs, commands)"
+    )]
+    pub async fn omni_search(&self, #[tool(param)] query: String) -> String {
+        if query.trim().is_empty() {
+            return "Please provide a query".to_string();
+        }
+        let session_id = self.session.lock().unwrap().session_id.clone();
+        let results = self.store.search_session_events(&session_id, &query, 10);
+        if results.is_empty() {
+            format!("No events matched the search query '{}'", query)
+        } else {
+            let mut report = format!("Found {} results:\n\n", results.len());
+            for r in results {
+                report.push_str(&format!("- {}\n", r));
+            }
+            report
+        }
+    }
 }
 
 // Requires async_trait natively for rmcp handlers
@@ -254,6 +277,7 @@ impl ServerHandler for OmniServer {
                 "omni_density" => Self::omni_density_tool_call(tcc).await,
                 "omni_trust" => Self::omni_trust_tool_call(tcc).await,
                 "omni_session" => Self::omni_session_tool_call(tcc).await,
+                "omni_search" => Self::omni_search_tool_call(tcc).await,
                 _ => Err(rmcp::Error::invalid_params("method not found", None)),
             }
         })
@@ -279,6 +303,7 @@ impl ServerHandler for OmniServer {
                     Self::omni_density_tool_attr(),
                     Self::omni_trust_tool_attr(),
                     Self::omni_session_tool_attr(),
+                    Self::omni_search_tool_attr(),
                 ],
                 next_cursor: None,
             })

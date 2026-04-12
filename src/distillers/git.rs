@@ -1,13 +1,9 @@
 use crate::distillers::Distiller;
-use crate::pipeline::{ContentType, OutputSegment, SignalTier};
+use crate::pipeline::{OutputSegment, SignalTier};
 
 pub struct GitDistiller;
 
 impl Distiller for GitDistiller {
-    fn content_type(&self) -> ContentType {
-        ContentType::GitDiff
-    }
-
     fn distill(
         &self,
         segments: &[OutputSegment],

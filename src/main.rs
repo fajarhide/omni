@@ -46,6 +46,10 @@ fn detect_mode(args: &[String]) -> Mode {
     Mode::Cli
 }
 
+fn detect_pipe_command() -> Option<String> {
+    env::var("OMNI_CMD").ok().or_else(|| env::var("CMD").ok())
+}
+
 // ─── Engine / Globals ───────────────────────────────────
 
 fn init_globals() -> (Option<Arc<Store>>, Option<Arc<Mutex<SessionState>>>) {
@@ -156,6 +160,11 @@ fn main() {
             // Legacy flag — route through dispatcher
             let (store, session) = init_globals();
             if let (Some(s), Some(ss)) = (store, session) {
+                // Background cleanup to prevent DB bloating
+                let s_clone = Arc::clone(&s);
+                std::thread::spawn(move || {
+                    s_clone.cleanup_old(30); // keep last 30 days
+                });
                 let _ = hooks::dispatcher::run(s, ss);
             }
         }
@@ -186,7 +195,8 @@ fn main() {
                 let session = s.find_latest_session().unwrap_or_else(SessionState::new);
                 Arc::new(Mutex::new(session))
             });
-            if let Err(e) = hooks::pipe::run(store_arc, session_arc, None) {
+            let cmd_name = detect_pipe_command();
+            if let Err(e) = hooks::pipe::run(store_arc, session_arc, cmd_name.as_deref()) {
                 eprintln!("[omni] Pipe engine error: {}", e);
                 std::process::exit(1);
             }
