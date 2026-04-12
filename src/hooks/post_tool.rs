@@ -1,4 +1,3 @@
-use crate::distillers;
 use crate::pipeline::toml_filter;
 use crate::pipeline::{DistillResult, Route, SessionState, collapse, scorer};
 use crate::store::sqlite::Store;
@@ -141,11 +140,8 @@ pub fn process_payload(
         (output, filter.name.clone(), None)
     } else {
         // Command-first pipeline: scorer infers ContentType dari command
-        let (segments, content_type) = scorer::score_with_command(
-            &content,
-            clean_command,
-            session_guard.as_deref(),
-        );
+        let (segments, content_type) =
+            scorer::score_with_command(&content, clean_command, session_guard.as_deref());
 
         // Collapse repetitive lines SEBELUM distill (sudah ada, tetap pakai)
         let collapse_result = collapse::collapse(&content, &content_type);
@@ -167,7 +163,15 @@ pub fn process_payload(
             session_guard.as_deref(),
         );
 
-        (output, clean_command.split_whitespace().next().unwrap_or("omni").to_string(), Some(content_type))
+        (
+            output,
+            clean_command
+                .split_whitespace()
+                .next()
+                .unwrap_or("omni")
+                .to_string(),
+            Some(content_type),
+        )
     };
 
     drop(session_guard); // Release lock ASAP sebelum rewind check
@@ -179,11 +183,15 @@ pub fn process_payload(
     if let Some(ref ctype) = ctype {
         // Quick re-score untuk rewind decision (reuse segments dari tadi)
         let check_segments = scorer::score_with_command(&content, clean_command, None).0;
-        let noise_count = check_segments.iter().filter(|s| s.final_score() < 0.3).count();
+        let noise_count = check_segments
+            .iter()
+            .filter(|s| s.final_score() < 0.3)
+            .count();
         let should_store = noise_count as f32 / check_segments.len().max(1) as f32 > 0.4
             && check_segments.len() > 20;
 
-        let dropped_lines: usize = check_segments.iter()
+        let dropped_lines: usize = check_segments
+            .iter()
             .filter(|s| s.final_score() < 0.3)
             .map(|s| s.content.lines().count())
             .sum();
@@ -212,13 +220,15 @@ pub fn process_payload(
         }
 
         // Update session state
-        if let Some(ref lock) = session {
-            if let Ok(mut state) = lock.lock() {
-                if !command.is_empty() { state.add_command(&command); }
-                for seg in &check_segments {
-                    if seg.tier == crate::pipeline::SignalTier::Critical {
-                        state.add_error(&seg.content);
-                    }
+        if let Some(ref lock) = session
+            && let Ok(mut state) = lock.lock()
+        {
+            if !command.is_empty() {
+                state.add_command(&command);
+            }
+            for seg in &check_segments {
+                if seg.tier == crate::pipeline::SignalTier::Critical {
+                    state.add_error(&seg.content);
                 }
             }
         }

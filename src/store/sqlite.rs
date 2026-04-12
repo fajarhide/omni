@@ -4,30 +4,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 
 use crate::paths;
-use crate::pipeline::classifier::classify;
+use crate::pipeline::scorer::command_to_content_type;
 use crate::pipeline::{DistillResult, SessionState};
-
-pub struct FilterStats {
-    pub filter_name: String,
-    pub total_input_bytes: u64,
-    pub total_output_bytes: u64,
-    pub count: u32,
-}
-
-pub struct RouteStats {
-    pub route: String,
-    pub count: u32,
-}
-
-pub struct StoreSummary {
-    pub total_sessions: u32,
-    pub total_distillations: u32,
-    pub total_input_bytes: u64,
-    pub total_output_bytes: u64,
-    pub by_filter: Vec<FilterStats>,
-    pub by_route: Vec<RouteStats>,
-    pub passthrough_commands: Vec<(String, u32)>, // (command, count)
-}
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -196,21 +174,6 @@ impl Store {
             out.push(r?);
         }
         Ok(out)
-    }
-
-    /// Passthrough candidates: commands that went through without filter
-    pub fn passthrough_candidates(&self, since: i64) -> Result<Vec<(String, u64)>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT command, COUNT(*) as cnt FROM distillations WHERE ts >= ?1 AND route = 'Passthrough' AND command != '' GROUP BY command ORDER BY cnt DESC LIMIT 10"
-        )?;
-        let rows = stmt
-            .query_map(params![since], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
     }
 
     /// Hot files for session insight
@@ -443,28 +406,6 @@ impl Store {
         );
     }
 
-    pub fn load_session(&self, session_id: &str) -> Option<SessionState> {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-
-        let state_json: Option<String> = conn
-            .query_row(
-                "SELECT state_json FROM sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .unwrap_or(None);
-
-        if let Some(json) = state_json {
-            serde_json::from_str(&json).ok()
-        } else {
-            None
-        }
-    }
-
     pub fn find_latest_session(&self) -> Option<SessionState> {
         let conn = match self.conn.lock() {
             Ok(c) => c,
@@ -554,7 +495,7 @@ impl Store {
         for row in rows.flatten() {
             let (id, command, old_filter) = row;
             // Re-classify using only command context (input is empty)
-            let new_type = classify("", Some(&command));
+            let new_type = command_to_content_type(&command);
             let new_filter = format!("{:?}", new_type);
 
             if new_filter != old_filter && new_filter != "Unknown" {
@@ -598,7 +539,7 @@ impl Store {
         while let Ok(Some(row)) = rows.next() {
             let cmd: String = row.get(0).unwrap_or_default();
             let old_type: String = row.get(1).unwrap_or_default();
-            let new_type = crate::pipeline::classifier::classify("", Some(&cmd));
+            let new_type = crate::pipeline::scorer::command_to_content_type(&cmd);
             let new_type_str = format!("{:?}", new_type);
             if new_type_str != old_type && new_type_str != "Unknown" {
                 return true;
@@ -607,97 +548,39 @@ impl Store {
         false
     }
 
-    pub fn get_summary(&self, since_secs: i64) -> Result<StoreSummary> {
-        let conn = self.conn.lock().unwrap();
-
-        let ts_threshold = chrono::Utc::now().timestamp() - since_secs;
-
-        let total_sessions: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM sessions WHERE started_at >= ?1",
-            params![ts_threshold],
-            |row| row.get(0),
-        )?;
-
-        let (total_distillations, total_input_bytes, total_output_bytes): (u32, i64, i64) = conn.query_row(
-            "SELECT COUNT(*), COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0) FROM distillations WHERE ts >= ?1",
-            params![ts_threshold],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-
-        let mut by_filter = Vec::new();
-        let mut stmt = conn.prepare(
-            "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0) 
-             FROM distillations WHERE ts >= ?1 GROUP BY grp_name"
-        )?;
-        let rows = stmt.query_map(params![ts_threshold], |row| {
-            Ok(FilterStats {
-                filter_name: row.get(0)?,
-                count: row.get(1)?,
-                total_input_bytes: row.get(2)?,
-                total_output_bytes: row.get(3)?,
-            })
-        })?;
-        for stats in rows.flatten() {
-            by_filter.push(stats);
-        }
-
-        let mut by_route = Vec::new();
-        let mut stmt = conn
-            .prepare("SELECT route, COUNT(*) FROM distillations WHERE ts >= ?1 GROUP BY route")?;
-        let rows = stmt.query_map(params![ts_threshold], |row| {
-            Ok(RouteStats {
-                route: row.get(0)?,
-                count: row.get(1)?,
-            })
-        })?;
-        for stats in rows.flatten() {
-            by_route.push(stats);
-        }
-
-        let mut passthrough_commands = Vec::new();
-        let mut stmt = conn.prepare(
-            "SELECT command, COUNT(*) as c FROM distillations 
-             WHERE ts >= ?1 AND route = 'Passthrough' AND command != '' 
-             GROUP BY command ORDER BY c DESC LIMIT 10",
-        )?;
-        let rows = stmt.query_map(params![ts_threshold], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        for stats in rows.flatten() {
-            passthrough_commands.push(stats);
-        }
-
-        Ok(StoreSummary {
-            total_sessions,
-            total_distillations,
-            total_input_bytes: total_input_bytes as u64,
-            total_output_bytes: total_output_bytes as u64,
-            by_filter,
-            by_route,
-            passthrough_commands,
-        })
-    }
-
-    /// Content type breakdown: (content_type, count, avg_reduction_pct, comma_separated_commands)
-    pub fn content_type_breakdown(&self, since: i64) -> Result<Vec<(String, u64, f64, String)>> {
+    pub fn get_per_command_stats(
+        &self,
+        since: i64,
+        limit: usize,
+    ) -> Result<Vec<(String, u64, f64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT content_type, COUNT(*),
-                    CASE WHEN SUM(input_bytes)=0 THEN 0.0
-                         ELSE ROUND(100.0*(1.0 - CAST(SUM(output_bytes) AS REAL)/SUM(input_bytes)),1) END,
-                    COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN command != '' THEN command END), '[pipe]')
-             FROM distillations WHERE ts >= ?1
-             GROUP BY content_type ORDER BY COUNT(*) DESC",
+            "SELECT
+                command,
+                COUNT(*) as calls,
+                CASE
+                    WHEN SUM(input_bytes) = 0 THEN 0.0
+                    ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
+                END as avg_reduction
+            FROM distillations
+            WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
+            GROUP BY command
+            HAVING avg_reduction > 0
+            ORDER BY calls DESC
+            LIMIT ?2"
         )?;
+
         let rows = stmt
-            .query_map(params![since], |row| {
+            .query_map(params![since, limit as i64], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, u64>(1)?,
                     row.get::<_, f64>(2)?,
-                    row.get::<_, String>(3)?,
                 ))
             })?
             .filter_map(|r| r.ok())
             .collect();
+
         Ok(rows)
     }
 
@@ -898,81 +781,6 @@ mod tests {
     }
 
     #[test]
-    fn test_upsert_session_and_load_session_roundtrip() {
-        let (store, _dir) = get_temp_store();
-        let mut state = SessionState::new();
-        state.inferred_task = Some("fixing bugs".to_string());
-
-        store.upsert_session(&state);
-
-        let loaded = store.load_session(&state.session_id).unwrap();
-        assert_eq!(loaded.inferred_task, Some("fixing bugs".to_string()));
-    }
-
-    #[test]
-    fn test_get_summary_kalkulasi_benar() {
-        let (store, _dir) = get_temp_store();
-
-        let mut state = SessionState::new();
-        state.session_id = "sess_1".to_string();
-        store.upsert_session(&state);
-
-        let res1 = DistillResult {
-            output: "".to_string(),
-            route: crate::pipeline::Route::Keep,
-            filter_name: "f1".to_string(),
-            content_type: ContentType::Unknown,
-            score: 0.9,
-            context_score: 0.1,
-            input_bytes: 100,
-            output_bytes: 50,
-            latency_ms: 10,
-            rewind_hash: None,
-            segments_kept: 1,
-            segments_dropped: 0,
-            collapse_savings: None,
-        };
-        store.record_distillation("sess_1", &res1, "cmd1");
-
-        let res2 = DistillResult {
-            output: "".to_string(),
-            route: crate::pipeline::Route::Keep,
-            filter_name: "f1".to_string(),
-            content_type: ContentType::Unknown,
-            score: 0.9,
-            context_score: 0.1,
-            input_bytes: 200,
-            output_bytes: 50,
-            latency_ms: 10,
-            rewind_hash: None,
-            segments_kept: 1,
-            segments_dropped: 0,
-            collapse_savings: None,
-        };
-        store.record_distillation("sess_1", &res2, "cmd2");
-
-        let summary = store.get_summary(3600).unwrap();
-        assert_eq!(summary.total_sessions, 1);
-        assert_eq!(summary.total_distillations, 2);
-        assert_eq!(summary.total_input_bytes, 300);
-        assert_eq!(summary.total_output_bytes, 100);
-
-        assert_eq!(summary.by_filter.len(), 2);
-        // Groups are "cmd1" and "cmd2"
-        let group_names: Vec<String> = summary
-            .by_filter
-            .iter()
-            .map(|f| f.filter_name.clone())
-            .collect();
-        assert!(group_names.contains(&"cmd1".to_string()));
-        assert!(group_names.contains(&"cmd2".to_string()));
-
-        assert_eq!(summary.by_route.len(), 1);
-        assert_eq!(summary.by_route[0].route, "Keep");
-        assert_eq!(summary.by_route[0].count, 2);
-    }
-
-    #[test]
     fn test_reclassify_historical_data() {
         use crate::pipeline::ContentType;
         let dir = tempfile::tempdir().unwrap();
@@ -996,18 +804,11 @@ mod tests {
         };
         store.record_distillation("s1", &res, "git status");
 
-        // 2. Verify it's Unknown initially
-        let _summary_pre = store.get_summary(3600).unwrap();
-        // Since get_summary uses 'command' if filter_name == '', and our record_distillation sets it...
-        // Wait, get_summary grp_name logic:
-        // CASE WHEN command != '' THEN command ELSE filter_name END as grp_name
-        // This is for the UI grouping. The actual content_type/filter_name is still recorded as 'Unknown'.
-
-        // 3. Run re-classification
+        // 2. Run re-classification
         let count = store.reclassify_historical_data().unwrap();
         assert_eq!(count, 1);
 
-        // 4. Verify the database record itself
+        // 3. Verify the database record itself
         let conn = store.conn.lock().unwrap();
         let final_filter: String = conn
             .query_row("SELECT filter_name FROM distillations LIMIT 1", [], |row| {

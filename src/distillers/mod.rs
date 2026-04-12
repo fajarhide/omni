@@ -12,6 +12,7 @@ pub mod tabular;
 pub mod test;
 
 pub trait Distiller: Send + Sync {
+    #[allow(dead_code)]
     fn content_type(&self) -> ContentType;
     fn distill(
         &self,
@@ -43,51 +44,111 @@ pub fn distill_with_command(
 
     // Git subcommand routing (paling granular — git punya 3 distiller targets)
     if base == "git" {
-        return Box::new(git::GitDistiller).distill(segments, input, session);
+        return git::GitDistiller.distill(segments, input, session);
     }
 
     // Build tools → BuildDistiller
-    if matches!(base, "cargo" | "make" | "cmake" | "gcc" | "g++" | "clang" | "rustc"
-              | "go" | "pip" | "pip3" | "ruff" | "mypy" | "black"
-              | "ruby" | "rake" | "rubocop" | "dotnet" | "gradle" | "mvn") {
+    if matches!(
+        base,
+        "cargo"
+            | "make"
+            | "cmake"
+            | "gcc"
+            | "g++"
+            | "clang"
+            | "rustc"
+            | "go"
+            | "pip"
+            | "pip3"
+            | "ruff"
+            | "mypy"
+            | "black"
+            | "ruby"
+            | "rake"
+            | "rubocop"
+            | "dotnet"
+            | "gradle"
+            | "mvn"
+    ) {
         // Tapi test → TestDistiller
-        if cmd_lower.contains("test") || cmd_lower.contains("pytest")
+        if cmd_lower.contains("test")
+            || cmd_lower.contains("pytest")
             || matches!(base, "pytest" | "rspec" | "phpunit")
         {
-            return Box::new(test::TestDistiller).distill(segments, input, session);
+            return test::TestDistiller.distill(segments, input, session);
         }
-        return Box::new(build::BuildDistiller).distill(segments, input, session);
+        return build::BuildDistiller.distill(segments, input, session);
     }
 
     // JS/TS ecosystem → JsTsDistiller
-    if matches!(base, "vitest" | "playwright" | "tsc" | "eslint" | "prettier"
-              | "jest" | "esbuild" | "vite") {
-        return Box::new(jsts::JsTsDistiller).distill(segments, input, session);
+    if matches!(
+        base,
+        "vitest" | "playwright" | "tsc" | "eslint" | "prettier" | "jest" | "esbuild" | "vite"
+    ) {
+        return jsts::JsTsDistiller.distill(segments, input, session);
     }
     // npm/pnpm/yarn/bun: check subcommand
     if matches!(base, "npm" | "npx" | "pnpm" | "yarn" | "bun") {
-        if cmd_lower.contains("test") || cmd_lower.contains("vitest")
-            || cmd_lower.contains("jest") || cmd_lower.contains("playwright")
+        if cmd_lower.contains("test")
+            || cmd_lower.contains("vitest")
+            || cmd_lower.contains("jest")
+            || cmd_lower.contains("playwright")
         {
-            return Box::new(jsts::JsTsDistiller).distill(segments, input, session);
+            return jsts::JsTsDistiller.distill(segments, input, session);
         }
         // install/build → still JsTs ecosystem (pnpm install, npm run build)
-        return Box::new(jsts::JsTsDistiller).distill(segments, input, session);
+        return jsts::JsTsDistiller.distill(segments, input, session);
     }
 
     // Cloud & infra → CloudDistiller
-    if matches!(base, "docker" | "podman" | "kubectl" | "helm"
-              | "terraform" | "tofu" | "aws" | "gcloud" | "az" | "doctl") {
-        return Box::new(cloud::CloudDistiller).distill(segments, input, session);
+    if matches!(
+        base,
+        "docker"
+            | "podman"
+            | "kubectl"
+            | "helm"
+            | "terraform"
+            | "tofu"
+            | "aws"
+            | "gcloud"
+            | "az"
+            | "doctl"
+    ) {
+        return cloud::CloudDistiller.distill(segments, input, session);
     }
 
     // System ops → SystemOpsDistiller
-    if matches!(base, "ls" | "tree" | "find" | "grep" | "rg" | "ps" | "df"
-              | "du" | "env" | "stat" | "cat" | "head" | "tail" | "curl" | "wget"
-              | "wc" | "sort" | "uniq" | "awk" | "sed" | "tar" | "zip" | "unzip"
-              | "apt" | "apt-get" | "brew" | "yum" | "dnf"
+    if matches!(
+        base,
+        "ls" | "tree"
+            | "find"
+            | "grep"
+            | "rg"
+            | "ps"
+            | "df"
+            | "du"
+            | "env"
+            | "stat"
+            | "cat"
+            | "head"
+            | "tail"
+            | "curl"
+            | "wget"
+            | "wc"
+            | "sort"
+            | "uniq"
+            | "awk"
+            | "sed"
+            | "tar"
+            | "zip"
+            | "unzip"
+            | "apt"
+            | "apt-get"
+            | "brew"
+            | "yum"
+            | "dnf"
     ) {
-        return Box::new(system_ops::SystemOpsDistiller).distill(segments, input, session);
+        return system_ops::SystemOpsDistiller.distill(segments, input, session);
     }
 
     // Phase 2: Fallback to ContentType-based dispatch (existing behavior)
@@ -121,7 +182,21 @@ mod tests {
             #[test]
             fn $name() {
                 let input = include_str!(concat!("../../tests/fixtures/", $file));
-                let segments = scorer::score_segments(input, &$ctype, None);
+                let dummy_cmd = match $ctype {
+                    ContentType::GitDiff => "git diff",
+                    ContentType::GitStatus => "git status",
+                    ContentType::GitLog => "git log",
+                    ContentType::BuildOutput => "cargo build",
+                    ContentType::TestOutput => "cargo test",
+                    ContentType::InfraOutput => "docker build",
+                    ContentType::Cloud => "kubectl get pods",
+                    ContentType::SystemOps => "ls",
+                    ContentType::JsTs => "vitest",
+                    ContentType::LogOutput => "cat",
+                    ContentType::TabularData => "cat",
+                    _ => "",
+                };
+                let (segments, _) = scorer::score_with_command(input, dummy_cmd, None);
                 let distiller = get_distiller(&$ctype);
                 let output = distiller.distill(&segments, input, None);
 

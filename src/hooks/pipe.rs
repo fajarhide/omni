@@ -4,9 +4,7 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::pipeline::{
-    ContentType, Route, SessionState, collapse, scorer, toml_filter,
-};
+use crate::pipeline::{ContentType, Route, SessionState, collapse, scorer, toml_filter};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
@@ -203,7 +201,8 @@ fn distill(
                 &effective_input,
                 cmd,
                 session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-            ).0
+            )
+            .0
         } else {
             segments
         };
@@ -218,7 +217,10 @@ fn distill(
         );
 
         // Rewind decision — inline (no composer needed)
-        let noise_count = final_segments.iter().filter(|s| s.final_score() < 0.3).count();
+        let noise_count = final_segments
+            .iter()
+            .filter(|s| s.final_score() < 0.3)
+            .count();
         let should_store = noise_count as f32 / final_segments.len().max(1) as f32 > 0.4
             && final_segments.len() > 20;
         let d_count = noise_count;
@@ -254,7 +256,14 @@ fn distill(
             out.push_str("\n[OMNI: output truncated]\n");
         }
 
-        (out, cmd.split_whitespace().next().unwrap_or("omni").to_string(), c, r_hash, k_count, d_count)
+        (
+            out,
+            cmd.split_whitespace().next().unwrap_or("omni").to_string(),
+            c,
+            r_hash,
+            k_count,
+            d_count,
+        )
     };
 
     PipelineResult {

@@ -21,53 +21,129 @@ pub fn command_to_content_type(command: &str) -> ContentType {
         let parts: Vec<&str> = cmd_lower.split_whitespace().collect();
         let sub = parts.get(1).copied().unwrap_or("");
         return match sub {
-            "diff" | "show" | "whatchanged" | "status" => {
-                if cmd_lower.contains("--stat") { ContentType::GitStatus }
-                else { ContentType::GitDiff }
+            "diff" | "show" | "whatchanged" => {
+                if cmd_lower.contains("--stat") {
+                    ContentType::GitStatus
+                } else {
+                    ContentType::GitDiff
+                }
             }
             "log" | "shortlog" | "reflog" => ContentType::GitLog,
             _ => ContentType::GitStatus, // status, branch, tag, remote, stash, config, checkout
         };
     }
 
-    // Build tools
-    if matches!(base, "cargo" | "rustc" | "make" | "cmake" | "gcc" | "g++" | "clang") {
-        return ContentType::BuildOutput;
-    }
-    if base == "go" && cmd_lower.contains("build") { return ContentType::BuildOutput; }
-    if base == "go" && cmd_lower.contains("test")  { return ContentType::TestOutput; }
-
-    // Test runners
+    // Test runners (must be before generic build tools to catch cargo test and go test)
     if matches!(base, "pytest" | "rspec" | "phpunit" | "jest") {
         return ContentType::TestOutput;
     }
-    if base == "cargo" && cmd_lower.contains("test") { return ContentType::TestOutput; }
+    if base == "cargo" && cmd_lower.contains("test") {
+        return ContentType::TestOutput;
+    }
+    if base == "go" && cmd_lower.contains("test") {
+        return ContentType::TestOutput;
+    }
+
+    // Build tools
+    if matches!(
+        base,
+        "cargo" | "rustc" | "make" | "cmake" | "gcc" | "g++" | "clang"
+    ) {
+        return ContentType::BuildOutput;
+    }
+    if base == "go" && cmd_lower.contains("build") {
+        return ContentType::BuildOutput;
+    }
 
     // JS/TS toolchain
-    if matches!(base, "vitest" | "playwright" | "tsc" | "eslint" | "prettier"
-              | "node" | "npm" | "npx" | "yarn" | "pnpm" | "bun" | "esbuild" | "vite") {
+    if matches!(
+        base,
+        "vitest"
+            | "playwright"
+            | "tsc"
+            | "eslint"
+            | "prettier"
+            | "node"
+            | "npm"
+            | "npx"
+            | "yarn"
+            | "pnpm"
+            | "bun"
+            | "esbuild"
+            | "vite"
+    ) {
         return ContentType::JsTs;
     }
 
     // Cloud & infra
-    if matches!(base, "docker" | "podman" | "kubectl" | "helm"
-              | "terraform" | "tofu" | "aws" | "gcloud" | "az" | "doctl") {
+    if matches!(
+        base,
+        "docker"
+            | "podman"
+            | "kubectl"
+            | "helm"
+            | "terraform"
+            | "tofu"
+            | "aws"
+            | "gcloud"
+            | "az"
+            | "doctl"
+    ) {
         return ContentType::Cloud;
     }
 
     // System ops — 85+ commands (lightweight: just match base)
-    if matches!(base,
-        "ls" | "tree" | "find" | "grep" | "rg" | "awk" | "sed" | "cat" | "head" | "tail"
-      | "ps" | "top" | "htop" | "df" | "du" | "env" | "printenv" | "which" | "stat"
-      | "curl" | "wget" | "ping" | "ip" | "netstat" | "ss" | "lsof"
-      | "tar" | "gzip" | "zip" | "unzip" | "chmod" | "chown" | "wc" | "sort" | "uniq"
-      | "apt" | "apt-get" | "yum" | "dnf" | "brew" | "pacman"
+    if matches!(
+        base,
+        "ls" | "tree"
+            | "find"
+            | "grep"
+            | "rg"
+            | "awk"
+            | "sed"
+            | "cat"
+            | "head"
+            | "tail"
+            | "ps"
+            | "top"
+            | "htop"
+            | "df"
+            | "du"
+            | "env"
+            | "printenv"
+            | "which"
+            | "stat"
+            | "curl"
+            | "wget"
+            | "ping"
+            | "ip"
+            | "netstat"
+            | "ss"
+            | "lsof"
+            | "tar"
+            | "gzip"
+            | "zip"
+            | "unzip"
+            | "chmod"
+            | "chown"
+            | "wc"
+            | "sort"
+            | "uniq"
+            | "apt"
+            | "apt-get"
+            | "yum"
+            | "dnf"
+            | "brew"
+            | "pacman"
     ) {
         return ContentType::SystemOps;
     }
 
     // Python tools
-    if matches!(base, "pip" | "pip3" | "poetry" | "uv" | "ruff" | "mypy" | "black") {
+    if matches!(
+        base,
+        "pip" | "pip3" | "poetry" | "uv" | "ruff" | "mypy" | "black"
+    ) {
         return ContentType::BuildOutput;
     }
 

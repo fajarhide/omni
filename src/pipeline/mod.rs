@@ -1,6 +1,5 @@
-pub mod classifier;
 pub mod collapse;
-pub mod composer;
+
 pub mod scorer;
 pub mod toml_filter;
 

@@ -156,6 +156,11 @@ fn main() {
             // Legacy flag — route through dispatcher
             let (store, session) = init_globals();
             if let (Some(s), Some(ss)) = (store, session) {
+                // Background cleanup to prevent DB bloating
+                let s_clone = Arc::clone(&s);
+                std::thread::spawn(move || {
+                    s_clone.cleanup_old(30); // keep last 30 days
+                });
                 let _ = hooks::dispatcher::run(s, ss);
             }
         }
