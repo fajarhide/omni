@@ -71,7 +71,7 @@ flowchart TD
     Work --> Learn
 
     subgraph Learn [When Output Isn't Filtered Well]
-        LearnStatus["omni learn --discover"] --> DryRun["omni learn --dry-run"]
+        LearnDiscover["omni learn --discover"] --> DryRun["omni learn --dry-run"]
         DryRun --> Apply["omni learn --apply"]
     end
 
