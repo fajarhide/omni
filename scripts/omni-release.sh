@@ -35,7 +35,7 @@ fi
 ok "Cargo.toml version: $CARGO_VERSION"
 
 # 2. Verify version in openclaw.plugin.json
-OPENCLAW_VERSION=$(grep '^version' integrations/openclaw/openclaw.plugin.json | head -1 | sed 's/version = "\(.*\)"/\1/')
+OPENCLAW_VERSION=$(grep '"version":' integrations/openclaw/openclaw.plugin.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
 if [ "$OPENCLAW_VERSION" != "$VERSION" ]; then
     fail "openclaw.plugin.json version ($OPENCLAW_VERSION) ≠ release version ($VERSION)\n  Fix: edit openclaw.plugin.json version field, or run: ./scripts/bump_version.sh $VERSION"
 fi

@@ -32,7 +32,7 @@ rm -f Cargo.toml.bak
 cargo check --quiet 2>/dev/null || true
 
 # 4. Update openclaw plugin version
-sed -i.bak "s/^version = \".*\"/version = \"$NEW\"/" integrations/openclaw/openclaw.plugin.json
+sed -i.bak 's/"version": ".*"/"version": "'$NEW'"/' integrations/openclaw/openclaw.plugin.json
 rm -f integrations/openclaw/openclaw.plugin.json.bak
 
 # 5. Verify build

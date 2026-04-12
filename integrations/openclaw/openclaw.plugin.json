@@ -1,7 +1,7 @@
 {
   "id": "omni-signal-engine",
   "name": "OMNI Signal Engine",
-  "version": "0.5.6-rc1",
+  "version": "0.5.6-rc2",
   "description": "Intelligent context filtering for OpenClaw using OMNI. Saves tokens by distilling shell output.",
   "author": "OMNI Team",
   "configSchema": {
