@@ -14,12 +14,12 @@ This plugin provides a secure bridge between your OpenClaw agent and the [OMNI S
 
 ### Installation
 
-**Option A: via ClawHub (Recommended)**
+**via ClawHub (Recommended)**
 ```bash
-clawhub install omni-signal-engine
+openclaw plugins install clawhub:@fajarhide/omni-signal-engine
 ```
 
-**Option B: Manual Install**
+**Manual Install**
 1. Clone or copy the OMNI repository.
 2. Navigate to the OMNI directory.
 3. Install the plugin into OpenClaw:
