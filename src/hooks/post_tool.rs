@@ -100,7 +100,6 @@ pub fn process_payload(
     let parsed: HookInput = match serde_json::from_str(input_str) {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("[omni] parse error");
             return None;
         }
     };

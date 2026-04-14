@@ -190,20 +190,30 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         candidates.len().to_string().yellow().bold()
     );
 
+    // Header Table
+    println!(
+        "    {: <4} {: <10} {: <45} {: <8}",
+        "#".bright_black(),
+        "ACTION".bright_black(),
+        "PATTERN PREVIEW".bright_black(),
+        "COUNT".bright_black()
+    );
+    println!("    {}", "─".repeat(70).bright_black());
+
     for (i, c) in candidates.iter().enumerate() {
-        let action = format!("[{:?}]", c.suggested_action).to_lowercase();
+        let action = format!("{:?}", c.suggested_action).to_lowercase();
         let mut preview = c.trigger_prefix.clone();
-        if preview.len() > 60 {
-            preview.truncate(57);
+        if preview.len() > 42 {
+            preview.truncate(39);
             preview.push_str("...");
         }
 
         println!(
-            "  {:>2}. {: <8} {: <60} ({}x)",
-            i + 1,
+            "    {:02}. {: <10} {: <45} {: <8}",
+            (i + 1).to_string().bright_black(),
             action.cyan(),
             preview.bright_white(),
-            c.count.to_string().yellow()
+            format!("{}x", c.count).yellow()
         );
     }
 
@@ -220,14 +230,15 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
         for (i, rule) in correction_rules.iter().take(5).enumerate() {
             println!(
-                "  {:>2}. {: <25} → {: <25} ({}x)",
-                i + 1,
+                "    {:02}. {: <25} → {: <25} ({}x)",
+                (i + 1).to_string().bright_black(),
                 rule.wrong_pattern.red(),
                 rule.right_pattern.green(),
-                rule.occurrences.to_string().yellow()
+                format!("{}x", rule.occurrences).yellow()
             );
             println!(
-                "      Cause: {} | Base: {}",
+                "        {} {} | Base: {}",
+                "Cause:".bright_black(),
                 rule.error_type.as_str().bright_black(),
                 rule.base_command.bright_black()
             );
@@ -281,11 +292,30 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 added,
                 path
             );
+
+            // AUTO-CLEAR QUEUE after successful apply
+            if use_queue {
+                let queue_path = crate::paths::omni_home().join("learn_queue.jsonl");
+                if queue_path.exists() {
+                    let _ = fs::write(&queue_path, ""); // Truncate the file
+                    println!(
+                        "  {} Learning queue cleared. {} pending samples processed.",
+                        "✨".bright_white(),
+                        executions.len().to_string().yellow()
+                    );
+                }
+            }
+
             println!(
                 "{}",
                 "─────────────────────────────────────────"
                     .bright_black()
                     .bold()
+            );
+        } else {
+            println!(
+                "  {} No new patterns to apply (all already exist).",
+                "ℹ".blue()
             );
         }
     } else {
