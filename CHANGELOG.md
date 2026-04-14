@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6-rc3] - 2026-04-14
+
+### Added
+- **Database Distiller**: New `DatabaseDistiller` for intelligent distillation of PostgreSQL, MySQL, and SQLite CLI output — strips verbose headers and retains only actionable error signals.
+- **Security Distiller**: New `SecurityDistiller` for CVE scanners (Trivy, Snyk, Semgrep) — collapses verbose scan reports into concise vulnerability summaries.
+- **VCS Distiller**: New `VcsDistiller` for version control tools beyond Git (Mercurial, SVN) with output-aware heuristics.
+- **Expanded Tool Registry**: Added granular `cargo` subcommand support and new tool categories for Database, Mobile, Cloud, and CI/CD toolchains with accurate distiller routing.
+
+### Improved
+- **Robust RegEx Generation (`omni learn`)**: Fixed a critical bug where auto-learned numeric patterns used literal `#` instead of functional `\d+` in generated TOML filters. Now delegates TOML string escaping to the `toml` crate for correctness.
+- **Enhanced Verify Report (`omni learn --verify`)**: Results are now grouped by source (Built-in vs. User), with clear per-category pass/fail counts and actionable tips when user-learned filters fail.
+- **Auto-Clear Learn Queue**: `omni learn --apply` now automatically clears `~/.omni/learn_queue.jsonl` after successful application, preventing stale data from polluting subsequent `--discover` runs.
+- **Premium Discover Table (`omni learn --discover`)**: Replaced raw text output with a structured `comfy-table` layout featuring color-coded actions (Strip/Count) and pattern previews.
+- **Doctor Filter Diagnostics**: `omni doctor` now reports specific warnings for skipped filters (e.g., missing `match_command`) instead of generic error messages, and `--fix` can auto-repair invalid TOML files.
+- **Distiller Robustness**: Replaced strict prefix checks with case-insensitive substring matching across all distillers for more reliable command detection.
+- **Filter Loading**: Made `match_command` optional in `FilterConfig`, gracefully skipping filters with empty or missing patterns instead of crashing.
+
+### Fixed
+- **Test Regression (`test_claude_code_stdout_format`)**: Resolved a persistent CI failure caused by state contamination from user-learned filters leaking into the test environment.
+- **Stats UX Hint**: Added `--all-commands` usage hint to `omni stats` when showing truncated top-10 results.
+
 ## [0.5.6-rc2] - 2026-04-12
 
 ### Added
