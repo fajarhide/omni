@@ -255,17 +255,17 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     ToolProfile::default()
 }
 
-/// Untuk command chains (&&, ||, |, ;), return profile dari command paling relevan.
-/// "Paling relevan" = command terakhir yang bukan pipe filter sederhana,
-/// atau command pertama jika semua sama pentingnya.
-///
-/// Contoh:
-///   "cargo build && ./app"      → profile dari "cargo build"
-///   "npm install && npm test"   → profile dari "npm test" (test lebih spesifik)
-///   "cat file.log | grep error" → profile dari "grep" (spesifik, bukan cat)
-///   "cd /project && ls -la"     → profile dari "ls" (action command)
+/// For command chains (&&, ||, |, ;), return the profile of the most relevant command.
+/// “Most relevant” = the last command that is not a simple pipe filter,
+/// or the first command if all are equally important.
+
+/// Example:
+///   "cargo build && ./app"      → profile from "cargo build"
+///   "npm install && npm test"   → profile from "npm test" (test more spesifik)
+///   "cat file.log | grep error" → profile from "grep" (spesifik, not cat)
+///   "cd /project && ls -la"     → profile from "ls" (action command)
 pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
-    // Split on shell operators (sederhana, tidak handle nested quotes)
+    // Split on shell operators 
     let segments: Vec<&str> = command
         .split(|c| c == '|' || c == '&' || c == ';')
         .map(|s| s.trim())

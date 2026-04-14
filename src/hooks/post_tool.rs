@@ -143,7 +143,7 @@ pub fn process_payload(
         (output, filter.name.clone())
     } else {
         // Pure Command Architecture: Resolve profile once
-        let profile = crate::pipeline::registry::resolve_profile(clean_command);
+        let profile = crate::pipeline::registry::resolve_profile_for_chain(clean_command);
 
         // 1. Initial Scoring (to evaluate learning/stats)
         let segments =
