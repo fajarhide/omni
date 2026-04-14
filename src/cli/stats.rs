@@ -484,7 +484,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 println!(
                     "\n   {}",
                     format!(
-                        "Showing top 10 of {} commands with active savings.",
+                        "Showing top 10 of {} commands with active savings. --all-commands to see all",
                         filtered_count
                     )
                     .bright_black()

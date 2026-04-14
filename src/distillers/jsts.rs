@@ -112,7 +112,9 @@ fn distill_vitest(input: &str) -> String {
     // Attempt to parse formal summary first
     for line in &lines {
         let t = line.trim();
-        if t.starts_with("Tests  ") {
+        let t_lower = t.to_lowercase();
+        if t_lower.contains("tests ") && (t_lower.contains("failed") || t_lower.contains("passed"))
+        {
             has_summary = true;
             // E.g., "Tests  3 failed | 48 passed (51)"
             let parts: Vec<&str> = t.split('|').collect();
@@ -139,8 +141,8 @@ fn distill_vitest(input: &str) -> String {
 
         // Find failed tests: " ✗ src/services/__tests__/api.test.ts:47:12" or "   ✗ should handle rate limiting"
         // Look for deeper trace points
-        if t.starts_with('❯') && t.contains(':') {
-            let trace = t.trim_start_matches('❯').trim();
+        if t.contains('❯') && t.contains(':') {
+            let trace = t[t.find('❯').unwrap()..].trim_start_matches('❯').trim();
             // take basename:line
             if let Some(slash_idx) = trace.rfind('/') {
                 let rest = &trace[slash_idx + 1..];
@@ -270,7 +272,7 @@ fn distill_tsc(input: &str) -> String {
             if !file_display.is_empty() {
                 by_file.entry(file_display).or_default().push(issue_display);
             }
-        } else if t.starts_with("Found ") && t.contains(" error") {
+        } else if t.to_lowercase().contains("found ") && t.to_lowercase().contains(" error") {
             // "Found 5 errors"
             if let Some(num) = t
                 .split_whitespace()
@@ -328,7 +330,7 @@ fn distill_playwright(input: &str) -> String {
     for line in &lines {
         let t = line.trim();
         // Look for: ✗  9 [chromium] › tests/login.spec.ts:20:1 › submits valid credentials (5.0s)
-        if t.starts_with('✗') && t.contains(" › ") {
+        if t.contains('✗') && t.contains(" › ") {
             // Extract file:line and test name
             let parts: Vec<&str> = t.split(" › ").collect();
             if parts.len() >= 3 {
@@ -411,9 +413,10 @@ fn distill_eslint(input: &str) -> String {
 
     for line in input.lines() {
         let t = line.trim();
+        let t_lower = t.to_lowercase();
 
         // Skip empty or summary lines
-        if t.is_empty() || t.starts_with("✖") || t.starts_with("Checking") {
+        if t.is_empty() || t.contains('✖') || t_lower.contains("checking") {
             // But still parse summary counts
             if t.contains("problems (") {
                 if let Some(err_idx) = t.find(" errors") {

@@ -4,3 +4,4 @@ expression: output
 ---
 Tests: 0 passed, 1 failed
 FAILED tests/test_omni.py::test_failure - assert 1 == 2
+========================= 1 failed, 2 passed in 0.05s ==========================

@@ -90,26 +90,66 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bold()
                 .bright_white()
         );
-        let report = crate::pipeline::toml_filter::run_inline_tests(
-            crate::pipeline::toml_filter::load_all_filters(),
+        let all_filters = crate::pipeline::toml_filter::load_all_filters();
+        let report = crate::pipeline::toml_filter::run_inline_tests(all_filters);
+
+        let (mut built_in_fails, mut user_fails) = (0, 0);
+        let (mut built_in_total, mut user_total) = (0, 0);
+
+        for filter in all_filters {
+            let count = filter.inline_tests.len();
+            if filter.name.starts_with("sys_") {
+                built_in_total += count;
+            } else {
+                user_total += count;
+            }
+        }
+
+        for fail in &report.failures {
+            if fail.contains("Filter 'sys_") {
+                built_in_fails += 1;
+            } else {
+                user_fails += 1;
+            }
+        }
+
+        let total_tests = built_in_total + user_total;
+        let total_passes = report.passes;
+
+        println!(
+            "  Total Tests: {} ({} passed, {} failed)",
+            total_tests,
+            total_passes,
+            report.failures.len()
         );
-        let total = report.passes + report.failures.len();
-
-        let status = if report.failures.is_empty() {
-            "ALL PASSED".green()
-        } else {
-            "FAILURES DETECTED".red()
-        };
-
-        println!("  Status:  {} ({} / {})", status, report.passes, total);
+        println!(
+            "  - Built-in:  {} tests ({} failed)",
+            built_in_total, built_in_fails
+        );
+        println!(
+            "  - User:      {} tests ({} failed)",
+            user_total, user_fails
+        );
 
         if !report.failures.is_empty() {
-            println!("\n{}", "Details:".bold().red());
+            println!("\n{}", "Failure Details:".bold().red());
             for f in report.failures {
                 println!("  {} {}", "✗".red(), f);
             }
+            if user_fails > 0 {
+                println!(
+                    "\n{}",
+                    "TIP: Learned filters often fail if the noise pattern has changed. You can clear them by deleting ~/.omni/filters/learned.toml"
+                        .dimmed()
+                );
+            }
+        } else {
+            println!(
+                "\n{}",
+                "✓ All loaded filters pass their inline tests!".green()
+            );
         }
-        println!();
+
         return Ok(());
     }
 
@@ -190,20 +230,30 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         candidates.len().to_string().yellow().bold()
     );
 
+    // Header Table
+    println!(
+        "    {: <4} {: <10} {: <45} {: <8}",
+        "#".bright_black(),
+        "ACTION".bright_black(),
+        "PATTERN PREVIEW".bright_black(),
+        "COUNT".bright_black()
+    );
+    println!("    {}", "─".repeat(70).bright_black());
+
     for (i, c) in candidates.iter().enumerate() {
-        let action = format!("[{:?}]", c.suggested_action).to_lowercase();
+        let action = format!("{:?}", c.suggested_action).to_lowercase();
         let mut preview = c.trigger_prefix.clone();
-        if preview.len() > 60 {
-            preview.truncate(57);
+        if preview.len() > 42 {
+            preview.truncate(39);
             preview.push_str("...");
         }
 
         println!(
-            "  {:>2}. {: <8} {: <60} ({}x)",
-            i + 1,
+            "    {:02}. {: <10} {: <45} {: <8}",
+            (i + 1).to_string().bright_black(),
             action.cyan(),
             preview.bright_white(),
-            c.count.to_string().yellow()
+            format!("{}x", c.count).yellow()
         );
     }
 
@@ -220,14 +270,15 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
         for (i, rule) in correction_rules.iter().take(5).enumerate() {
             println!(
-                "  {:>2}. {: <25} → {: <25} ({}x)",
-                i + 1,
+                "    {:02}. {: <25} → {: <25} ({}x)",
+                (i + 1).to_string().bright_black(),
                 rule.wrong_pattern.red(),
                 rule.right_pattern.green(),
-                rule.occurrences.to_string().yellow()
+                format!("{}x", rule.occurrences).yellow()
             );
             println!(
-                "      Cause: {} | Base: {}",
+                "        {} {} | Base: {}",
+                "Cause:".bright_black(),
                 rule.error_type.as_str().bright_black(),
                 rule.base_command.bright_black()
             );
@@ -281,11 +332,30 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 added,
                 path
             );
+
+            // AUTO-CLEAR QUEUE after successful apply
+            if use_queue {
+                let queue_path = crate::paths::omni_home().join("learn_queue.jsonl");
+                if queue_path.exists() {
+                    let _ = fs::write(&queue_path, ""); // Truncate the file
+                    println!(
+                        "  {} Learning queue cleared. {} pending samples processed.",
+                        "✨".bright_white(),
+                        executions.len().to_string().yellow()
+                    );
+                }
+            }
+
             println!(
                 "{}",
                 "─────────────────────────────────────────"
                     .bright_black()
                     .bold()
+            );
+        } else {
+            println!(
+                "  {} No new patterns to apply (all already exist).",
+                "ℹ".blue()
             );
         }
     } else {

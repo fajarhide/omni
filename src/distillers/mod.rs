@@ -2,11 +2,14 @@ use crate::pipeline::OutputSegment;
 
 pub mod build;
 pub mod cloud;
+pub mod database;
 pub mod generic;
 pub mod git;
 pub mod jsts;
+pub mod security;
 pub mod system_ops;
 pub mod test;
+pub mod vcs;
 
 pub trait Distiller: Send + Sync {
     fn distill(
@@ -40,6 +43,43 @@ pub fn distill_with_command(
     // Git subcommand routing
     if base == "git" {
         return git::GitDistiller.distill(segments, input, session);
+    }
+
+    // Database tools
+    if matches!(base, "psql" | "mysql" | "sqlite3" | "pg_dump" | "redis-cli") {
+        return database::DatabaseDistiller.distill(segments, input, session);
+    }
+
+    // Security scanners
+    if matches!(
+        base,
+        "semgrep" | "trivy" | "snyk" | "hadolint" | "gosec" | "bandit"
+    ) {
+        return security::SecurityDistiller.distill(segments, input, session);
+    }
+
+    // GitHub/VCS CLIs
+    if matches!(base, "gh" | "hub" | "glab") {
+        return vcs::VcsDistiller.distill(segments, input, session);
+    }
+
+    // Java/JVM — use BuildDistiller (sudah ada)
+    if matches!(
+        base,
+        "java" | "javac" | "mvn" | "mvnw" | "gradle" | "gradlew"
+    ) {
+        if cmd_lower.contains("test") {
+            return test::TestDistiller.distill(segments, input, session);
+        }
+        return build::BuildDistiller.distill(segments, input, session);
+    }
+
+    // Flutter/Dart
+    if matches!(base, "flutter" | "dart") {
+        if cmd_lower.contains("test") || cmd_lower.contains("analyze") {
+            return test::TestDistiller.distill(segments, input, session);
+        }
+        return build::BuildDistiller.distill(segments, input, session);
     }
 
     // Build tools → BuildDistiller
@@ -238,4 +278,15 @@ mod tests {
         "playwright test"
     );
     snapshot_test!(test_jsts_eslint, "eslint_errors.txt", "eslint");
+
+    snapshot_test!(
+        test_database_psql_error,
+        "psql_error.txt",
+        "psql -U postgres mydb"
+    );
+    snapshot_test!(
+        test_security_trivy_scan,
+        "trivy_output.txt",
+        "trivy image myapp:latest"
+    );
 }

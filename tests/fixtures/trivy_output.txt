@@ -1,0 +1,6 @@
+2024-04-14T00:00:00Z INFO Vulnerability scanning is enabled
+my-image:latest (alpine 3.19.0)
+Total: 3 (CRITICAL: 1, HIGH: 1, MEDIUM: 0, LOW: 1)
+CRITICAL CVE-2023-1234 libssl vulnerabilities found
+HIGH CVE-2023-5678 libcrypto issue detected
+LOW CVE-2024-0001 sqlite minor issue

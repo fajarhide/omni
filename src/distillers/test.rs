@@ -21,7 +21,9 @@ impl Distiller for TestDistiller {
             {
                 failed += 1;
                 // Avoid pushing pure summary lines as failure details if they are just the aggregate count
-                if !seg.content.starts_with("FAILED tests/") && !seg.content.starts_with("===") {
+                if !seg.content.to_lowercase().contains("failed tests/")
+                    && !seg.content.contains("===")
+                {
                     failure_details.push(seg.content.clone());
                 }
             } else if seg.tier == SignalTier::Important
@@ -35,7 +37,10 @@ impl Distiller for TestDistiller {
 
         // Try to find explicit summary in input
         for line in input.lines() {
-            if line.starts_with("FAILED ") && !failure_details.contains(&line.to_string()) {
+            let lower = line.to_lowercase();
+            if (lower.contains("failed") || lower.contains("error:") || lower.contains("err "))
+                && !failure_details.contains(&line.to_string())
+            {
                 failure_details.push(line.to_string());
             }
         }

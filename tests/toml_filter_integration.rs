@@ -14,7 +14,7 @@ use std::path::Path;
 fn load_filters() -> Vec<omni::pipeline::toml_filter::TomlFilter> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let filters_dir = Path::new(&manifest_dir).join("filters");
-    omni::pipeline::toml_filter::load_from_dir(&filters_dir)
+    omni::pipeline::toml_filter::load_from_dir(&filters_dir).filters
 }
 
 /// Find a filter by exact name.

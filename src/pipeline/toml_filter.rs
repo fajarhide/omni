@@ -21,7 +21,7 @@ struct TomlDocument {
 #[derive(Debug, Deserialize)]
 struct FilterConfig {
     description: Option<String>,
-    match_command: String,
+    match_command: Option<String>,
     #[serde(default)]
     strip_ansi: bool,
     #[serde(default = "default_confidence")]
@@ -96,6 +96,11 @@ pub struct MatchOutputRule {
 pub struct TestReport {
     pub passes: usize,
     pub failures: Vec<String>,
+}
+
+pub struct LoadReport {
+    pub filters: Vec<TomlFilter>,
+    pub warnings: Vec<String>,
 }
 
 impl TomlFilter {
@@ -177,7 +182,8 @@ impl TomlFilter {
     }
 }
 
-pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
+pub fn load_from_file(path: &Path) -> Result<LoadReport> {
+    let mut warnings = Vec::new();
     let content =
         fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
 
@@ -185,23 +191,31 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
         .with_context(|| format!("Failed to parse TOML in {}", path.display()))?;
 
     if doc.schema_version > 1 {
-        eprintln!(
-            "[omni] Warning: parsing newer TOML schema version {} in {}",
+        warnings.push(format!(
+            "newer TOML schema version {} in {}",
             doc.schema_version,
             path.display()
-        );
+        ));
     }
 
-    let mut results = Vec::new();
+    let mut filters_result = Vec::new();
 
     if let Some(filters) = doc.filters {
         let mut tests_map = doc.tests.unwrap_or_default();
 
         for (name, config) in filters {
-            let match_regex = match Regex::new(&config.match_command) {
+            let cmd_pattern = match config.match_command {
+                Some(ref c) if !c.is_empty() => c,
+                _ => {
+                    warnings.push(format!("skip filter '{}': missing match_command", name));
+                    continue;
+                }
+            };
+
+            let match_regex = match Regex::new(cmd_pattern) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("[omni] skip invalid regex in filter '{}': {}", name, e);
+                    warnings.push(format!("skip invalid regex in filter '{}': {}", name, e));
                     continue;
                 }
             };
@@ -212,10 +226,10 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
                 match Regex::new(&rr.pattern) {
                     Ok(r) => replace_rules.push((r, rr.replacement)),
                     Err(e) => {
-                        eprintln!(
-                            "[omni] skip invalid replace regex in filter '{}': {}",
+                        warnings.push(format!(
+                            "skip invalid replace regex in filter '{}': {}",
                             name, e
-                        );
+                        ));
                         replace_failed = true;
                         break;
                     }
@@ -231,10 +245,10 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
                 let pattern = match Regex::new(&mo.pattern) {
                     Ok(r) => r,
                     Err(e) => {
-                        eprintln!(
-                            "[omni] skip invalid match_output pattern in '{}': {}",
+                        warnings.push(format!(
+                            "skip invalid match_output pattern in '{}': {}",
                             name, e
-                        );
+                        ));
                         mo_failed = true;
                         break;
                     }
@@ -243,10 +257,10 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
                     Some(u) => match Regex::new(&u) {
                         Ok(r) => Some(r),
                         Err(e) => {
-                            eprintln!(
-                                "[omni] skip invalid match_output unless in '{}': {}",
+                            warnings.push(format!(
+                                "skip invalid match_output unless in '{}': {}",
                                 name, e
-                            );
+                            ));
                             mo_failed = true;
                             break;
                         }
@@ -266,13 +280,29 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
             let line_filter = if let Some(strips) = config.strip_lines_matching {
                 let mut rules = Vec::new();
                 for s in strips {
-                    rules.push(Regex::new(&s).unwrap());
+                    match Regex::new(&s) {
+                        Ok(r) => rules.push(r),
+                        Err(e) => {
+                            warnings.push(format!(
+                                "skip invalid strip regex in filter '{}': {}",
+                                name, e
+                            ));
+                        }
+                    }
                 }
                 LineFilter::Strip(rules)
             } else if let Some(keeps) = config.keep_lines_matching {
                 let mut rules = Vec::new();
                 for k in keeps {
-                    rules.push(Regex::new(&k).unwrap());
+                    match Regex::new(&k) {
+                        Ok(r) => rules.push(r),
+                        Err(e) => {
+                            warnings.push(format!(
+                                "skip invalid keep regex in filter '{}': {}",
+                                name, e
+                            ));
+                        }
+                    }
                 }
                 LineFilter::Keep(rules)
             } else {
@@ -281,7 +311,7 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
 
             let inline_tests = tests_map.remove(&name).unwrap_or_default();
 
-            results.push(TomlFilter {
+            filters_result.push(TomlFilter {
                 name,
                 description: config.description,
                 match_regex,
@@ -297,13 +327,63 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
         }
     }
 
-    Ok(results)
+    Ok(LoadReport {
+        filters: filters_result,
+        warnings,
+    })
 }
 
-pub fn load_from_dir(dir: &Path) -> Vec<TomlFilter> {
+/// Intelligent Repair for Filter TOMLs
+pub fn try_repair_file(path: &Path) -> Result<bool> {
+    let content = fs::read_to_string(path)?;
+    let mut repaired = content.clone();
+    let mut changed = false;
+
+    // 1. Missing schema_version (Hard requirement for TomlDocument)
+    if !repaired.contains("schema_version") {
+        repaired = format!("schema_version = 1\n\n{}", repaired);
+        changed = true;
+    }
+
+    // 2. Dangerous catch-all patterns
+    if repaired.contains("match_command = \".*\"") {
+        repaired = repaired.replace(
+            "match_command = \".*\"",
+            "# match_command = \".*\" # [OMNI: disabled because it intercepts all commands]",
+        );
+        changed = true;
+    }
+
+    // 3. Simple syntax cleanups
+    // Trim trailing whitespace on every line to avoid some weirdness
+    let cleaned: Vec<String> = repaired.lines().map(|l| l.trim_end().to_string()).collect();
+    repaired = cleaned.join("\n");
+
+    // 4. Try to parse with standard toml crate to verify structural integrity
+    match toml::from_str::<TomlDocument>(&repaired) {
+        Ok(_) => {
+            if changed || repaired != content {
+                fs::write(path, repaired)?;
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        Err(_) => {
+            // Still broken. We fallback to backup in doctor.rs if it's still syntactically invalid.
+            Ok(false)
+        }
+    }
+}
+
+pub fn load_from_dir(dir: &Path) -> LoadReport {
     let mut all_filters = Vec::new();
+    let mut all_warnings = Vec::new();
+
     if !dir.exists() || !dir.is_dir() {
-        return all_filters;
+        return LoadReport {
+            filters: all_filters,
+            warnings: all_warnings,
+        };
     }
 
     if let Ok(entries) = fs::read_dir(dir) {
@@ -311,19 +391,27 @@ pub fn load_from_dir(dir: &Path) -> Vec<TomlFilter> {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "toml") {
                 match load_from_file(&path) {
-                    Ok(mut filters) => all_filters.append(&mut filters),
-                    Err(e) => eprintln!("[omni] skip file {}: {}", path.display(), e),
+                    Ok(mut report) => {
+                        all_filters.append(&mut report.filters);
+                        all_warnings.append(&mut report.warnings);
+                    }
+                    Err(e) => all_warnings.push(format!("skip file {}: {}", path.display(), e)),
                 }
             }
         }
     }
-    all_filters
+    LoadReport {
+        filters: all_filters,
+        warnings: all_warnings,
+    }
 }
 
-pub fn load_embedded_filters() -> Vec<TomlFilter> {
+pub fn load_embedded_filters() -> LoadReport {
     let mut all_filters = Vec::new();
+    let mut all_warnings = Vec::new();
+
     let mut files: Vec<String> = Asset::iter().map(|s| s.to_string()).collect();
-    files.sort(); // Sort alphabetically so specific filters (e.g., 00_vitest.toml) load before general ones (e.g., npm.toml)
+    files.sort();
     for file in files {
         if file.ends_with(".toml")
             && let Some(content) = Asset::get(&file)
@@ -334,21 +422,27 @@ pub fn load_embedded_filters() -> Vec<TomlFilter> {
                     if let Some(filters) = doc.filters {
                         let mut tests_map = doc.tests.unwrap_or_default();
                         for (name, config) in filters {
-                            // Add sys_ prefix to built-in filters
                             let sys_name = format!("sys_{}", name);
-                            if let Ok(filter) =
-                                create_filter_from_config(sys_name, config, &mut tests_map)
-                            {
-                                all_filters.push(filter);
+                            match create_filter_from_config(sys_name, config, &mut tests_map) {
+                                Ok(filter) => all_filters.push(filter),
+                                Err(e) => all_warnings.push(format!(
+                                    "failed to parse embedded filter {} > {}: {}",
+                                    file, name, e
+                                )),
                             }
                         }
                     }
                 }
-                Err(e) => eprintln!("[omni] failed to parse embedded filter {}: {}", file, e),
+                Err(e) => {
+                    all_warnings.push(format!("failed to parse embedded file {}: {}", file, e))
+                }
             }
         }
     }
-    all_filters
+    LoadReport {
+        filters: all_filters,
+        warnings: all_warnings,
+    }
 }
 
 fn create_filter_from_config(
@@ -356,7 +450,12 @@ fn create_filter_from_config(
     config: FilterConfig,
     tests_map: &mut HashMap<String, Vec<TestConfig>>,
 ) -> Result<TomlFilter> {
-    let match_regex = Regex::new(&config.match_command)?;
+    let cmd_pattern = config
+        .match_command
+        .as_ref()
+        .filter(|c| !c.is_empty())
+        .context("missing match_command")?;
+    let match_regex = Regex::new(cmd_pattern)?;
     let mut replace_rules = Vec::new();
     for rr in config.replace_rules {
         replace_rules.push((Regex::new(&rr.pattern)?, rr.replacement));
@@ -445,7 +544,8 @@ pub fn load_all_filters() -> &'static [TomlFilter] {
             if local_filters_dir.exists() {
                 let config_path = cwd.join("omni_config.json");
                 if crate::guard::trust::is_trusted(&config_path) {
-                    for f in load_from_dir(&local_filters_dir) {
+                    let report = load_from_dir(&local_filters_dir);
+                    for f in report.filters {
                         if !seen.contains(&f.name) {
                             seen.insert(f.name.clone());
                             all.push(f);
@@ -456,10 +556,10 @@ pub fn load_all_filters() -> &'static [TomlFilter] {
         }
 
         // 2. ~/.omni/filters/*.toml (user-global)
-        if let Some(mut home) = dirs::home_dir() {
-            home.push(".omni");
-            home.push("filters");
-            for f in load_from_dir(&home) {
+        let user_dir = dirs::home_dir().map(|h| h.join(".omni").join("filters"));
+        if let Some(dir) = user_dir {
+            let report = load_from_dir(&dir);
+            for f in report.filters {
                 if !seen.contains(&f.name) {
                     seen.insert(f.name.clone());
                     all.push(f);
@@ -468,7 +568,8 @@ pub fn load_all_filters() -> &'static [TomlFilter] {
         }
 
         // 3. Built-in filters (embedded)
-        for f in load_embedded_filters() {
+        let report = load_embedded_filters();
+        for f in report.filters {
             if !seen.contains(&f.name) {
                 seen.insert(f.name.clone());
                 all.push(f);
@@ -479,49 +580,27 @@ pub fn load_all_filters() -> &'static [TomlFilter] {
     })
 }
 
-pub fn get_filters_by_source() -> (Vec<TomlFilter>, Vec<TomlFilter>, Vec<TomlFilter>) {
-    let mut built_in = Vec::new();
-    let mut user = Vec::new();
-    let mut local = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+pub fn get_filters_by_source() -> (LoadReport, LoadReport, LoadReport) {
+    let built_in = load_embedded_filters();
 
-    // 1. Local
+    let user_dir = dirs::home_dir().map(|h| h.join(".omni").join("filters"));
+    let user_filters = user_dir
+        .map(|d| load_from_dir(&d))
+        .unwrap_or_else(|| LoadReport {
+            filters: Vec::new(),
+            warnings: Vec::new(),
+        });
+
+    let mut local_filters = LoadReport {
+        filters: Vec::new(),
+        warnings: Vec::new(),
+    };
     if let Ok(cwd) = std::env::current_dir() {
-        let local_filters_dir = cwd.join(".omni").join("filters");
-        if local_filters_dir.exists() {
-            let config_path = cwd.join("omni_config.json");
-            if crate::guard::trust::is_trusted(&config_path) {
-                for f in load_from_dir(&local_filters_dir) {
-                    if !seen.contains(&f.name) {
-                        seen.insert(f.name.clone());
-                        local.push(f);
-                    }
-                }
-            }
-        }
+        let local_dir = cwd.join(".omni").join("filters");
+        local_filters = load_from_dir(&local_dir);
     }
 
-    // 2. User
-    if let Some(mut home) = dirs::home_dir() {
-        home.push(".omni");
-        home.push("filters");
-        for f in load_from_dir(&home) {
-            if !seen.contains(&f.name) {
-                seen.insert(f.name.clone());
-                user.push(f);
-            }
-        }
-    }
-
-    // 3. Built-in
-    for f in load_embedded_filters() {
-        if !seen.contains(&f.name) {
-            seen.insert(f.name.clone());
-            built_in.push(f);
-        }
-    }
-
-    (built_in, user, local)
+    (built_in, user_filters, local_filters)
 }
 
 #[cfg(test)]
@@ -544,9 +623,9 @@ mod tests {
         )
         .unwrap();
 
-        let filters = load_from_file(file.path()).unwrap();
-        assert_eq!(filters.len(), 1);
-        assert_eq!(filters[0].name, "test1");
+        let report = load_from_file(file.path()).unwrap();
+        assert_eq!(report.filters.len(), 1);
+        assert_eq!(report.filters[0].name, "test1");
     }
 
     #[test]
@@ -562,8 +641,9 @@ mod tests {
         )
         .unwrap();
 
-        let filters = load_from_file(file.path()).unwrap();
-        assert_eq!(filters.len(), 0); // Di-skip
+        let report = load_from_file(file.path()).unwrap();
+        assert_eq!(report.filters.len(), 0); // Di-skip
+        assert!(!report.warnings.is_empty());
     }
 
     #[test]
@@ -649,10 +729,10 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_from_dir(&filters_dir);
-        let report = run_inline_tests(&loaded);
-        assert_eq!(report.passes, 1);
-        assert_eq!(report.failures.len(), 0);
+        let report = load_from_dir(&filters_dir);
+        let test_report = run_inline_tests(&report.filters);
+        assert_eq!(test_report.passes, 1);
+        assert_eq!(test_report.failures.len(), 0);
     }
 
     #[test]
@@ -676,17 +756,17 @@ mod tests {
     fn test_verify_all_builtin_filters_pass_their_inline_tests() {
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let filters_dir = std::path::Path::new(&manifest_dir).join("filters");
-        let filters = load_from_dir(&filters_dir);
+        let report = load_from_dir(&filters_dir);
 
         // Ensure we loaded something
         assert!(
-            !filters.is_empty(),
+            !report.filters.is_empty(),
             "Built-in filters directory should not be empty"
         );
 
-        let report = run_inline_tests(&filters);
-        if !report.failures.is_empty() {
-            for failure in &report.failures {
+        let test_report = run_inline_tests(&report.filters);
+        if !test_report.failures.is_empty() {
+            for failure in &test_report.failures {
                 println!("{}", failure);
             }
             panic!("TOML Filter Verification Failed");
