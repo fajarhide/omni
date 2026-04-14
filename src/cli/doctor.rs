@@ -388,13 +388,13 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     // 6. Config Filters
     println!("\n {}", "Filters:".bold().bright_white());
-    let (built_in, user_filters, local_filters) =
+    let (built_in, user_report, local_report) =
         crate::pipeline::toml_filter::get_filters_by_source();
 
     println!(
         "   {:<15} {} loaded (embedded)",
         "Built-in:".bright_black(),
-        built_in.len().to_string().yellow()
+        built_in.filters.len().to_string().yellow()
     );
 
     let user_dir = conf_dir.join("filters");
@@ -402,7 +402,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!(
             "   {:<15} ~/.omni/filters/ ({} filters)",
             "User:".bright_black(),
-            user_filters.len().to_string().yellow()
+            user_report.filters.len().to_string().yellow()
         );
 
         if fix_mode && let Ok(entries) = std::fs::read_dir(&user_dir) {
@@ -446,37 +446,65 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!("   {:<15} none", "User:".bright_black());
     }
 
-    let project_dir = PathBuf::from(".omni/filters");
-    if project_dir.exists() {
-        if crate::guard::trust::is_trusted(std::env::current_dir().unwrap_or_default().as_path()) {
-            println!(
-                "   {:<15} .omni/filters/ ({} filters, TRUSTED) {}",
-                "Project:".bright_black(),
-                local_filters.len().to_string().yellow(),
-                "[OK]".green().bold()
-            );
-        } else {
-            if fix_mode {
-                let _ = crate::guard::trust::trust_project(
-                    std::env::current_dir().unwrap_or_default().as_path(),
-                );
+    if let Ok(cwd) = std::env::current_dir() {
+        let local_filters_dir = cwd.join(".omni").join("filters");
+        if local_filters_dir.exists() {
+            if crate::guard::trust::is_trusted(&cwd.join("omni_config.json")) {
                 println!(
-                    "   {:<15} .omni/filters/ (TRUSTED) {}",
+                    "   {:<15} .omni/filters/ ({} filters, TRUSTED) {}",
                     "Project:".bright_black(),
-                    "[FIXED]".green().bold()
+                    local_report.filters.len().to_string().yellow(),
+                    "[OK]".green().bold()
                 );
             } else {
-                println!(
-                    "   {:<15} .omni/filters/ (NOT TRUSTED) {}",
-                    "Project:".bright_black(),
-                    "[WARNING]".yellow().bold()
-                );
-                warnings.push("Project filters found but not trusted. Run: `omni trust`.");
-                all_ok = false;
+                if fix_mode {
+                    let _ = crate::guard::trust::trust_project(&cwd);
+                    println!(
+                        "   {:<15} .omni/filters/ (TRUSTED) {}",
+                        "Project:".bright_black(),
+                        "[FIXED]".green().bold()
+                    );
+                } else {
+                    println!(
+                        "   {:<15} .omni/filters/ ({} filters, NOT TRUSTED) {}",
+                        "Project:".bright_black(),
+                        local_report.filters.len().to_string().yellow(),
+                        "[WARNING]".yellow().bold()
+                    );
+                    warnings.push("Project filters found but not trusted. Run: `omni trust`.");
+                    all_ok = false;
+                }
             }
+        } else {
+            println!(
+                "   {:<15} {}",
+                "Project:".bright_black(),
+                "none".bright_black()
+            );
         }
-    } else {
-        println!("   {:<15} none", "Project:".bright_black());
+    }
+
+    // --- Elegant Warning Display ---
+    let mut all_filter_warnings = Vec::new();
+    all_filter_warnings.extend(built_in.warnings);
+    all_filter_warnings.extend(user_report.warnings);
+    all_filter_warnings.extend(local_report.warnings);
+
+    if !all_filter_warnings.is_empty() {
+        for warning in all_filter_warnings.iter().take(5) {
+            println!(
+                "   {:<15} {}",
+                "Warning:".yellow().bold(),
+                warning.bright_black()
+            );
+        }
+        if all_filter_warnings.len() > 5 {
+            println!(
+                "   {:<15} ... and {} more",
+                "".repeat(15),
+                (all_filter_warnings.len() - 5).to_string().bright_black()
+            );
+        }
     }
 
     if let Some(latest) = crate::guard::update::check() {
