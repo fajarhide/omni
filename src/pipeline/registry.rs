@@ -75,7 +75,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
             },
             "clippy" | "check" => ToolProfile {
                 segmentation: SegmentationMode::Line,
-                collapse: CollapseMode::Build,  // clippy warnings treated like build
+                collapse: CollapseMode::Build, // clippy warnings treated like build
             },
             "bench" => ToolProfile {
                 segmentation: SegmentationMode::TestGroup,
@@ -134,8 +134,14 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     // 6. Database Tools — Log/tabular collapse
     if matches!(
         base,
-        "psql" | "mysql" | "sqlite3" | "pg_dump" | "pg_restore"
-            | "mongodump" | "redis-cli" | "clickhouse"
+        "psql"
+            | "mysql"
+            | "sqlite3"
+            | "pg_dump"
+            | "pg_restore"
+            | "mongodump"
+            | "redis-cli"
+            | "clickhouse"
     ) {
         return ToolProfile {
             segmentation: SegmentationMode::Line,
@@ -144,7 +150,10 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     }
 
     // 7. Java/JVM Ecosystem — Build collapse
-    if matches!(base, "java" | "javac" | "mvn" | "gradle" | "gradlew" | "mvnw" | "kotlin" | "kotlinc") {
+    if matches!(
+        base,
+        "java" | "javac" | "mvn" | "gradle" | "gradlew" | "mvnw" | "kotlin" | "kotlinc"
+    ) {
         return ToolProfile {
             segmentation: SegmentationMode::Line,
             collapse: CollapseMode::Build,
@@ -197,8 +206,18 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     // 11. Extended Cloud & K8s Dev Tools
     if matches!(
         base,
-        "skaffold" | "argocd" | "flux" | "k3s" | "k3d" | "kind" | "minikube"
-            | "kustomize" | "cdk" | "pulumi" | "serverless" | "sam"
+        "skaffold"
+            | "argocd"
+            | "flux"
+            | "k3s"
+            | "k3d"
+            | "kind"
+            | "minikube"
+            | "kustomize"
+            | "cdk"
+            | "pulumi"
+            | "serverless"
+            | "sam"
     ) {
         return ToolProfile {
             segmentation: SegmentationMode::Line,
@@ -207,10 +226,13 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     }
 
     // 12. Additional Security & Quality Tools
-    if matches!(base, "semgrep" | "trivy" | "snyk" | "hadolint" | "gosec" | "bandit") {
+    if matches!(
+        base,
+        "semgrep" | "trivy" | "snyk" | "hadolint" | "gosec" | "bandit"
+    ) {
         return ToolProfile {
             segmentation: SegmentationMode::Line,
-            collapse: CollapseMode::Build,   // treat like lint/build errors
+            collapse: CollapseMode::Build, // treat like lint/build errors
         };
     }
 
@@ -229,7 +251,10 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     }
 
     // 14. Network & System Monitoring
-    if matches!(base, "ping" | "traceroute" | "nmap" | "netstat" | "ss" | "tcpdump" | "htop" | "top") {
+    if matches!(
+        base,
+        "ping" | "traceroute" | "nmap" | "netstat" | "ss" | "tcpdump" | "htop" | "top"
+    ) {
         return ToolProfile {
             segmentation: SegmentationMode::Line,
             collapse: CollapseMode::Log,
@@ -237,7 +262,10 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     }
 
     // 15. Database Migration Tools
-    if matches!(base, "alembic" | "flyway" | "liquibase" | "knex" | "typeorm" | "sequelize") {
+    if matches!(
+        base,
+        "alembic" | "flyway" | "liquibase" | "knex" | "typeorm" | "sequelize"
+    ) {
         return ToolProfile {
             segmentation: SegmentationMode::Line,
             collapse: CollapseMode::Log,
@@ -258,16 +286,15 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
 /// For command chains (&&, ||, |, ;), return the profile of the most relevant command.
 /// “Most relevant” = the last command that is not a simple pipe filter,
 /// or the first command if all are equally important.
-
 /// Example:
 ///   "cargo build && ./app"      → profile from "cargo build"
 ///   "npm install && npm test"   → profile from "npm test" (test more spesifik)
 ///   "cat file.log | grep error" → profile from "grep" (spesifik, not cat)
 ///   "cd /project && ls -la"     → profile from "ls" (action command)
 pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
-    // Split on shell operators 
+    // Split on shell operators
     let segments: Vec<&str> = command
-        .split(|c| c == '|' || c == '&' || c == ';')
+        .split(['|', '&', ';'])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty() && *s != "&" && *s != "|")
         .collect();
@@ -281,7 +308,9 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
         .iter()
         .enumerate()
         .map(|(i, seg)| {
-            let base = seg.split_whitespace().next()
+            let base = seg
+                .split_whitespace()
+                .next()
                 .and_then(|w| std::path::Path::new(w).file_name()?.to_str())
                 .unwrap_or("");
             let specificity = command_specificity(base, seg);
@@ -303,7 +332,10 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
 fn command_specificity(base: &str, full_cmd: &str) -> u8 {
     let cmd_lower = full_cmd.to_lowercase();
     // Test runners — paling spesifik
-    if matches!(base, "pytest" | "jest" | "vitest" | "rspec" | "phpunit" | "playwright") {
+    if matches!(
+        base,
+        "pytest" | "jest" | "vitest" | "rspec" | "phpunit" | "playwright"
+    ) {
         return 100;
     }
     if (base == "cargo" || base == "go" || base == "npm") && cmd_lower.contains("test") {
@@ -325,7 +357,7 @@ fn command_specificity(base: &str, full_cmd: &str) -> u8 {
     if matches!(base, "cd" | "ls" | "cat" | "echo" | "true" | "false") {
         return 10;
     }
-    50  // default
+    50 // default
 }
 
 #[cfg(test)]

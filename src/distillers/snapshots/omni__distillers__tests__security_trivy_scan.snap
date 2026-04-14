@@ -1,0 +1,8 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+Security scan: 2 CRITICAL, 1 HIGH, 0 MEDIUM, 1 LOW
+  🔴 Total: 3 (CRITICAL: 1, HIGH: 1, MEDIUM: 0, LOW: 1)
+  🔴 CRITICAL CVE-2023-1234 libssl vulnerabilities found
+  🟠 HIGH CVE-2023-5678 libcrypto issue detected
