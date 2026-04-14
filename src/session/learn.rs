@@ -133,8 +133,14 @@ pub fn generate_toml(
 
         // Escape characters for RegEx safeties
         let escaped_prefix = regex::escape(&clean_prefix);
-        let toml_safe = escaped_prefix.replace('\\', "\\\\").replace('"', "\\\"");
-        strips.push(format!("\"^{}\"", toml_safe));
+        // Replace the '#' placeholder with the memory-safe regex placeholder (single backslash \d+)
+        let mem_regex = format!("^{}", escaped_prefix.replace('#', r"\d+"));
+
+        // Use toml crate to handle ALL string escaping correctly for TOML
+        let toml_val = toml::Value::String(mem_regex);
+        let toml_safe = toml_val.to_string();
+
+        strips.push(toml_safe);
         sample_lines.push_str(&format!("{}\n", clean_sample));
     }
 
@@ -324,5 +330,24 @@ mod tests {
     fn test_queue_for_learn_non_blocking() {
         // Will fire the thread in the background
         queue_for_learn("x".repeat(300).as_str(), "make build");
+    }
+
+    #[test]
+    fn test_generate_toml_with_numeric_placeholders() {
+        let c = vec![PatternCandidate {
+            trigger_prefix: "Step #/#:".to_string(),
+            sample_line: "Step 1/2: FROM alpine".to_string(),
+            count: 3,
+            confidence: 0.85,
+            suggested_action: LearnAction::Strip,
+        }];
+        let toml = generate_toml(&c, "numeric_test", None);
+        // The generated regex in TOML will have escaped backslashes
+        // Step #/#: -> Step \d+/\d+: -> Step \\d+/\\d+:
+        assert!(
+            toml.contains(r"Step \\d+/\\d+:"),
+            "TOML did not contain expected regex. Got: {}",
+            toml
+        );
     }
 }

@@ -90,26 +90,66 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bold()
                 .bright_white()
         );
-        let report = crate::pipeline::toml_filter::run_inline_tests(
-            crate::pipeline::toml_filter::load_all_filters(),
+        let all_filters = crate::pipeline::toml_filter::load_all_filters();
+        let report = crate::pipeline::toml_filter::run_inline_tests(all_filters);
+
+        let (mut built_in_fails, mut user_fails) = (0, 0);
+        let (mut built_in_total, mut user_total) = (0, 0);
+
+        for filter in all_filters {
+            let count = filter.inline_tests.len();
+            if filter.name.starts_with("sys_") {
+                built_in_total += count;
+            } else {
+                user_total += count;
+            }
+        }
+
+        for fail in &report.failures {
+            if fail.contains("Filter 'sys_") {
+                built_in_fails += 1;
+            } else {
+                user_fails += 1;
+            }
+        }
+
+        let total_tests = built_in_total + user_total;
+        let total_passes = report.passes;
+
+        println!(
+            "  Total Tests: {} ({} passed, {} failed)",
+            total_tests,
+            total_passes,
+            report.failures.len()
         );
-        let total = report.passes + report.failures.len();
-
-        let status = if report.failures.is_empty() {
-            "ALL PASSED".green()
-        } else {
-            "FAILURES DETECTED".red()
-        };
-
-        println!("  Status:  {} ({} / {})", status, report.passes, total);
+        println!(
+            "  - Built-in:  {} tests ({} failed)",
+            built_in_total, built_in_fails
+        );
+        println!(
+            "  - User:      {} tests ({} failed)",
+            user_total, user_fails
+        );
 
         if !report.failures.is_empty() {
-            println!("\n{}", "Details:".bold().red());
+            println!("\n{}", "Failure Details:".bold().red());
             for f in report.failures {
                 println!("  {} {}", "✗".red(), f);
             }
+            if user_fails > 0 {
+                println!(
+                    "\n{}",
+                    "TIP: Learned filters often fail if the noise pattern has changed. You can clear them by deleting ~/.omni/filters/learned.toml"
+                        .dimmed()
+                );
+            }
+        } else {
+            println!(
+                "\n{}",
+                "✓ All loaded filters pass their inline tests!".green()
+            );
         }
-        println!();
+
         return Ok(());
     }
 
