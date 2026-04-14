@@ -21,7 +21,7 @@ struct TomlDocument {
 #[derive(Debug, Deserialize)]
 struct FilterConfig {
     description: Option<String>,
-    match_command: String,
+    match_command: Option<String>,
     #[serde(default)]
     strip_ansi: bool,
     #[serde(default = "default_confidence")]
@@ -198,7 +198,15 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
         let mut tests_map = doc.tests.unwrap_or_default();
 
         for (name, config) in filters {
-            let match_regex = match Regex::new(&config.match_command) {
+            let cmd_pattern = match config.match_command {
+                Some(ref c) if !c.is_empty() => c,
+                _ => {
+                    eprintln!("[omni] skip filter '{}': missing match_command", name);
+                    continue;
+                }
+            };
+
+            let match_regex = match Regex::new(cmd_pattern) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("[omni] skip invalid regex in filter '{}': {}", name, e);
@@ -356,7 +364,12 @@ fn create_filter_from_config(
     config: FilterConfig,
     tests_map: &mut HashMap<String, Vec<TestConfig>>,
 ) -> Result<TomlFilter> {
-    let match_regex = Regex::new(&config.match_command)?;
+    let cmd_pattern = config
+        .match_command
+        .as_ref()
+        .filter(|c| !c.is_empty())
+        .context("missing match_command")?;
+    let match_regex = Regex::new(cmd_pattern)?;
     let mut replace_rules = Vec::new();
     for rr in config.replace_rules {
         replace_rules.push((Regex::new(&rr.pattern)?, rr.replacement));

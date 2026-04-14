@@ -96,9 +96,14 @@ pub fn generate_toml(
     if let Some(cmd) = command {
         // Create a simple prefix-based match for the command
         let cmd_base = cmd.split_whitespace().next().unwrap_or(cmd);
-        toml.push_str(&format!("match_command = \"^{}.*\"\n", cmd_base));
+        // Ensure we don't accidentally match everything if cmd_base is empty or just special chars
+        if !cmd_base.is_empty() && cmd_base != "." && cmd_base != "*" {
+            toml.push_str(&format!("match_command = \"^{}.*\"\n", regex::escape(cmd_base)));
+        }
     } else {
-        toml.push_str("match_command = \".*\"\n");
+        // Omitting match_command since it's now optional in the parser.
+        // This filter will be skipped by the loader, which is safer than a catch-all.
+        toml.push_str("# match_command omitted (unknown command)\n");
     }
 
     toml.push_str("strip_ansi = true\n");
