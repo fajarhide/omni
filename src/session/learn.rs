@@ -96,7 +96,9 @@ pub fn generate_toml(
     if let Some(cmd) = command {
         // Create a simple prefix-based match for the command
         let cmd_base = cmd.split_whitespace().next().unwrap_or(cmd);
-        toml.push_str(&format!("match_command = \"{}.*\"\n", cmd_base));
+        toml.push_str(&format!("match_command = \"^{}.*\"\n", cmd_base));
+    } else {
+        toml.push_str("match_command = \".*\"\n");
     }
 
     toml.push_str("strip_ansi = true\n");
