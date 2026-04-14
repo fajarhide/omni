@@ -283,7 +283,8 @@ fn distill_docker_build(input: &str) -> String {
     let mut success = false;
 
     for line in input.lines() {
-        if line.starts_with("Step ") {
+        let l_lower = line.to_lowercase();
+        if l_lower.contains("step ") {
             steps_total += 1;
         }
         if line.contains("Using cache") {
@@ -381,8 +382,10 @@ fn distill_terraform(input: &str) -> String {
             }
         }
 
+        let t_lower = trimmed.to_lowercase();
+
         // Also catch the summary line: "Plan: X to add, Y to change, Z to destroy."
-        if trimmed.starts_with("Plan:") {
+        if t_lower.contains("plan:") {
             // Parse "Plan: 3 to add, 1 to change, 0 to destroy."
             for part in trimmed.split(',') {
                 let part = part.trim();
@@ -408,7 +411,7 @@ fn distill_terraform(input: &str) -> String {
         }
 
         // "Apply complete! Resources: X added, Y changed, Z destroyed."
-        if trimmed.starts_with("Apply complete!") {
+        if t_lower.contains("apply complete!") {
             return format!(
                 "terraform: apply complete +{} ~{} -{}",
                 added, changed, destroyed

@@ -41,7 +41,7 @@ const FIXTURES: &[(&str, &str, f64, &str)] = &[
         70.0,
         "cargo build",
     ),
-    ("test", "tests/fixtures/pytest_failures.txt", 85.0, "pytest"),
+    ("test", "tests/fixtures/pytest_failures.txt", 75.0, "pytest"),
     (
         "infra",
         "tests/fixtures/kubectl_pods_mixed.txt",

@@ -28,11 +28,13 @@ fn distill_db_error(input: &str) -> String {
 
     for line in input.lines() {
         let l = line.trim();
-        if l.contains("ERROR:") || l.contains("FATAL:") || l.contains("error:") {
+        let l_lower = l.to_lowercase();
+        // Semantic matching (resilient to timestamp prefixes, container logs, etc)
+        if l_lower.contains("error:") || l_lower.contains("fatal:") || l_lower.contains("error ") {
             errors.push(l.to_string());
-        } else if l.starts_with("HINT:") || l.starts_with("DETAIL:") {
+        } else if l_lower.contains("hint:") || l_lower.contains("detail:") {
             hint = Some(l.to_string());
-        } else if l.starts_with("LINE ") || l.starts_with("POSITION:") {
+        } else if l_lower.contains("line ") || l_lower.contains("position:") {
             position = Some(l.to_string());
         }
     }
@@ -68,7 +70,10 @@ fn distill_query_result(input: &str) -> String {
     // Header (kolom) biasanya baris pertama non-empty
     let header = lines
         .iter()
-        .find(|l| !l.trim().is_empty() && !l.starts_with('-') && !l.starts_with('('))
+        .find(|l| {
+            let lt = l.trim();
+            !lt.is_empty() && !lt.contains("---") && !lt.contains("(") && !lt.contains("rows")
+        })
         .map(|l| l.trim().to_string());
 
     let mut out = String::new();
@@ -83,7 +88,10 @@ fn distill_query_result(input: &str) -> String {
     // Show first 3 data rows as sample
     let data_rows: Vec<&str> = lines
         .iter()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with('-') && !l.starts_with('('))
+        .filter(|l| {
+            let lt = l.trim();
+            !lt.is_empty() && !lt.contains("---") && !lt.contains("(") && !lt.contains("rows")
+        })
         .skip(1) // skip header
         .take(3)
         .copied()
@@ -130,5 +138,5 @@ fn looks_like_table(input: &str) -> bool {
     input
         .lines()
         .take(5)
-        .any(|l| l.contains(" | ") || l.starts_with("---"))
+        .any(|l| l.contains(" | ") || l.contains("---") || l.contains("+--"))
 }
