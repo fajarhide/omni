@@ -411,17 +411,33 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 if path.extension().is_some_and(|ext| ext == "toml")
                     && crate::pipeline::toml_filter::load_from_file(&path).is_err()
                 {
-                    let bak_path = path.with_extension("toml.bak");
-                    if std::fs::rename(&path, &bak_path).is_ok() {
-                        println!(
-                            "   {:<15} {} {}",
-                            "Cleaned:".bright_black(),
-                            path.file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .bright_black(),
-                            "[RENAMED TO .bak]".green().bold()
-                        );
+                    // Try to repair before renaming to .bak
+                    match crate::pipeline::toml_filter::try_repair_file(&path) {
+                        Ok(true) => {
+                            println!(
+                                "   {:<15} {} {}",
+                                "Cleaned:".bright_black(),
+                                path.file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .bright_black(),
+                                "[REPAIRED]".green().bold()
+                            );
+                        }
+                        _ => {
+                            let bak_path = path.with_extension("toml.bak");
+                            if std::fs::rename(&path, &bak_path).is_ok() {
+                                println!(
+                                    "   {:<15} {} {}",
+                                    "Cleaned:".bright_black(),
+                                    path.file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .bright_black(),
+                                    "[RENAMED TO .bak]".yellow().bold()
+                                );
+                            }
+                        }
                     }
                 }
             }

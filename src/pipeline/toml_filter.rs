@@ -308,6 +308,48 @@ pub fn load_from_file(path: &Path) -> Result<Vec<TomlFilter>> {
     Ok(results)
 }
 
+/// Intelligent Repair for Filter TOMLs
+pub fn try_repair_file(path: &Path) -> Result<bool> {
+    let content = fs::read_to_string(path)?;
+    let mut repaired = content.clone();
+    let mut changed = false;
+
+    // 1. Missing schema_version (Hard requirement for TomlDocument)
+    if !repaired.contains("schema_version") {
+        repaired = format!("schema_version = 1\n\n{}", repaired);
+        changed = true;
+    }
+
+    // 2. Dangerous catch-all patterns
+    if repaired.contains("match_command = \".*\"") {
+        repaired = repaired.replace(
+            "match_command = \".*\"",
+            "# match_command = \".*\" # [OMNI: disabled because it intercepts all commands]"
+        );
+        changed = true;
+    }
+
+    // 3. Simple syntax cleanups
+    // Trim trailing whitespace on every line to avoid some weirdness
+    let cleaned: Vec<String> = repaired.lines().map(|l| l.trim_end().to_string()).collect();
+    repaired = cleaned.join("\n");
+
+    // 4. Try to parse with standard toml crate to verify structural integrity
+    match toml::from_str::<TomlDocument>(&repaired) {
+        Ok(_) => {
+            if changed || repaired != content {
+                fs::write(path, repaired)?;
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        Err(_) => {
+            // Still broken. We fallback to backup in doctor.rs if it's still syntactically invalid.
+            Ok(false)
+        }
+    }
+}
+
 pub fn load_from_dir(dir: &Path) -> Vec<TomlFilter> {
     let mut all_filters = Vec::new();
     if !dir.exists() || !dir.is_dir() {
