@@ -324,7 +324,7 @@ pub fn try_repair_file(path: &Path) -> Result<bool> {
     if repaired.contains("match_command = \".*\"") {
         repaired = repaired.replace(
             "match_command = \".*\"",
-            "# match_command = \".*\" # [OMNI: disabled because it intercepts all commands]"
+            "# match_command = \".*\" # [OMNI: disabled because it intercepts all commands]",
         );
         changed = true;
     }

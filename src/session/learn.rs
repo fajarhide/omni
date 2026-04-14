@@ -98,7 +98,10 @@ pub fn generate_toml(
         let cmd_base = cmd.split_whitespace().next().unwrap_or(cmd);
         // Ensure we don't accidentally match everything if cmd_base is empty or just special chars
         if !cmd_base.is_empty() && cmd_base != "." && cmd_base != "*" {
-            toml.push_str(&format!("match_command = \"^{}.*\"\n", regex::escape(cmd_base)));
+            toml.push_str(&format!(
+                "match_command = \"^{}.*\"\n",
+                regex::escape(cmd_base)
+            ));
         }
     } else {
         // Omitting match_command since it's now optional in the parser.
