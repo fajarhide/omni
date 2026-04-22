@@ -776,10 +776,7 @@ impl Store {
         );
     }
 
-    pub fn get_recent_traces(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<(String, String, String, String)>> {
+    pub fn get_recent_traces(&self, limit: usize) -> Result<Vec<(String, String, String, String)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT session_id, command, raw_input, distilled_output FROM execution_traces ORDER BY ts DESC LIMIT ?1",

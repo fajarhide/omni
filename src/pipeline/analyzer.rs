@@ -27,7 +27,13 @@ pub fn analyze_trace(raw_input: &str, distilled_output: &str, _command: &str) ->
 
     // Detect critical signals in raw input
     let critical_indicators = [
-        "error:", "error[", "FAIL:", "panic:", "fatal:", "Exception:", "Traceback",
+        "error:",
+        "error[",
+        "FAIL:",
+        "panic:",
+        "fatal:",
+        "Exception:",
+        "Traceback",
     ];
     let mut raw_critical = Vec::new();
     for line in raw_input.lines() {
@@ -38,7 +44,9 @@ pub fn analyze_trace(raw_input: &str, distilled_output: &str, _command: &str) ->
 
     // Check if they exist in distilled output
     for crit in raw_critical {
-        if !distilled_output.contains(crit) && !distilled_output.contains(&crit[..crit.len().max(20).min(crit.len())]) {
+        if !distilled_output.contains(crit)
+            && !distilled_output.contains(&crit[..crit.len().max(20).min(crit.len())])
+        {
             // Check substrings to handle slight formatting changes
             dropped_critical_lines += 1;
         }

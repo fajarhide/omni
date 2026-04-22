@@ -98,6 +98,10 @@ fn print_help() {
         "  {: <12} View and manage archived content",
         "rewind".cyan()
     );
+    println!(
+        "  {: <12} Run self-optimizing loop on traces",
+        "optimize".cyan()
+    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -279,6 +283,13 @@ fn main() {
                 "learn" => {
                     if let Err(e) = cli::learn::run_learn(&args) {
                         eprintln!("[omni] Auto-Learn error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
+                "optimize" => {
+                    if let Err(e) = cli::optimize::run_optimize(&args) {
+                        eprintln!("[omni] Optimize error: {}", e);
                         std::process::exit(1);
                     }
                 }

@@ -3,6 +3,7 @@ pub mod doctor;
 pub mod exec;
 pub mod init;
 pub mod learn;
+pub mod optimize;
 pub mod reset;
 pub mod rewind;
 pub mod rewrite;
