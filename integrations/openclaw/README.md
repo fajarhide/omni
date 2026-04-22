@@ -19,11 +19,14 @@ This plugin provides a secure bridge between your OpenClaw agent and the [OMNI S
 openclaw plugins install clawhub:@fajarhide/omni-signal-engine
 ```
 
-**Manual Install**
-1. Clone or copy the OMNI repository.
-2. Navigate to the OMNI directory.
-3. Install the plugin into OpenClaw:
+**Automatic Install (No Clone Required)**
+OMNI natively fetches the integration files securely from public GitHub.
+```bash
+omni doctor --fix
+```
 
+**Local Developer Install**
+If you cloned the repository locally:
 ```bash
 openclaw plugins install ./integrations/openclaw
 ```

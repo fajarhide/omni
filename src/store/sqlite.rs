@@ -582,6 +582,74 @@ impl Store {
         Ok(rows)
     }
 
+    /// Agent breakdown: (agent_id, count, input_bytes, output_bytes)
+    pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                COALESCE(agent_id, 'claude_code') as agent,
+                COUNT(*) as calls,
+                COALESCE(SUM(input_bytes), 0) as total_input,
+                COALESCE(SUM(output_bytes), 0) as total_output
+            FROM distillations
+            WHERE ts >= ?1
+            GROUP BY agent
+            ORDER BY calls DESC",
+        )?;
+
+        let rows = stmt
+            .query_map(params![since], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u64>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Per-command stats with agent_id: (command, agent_id, count, input_bytes, output_bytes)
+    #[allow(clippy::type_complexity)]
+    pub fn get_per_command_with_agent(
+        &self,
+        since: i64,
+        limit: usize,
+    ) -> Result<Vec<(String, String, u64, u64, u64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                command,
+                COALESCE(agent_id, 'claude_code') as agent,
+                COUNT(*) as calls,
+                COALESCE(SUM(input_bytes), 0) as total_input,
+                COALESCE(SUM(output_bytes), 0) as total_output
+            FROM distillations
+            WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
+            GROUP BY command, agent
+            ORDER BY calls DESC
+            LIMIT ?2",
+        )?;
+
+        let rows = stmt
+            .query_map(params![since, limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u64>(3)?,
+                    row.get::<_, u64>(4)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     /// Multi-period stats: Vec of (period_label, count, input_bytes, output_bytes)
     pub fn multi_period_stats(&self) -> Result<Vec<(String, u64, u64, u64)>> {
         let now = chrono::Utc::now().timestamp();

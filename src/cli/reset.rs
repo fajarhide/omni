@@ -1,102 +1,214 @@
+use crate::agents::all_integrations;
 use colored::*;
-use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::env;
+use std::io::Write;
 
 fn print_help() {
     println!(
-        "\n{} {} — Clean uninstall (with backups)",
-        "omni".bold().cyan(),
-        "reset".bold().yellow()
+        "\n{} {}",
+        "OMNI RESET".bold().red(),
+        "- Wipe All Omni AI Connections".bold().white()
     );
-    println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni {} [--yes]", "reset".cyan());
-
-    println!("\n{}", "DESCRIPTION:".bold().bright_white());
-    println!("  Performs a clean uninstall of OMNI by:");
-    println!("  1. Backing up ~/.omni to a .bak folder");
-    println!("  2. Removing hooks from Claude settings");
-    println!("  3. Unregistering the MCP server");
+    println!("Use this command to cleanly remove OMNI configurations from all IDEs and tools.");
+    println!();
+    println!("Usage: omni reset [OPTIONS]");
+    println!();
+    println!("Options:");
+    println!(
+        "  {: <14} Uninstall all integrations and wipe the omni.db",
+        "--all".red()
+    );
+    println!(
+        "  {: <14} Uninstall Claude Code (Anthropic)",
+        "--claude".cyan()
+    );
+    println!("  {: <14} Uninstall Cursor AI", "--cursor".cyan());
+    println!("  {: <14} Uninstall Zed Editor", "--zed".cyan());
+    println!("  {: <14} Uninstall Cline", "--cline".cyan());
+    println!("  {: <14} Uninstall Roo Code", "--roo".cyan());
+    println!("  {: <14} Uninstall GitHub Copilot CLI", "--copilot".cyan());
+    println!("  {: <14} Uninstall Gemini CLI", "--gemini".cyan());
+    println!("  {: <14} Uninstall OpenCode", "--opencode".cyan());
+    println!("  {: <14} Uninstall Codex CLI", "--codex".cyan());
+    println!(
+        "  {: <14} Uninstall Antigravity IDE",
+        "--antigravity".cyan()
+    );
+    println!(
+        "  {: <14} Display this help message",
+        "--help, -h".bright_black()
+    );
     println!();
 }
 
-pub fn run(args: &[String]) -> Result<(), String> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+pub fn handle_reset() -> anyhow::Result<()> {
+    let args: Vec<String> = env::args().collect();
+
+    if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
         return Ok(());
     }
 
-    if args.iter().any(|a| a == "--yes" || a == "-y") {
-        // Skip prompt
-    } else {
-        use std::io::{self, Write};
-        print!(
-            "{} Are you sure you want to uninstall OMNI? [y/N]: ",
-            "⚠".yellow().bold()
+    let is_all = args.iter().any(|a| a == "--all");
+
+    let mut is_claude = args.iter().any(|a| a == "--claude");
+    let mut is_cursor = args.iter().any(|a| a == "--cursor");
+    let mut is_zed = args.iter().any(|a| a == "--zed");
+    let mut is_cline = args.iter().any(|a| a == "--cline");
+    let mut is_roo = args.iter().any(|a| a == "--roo" || a == "--roo-code");
+    let mut is_copilot = args.iter().any(|a| a == "--copilot");
+    let mut is_gemini = args.iter().any(|a| a == "--gemini");
+    let mut is_opencode = args.iter().any(|a| a == "--opencode");
+    let mut is_codex = args.iter().any(|a| a == "--codex");
+    let mut is_antigravity = args.iter().any(|a| a == "--antigravity");
+
+    // Check if no flags
+    let no_flags = !is_claude
+        && !is_cursor
+        && !is_zed
+        && !is_cline
+        && !is_roo
+        && !is_copilot
+        && !is_gemini
+        && !is_opencode
+        && !is_codex
+        && !is_antigravity;
+
+    if no_flags && !is_all {
+        println!(
+            "\n{} {}",
+            "OMNI RESET".bold().red(),
+            "- Interactive Mode".bold().white()
         );
-        io::stdout().flush().unwrap();
+        println!("Which integrations would you like to remove?");
+        println!(
+            "  [{}] Wipe ALL Agent Integrations & Database",
+            "1".red().bold()
+        );
+        println!("  [{}] Claude Code (Anthropic)", "2".cyan());
+        println!("  [{}] Cursor AI", "3".cyan());
+        println!("  [{}] Zed Editor", "4".cyan());
+        println!("  [{}] Cline VS Code Extension", "5".cyan());
+        println!("  [{}] Roo Code VS Code Extension", "6".cyan());
+        println!("  [{}] GitHub Copilot CLI", "7".cyan());
+        println!("  [{}] Gemini CLI", "8".cyan());
+        println!("  [{}] OpenCode", "9".cyan());
+        println!("  [{}] Codex CLI", "10".cyan());
+        println!("  [{}] Antigravity IDE", "11".cyan());
+        println!("  [{}] Cancel\n", "q".yellow());
+
+        print!("Select an option [1-11, q]: ");
+        std::io::stdout().flush()?;
 
         let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            return Err("Failed to read input".to_string());
+        std::io::stdin().read_line(&mut input)?;
+        match input.trim() {
+            "1" => return perform_reset(true, vec![]),
+            "2" => is_claude = true,
+            "3" => is_cursor = true,
+            "4" => is_zed = true,
+            "5" => is_cline = true,
+            "6" => is_roo = true,
+            "7" => is_copilot = true,
+            "8" => is_gemini = true,
+            "9" => is_opencode = true,
+            "10" => is_codex = true,
+            "11" => is_antigravity = true,
+            _ => return Ok(()),
         }
-        let input = input.trim().to_lowercase();
-        if input != "y" && input != "yes" {
-            println!("Reset aborted.");
-            return Ok(());
-        }
+        println!();
     }
 
-    let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
-    let omni_dir = home_dir.join(".omni");
+    let mut target_ids = Vec::new();
+    if is_claude {
+        target_ids.push("claude");
+    }
+    if is_cursor {
+        target_ids.push("cursor");
+    }
+    if is_zed {
+        target_ids.push("zed");
+    }
+    if is_cline {
+        target_ids.push("cline");
+    }
+    if is_roo {
+        target_ids.push("roo-code");
+    }
+    if is_copilot {
+        target_ids.push("copilot");
+    }
+    if is_gemini {
+        target_ids.push("gemini");
+    }
+    if is_opencode {
+        target_ids.push("opencode");
+    }
+    if is_codex {
+        target_ids.push("codex");
+    }
+    if is_antigravity {
+        target_ids.push("antigravity");
+    }
 
-    if !omni_dir.exists() {
+    perform_reset(is_all, target_ids)
+}
+
+fn perform_reset(is_all: bool, target_ids: Vec<&str>) -> anyhow::Result<()> {
+    if is_all {
+        println!("\n{} Removing ALL omni agent integrations...", "⟳".yellow());
+        for agent in all_integrations() {
+            if let Err(e) = agent.uninstall() {
+                println!(
+                    "  {} Failed to uninstall {}: {}",
+                    "x".red(),
+                    agent.name(),
+                    e
+                );
+            }
+        }
+
+        // Wipe Database Optional behavior
         println!(
-            "\n{} The ~/.omni directory does not exist. Nothing to reset.",
-            "ℹ".blue()
+            "\n{} Would you like to wipe the SQLite database (~/.omni/omni.db)? [y/N]",
+            "?".yellow()
         );
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if input.trim().eq_ignore_ascii_case("y") {
+            let db_path = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".omni/omni.db");
+            if db_path.exists() {
+                std::fs::remove_file(&db_path).ok();
+                println!("  {} Omni database wiped.", "✓".green());
+            }
+        }
+
+        println!("  {} All resets completed.", "✓".green());
         return Ok(());
     }
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let backup_dir_name = format!(".omni.{}.bak", timestamp);
-    let backup_dir = home_dir.join(&backup_dir_name);
-
-    if let Err(e) = fs::rename(&omni_dir, &backup_dir) {
-        return Err(format!("{} Failed to backup ~/.omni: {}", "✗".red(), e));
+    if target_ids.is_empty() {
+        println!("No integrations selected. Aborting.");
+        return Ok(());
     }
 
-    println!(
-        "\n{} {} backed up successfully.",
-        "✓".green(),
-        "Data".bold()
-    );
-    println!("  Moved ~/.omni to ~/{}\n", backup_dir_name.bright_black());
-
-    println!("{} Cleaning up agent integrations...", "ℹ".blue());
-    let args = vec!["--uninstall".to_string()];
-    if let Err(e) = crate::cli::init::run_init(&args) {
-        println!(
-            "  {} (Note: could not fully remove hooks/MCP: {})",
-            "⚠".yellow(),
-            e
-        );
+    println!("\n{} Uninstalling selected integrations...", "⟳".yellow());
+    let agents = all_integrations();
+    for agent in agents {
+        if target_ids.contains(&agent.id())
+            && let Err(e) = agent.uninstall()
+        {
+            println!(
+                "  {} Failed to uninstall {}: {}",
+                "x".red(),
+                agent.name(),
+                e
+            );
+        }
     }
 
-    println!(
-        "\n{} You can now safely uninstall OMNI.",
-        "✓".green().bold()
-    );
-    println!(
-        "  Run: {} brew uninstall fajarhide/tap/omni\n",
-        "→".yellow()
-    );
-
+    println!("\n{} Selected integrations have been reset.", "✓".green());
     Ok(())
 }

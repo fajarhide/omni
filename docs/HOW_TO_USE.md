@@ -898,10 +898,20 @@ omni init              # Interactive Menu for any AI Agent
 
 # Or bypass the menu for a specific agent
 omni init --claude     # Full Setup for Claude Code (Hooks + MCP)
-omni init --vscode     # Setup for VS Code Continue.dev
+omni init --cursor     # Setup for Cursor AI
+omni init --zed        # Setup for Zed Editor
+omni init --cline      # Setup for Cline
+omni init --roo        # Setup for Roo Code
+omni init --copilot    # Setup for GitHub Copilot CLI
+omni init --gemini     # Setup for Gemini CLI
 omni init --opencode   # Setup for OpenCode plugin
 omni init --codex      # Setup for Codex CLI
+omni init --openclaw   # Setup for OpenClaw plugin
+omni init --antigravity# Setup for Antigravity IDE
+
+# Claude-specific utilities
 omni init --mcp        # Setup Claude MCP Server only
+omni init --hook       # Setup Claude hooks only
 omni init --status     # Check Claude installation status
 omni init --uninstall  # Remove all OMNI components from Claude
 ```
@@ -1178,7 +1188,7 @@ OMNI is designed to be the "Intelligence Layer" for multiple agent frameworks.
 You can use OMNI natively with OpenClaw by installing the official skill from ClawHub:
 - **ClawHub**: [OMNI Semantic Signal Engine](https://clawhub.ai/fajarhide/omni-signal-engine)
 - **Install Command**: `clawhub install omni-signal-engine`
-- **Manual Install**: `openclaw plugins install ./integrations/openclaw`
+- **Automatic Setup**: OpenClaw integration is completely automatic. Run `omni doctor --fix` to fetch and install the latest plugin directly from the OMNI public repository.
 
 ---
 

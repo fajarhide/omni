@@ -154,7 +154,7 @@ By default, `omni init --claude` automatically hooks into **Claude Code**. Howev
 
 1. **VS Code & Continue.dev**: Use our MCP context provider (`integrations/continue-dev/`).
 2. **OpenCode & Codex CLI**: Built-in wrappers automatically pipe command output to OMNI.
-3. **Generic Webhook (Antigravity IDE etc)**: Run `omni serve --port=7891` to launch an ultra-lightweight local HTTP server for agents to drop payloads into OMNI.
+3. **Antigravity IDE**: OMNI natively supports IDEs like Antigravity via MCP over stdio. Just import the plugin manifest (`integrations/antigravity/antigravity.plugin.json`).
 
 **Multi-Agent Tuning (`~/.omni/config.toml`)**
 Different agents have different pain points. Keep VS Code chat clean, whilst letting OpenCode read more data. Tune them individually:

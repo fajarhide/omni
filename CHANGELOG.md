@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Expanded Tool Registry**: Added granular `cargo` subcommand support and new tool categories for Database, Mobile, Cloud, and CI/CD toolchains with accurate distiller routing.
 
 ### Improved
+- **OpenClaw Portability**: The OpenClaw integration natively fetches plugin files directly from the public GitHub repository, allowing successful 1-click installation without requiring a full local git repository clone.
 - **Robust RegEx Generation (`omni learn`)**: Fixed a critical bug where auto-learned numeric patterns used literal `#` instead of functional `\d+` in generated TOML filters. Now delegates TOML string escaping to the `toml` crate for correctness.
 - **Enhanced Verify Report (`omni learn --verify`)**: Results are now grouped by source (Built-in vs. User), with clear per-category pass/fail counts and actionable tips when user-learned filters fail.
 - **Auto-Clear Learn Queue**: `omni learn --apply` now automatically clears `~/.omni/learn_queue.jsonl` after successful application, preventing stale data from polluting subsequent `--discover` runs.
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Filter Loading**: Made `match_command` optional in `FilterConfig`, gracefully skipping filters with empty or missing patterns instead of crashing.
 
 ### Fixed
+- **Learned Filters Concurrency (`learned.toml`)**: Replaced seconds-based timestamp resolution with `timestamp_micros()` for auto-generated filters to prevent fatal TOML duplication parse errors during high-frequency concurrent learning (fixes the infinite `doctor --fix` `.bak` failure loop).
 - **Test Regression (`test_claude_code_stdout_format`)**: Resolved a persistent CI failure caused by state contamination from user-learned filters leaking into the test environment.
 - **Stats UX Hint**: Added `--all-commands` usage hint to `omni stats` when showing truncated top-10 results.
 

@@ -118,6 +118,23 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
     }
 }
 
+fn agent_display_name(agent_id: &str) -> &str {
+    match agent_id {
+        "claude_code" | "claude" => "Claude Code",
+        "cursor" => "Cursor AI",
+        "zed" => "Zed Editor",
+        "cline" => "Cline",
+        "roo-code" | "roo_code" => "Roo Code",
+        "copilot" => "Copilot CLI",
+        "gemini" => "Gemini CLI",
+        "opencode" => "OpenCode",
+        "codex" => "Codex CLI",
+        "openclaw" => "OpenClaw",
+        "antigravity" => "Antigravity",
+        other => other,
+    }
+}
+
 fn print_separator() {
     println!(
         "{}",
@@ -138,7 +155,7 @@ fn print_help() {
 
     println!("\n{}", "FLAGS:".bold().bright_white());
     println!(
-        "  {: <12} Full technical breakdown (commands, routes, session)",
+        "  {: <12} Full technical breakdown (commands, routes, sessions, agents)",
         "--detail".cyan()
     );
     println!("  {: <12} Scope to today only", "--today".cyan());
@@ -294,6 +311,35 @@ fn run_default(store: &Store) -> Result<()> {
         }
     }
 
+    // Agent Distribution
+    let agent_data = store.get_agent_breakdown(0).unwrap_or_default();
+    if !agent_data.is_empty() {
+        let total_cmds: u64 = agent_data.iter().map(|(_, c, _, _)| c).sum();
+        println!("\n  {}", "Agent Distribution:".bold().bright_white());
+        for (agent_id, count, input, output) in &agent_data {
+            let name = agent_display_name(agent_id);
+            let pct = if total_cmds > 0 {
+                *count as f64 / total_cmds as f64 * 100.0
+            } else {
+                0.0
+            };
+            let savings = if *input > 0 {
+                100.0 * (1.0 - *output as f64 / *input as f64)
+            } else {
+                0.0
+            };
+            let bar = format_bar_with_empty(pct);
+            println!(
+                "    {:<14} {}  {:>5.1}%  ({:>3}x)  {:>5.1}% saved",
+                name.bright_cyan(),
+                bar.bright_blue(),
+                pct,
+                count,
+                savings,
+            );
+        }
+    }
+
     // RewindStore
     println!(
         "\n  {:<20} {}",
@@ -433,13 +479,27 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             .collect()
     };
 
+    // Per-command with agent info
+    let cmd_agent_data = store
+        .get_per_command_with_agent(since, 30)
+        .unwrap_or_default();
+
     if !display_filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
         println!(
-            "   #  {:<24} {:>7} {:>9}  Signal Strength",
-            "CLI", "Count", "Savings"
+            "   {}  {:<22} {:<13} {:>5} {:>8}  {}",
+            "#".bright_black(),
+            "CLI".bright_black(),
+            "Agent".bright_black(),
+            "Count".bright_black(),
+            "Savings".bright_black(),
+            "Signal Strength".bright_black()
         );
-        println!("   ── {:─<24} ─────── ───────── ────────────────────", "");
+        println!(
+            "   {} {}",
+            "──".bright_black(),
+            "──────────────────── ──────────── ───── ──────── ────────────────────".bright_black()
+        );
 
         for (i, (name, cnt, pct)) in display_filters.iter().enumerate() {
             let bar = format_bar(*pct);
@@ -454,18 +514,26 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 "".clear()
             };
 
-            let display_name = if name.chars().count() > 21 {
-                let mut s: String = name.chars().take(18).collect();
+            let display_name = if name.chars().count() > 19 {
+                let mut s: String = name.chars().take(16).collect();
                 s.push_str("...");
                 s
             } else {
                 (*name).clone()
             };
 
+            // Find the most common agent for this command
+            let agent_label = cmd_agent_data
+                .iter()
+                .find(|(cmd, _, _, _, _)| shorten_command(cmd, 19) == display_name)
+                .map(|(_, aid, _, _, _)| agent_display_name(aid))
+                .unwrap_or("—");
+
             println!(
-                "  {:>2}. {:<24} {:>6}x  {:>7.1}%  {}{}",
+                "  {:>2}. {:<22} {:<13} {:>4}x  {:>6.1}%  {}{}",
                 i + 1,
                 display_name.bright_cyan(),
+                agent_label.bright_blue(),
                 cnt,
                 pct,
                 bar_colored,
@@ -535,6 +603,54 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         }
     }
 
+    // Agent Distribution
+    let agent_data = store.get_agent_breakdown(since).unwrap_or_default();
+    if !agent_data.is_empty() {
+        let total_cmds: u64 = agent_data.iter().map(|(_, c, _, _)| c).sum();
+        println!("\n {}", "Agent Distribution:".bold().bright_white());
+        println!(
+            "   {:<16} {:>6} {:>7}  {}",
+            "Agent".bright_black(),
+            "Count".bright_black(),
+            "Share".bright_black(),
+            "Savings".bright_black()
+        );
+        println!(
+            "   {} {}",
+            "──".bright_black(),
+            "────────────── ────── ─────── ────────────────────".bright_black()
+        );
+        for (agent_id, count, input, output) in &agent_data {
+            let name = agent_display_name(agent_id);
+            let pct = if total_cmds > 0 {
+                *count as f64 / total_cmds as f64 * 100.0
+            } else {
+                0.0
+            };
+            let savings = if *input > 0 {
+                100.0 * (1.0 - *output as f64 / *input as f64)
+            } else {
+                0.0
+            };
+            let bar = format_bar(savings);
+            let bar_colored = if savings > 80.0 {
+                bar.bright_green()
+            } else if savings > 40.0 {
+                bar.bright_yellow()
+            } else {
+                bar.bright_red()
+            };
+            println!(
+                "   {:<16} {:>5}x  {:>5.1}%  {} {:.1}%",
+                name.bright_cyan(),
+                count,
+                pct,
+                bar_colored,
+                savings,
+            );
+        }
+    }
+
     // Session insights — always shown in detail mode
     let hot_files = store.hot_files_global(since)?;
     if !hot_files.is_empty() {
@@ -600,9 +716,29 @@ fn run_json(store: &Store) -> Result<()> {
         })
         .collect();
 
+    let agent_json: Vec<serde_json::Value> = store
+        .get_agent_breakdown(0)
+        .unwrap_or_default()
+        .iter()
+        .map(|(agent_id, count, input, output)| {
+            let savings = if *input > 0 {
+                (100.0 * (1.0 - *output as f64 / *input as f64) * 10.0).round() / 10.0
+            } else {
+                0.0
+            };
+            serde_json::json!({
+                "agent": agent_display_name(agent_id),
+                "agent_id": agent_id,
+                "count": count,
+                "savings_pct": savings,
+            })
+        })
+        .collect();
+
     let output = serde_json::json!({
         "periods": periods_json,
         "commands": commands_json,
+        "agents": agent_json,
         "rewind": {
             "archived": rewind_stored,
             "retrieved": rewind_retrieved,

@@ -1,3 +1,4 @@
+pub mod agents;
 mod cli;
 mod distillers;
 mod guard;
@@ -229,6 +230,13 @@ fn main() {
                     let _ = cli::init::run_init(&args);
                 }
 
+                "reset" => {
+                    if let Err(e) = cli::reset::handle_reset() {
+                        eprintln!("[omni] Reset error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
                 "serve" => {
                     let port: u16 = args
                         .iter()
@@ -303,13 +311,6 @@ fn main() {
                 "rewrite" => {
                     if let Err(_e) = cli::rewrite::run_rewrite(&args) {
                         std::process::exit(1); // Standard silent fail for rewrite hook
-                    }
-                }
-
-                "reset" => {
-                    if let Err(e) = cli::reset::run(&args) {
-                        eprintln!("[omni] Reset error: {}", e);
-                        std::process::exit(1);
                     }
                 }
 
