@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod collapse;
 pub mod registry;
 pub mod scorer;
