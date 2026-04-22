@@ -285,7 +285,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         }
     }
 
-    let filter_name = format!("learned_{}", Utc::now().timestamp());
+    let filter_name = format!("learned_{}", Utc::now().timestamp_micros());
 
     let command_hint = executions.first().map(|e| e.command.as_str());
 

@@ -1,4 +1,5 @@
 pub mod dispatcher;
+pub mod normalize;
 pub mod pipe;
 pub mod post_tool;
 pub mod pre_compact;

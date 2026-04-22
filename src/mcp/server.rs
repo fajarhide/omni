@@ -61,7 +61,7 @@ impl OmniServer {
 
         // 3. If apply=true: write to ~/.omni/filters/learned.toml
         if apply {
-            let filter_name = format!("learned_{}", chrono::Utc::now().timestamp());
+            let filter_name = format!("learned_{}", chrono::Utc::now().timestamp_micros());
             let _toml_content = generate_toml(&candidates, &filter_name, None);
 
             let config_path = crate::paths::learned_filters_path();
@@ -167,7 +167,7 @@ impl OmniServer {
                 let domain = s.inferred_domain.as_deref().unwrap_or("none");
 
                 let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
-                hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+                hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
                 let hot_str = if hot_vec.is_empty() {
                     "none".to_string()
                 } else {
@@ -195,7 +195,7 @@ impl OmniServer {
                 let task = s.inferred_task.as_deref().unwrap_or("none");
 
                 let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
-                hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+                hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
                 let hot_str = if hot_vec.is_empty() {
                     "none".to_string()
                 } else {

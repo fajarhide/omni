@@ -4,3 +4,7 @@ expression: output
 ---
 Build: 1 errors, 0 warnings
 error[E0432]: unresolved import `std::collections`
+ --> src/main.rs:1:5
+  |
+1 | use std::collections::Foo;
+  |     ^^^^^^^^^^^^^^^^^^^^^ no `Foo` in `collections`

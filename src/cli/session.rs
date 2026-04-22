@@ -153,7 +153,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     if is_inject {
         let task = state.inferred_task.as_deref().unwrap_or("none");
         let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
-        hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+        hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
         let hot_str = if hot_vec.is_empty() {
             "none".to_string()
         } else {
@@ -253,7 +253,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         );
 
         let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
-        hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+        hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
         println!(" {}", "Hot files:".bold().bright_white());
         for (i, (file, count)) in hot_vec.iter().take(3).enumerate() {
             println!(
@@ -559,7 +559,7 @@ mod tests {
             .map(|e| e.as_str())
             .unwrap_or("none");
         let mut hot: Vec<_> = state.hot_files.iter().collect();
-        hot.sort_by(|a, b| b.1.cmp(a.1));
+        hot.sort_by_key(|a| std::cmp::Reverse(a.1));
         let hot_str = hot
             .iter()
             .take(2)

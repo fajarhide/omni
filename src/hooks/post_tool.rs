@@ -1,28 +1,11 @@
 use crate::pipeline::toml_filter;
 use crate::pipeline::{DistillResult, Route, SessionState, collapse, scorer};
 use crate::store::sqlite::Store;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[derive(Deserialize)]
-struct HookInput {
-    tool_name: String,
-    tool_input: Option<ToolInput>,
-    tool_response: Option<ToolResponse>,
-}
-
-#[derive(Deserialize)]
-struct ToolInput {
-    command: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ToolResponse {
-    content: Option<serde_json::Value>,
-    stdout: Option<String>,
-    stderr: Option<String>,
-}
+// Input parsing moved to hooks::normalize
 
 #[derive(Serialize)]
 struct HookOutput {
@@ -37,88 +20,53 @@ struct HookSpecificOutput {
     #[serde(rename = "updatedResponse")]
     updated_response: String,
 }
-
-fn extract_content(value: &serde_json::Value) -> Option<String> {
-    if let Some(s) = value.as_str() {
-        return Some(s.to_string());
-    }
-    if let Some(arr) = value.as_array() {
-        let mut out = String::new();
-        for item in arr {
-            if let Some(obj) = item.as_object()
-                && let Some(t) = obj.get("type")
-                && t == "text"
-                && let Some(text) = obj.get("text")
-                && let Some(s) = text.as_str()
-            {
-                out.push_str(s);
-                out.push('\n');
-            }
-        }
-        if out.is_empty() {
-            return None;
-        }
-        return Some(out.trim_end().to_string());
-    }
-    None
-}
-
-/// Extracts content from tool_response, trying `content` first (Cursor, Windsurf)
-/// then falling back to `stdout`/`stderr` (Claude Code format).
-fn extract_tool_content(input: &HookInput) -> Option<String> {
-    let response = input.tool_response.as_ref()?;
-
-    // Try structured `content` field first
-    if let Some(ref val) = response.content
-        && let Some(s) = extract_content(val)
-    {
-        return Some(s);
-    }
-
-    // Fall back to stdout/stderr (Claude Code format)
-    if let Some(ref stdout) = response.stdout
-        && !stdout.is_empty()
-    {
-        let mut result = stdout.clone();
-        if let Some(ref stderr) = response.stderr
-            && !stderr.is_empty()
-        {
-            result.push_str("\n[stderr]\n");
-            result.push_str(stderr);
-        }
-        return Some(result);
-    }
-
-    None
-}
-
 pub fn process_payload(
     input_str: &str,
     store: Option<Arc<Store>>,
     session: Option<Arc<Mutex<SessionState>>>,
 ) -> Option<String> {
-    let parsed: HookInput = match serde_json::from_str(input_str) {
-        Ok(p) => p,
-        Err(_) => {
-            return None;
+    let normalized = crate::hooks::normalize::normalize(input_str)?;
+
+    let content = normalized.content;
+
+    let config = crate::guard::config::load_config();
+    let agent_config = config.for_agent(&normalized.agent_id);
+
+    // Route based on tool_name: handle non-Bash tools with specialized distillation
+    match normalized.tool_name.as_str() {
+        "Bash" => { /* fall through to existing pipeline below */ }
+        "Read" => {
+            if !agent_config.readfile_enabled() {
+                return None;
+            }
+            let filepath = if normalized.command.is_empty() {
+                "unknown"
+            } else {
+                &normalized.command
+            };
+            return process_file_read(&content, filepath).map(wrap_hook_output);
         }
-    };
-
-    if parsed.tool_name != "Bash" {
-        return None;
+        "Grep" => {
+            if !agent_config.grep_enabled() {
+                return None;
+            }
+            return process_grep_output(&content).map(wrap_hook_output);
+        }
+        "WebFetch" => {
+            if !agent_config.webfetch_enabled() {
+                return None;
+            }
+            return process_web_content(&content).map(wrap_hook_output);
+        }
+        _ => return None, // Edit, Write, etc. — don't need distillation
     }
-
-    let content = extract_tool_content(&parsed)?;
 
     if content.len() < 50 {
         return None;
     }
 
-    let command = parsed
-        .tool_input
-        .as_ref()
-        .and_then(|i| i.command.clone())
-        .unwrap_or_default();
+    let command = normalized.command.clone();
+    let _agent_id = &normalized.agent_id;
 
     let clean_command = if let Some(stripped) = command.strip_prefix("omni exec ") {
         stripped
@@ -246,13 +194,15 @@ pub fn process_payload(
         }
     }
 
-    // Determine Route
+    // Determine Route based on agent config thresholds
     let ratio = 1.0 - (final_out.len() as f32 / content.len().max(1) as f32);
+    let (keep_threshold, soft_threshold) = agent_config.route_thresholds();
+
     let route = if !rewind_hash.is_empty() {
         Route::Rewind
-    } else if ratio >= 0.7 {
+    } else if ratio >= keep_threshold {
         Route::Keep
-    } else if ratio >= 0.3 {
+    } else if ratio >= soft_threshold {
         Route::Soft
     } else {
         Route::Passthrough
@@ -264,7 +214,11 @@ pub fn process_payload(
 
     // Measure ratio strictly
     if final_out.len() >= content.len() * 9 / 10 {
-        return None;
+        if final_out.len() < 1000 {
+            return None; // Tiny output, silent passthrough
+        } else {
+            final_out.insert_str(0, "[OMNI: Passthrough (low compression)]\n");
+        }
     }
 
     let latency_ms = start.elapsed().as_millis() as u32;
@@ -294,7 +248,13 @@ pub fn process_payload(
             .and_then(|lock| lock.lock().ok())
             .map(|s| s.session_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
-        s.record_distillation(&session_id, &result, clean_command, &project_path);
+        s.record_distillation(
+            &session_id,
+            &result,
+            clean_command,
+            &project_path,
+            _agent_id,
+        );
 
         if let Some(ref sess) = session {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
@@ -316,6 +276,344 @@ pub fn process_payload(
         },
     })
     .ok()
+}
+
+fn wrap_hook_output(distilled: String) -> String {
+    serde_json::to_string(&HookOutput {
+        hook_specific_output: HookSpecificOutput {
+            hook_event_name: "PostToolUse",
+            updated_response: distilled,
+        },
+    })
+    .unwrap_or_default()
+}
+
+// ── NON-BASH TOOL DISTILLATION ───────────────────────────────────────
+
+fn process_file_read(content: &str, filepath: &str) -> Option<String> {
+    let line_count = content.lines().count();
+    if line_count < 50 {
+        return None; // Small files pass through
+    }
+
+    let ext = std::path::Path::new(filepath)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let distilled = match ext {
+        "rs" => distill_rust_file(content),
+        "py" => distill_python_file(content),
+        "ts" | "tsx" | "js" | "jsx" => distill_js_ts_file(content),
+        "go" => distill_go_file(content),
+        "java" | "kt" => distill_java_file(content),
+        "json" => distill_json_file(content),
+        "toml" | "yaml" | "yml" => distill_config_file(content, ext),
+        "log" | "txt" => distill_log_file(content),
+        _ => distill_unknown_file(content),
+    };
+
+    // Only return if meaningful compression achieved
+    if distilled.len() < content.len() * 8 / 10 {
+        Some(format!(
+            "[OMNI ReadFile: {} → distilled ({} lines)]\n{}",
+            filepath, line_count, distilled
+        ))
+    } else {
+        None
+    }
+}
+
+fn distill_rust_file(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub struct ")
+            || trimmed.starts_with("pub enum ")
+            || trimmed.starts_with("pub trait ")
+            || trimmed.starts_with("impl ")
+            || trimmed.starts_with("pub mod ")
+            || trimmed.starts_with("use ")
+            || trimmed.starts_with("//!")
+            || trimmed.contains("todo!")
+            || trimmed.contains("unimplemented!")
+            || trimmed.contains("panic!")
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        distill_unknown_file(content)
+    } else {
+        out.trim().to_string()
+    }
+}
+
+fn distill_python_file(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("def ")
+            || trimmed.starts_with("async def ")
+            || trimmed.starts_with("class ")
+            || trimmed.starts_with("import ")
+            || trimmed.starts_with("from ")
+            || trimmed.starts_with('@')
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        distill_unknown_file(content)
+    } else {
+        out.trim().to_string()
+    }
+}
+
+fn distill_js_ts_file(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("export ")
+            || trimmed.starts_with("function ")
+            || trimmed.starts_with("class ")
+            || trimmed.starts_with("interface ")
+            || trimmed.starts_with("type ")
+            || (trimmed.starts_with("const ") && trimmed.contains("=>"))
+            || trimmed.starts_with("import ")
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        distill_unknown_file(content)
+    } else {
+        out.trim().to_string()
+    }
+}
+
+fn distill_go_file(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("func ")
+            || trimmed.starts_with("type ")
+            || trimmed.starts_with("var ")
+            || trimmed.starts_with("const ")
+            || trimmed.starts_with("package ")
+            || trimmed.starts_with("import")
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        distill_unknown_file(content)
+    } else {
+        out.trim().to_string()
+    }
+}
+
+fn distill_java_file(content: &str) -> String {
+    let mut out = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if (trimmed.contains("class ")
+            || trimmed.contains("interface ")
+            || trimmed.contains("public ")
+            || trimmed.contains("private ")
+            || trimmed.contains("protected ")
+            || trimmed.starts_with("import ")
+            || trimmed.starts_with("package "))
+            && !trimmed.starts_with("//")
+            && !trimmed.is_empty()
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        distill_unknown_file(content)
+    } else {
+        out.trim().to_string()
+    }
+}
+
+fn distill_json_file(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if total <= 30 {
+        return content.trim().to_string();
+    }
+    let head: Vec<&str> = lines.iter().take(15).copied().collect();
+    format!(
+        "{}\n... [{} more lines — full JSON in RewindStore]",
+        head.join("\n"),
+        total - 15
+    )
+}
+
+fn distill_config_file(content: &str, ext: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if total <= 40 {
+        return content.trim().to_string();
+    }
+    let mut out = String::new();
+    for line in &lines {
+        let trimmed = line.trim();
+        if (ext == "toml"
+            && (trimmed.starts_with('[')
+                || (!trimmed.starts_with('#')
+                    && trimmed.contains('=')
+                    && !trimmed.starts_with(' '))))
+            || (matches!(ext, "yaml" | "yml")
+                && !trimmed.starts_with(' ')
+                && !trimmed.starts_with('#')
+                && trimmed.ends_with(':'))
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        distill_unknown_file(content)
+    } else {
+        format!("[Config structure — {} lines total]\n{}", total, out.trim())
+    }
+}
+
+fn distill_log_file(content: &str) -> String {
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    let mut error_lines: Vec<String> = vec![];
+    for line in content.lines() {
+        let l = line.to_lowercase();
+        if l.contains("error") || l.contains("fatal") || l.contains("panic") {
+            errors += 1;
+            error_lines.push(line.to_string());
+        } else if l.contains("warn") {
+            warnings += 1;
+        }
+    }
+    let total = content.lines().count();
+    let mut out = format!(
+        "Log: {} errors, {} warnings ({} total lines)\n",
+        errors, warnings, total
+    );
+    for err in error_lines.iter().take(10) {
+        out.push_str(err);
+        out.push('\n');
+    }
+    if errors > 10 {
+        out.push_str(&format!("... [{} more error lines]\n", errors - 10));
+    }
+    out.trim().to_string()
+}
+
+fn distill_unknown_file(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if total <= 30 {
+        return content.trim().to_string();
+    }
+    let head: Vec<&str> = lines.iter().take(15).copied().collect();
+    let tail: Vec<&&str> = lines.iter().rev().take(5).collect();
+    let tail_rev: Vec<&&str> = tail.into_iter().rev().collect();
+    format!(
+        "--- HEAD ({} total lines) ---\n{}\n... [{} lines omitted] ...\n--- TAIL ---\n{}",
+        total,
+        head.join("\n"),
+        total - 20,
+        tail_rev
+            .iter()
+            .map(|l| **l)
+            .collect::<Vec<&str>>()
+            .join("\n")
+    )
+}
+
+fn process_grep_output(content: &str) -> Option<String> {
+    let line_count = content.lines().count();
+    if line_count < 20 {
+        return None;
+    } // Small results pass through
+
+    let files: std::collections::HashSet<&str> = content
+        .lines()
+        .filter_map(|l| l.split(':').next())
+        .filter(|f| !f.is_empty())
+        .collect();
+    let file_count = files.len();
+    let top: Vec<&str> = content.lines().take(15).collect();
+    let summary = format!(
+        "[OMNI Grep: {} matches in {} files]\n{}{}",
+        line_count,
+        file_count,
+        top.join("\n"),
+        if line_count > 15 {
+            format!("\n... [{} more matches]", line_count - 15)
+        } else {
+            String::new()
+        }
+    );
+    if summary.len() < content.len() * 8 / 10 {
+        Some(summary)
+    } else {
+        None
+    }
+}
+
+fn process_web_content(content: &str) -> Option<String> {
+    let line_count = content.lines().count();
+    if line_count < 30 {
+        return None;
+    }
+
+    let stripped = strip_html_simple(content);
+    let stripped_lines: Vec<&str> = stripped.lines().filter(|l| !l.trim().is_empty()).collect();
+    let total_clean = stripped_lines.len();
+    let meaningful: Vec<&str> = stripped_lines
+        .iter()
+        .filter(|l| l.trim().len() > 20)
+        .take(40)
+        .copied()
+        .collect();
+    let summary = format!(
+        "[OMNI WebFetch: {} lines → {} relevant]\n{}{}",
+        line_count,
+        total_clean,
+        meaningful.join("\n"),
+        if total_clean > 40 {
+            format!("\n... [{} more lines]", total_clean - 40)
+        } else {
+            String::new()
+        }
+    );
+    if summary.len() < content.len() * 7 / 10 {
+        Some(summary)
+    } else {
+        None
+    }
+}
+
+fn strip_html_simple(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -349,16 +647,90 @@ mod tests {
     }
 
     #[test]
-    fn test_non_bash_tool_exit_tanpa_output() {
+    fn test_non_bash_tool_small_file_passthrough() {
+        // Small ReadFile content (<50 lines) should pass through (None)
         let input = json!({
-            "tool_name": "ReadFile",
-            "tool_input": {},
+            "tool_name": "Read",
+            "tool_input": { "path": "small.rs" },
             "tool_response": {
-                "content": "a".repeat(100)
+                "content": "fn main() {\n    println!(\"hello\");\n}\n"
             }
         });
         let out = process_payload(&input.to_string(), None, None);
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn test_readfile_large_rust_file_distilled() {
+        // Large ReadFile (>50 lines) should be distilled
+        // Generate mix of pub fn signatures + private code bodies for realistic compression
+        let mut big_rust = String::new();
+        for i in 0..20 {
+            big_rust.push_str(&format!("pub fn function_{}() -> i32 {{\n", i));
+            big_rust.push_str(&format!("    let x = {};\n", i));
+            big_rust.push_str(&format!("    let y = x + {};\n", i * 2));
+            big_rust.push_str("    println!(\"computing result\");\n");
+            big_rust.push_str("    x + y\n");
+            big_rust.push_str("}\n\n");
+        }
+        let input = json!({
+            "tool_name": "Read",
+            "tool_input": { "path": "src/big.rs" },
+            "tool_response": {
+                "content": big_rust
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some(), "Large ReadFile must be distilled");
+        let res = out.expect("Output exists");
+        assert!(
+            res.contains("OMNI ReadFile"),
+            "Must have OMNI ReadFile label"
+        );
+        assert!(
+            res.contains("pub fn function_0"),
+            "Must contain pub fn signatures"
+        );
+    }
+
+    #[test]
+    fn test_grep_tool_distilled_with_file_count() {
+        let grep_output = (0..50)
+            .map(|i| format!("src/file{}.rs:42:    some match text here", i % 5))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let input = json!({
+            "tool_name": "Grep",
+            "tool_input": {},
+            "tool_response": {
+                "content": grep_output
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some(), "Grep output must be distilled");
+        let res = out.expect("Output exists");
+        assert!(res.contains("OMNI Grep"), "Must have OMNI Grep label");
+        assert!(res.contains("matches"), "Must show match count");
+    }
+
+    #[test]
+    fn test_edit_tool_returns_none() {
+        let input = json!({
+            "tool_name": "Edit",
+            "tool_input": {},
+            "tool_response": {
+                "content": "File edited successfully"
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_none(), "Edit tool should not be distilled");
+    }
+
+    #[test]
+    fn test_html_strip_removes_tags() {
+        let html = "<h1>Title</h1><p>Content here</p>";
+        let stripped = strip_html_simple(html);
+        assert_eq!(stripped.trim(), "TitleContent here");
     }
 
     #[test]
@@ -387,8 +759,34 @@ mod tests {
         let out = process_payload(&input.to_string(), None, None);
         // GenericDistiller limits to 100 lines.
         // Noise is a single line, so generic prints exactly the same thing.
-        // Therefore length > 90% and exits without distillation!
+        // Therefore length > 90% and exits without distillation (because length < 1000)
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn test_no_significant_reduction_labeled_passthrough_for_large_output() {
+        // Create 20 lines of exactly 60 chars each (total 1200+ chars)
+        let noise = (0..30)
+            .map(|i| {
+                // Generate completely distinct strings with varying lengths and chars
+                let chars: String =
+                    std::iter::repeat_n((b'a' + (i % 26) as u8) as char, 40 + (i as usize * 3))
+                        .collect();
+                format!("unqiue_prefix_{} {}\n", i, chars)
+            })
+            .collect::<String>();
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": {},
+            "tool_response": {
+                "content": noise
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some());
+        let res = out.expect("Output exists");
+        println!("PASSTHROUGH RES: {}", res);
+        assert!(res.contains("OMNI: Passthrough"));
     }
 
     #[test]
@@ -399,22 +797,29 @@ mod tests {
 
     #[test]
     fn test_array_content_format_extracted_correctly() {
-        let arr = json!([
-            {"type": "text", "text": "hello\n"},
-            {"type": "text", "text": "world ".repeat(10)},
-            {"type": "text", "text": "!"}
-        ]);
-        let extracted = extract_content(&arr).expect("must succeed");
-        assert!(extracted.contains("hello"));
-        assert!(extracted.contains("world world"));
-        assert!(extracted.ends_with("!"));
+        // Verify array content extraction via normalize (Cursor/Windsurf format)
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "ls" },
+            "tool_response": {
+                "content": [
+                    {"type": "text", "text": "hello\n"},
+                    {"type": "text", "text": "world ".repeat(10)},
+                    {"type": "text", "text": "!"}
+                ]
+            }
+        });
+        let norm = crate::hooks::normalize::normalize(&input.to_string()).expect("must normalize");
+        assert!(norm.content.contains("hello"));
+        assert!(norm.content.contains("world world"));
+        assert!(norm.content.ends_with("!"));
     }
 
     #[test]
     fn test_claude_code_stdout_format() {
         let mut big_output =
             "total 42\ndrwxr-xr-x  15 user  staff  480 Apr 10 10:00 .\n".to_string();
-        for i in 0..30 {
+        for i in 0..80 {
             big_output.push_str(&format!(
                 "-rw-r--r--   1 user  staff  {} Apr 10 10:00 file{}.rs\n",
                 i * 100,
@@ -453,11 +858,10 @@ mod tests {
                 "interrupted": false
             }
         });
-        let parsed: HookInput = serde_json::from_value(input).expect("must parse");
-        let content = extract_tool_content(&parsed).expect("must extract");
-        assert!(content.contains("line 0 of output"));
-        assert!(content.contains("[stderr]"));
-        assert!(content.contains("warning: unused variable"));
+        let norm = crate::hooks::normalize::normalize(&input.to_string()).expect("must normalize");
+        assert!(norm.content.contains("line 0 of output"));
+        assert!(norm.content.contains("[stderr]"));
+        assert!(norm.content.contains("warning: unused variable"));
     }
 
     #[test]
@@ -495,6 +899,49 @@ mod tests {
         assert!(
             res.contains("test.txt"),
             "content field should be used, not stdout"
+        );
+    }
+
+    #[test]
+    fn test_process_payload_opencode_format() {
+        let input = r#"{"type":"tool_result","tool":"shell","output":"pytest\n5 passed in 2.1s","command":"pytest"}"#;
+        // OpenCode format harus diproses sama seperti Claude Code
+        let _out = process_payload(input, None, None);
+        // Jika content < threshold, bisa None — tapi jangan crash
+        // Test ini memverifikasi tidak ada panic
+    }
+
+    #[test]
+    fn test_process_payload_codex_format() {
+        let long_output = "line\n".repeat(200);
+        let input = serde_json::json!({
+            "action": "run",
+            "command": "cargo build",
+            "result": long_output
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        // Harus ada output (bukan None) untuk input panjang
+        // (cargo build dengan 200 baris harusnya di-distilasi)
+        assert!(
+            out.is_some(),
+            "Codex format harus di-distilasi jika output panjang"
+        );
+    }
+
+    #[test]
+    fn test_claude_code_still_works_after_refactor() {
+        // REGRESSION TEST — CRITICAL
+        let input = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo build"},
+            "tool_response": {
+                "stdout": "error[E0382]: borrow of moved value\n  --> src/main.rs:47\n".repeat(50)
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(
+            out.is_some(),
+            "Claude Code format harus tetap bekerja setelah refactor"
         );
     }
 }

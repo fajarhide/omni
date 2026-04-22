@@ -111,8 +111,8 @@ Omni is incredibly easy to set up. It natively integrates into your terminal.
 # 1. Install via Homebrew
 brew install fajarhide/tap/omni
 
-# 2. Setup Omni (Hooks + MCP Server)
-omni init --all
+# 2. Setup Omni (Interactive Menu for Claude, VS Code, OpenCode, Codex, Antigravity)
+omni init
 
 # 3. Verify it's working
 omni doctor
@@ -138,7 +138,7 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ## How to Use It
 
-Once installed via `omni init --all`, OMNI works invisibly in the background. Whether your AI Agent runs a terminal command via MCP or you manually pipe output (`ls | omni`), OMNI automatically jumps in as a transparent layer. It intelligently filters terminal output, removes the noisy logs, and hands the clean signal back to the AI.
+Once installed via `omni init`, OMNI works invisibly in the background. Whether your AI Agent runs a terminal command via MCP or you manually pipe output (`ls | omni`), OMNI automatically jumps in as a transparent layer. It intelligently filters terminal output, removes the noisy logs, and hands the clean signal back to the AI.
 
 To review how many tokens (and how much money) you've saved today, just type:
 ```bash
@@ -147,6 +147,29 @@ omni stats
 
 Need to see the filters in action or add your own custom rules?
 You can easily create your own rules using simple TOML files.
+
+### Multi-Agent Support & Integrations
+
+By default, `omni init --claude` automatically hooks into **Claude Code**. However, OMNI works perfectly with any agentic AI through its built-in integrations! Run `omni init` to see the interactive menu.
+
+1. **VS Code & Continue.dev**: Use our MCP context provider (`integrations/continue-dev/`).
+2. **OpenCode & Codex CLI**: Built-in wrappers automatically pipe command output to OMNI.
+3. **Antigravity IDE**: OMNI natively supports IDEs like Antigravity via MCP over stdio. Just import the plugin manifest (`integrations/antigravity/antigravity.plugin.json`).
+
+**Multi-Agent Tuning (`~/.omni/config.toml`)**
+Different agents have different pain points. Keep VS Code chat clean, whilst letting OpenCode read more data. Tune them individually:
+```toml
+[global]
+aggressiveness = "balanced"
+
+[agents.vscode_continue]
+aggressiveness = "aggressive"
+enable_readfile_distillation = true
+
+[agents.opencode]
+aggressiveness = "conservative"
+enable_readfile_distillation = false
+```
 
 ### Documentation Index
 

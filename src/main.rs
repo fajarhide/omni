@@ -1,3 +1,4 @@
+pub mod agents;
 mod cli;
 mod distillers;
 mod guard;
@@ -116,7 +117,10 @@ fn print_help() {
     println!("  {: <12} Show this help message", "help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
-    println!("  omni init --all       {}", "# OMNI setup".bright_black());
+    println!(
+        "  omni init             {}",
+        "# OMNI setup (interactive)".bright_black()
+    );
     println!(
         "  omni doctor           {}",
         "# Diagnose installation health".bright_black()
@@ -226,6 +230,25 @@ fn main() {
                     let _ = cli::init::run_init(&args);
                 }
 
+                "reset" => {
+                    if let Err(e) = cli::reset::handle_reset() {
+                        eprintln!("[omni] Reset error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
+                "serve" => {
+                    let port: u16 = args
+                        .iter()
+                        .find(|a| a.starts_with("--port="))
+                        .and_then(|a| a["--port=".len()..].parse().ok())
+                        .unwrap_or(7891);
+                    if let Err(e) = cli::serve::run_http_server(port) {
+                        eprintln!("[omni] Server error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
                 "stats" => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::stats::run(&args, &store) {
@@ -288,13 +311,6 @@ fn main() {
                 "rewrite" => {
                     if let Err(_e) = cli::rewrite::run_rewrite(&args) {
                         std::process::exit(1); // Standard silent fail for rewrite hook
-                    }
-                }
-
-                "reset" => {
-                    if let Err(e) = cli::reset::run(&args) {
-                        eprintln!("[omni] Reset error: {}", e);
-                        std::process::exit(1);
                     }
                 }
 

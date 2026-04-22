@@ -103,7 +103,7 @@ if ($UserPath -notmatch [regex]::Escape($InstallDir)) {
 
 Write-Host ""
 Write-Host "  Next steps:"
-Write-Host "    omni init --hook   # Activate Claude Code hooks"
-Write-Host "    omni doctor        # Verify installation"
-Write-Host "    omni stats         # View savings after first session"
+Write-Host "    omni init              # Interactive setup for your preferred AI Agent"
+Write-Host "    omni doctor            # Verify installation"
+Write-Host "    omni stats             # View savings after first session"
 Write-Host ""

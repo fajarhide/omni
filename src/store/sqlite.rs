@@ -230,7 +230,8 @@ impl Store {
                 latency_ms   INTEGER NOT NULL,
                 rewind_hash  TEXT DEFAULT '',
                 command      TEXT DEFAULT '',
-                project_path TEXT DEFAULT ''
+                project_path TEXT DEFAULT '',
+                agent_id     TEXT DEFAULT 'claude_code'
             );
             CREATE INDEX IF NOT EXISTS idx_dist_ts ON distillations(ts);
             CREATE INDEX IF NOT EXISTS idx_dist_session ON distillations(session_id);
@@ -299,11 +300,12 @@ impl Store {
                     latency_ms   INTEGER NOT NULL,
                     rewind_hash  TEXT DEFAULT '',
                     command      TEXT DEFAULT '',
-                    project_path TEXT DEFAULT ''
+                    project_path TEXT DEFAULT '',
+                    agent_id     TEXT DEFAULT 'claude_code'
                 );
                 INSERT INTO distillations 
-                (id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, project_path)
-                SELECT id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, '' 
+                (id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, project_path, agent_id)
+                SELECT id, session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, '', 'claude_code' 
                 FROM distillations_old;
                 DROP TABLE distillations_old;
                 CREATE INDEX idx_dist_ts ON distillations(ts);
@@ -326,6 +328,10 @@ impl Store {
             "ALTER TABLE distillations ADD COLUMN project_path TEXT DEFAULT ''",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN agent_id TEXT DEFAULT 'claude_code'",
+            [],
+        );
 
         Ok(())
     }
@@ -336,6 +342,7 @@ impl Store {
         result: &DistillResult,
         command: &str,
         project_path: &str,
+        agent_id: &str,
     ) {
         let conn = match self.conn.lock() {
             Ok(c) => c,
@@ -346,8 +353,8 @@ impl Store {
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
         let res = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path, agent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 session_id,
                 ts,
@@ -363,6 +370,7 @@ impl Store {
                 col_orig as i64,
                 col_to as i64,
                 project_path,
+                agent_id,
             ],
         );
 
@@ -574,6 +582,74 @@ impl Store {
         Ok(rows)
     }
 
+    /// Agent breakdown: (agent_id, count, input_bytes, output_bytes)
+    pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                COALESCE(agent_id, 'claude_code') as agent,
+                COUNT(*) as calls,
+                COALESCE(SUM(input_bytes), 0) as total_input,
+                COALESCE(SUM(output_bytes), 0) as total_output
+            FROM distillations
+            WHERE ts >= ?1
+            GROUP BY agent
+            ORDER BY calls DESC",
+        )?;
+
+        let rows = stmt
+            .query_map(params![since], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u64>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
+    /// Per-command stats with agent_id: (command, agent_id, count, input_bytes, output_bytes)
+    #[allow(clippy::type_complexity)]
+    pub fn get_per_command_with_agent(
+        &self,
+        since: i64,
+        limit: usize,
+    ) -> Result<Vec<(String, String, u64, u64, u64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT
+                command,
+                COALESCE(agent_id, 'claude_code') as agent,
+                COUNT(*) as calls,
+                COALESCE(SUM(input_bytes), 0) as total_input,
+                COALESCE(SUM(output_bytes), 0) as total_output
+            FROM distillations
+            WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
+            GROUP BY command, agent
+            ORDER BY calls DESC
+            LIMIT ?2",
+        )?;
+
+        let rows = stmt
+            .query_map(params![since, limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u64>(3)?,
+                    row.get::<_, u64>(4)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     /// Multi-period stats: Vec of (period_label, count, input_bytes, output_bytes)
     pub fn multi_period_stats(&self) -> Result<Vec<(String, u64, u64, u64)>> {
         let now = chrono::Utc::now().timestamp();
@@ -721,7 +797,7 @@ mod tests {
             collapse_savings: None,
         };
         // Should not panic
-        store.record_distillation("sess_123", &res, "npm start", "");
+        store.record_distillation("sess_123", &res, "npm start", "", "claude_code");
     }
 
     #[test]

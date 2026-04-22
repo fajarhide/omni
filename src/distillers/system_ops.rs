@@ -212,7 +212,7 @@ fn distill_grep_output(input: &str) -> String {
 
     // Sort by count descending
     let mut sorted: Vec<(String, u32)> = by_file.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     let shown = sorted.iter().take(10);
     for (file, count) in shown {
@@ -324,7 +324,7 @@ fn distill_find_output(input: &str) -> String {
 
     // Sort by count descending, show top extensions
     let mut sorted: Vec<(String, u32)> = by_ext.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     let ext_strs: Vec<String> = sorted
         .iter()
@@ -442,7 +442,7 @@ pub fn distill_env_output(input: &str) -> String {
 
     // Sort by count descending, show top prefixes
     let mut sorted: Vec<(String, u32)> = by_prefix.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     let prefix_strs: Vec<String> = sorted
         .iter()

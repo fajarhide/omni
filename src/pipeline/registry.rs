@@ -34,13 +34,11 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         let parts: Vec<&str> = cmd_lower.split_whitespace().collect();
         let sub = parts.get(1).copied().unwrap_or("");
         match sub {
-            "diff" | "show" | "whatchanged" => {
-                if !cmd_lower.contains("--stat") {
-                    return ToolProfile {
-                        segmentation: SegmentationMode::GitHunk,
-                        collapse: CollapseMode::Generic,
-                    };
-                }
+            "diff" | "show" | "whatchanged" if !cmd_lower.contains("--stat") => {
+                return ToolProfile {
+                    segmentation: SegmentationMode::GitHunk,
+                    collapse: CollapseMode::Generic,
+                };
             }
             _ => {}
         }

@@ -165,9 +165,9 @@ main() {
 
     echo ""
     echo "  Next steps:"
-    echo "    omni init --hook   # Activate Claude Code hooks"
-    echo "    omni doctor        # Verify installation"
-    echo "    omni stats         # View savings after first session"
+    echo "    omni init              # Interactive setup for your preferred AI Agent"
+    echo "    omni doctor            # Verify installation"
+    echo "    omni stats             # View savings after first session"
     echo ""
 }
 

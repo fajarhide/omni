@@ -25,13 +25,7 @@ OMNI 0.5.0 is a **full rewrite in Rust** — replacing the previous Node.js + Zi
 
 ### ⚠️ Hooks Must Be Reinstalled
 
-The hook format has changed. Run:
-
-```bash
-omni init --hook
-```
-
-This will update `~/.claude/settings.json` with the new hook entries.
+The hook format has changed. Make sure to run `omni init` after upgrading to update the `PostToolUse` and `SessionStart` hooks in your Claude settings.
 If you had custom hooks, they will be backed up to `settings.json.bak`.
 
 ### ⚠️ `omni monitor` → `omni stats`
@@ -63,7 +57,7 @@ The MCP server is now built-in. Update your Claude config:
 }
 ```
 
-Or run `omni init --hook` which handles this automatically.
+Or run `omni init --claude` which handles this automatically.
 
 ## What's Compatible (No Action Needed)
 
@@ -83,7 +77,7 @@ Or run `omni init --hook` which handles this automatically.
 ```bash
 brew update
 brew upgrade omni
-omni init --hook    # Reinstall hooks
+omni init           # Select Claude Code, or run: omni init --claude
 omni doctor         # Verify everything
 ```
 
@@ -91,7 +85,7 @@ omni doctor         # Verify everything
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.sh | sh
-omni init --hook
+omni init
 omni doctor
 ```
 
@@ -102,7 +96,7 @@ omni doctor
 curl -LO https://github.com/fajarhide/omni/releases/download/v0.5.0/omni-v0.5.0-aarch64-apple-darwin.tar.gz
 tar xzf omni-v0.5.0-aarch64-apple-darwin.tar.gz
 mv omni ~/.local/bin/
-omni init --hook
+omni init           # Reinitialize hooks via interactive menu
 omni doctor
 ```
 
@@ -124,7 +118,7 @@ The `~/.omni/` directory and `omni.db` are safe to keep — they're compatible w
 | `omni doctor` | Diagnose installation (hooks, DB, filters) |
 | `omni stats` | Token savings analytics dashboard |
 | `omni learn` | Auto-generate TOML filters from passthrough output |
-| `omni init --hook` | Setup/update Claude Code hooks |
+| `omni init` | Interactive agent setup menu |
 | `omni --mcp` | Built-in MCP server mode |
 
 ## Troubleshooting

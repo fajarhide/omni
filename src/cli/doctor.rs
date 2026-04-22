@@ -1,4 +1,3 @@
-use crate::cli::init::get_settings_path;
 use crate::store::sqlite::Store;
 use colored::*;
 use std::fs;
@@ -64,7 +63,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     let fix_mode = args.iter().any(|a| a == "--fix");
 
     let mut all_ok = true;
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     println!(
         "\n{}",
         "─────────────────────────────────────────"
@@ -126,7 +125,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                     "[ERROR]".red().bold()
                 );
                 warnings.push(
-                    "Cannot write to ~/.omni/. If using Claude Code, add ~/.omni to sandbox.filesystem.allowWrite in ~/.claude/settings.json",
+                    "Cannot write to ~/.omni/. If using Claude Code, add ~/.omni to sandbox.filesystem.allowWrite in ~/.claude/settings.json".to_string(),
                 );
                 all_ok = false;
             }
@@ -144,7 +143,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 "Config dir:".bright_black(),
                 "[ERROR]".red().bold()
             );
-            warnings.push("Config directory ~/.omni/ is missing or not writable. Run `omni init`.");
+            warnings.push(
+                "Config directory ~/.omni/ is missing or not writable. Run `omni init`."
+                    .to_string(),
+            );
             all_ok = false;
         }
     }
@@ -174,7 +176,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                     "[ERROR]".red().bold()
                 );
                 warnings.push(
-                    "Database is read-only. Claude Code sandbox may be blocking writes to ~/.omni/omni.db. Add ~/.omni to sandbox.filesystem.allowWrite in ~/.claude/settings.json",
+                    "Database is read-only. Claude Code sandbox may be blocking writes to ~/.omni/omni.db. Add ~/.omni to sandbox.filesystem.allowWrite in ~/.claude/settings.json".to_string(),
                 );
                 all_ok = false;
             }
@@ -192,7 +194,8 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                     "[WARNING]".yellow().bold()
                 );
                 warnings.push(
-                    "SQLite FTS5 extension is not enabled. Search capabilities will be degraded.",
+                    "SQLite FTS5 extension is not enabled. Search capabilities will be degraded."
+                        .to_string(),
                 );
                 all_ok = false;
             }
@@ -228,162 +231,16 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 "FTS5:".bright_black(),
                 "[ERROR]".red().bold()
             );
-            warnings.push("Database is totally inaccessible.");
+            warnings.push("Database is totally inaccessible.".to_string());
             all_ok = false;
         }
     }
 
-    // 4. Hook entries in ~/.claude/settings.json
-    println!("\n {}", "OMNI Hooks:".bold().bright_white());
-    let path = get_settings_path();
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if content.contains("--hook")
-                || content.contains("--post-hook")
-                || content.contains("--pre-hook")
-                || content.contains("--session-start")
-                || content.contains("--pre-compact")
-            {
-                let fmt_hook = |name: &str, tag: &str| {
-                    if content.contains(tag) {
-                        println!(
-                            "   {:<15} {}",
-                            name.bright_black(),
-                            "[OK] installed".green()
-                        );
-                        true
-                    } else {
-                        println!(
-                            "   {:<15} {}",
-                            name.bright_black(),
-                            "[WARNING] missing".yellow()
-                        );
-                        false
-                    }
-                };
-
-                if !fmt_hook("PreToolUse", "PreToolUse") {
-                    all_ok = false;
-                }
-                if !fmt_hook("PostToolUse", "PostToolUse") {
-                    all_ok = false;
-                    warnings.push("PostToolUse hook is not installed. Run `omni init`.");
-                }
-                if !fmt_hook("SessionStart", "SessionStart") {
-                    all_ok = false;
-                }
-                if !fmt_hook("PreCompact", "PreCompact") {
-                    all_ok = false;
-                }
-
-                if fix_mode && !all_ok {
-                    let _ = crate::cli::init::run_init(&[
-                        "omni".to_string(),
-                        "init".to_string(),
-                        "--hook".to_string(),
-                    ]);
-                    println!(
-                        "   {:<15} {}",
-                        "Hooks:".bright_black(),
-                        "[FIXED] missing hooks installed".green().bold()
-                    );
-                    all_ok = true;
-                    warnings.retain(|w| {
-                        !w.contains("hook") && !w.contains("Claude settings not found")
-                    });
-                }
-            } else {
-                if fix_mode {
-                    let _ = crate::cli::init::run_init(&[
-                        "omni".to_string(),
-                        "init".to_string(),
-                        "--hook".to_string(),
-                    ]);
-                    println!(
-                        "   {:<15} {}",
-                        "Hooks:".bright_black(),
-                        "[FIXED] installed".green().bold()
-                    );
-                } else {
-                    println!(
-                        "   {:<15} {}",
-                        "Hooks:".bright_black(),
-                        "[WARNING] no hooks found".yellow().bold()
-                    );
-                    warnings.push("OMNI hooks are not configured. Run `omni init`.");
-                    all_ok = false;
-                }
-            }
-        }
-    } else {
-        if fix_mode {
-            let _ = crate::cli::init::run_init(&[
-                "omni".to_string(),
-                "init".to_string(),
-                "--hook".to_string(),
-            ]);
-            println!(
-                "   {:<15} {}",
-                "Hooks:".bright_black(),
-                "[FIXED] installed".green().bold()
-            );
-        } else {
-            println!(
-                "   {:<15} {}",
-                "Hooks:".bright_black(),
-                "[ERROR] settings.json missing".red()
-            );
-            warnings.push("Claude settings not found. Have you installed Claude Code?");
-            all_ok = false;
-        }
-    }
-
-    // 5. MCP Server registration
-    println!("\n {}", "OMNI MCP Server:".bold().bright_white());
-    let mcp_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Library/Application Support/Claude/claude_desktop_config.json");
-    let mcpa_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude.json");
-
-    let mut mcp_found = false;
-    for p in &[mcp_path, mcpa_path] {
-        if p.exists()
-            && let Ok(c) = fs::read_to_string(p)
-            && (c.contains("omni --mcp") || c.contains("\"omni\":"))
-        {
-            mcp_found = true;
-            println!(
-                "   {:<15} {} {}",
-                "Registered:".bright_black(),
-                p.display().to_string().bright_black(),
-                "[OK]".green().bold()
-            );
-            break;
-        }
-    }
-    if !mcp_found {
-        if fix_mode {
-            let _ = crate::cli::init::run_init(&[
-                "omni".to_string(),
-                "init".to_string(),
-                "--mcp".to_string(),
-            ]);
-            println!(
-                "   {:<15} {}",
-                "Registered:".bright_black(),
-                "[FIXED] registered".green().bold()
-            );
-        } else {
-            println!(
-                "   {:<15} {}",
-                "Registered:".bright_black(),
-                "[WARNING] no MCP server found".yellow().bold()
-            );
-            warnings.push("MCP Server is not configured. Run `omni init`.");
-            all_ok = false;
-        }
+    // 4. Agent Integrations
+    println!("\n {}", "Agent Integrations:".bold().bright_white());
+    let integrations = crate::agents::all_integrations();
+    for agent in integrations {
+        all_ok &= agent.doctor_check(fix_mode, &mut warnings);
     }
 
     // 6. Config Filters
@@ -471,7 +328,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                         local_report.filters.len().to_string().yellow(),
                         "[WARNING]".yellow().bold()
                     );
-                    warnings.push("Project filters found but not trusted. Run: `omni trust`.");
+                    warnings.push(
+                        "Project filters found but not trusted. Run: `omni doctor --fix`."
+                            .to_string(),
+                    );
                     all_ok = false;
                 }
             }

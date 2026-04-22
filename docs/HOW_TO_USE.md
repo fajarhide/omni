@@ -55,7 +55,7 @@ Nothing to type. Nothing to configure per-session. Just use Claude Code normally
 
 ```mermaid
 flowchart TD
-    Install([Install OMNI]) --> Init["omni init --all"]
+    Install([Install OMNI]) --> Init["omni init (Interactive)"]
     Init --> Doctor["omni doctor"]
     Doctor --> OK{All checks pass?}
     OK -- No --> Fix["omni doctor --fix"]
@@ -116,10 +116,10 @@ cp target/release/omni ~/.local/bin/
 This is the most important step. Without this, OMNI cannot intercept Claude Code's terminal output.
 
 ```bash
-omni init --all
+omni init
 ```
 
-**What `--all` does:**
+**What `omni init` does:**
 - Installs the `PostToolUse` hook — intercepts every command output after it runs
 - Installs the `SessionStart` hook — injects your working context at session start
 - Installs the `PreCompact` hook — preserves context during Claude's memory compaction
@@ -148,11 +148,11 @@ Start Claude Code normally. OMNI is now active and invisible.
 ```bash
 # Homebrew
 brew upgrade omni
-omni init --hook    # Reinstall hooks after upgrade
+omni init    # Reinstall hooks after upgrade
 
 # Manual
 curl -fsSL https://raw.githubusercontent.com/fajarhide/omni/main/scripts/install.sh | sh
-omni init --hook
+omni init
 ```
 
 See [MIGRATION.md](MIGRATION.md) for detailed upgrade instructions from 0.4.x.
@@ -794,9 +794,6 @@ When you run `omni doctor --fix`, OMNI will automatically repair:
 | Problem | Fix Applied |
 |---|---|
 | Missing `~/.omni/` directory | Creates it |
-| Claude Code hooks not installed | Runs `omni init --hook` |
-| MCP not registered | Runs `omni init --mcp` |
-| Untrusted project filters | Runs `omni trust` |
 | Broken `.toml` filter files | Renames to `.toml.bak` |
 | Historical `Unknown` stats records | Re-classifies with latest model |
 
@@ -897,11 +894,26 @@ cargo test 2>&1 | omni             # standard distillation
 Setup OMNI hooks in Claude Code.
 
 ```bash
-omni init --all        # Recommended: Full Setup (Hooks + MCP)
-omni init --hook       # Setup Hooks only
-omni init --mcp        # Setup MCP Server only
-omni init --status     # Check installation status
-omni init --uninstall  # Remove all OMNI components
+omni init              # Interactive Menu for any AI Agent
+
+# Or bypass the menu for a specific agent
+omni init --claude     # Full Setup for Claude Code (Hooks + MCP)
+omni init --cursor     # Setup for Cursor AI
+omni init --zed        # Setup for Zed Editor
+omni init --cline      # Setup for Cline
+omni init --roo        # Setup for Roo Code
+omni init --copilot    # Setup for GitHub Copilot CLI
+omni init --gemini     # Setup for Gemini CLI
+omni init --opencode   # Setup for OpenCode plugin
+omni init --codex      # Setup for Codex CLI
+omni init --openclaw   # Setup for OpenClaw plugin
+omni init --antigravity# Setup for Antigravity IDE
+
+# Claude-specific utilities
+omni init --mcp        # Setup Claude MCP Server only
+omni init --hook       # Setup Claude hooks only
+omni init --status     # Check Claude installation status
+omni init --uninstall  # Remove all OMNI components from Claude
 ```
 
 **What it does:**
@@ -994,8 +1006,6 @@ When `--fix` is passed, OMNI will automatically resolve detected issues:
 | Issue | Fix Applied |
 |---|---|
 | Missing `~/.omni/` directory | Creates the directory |
-| Missing Claude Code hooks | Runs `omni init --hook` |
-| Missing MCP server registration | Runs `omni init --mcp` |
 | Untrusted project filters | Runs `omni trust` on the project |
 | Invalid user filter files | Renames broken `.toml` to `.toml.bak` |
 
@@ -1085,7 +1095,7 @@ Hooks **always** exit 0 — they never crash the host agent.
 
 | Issue | Likely Cause | Fix |
 |---|---|---|
-| OMNI not filtering anything | Hooks not installed | Run `omni init --all` |
+| OMNI not filtering anything | Not installed | Run `omni init` and select your agent |
 | `omni stats` shows no data | First session not complete | Use Claude Code for a bit, then check |
 | Filter not matching a command | `match_command` regex wrong | Test regex at regex101.com, then `omni learn --verify` |
 | Session not persisting | DB not writable | Run `omni doctor`, check `~/.omni/` permissions |
@@ -1108,7 +1118,7 @@ omni doctor --fix  # Self-repair
 
 ### First-Time Setup
 - [ ] Install OMNI (`brew install fajarhide/tap/omni` or script)
-- [ ] Run `omni init --all`
+- [ ] Run `omni init` for your chosen agent
 - [ ] Run `omni doctor` — all checks should be green
 - [ ] If any checks fail, run `omni doctor --fix`
 - [ ] Use Claude Code normally for one session
@@ -1122,7 +1132,6 @@ omni doctor --fix  # Self-repair
 - [ ] Run `omni learn --verify` after applying any filters
 
 ### After Upgrading OMNI
-- [ ] Run `omni init --hook` (reinstall hooks after upgrade)
 - [ ] Run `omni doctor --fix` (re-classify historical data with new model)
 - [ ] Run `omni stats` to confirm everything is working
 
@@ -1179,7 +1188,7 @@ OMNI is designed to be the "Intelligence Layer" for multiple agent frameworks.
 You can use OMNI natively with OpenClaw by installing the official skill from ClawHub:
 - **ClawHub**: [OMNI Semantic Signal Engine](https://clawhub.ai/fajarhide/omni-signal-engine)
 - **Install Command**: `clawhub install omni-signal-engine`
-- **Manual Install**: `openclaw plugins install ./integrations/openclaw`
+- **Automatic Setup**: OpenClaw integration is completely automatic. Run `omni doctor --fix` to fetch and install the latest plugin directly from the OMNI public repository.
 
 ---
 

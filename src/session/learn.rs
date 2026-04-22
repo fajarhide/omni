@@ -78,7 +78,7 @@ pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
     }
 
     // 7. Sort by count desc, return max 16
-    candidates.sort_by(|a, b| b.count.cmp(&a.count));
+    candidates.sort_by_key(|a| std::cmp::Reverse(a.count));
     candidates.into_iter().take(16).collect()
 }
 

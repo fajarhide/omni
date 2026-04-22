@@ -24,7 +24,15 @@ impl Distiller for TestDistiller {
                 if !seg.content.to_lowercase().contains("failed tests/")
                     && !seg.content.contains("===")
                 {
-                    failure_details.push(seg.content.clone());
+                    // Truncate to max 12 lines to keep just the assertion and stack trace
+                    let lines: Vec<&str> = seg.content.lines().collect();
+                    if lines.len() > 12 {
+                        let truncated =
+                            lines[..12].join("\n") + "\n       ... [stack trace truncated]";
+                        failure_details.push(truncated);
+                    } else {
+                        failure_details.push(seg.content.clone());
+                    }
                 }
             } else if seg.tier == SignalTier::Important
                 || seg.content.contains("PASS")
@@ -53,7 +61,7 @@ impl Distiller for TestDistiller {
 
         out.push_str(&format!("Tests: {} passed, {} failed\n", passed, failed));
 
-        let max_fails = 5;
+        let max_fails = 10;
         for (i, fail) in failure_details.iter().enumerate() {
             if i < max_fails {
                 out.push_str(fail);

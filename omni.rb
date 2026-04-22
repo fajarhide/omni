@@ -33,7 +33,7 @@ class Omni < Formula
   def caveats
     <<~EOS
       Quick start:
-        omni init --all        # Initialize OMNI setup
+        omni init              # Initialize OMNI setup (interactive)
         omni doctor            # Verify installation
         omni stats             # View token savings
 

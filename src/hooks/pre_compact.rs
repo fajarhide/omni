@@ -101,7 +101,7 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
     );
 
     let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
-    hot_vec.sort_by(|a, b| b.1.cmp(a.1));
+    hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
     let top_files: Vec<String> = hot_vec
         .iter()
         .take(5)

@@ -242,7 +242,7 @@ pub fn find_pending() -> Option<Transcript> {
     }
 
     // Sort: most recent first
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     for (_, path) in candidates {
         if let Ok(content) = fs::read_to_string(&path)
@@ -284,7 +284,7 @@ pub fn list_recent(limit: usize) -> Vec<Transcript> {
         }
     }
 
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     let mut out = Vec::new();
     for (_, path) in candidates.into_iter().take(limit) {

@@ -365,11 +365,17 @@ fn persist<E: Write>(
             collapse_savings: result.collapse_savings,
         };
 
+        let agent_id = if std::env::var("OMNI_CMD").is_ok() {
+            "aider"
+        } else {
+            "terminal"
+        };
         s.record_distillation(
             &result.session_id,
             &distill_result,
             command_name.unwrap_or(""),
             &result.project_path,
+            agent_id,
         );
 
         if let Some(sess) = session {

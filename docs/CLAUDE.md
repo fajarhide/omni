@@ -52,7 +52,7 @@ src/
 ├── mcp/
 │   └── server.rs        # MCP server (5 tools: retrieve, learn, density, trust, compress)
 └── cli/
-    ├── init.rs          # omni init --hook
+    ├── init.rs          # omni init
     ├── stats.rs         # omni stats analytics dashboard
     ├── session.rs       # omni session state inspection
     ├── learn.rs         # omni learn CLI

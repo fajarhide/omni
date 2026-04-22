@@ -243,9 +243,19 @@ pub fn score_segments(
         }
         SegmentationMode::Line => {
             // Segment per line
-            let mut line_num = 1;
-            for line in input.lines() {
-                let tier = classify_line(line);
+            let mut boost_counter = 0;
+            for (line_num, line) in (1..).zip(input.lines()) {
+                let mut tier = classify_line(line);
+
+                if tier == SignalTier::Critical {
+                    boost_counter = 5;
+                } else if boost_counter > 0 {
+                    if tier == SignalTier::Context || tier == SignalTier::Noise {
+                        tier = SignalTier::Important;
+                    }
+                    boost_counter -= 1;
+                }
+
                 let base_score = match tier {
                     SignalTier::Critical => 0.9,
                     SignalTier::Important => 0.7,
@@ -261,7 +271,6 @@ pub fn score_segments(
                     context_score,
                     line_range: (line_num, line_num),
                 });
-                line_num += 1;
             }
         }
     }
@@ -380,5 +389,23 @@ mod tests {
 
         let boost = session.context_boost("src/main.rs has missing semicolon and E0432");
         assert!(boost <= 0.4);
+    }
+
+    #[test]
+    fn test_positional_boost_line_mode() {
+        let input = "normal line\nerror[E001]: bad\n  --> src/main.rs:10\n    | code\n    | more code\nnoise line\nnoise line\nback to normal";
+        let segments = score_segments(input, SegmentationMode::Line, None);
+        // segment 0: normal
+        assert_eq!(segments[0].tier, SignalTier::Context);
+        // segment 1: error
+        assert_eq!(segments[1].tier, SignalTier::Critical);
+        // segment 2-6: boosted to Important
+        assert_eq!(segments[2].tier, SignalTier::Important);
+        assert_eq!(segments[3].tier, SignalTier::Important);
+        assert_eq!(segments[4].tier, SignalTier::Important);
+        assert_eq!(segments[5].tier, SignalTier::Important);
+        assert_eq!(segments[6].tier, SignalTier::Important);
+        // segment 7: back to context
+        assert_eq!(segments[7].tier, SignalTier::Context);
     }
 }

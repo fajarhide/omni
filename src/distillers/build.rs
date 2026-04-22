@@ -12,12 +12,39 @@ impl Distiller for BuildDistiller {
     ) -> String {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
+        let mut current_block = Vec::new();
+        let mut is_error_block = false;
 
         for seg in segments {
-            if seg.tier == SignalTier::Critical {
-                errors.push(seg.content.clone());
-            } else if seg.tier == SignalTier::Important {
-                warnings.push(seg.content.clone());
+            if seg.tier == SignalTier::Critical || seg.tier == SignalTier::Important {
+                if current_block.is_empty() {
+                    is_error_block = seg.tier == SignalTier::Critical;
+                }
+                // If we see a new critical and we're currently in a warning block,
+                // or if it's a clear new error boundary, flush it
+                if seg.tier == SignalTier::Critical && !current_block.is_empty() && !is_error_block
+                {
+                    warnings.push(current_block.join("\n"));
+                    current_block.clear();
+                    is_error_block = true;
+                }
+                current_block.push(seg.content.clone());
+            } else {
+                if !current_block.is_empty() {
+                    if is_error_block {
+                        errors.push(current_block.join("\n"));
+                    } else {
+                        warnings.push(current_block.join("\n"));
+                    }
+                    current_block.clear();
+                }
+            }
+        }
+        if !current_block.is_empty() {
+            if is_error_block {
+                errors.push(current_block.join("\n"));
+            } else {
+                warnings.push(current_block.join("\n"));
             }
         }
 
