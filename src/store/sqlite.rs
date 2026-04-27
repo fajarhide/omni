@@ -277,6 +277,54 @@ impl Store {
                 distilled_output TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_traces_ts ON execution_traces(ts);
+
+            -- 7. Session summaries 
+            CREATE TABLE IF NOT EXISTS session_summaries (
+                session_id   TEXT PRIMARY KEY,
+                started_at   INTEGER NOT NULL,
+                ended_at     INTEGER NOT NULL,
+                agent_id     TEXT DEFAULT 'unknown',
+                total_commands INTEGER DEFAULT 0,
+                tokens_saved INTEGER DEFAULT 0,
+                top_filter   TEXT DEFAULT '',
+                exit_reason  TEXT DEFAULT 'unknown',
+                project_path TEXT DEFAULT ''
+            );
+
+            -- 8. Retrieve events for adaptive threshold 
+            CREATE TABLE IF NOT EXISTS retrieve_events (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                command_prefix TEXT NOT NULL,
+                hash         TEXT DEFAULT '',
+                ts           INTEGER NOT NULL,
+                agent_id     TEXT DEFAULT 'unknown'
+            );
+            CREATE INDEX IF NOT EXISTS idx_retrieve_cmd ON retrieve_events(command_prefix);
+            CREATE INDEX IF NOT EXISTS idx_retrieve_ts  ON retrieve_events(ts);
+
+            -- 9. Project knowledge — cross-session semantic memory 
+            CREATE TABLE IF NOT EXISTS project_knowledge (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_hash TEXT NOT NULL,
+                key          TEXT NOT NULL,
+                value        TEXT NOT NULL,
+                confidence   REAL DEFAULT 0.7,
+                hit_count    INTEGER DEFAULT 1,
+                last_updated INTEGER NOT NULL,
+                UNIQUE(project_hash, key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_pk_project ON project_knowledge(project_hash);
+
+            -- 10. Multi-agent sessions — shared state across agents 
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                agent_id     TEXT NOT NULL,
+                session_id   TEXT NOT NULL,
+                project_hash TEXT NOT NULL,
+                last_active  INTEGER NOT NULL,
+                state_json   TEXT DEFAULT '{}',
+                PRIMARY KEY (agent_id, project_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_as_project ON agent_sessions(project_hash);
             "#,
         )?;
 
@@ -480,6 +528,34 @@ impl Store {
         }
 
         content
+    }
+
+    /// Get recent distillation rows for omni_history MCP tool
+    pub fn get_recent_distillations(&self, session_id: &str, limit: usize) -> Vec<DistillationRow> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT command, input_bytes, output_bytes, route, filter_name
+             FROM distillations WHERE session_id = ?1
+             ORDER BY ts DESC LIMIT ?2",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        match stmt.query_map(params![session_id, limit as i64], |row| {
+            Ok(DistillationRow {
+                command: row.get(0)?,
+                input_bytes: row.get::<_, i64>(1)? as usize,
+                output_bytes: row.get::<_, i64>(2)? as usize,
+                route: row.get(3)?,
+                filter_name: row.get(4)?,
+            })
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
     }
 
     pub fn delete_session(&self, id: &str) -> Result<()> {
@@ -809,6 +885,270 @@ impl Store {
             Err(_) => false,
         }
     }
+
+    // ── v0.5.7: Session Summaries ─────────────────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_session_summary(
+        &self,
+        session_id: &str,
+        started_at: i64,
+        agent_id: &str,
+        total_commands: u32,
+        tokens_saved: u64,
+        top_filter: &str,
+        exit_reason: &str,
+        project_path: &str,
+    ) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let now = chrono::Utc::now().timestamp();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO session_summaries
+             (session_id, started_at, ended_at, agent_id, total_commands,
+              tokens_saved, top_filter, exit_reason, project_path)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                session_id,
+                started_at,
+                now,
+                agent_id,
+                total_commands as i64,
+                tokens_saved as i64,
+                top_filter,
+                exit_reason,
+                project_path
+            ],
+        );
+    }
+
+    pub fn get_recent_session_summaries(&self, limit: usize) -> Vec<SessionSummaryRow> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT session_id, started_at, ended_at, agent_id, total_commands,
+                    tokens_saved, top_filter, exit_reason, project_path
+             FROM session_summaries ORDER BY ended_at DESC LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        match stmt.query_map(params![limit as i64], |row| {
+            Ok(SessionSummaryRow {
+                session_id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                agent_id: row.get(3)?,
+                total_commands: row.get::<_, i64>(4)? as u32,
+                tokens_saved: row.get::<_, i64>(5)? as u64,
+                top_filter: row.get(6)?,
+                exit_reason: row.get(7)?,
+                project_path: row.get(8)?,
+            })
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    // ── v0.5.7: Retrieve Events (adaptive threshold) ──────────────────
+
+    pub fn record_retrieve_event(&self, command_prefix: &str, hash: &str, agent_id: &str) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let now = chrono::Utc::now().timestamp();
+        let prefix = &command_prefix[..command_prefix.len().min(40)];
+        let _ = conn.execute(
+            "INSERT INTO retrieve_events (command_prefix, hash, ts, agent_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![prefix, hash, now, agent_id],
+        );
+    }
+
+    /// Returns retrieve_rate for a command prefix (0.0 – 1.0)
+    /// High rate = OMNI too aggressive for this command type
+    pub fn get_retrieve_rate(&self, command_prefix: &str, window_days: i64) -> f64 {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return 0.0,
+        };
+        let cutoff = chrono::Utc::now().timestamp() - window_days * 86400;
+        let prefix = &command_prefix[..command_prefix.len().min(40)];
+        let retrieves: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM retrieve_events WHERE command_prefix = ?1 AND ts > ?2",
+                params![prefix, cutoff],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let distillations: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM distillations WHERE command LIKE ?1 AND ts > ?2",
+                params![format!("{}%", prefix), cutoff],
+                |r| r.get(0),
+            )
+            .unwrap_or(1)
+            .max(1);
+        (retrieves as f64 / distillations as f64).min(1.0)
+    }
+
+    pub fn find_command_for_hash(&self, hash: &str) -> Option<String> {
+        let conn = self.conn.lock().ok()?;
+        conn.query_row(
+            "SELECT command FROM distillations WHERE rewind_hash = ? LIMIT 1",
+            params![hash],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
+    // ── v0.5.7: Project Knowledge (cross-session semantic memory) ─────
+
+    pub fn upsert_project_knowledge(
+        &self,
+        project_hash: &str,
+        key: &str,
+        value: &str,
+        confidence: f32,
+    ) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let now = chrono::Utc::now().timestamp();
+        let _ = conn.execute(
+            "INSERT INTO project_knowledge (project_hash, key, value, confidence, hit_count, last_updated)
+             VALUES (?1,?2,?3,?4,1,?5)
+             ON CONFLICT(project_hash, key) DO UPDATE SET
+               value      = excluded.value,
+               confidence = excluded.confidence,
+               hit_count  = hit_count + 1,
+               last_updated = excluded.last_updated",
+            params![project_hash, key, value, confidence as f64, now],
+        );
+    }
+
+    pub fn get_project_knowledge(&self, project_hash: &str) -> Vec<(String, String, f32)> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT key, value, confidence FROM project_knowledge
+             WHERE project_hash = ?1 AND confidence >= 0.5
+             ORDER BY confidence DESC, hit_count DESC LIMIT 50",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        match stmt.query_map(params![project_hash], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)? as f32,
+            ))
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    // ── v0.5.7: Multi-Agent Sessions ─────────────────────────────────
+
+    /// Sync agent session for cross-agent state sharing
+    pub fn sync_agent_session(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        project_hash: &str,
+        state_json: &str,
+    ) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let now = chrono::Utc::now().timestamp();
+        let _ = conn.execute(
+            "INSERT INTO agent_sessions (agent_id, session_id, project_hash, last_active, state_json)
+             VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(agent_id, project_hash) DO UPDATE SET
+               session_id  = excluded.session_id,
+               last_active = excluded.last_active,
+               state_json  = excluded.state_json",
+            params![agent_id, session_id, project_hash, now, state_json],
+        );
+    }
+
+    /// Get all active agents working on the same project (within last 8h)
+    pub fn get_active_agents_for_project(
+        &self,
+        project_hash: &str,
+        exclude_agent: &str,
+    ) -> Vec<AgentSessionRow> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let cutoff = chrono::Utc::now().timestamp() - 8 * 3600;
+        let mut stmt = match conn.prepare(
+            "SELECT agent_id, session_id, last_active, state_json
+             FROM agent_sessions
+             WHERE project_hash = ?1 AND agent_id != ?2 AND last_active > ?3
+             ORDER BY last_active DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        match stmt.query_map(params![project_hash, exclude_agent, cutoff], |row| {
+            Ok(AgentSessionRow {
+                agent_id: row.get(0)?,
+                session_id: row.get(1)?,
+                last_active: row.get(2)?,
+                state_json: row.get(3)?,
+            })
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+}
+
+// ── v0.5.7 Row Types ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct DistillationRow {
+    pub command: String,
+    pub input_bytes: usize,
+    pub output_bytes: usize,
+    pub route: String,
+    pub filter_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionSummaryRow {
+    pub session_id: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub agent_id: String,
+    pub total_commands: u32,
+    pub tokens_saved: u64,
+    pub top_filter: String,
+    pub exit_reason: String,
+    pub project_path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentSessionRow {
+    pub agent_id: String,
+    pub session_id: String,
+    pub last_active: i64,
+    pub state_json: String,
 }
 
 #[cfg(test)]

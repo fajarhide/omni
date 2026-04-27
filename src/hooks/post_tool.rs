@@ -19,6 +19,9 @@ struct HookSpecificOutput {
     hook_event_name: &'static str,
     #[serde(rename = "updatedResponse")]
     updated_response: String,
+    #[serde(rename = "additionalContext")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    additional_context: Option<String>,
 }
 pub fn process_payload(
     input_str: &str,
@@ -223,26 +226,27 @@ pub fn process_payload(
 
     let latency_ms = start.elapsed().as_millis() as u32;
 
+    let kept = check_segments.len() - noise_count;
+    let result = DistillResult {
+        output: final_out.clone(),
+        route: route.clone(),
+        filter_name: filter_name.clone(),
+        score: 0.0,
+        context_score: 0.0,
+        input_bytes: content.len(),
+        output_bytes: final_out.len(),
+        latency_ms: latency_ms as u64,
+        rewind_hash: if rewind_hash.is_empty() {
+            None
+        } else {
+            Some(rewind_hash)
+        },
+        segments_kept: kept,
+        segments_dropped: noise_count,
+        collapse_savings: collapse_savings_data,
+    };
+
     if let Some(ref s) = store {
-        let kept = check_segments.len() - noise_count;
-        let result = DistillResult {
-            output: final_out.clone(),
-            route: route.clone(),
-            filter_name: filter_name.clone(),
-            score: 0.0,
-            context_score: 0.0,
-            input_bytes: content.len(),
-            output_bytes: final_out.len(),
-            latency_ms: latency_ms as u64,
-            rewind_hash: if rewind_hash.is_empty() {
-                None
-            } else {
-                Some(rewind_hash)
-            },
-            segments_kept: kept,
-            segments_dropped: noise_count,
-            collapse_savings: collapse_savings_data,
-        };
         let session_id = session
             .as_ref()
             .and_then(|lock| lock.lock().ok())
@@ -277,13 +281,45 @@ pub fn process_payload(
         final_out.push_str("\n[OMNI: output truncated]");
     }
 
+    // Build additionalContext with token savings stats
+    let additional_context = build_additional_context(&result, &session);
+
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
             updated_response: final_out,
+            additional_context,
         },
     })
     .ok()
+}
+
+/// Build invisible additionalContext injected into Claude's context
+fn build_additional_context(
+    result: &crate::pipeline::DistillResult,
+    session: &Option<Arc<Mutex<crate::pipeline::SessionState>>>,
+) -> Option<String> {
+    let saved_this_call = if result.input_bytes > result.output_bytes {
+        (result.input_bytes - result.output_bytes) / 4
+    } else {
+        0
+    };
+
+    // Only inject if meaningful savings
+    if saved_this_call < 100 {
+        return None;
+    }
+
+    let session_total = session
+        .as_ref()
+        .and_then(|s| s.lock().ok())
+        .map(|s| s.estimated_tokens_saved())
+        .unwrap_or(0);
+
+    Some(format!(
+        "[OMNI: -{saved_this_call}tok this call | -{session_total}tok session | {savings:.0}% compression]",
+        savings = result.savings_pct()
+    ))
 }
 
 fn wrap_hook_output(distilled: String) -> String {
@@ -291,6 +327,7 @@ fn wrap_hook_output(distilled: String) -> String {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
             updated_response: distilled,
+            additional_context: None,
         },
     })
     .unwrap_or_default()

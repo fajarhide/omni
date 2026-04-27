@@ -1,4 +1,4 @@
-use crate::hooks::{post_tool, pre_compact, session_start};
+use crate::hooks::{post_tool, post_tool_failure, pre_compact, session_end, session_start};
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
@@ -77,7 +77,15 @@ pub fn process_payload(
             let cfg = session_start::SessionConfig::from_env();
             session_start::process_payload(input_str, store, cfg)
         }
+        "SessionEnd" => session_end::process_payload(input_str, store, session.clone()),
         "PreCompact" => pre_compact::process_payload(input_str, store, session.clone()),
+        "PostToolUseFailure" => {
+            post_tool_failure::process_payload(input_str, store, session.clone())
+        }
+        "FileChanged" => {
+            handle_file_changed(input_str, session.clone());
+            None
+        }
         _ => post_tool::process_payload(input_str, Some(store), Some(session.clone())),
     };
 
@@ -91,6 +99,31 @@ pub fn process_payload(
     }
 
     result
+}
+
+/// Handle FileChanged event: update hot_files in session
+fn handle_file_changed(input_str: &str, session: Arc<Mutex<SessionState>>) {
+    #[derive(serde::Deserialize)]
+    struct FileChangedInput {
+        #[serde(rename = "filePath", default)]
+        file_path: String,
+        #[serde(rename = "file_path", default)]
+        file_path2: String,
+    }
+    let Ok(parsed) = serde_json::from_str::<FileChangedInput>(input_str) else {
+        return;
+    };
+    let path = if !parsed.file_path.is_empty() {
+        parsed.file_path
+    } else {
+        parsed.file_path2
+    };
+    if path.is_empty() {
+        return;
+    }
+    if let Ok(mut state) = session.lock() {
+        state.add_hot_file(&path);
+    }
 }
 
 #[cfg(test)]

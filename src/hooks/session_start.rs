@@ -1,3 +1,4 @@
+use crate::agents::multiagent;
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 use crate::store::transcript;
@@ -27,6 +28,9 @@ pub struct HookSpecificOutput {
     pub hook_event_name: String,
     #[serde(rename = "systemPromptAddition")]
     pub system_prompt_addition: String,
+    #[serde(rename = "watchPaths", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub watch_paths: Vec<String>,
 }
 
 pub struct SessionConfig {
@@ -80,10 +84,24 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     }
 
     if should_continue && let Some(state) = prev_state {
-        let summary = build_summary(&state, now);
+        let cwd_for_ctx = if parsed.working_directory.is_empty() {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        } else {
+            parsed.working_directory.clone()
+        };
+
+        // Auto-sync agent session for multi-agent awareness
+        let proj_hash = multiagent::project_hash(&cwd_for_ctx);
+        let agent_id = multiagent::detect_agent_id();
+        let state_json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+        store.sync_agent_session(&agent_id, &state.session_id, &proj_hash, &state_json);
+
+        let summary = build_summary_with_context(&state, now, &store, &cwd_for_ctx);
         let mut summary_truncated = summary.trim().to_string();
-        if summary_truncated.len() > 300 {
-            summary_truncated.truncate(297);
+        if summary_truncated.len() > 800 {
+            summary_truncated.truncate(797);
             summary_truncated.push_str("...");
         }
 
@@ -97,6 +115,7 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
             hook_specific_output: HookSpecificOutput {
                 hook_event_name: "SessionStart".to_string(),
                 system_prompt_addition: summary_truncated,
+                watch_paths: vec![],
             },
         };
 
@@ -126,6 +145,9 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
         new_state.toolchain_hints.insert("python".to_string(), pm);
     }
 
+    // Detect watch paths for file monitoring
+    let watch_paths = detect_watch_paths(cwd_path, &new_state.toolchain_hints);
+
     store.upsert_session(&new_state);
     let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
     store.index_event(&new_state.session_id, "SessionStart", &start_msg);
@@ -149,12 +171,62 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
             hook_specific_output: HookSpecificOutput {
                 hook_event_name: "SessionStart".to_string(),
                 system_prompt_addition: summary,
+                watch_paths: watch_paths.clone(),
+            },
+        };
+        return serde_json::to_string(&out).ok();
+    }
+
+    // Fresh session: only return output if we have watchPaths to register
+    if !watch_paths.is_empty() {
+        let out = HookOutput {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "SessionStart".to_string(),
+                system_prompt_addition: String::new(),
+                watch_paths,
             },
         };
         return serde_json::to_string(&out).ok();
     }
 
     None
+}
+
+/// Auto-detect critical project files to watch based on toolchain
+fn detect_watch_paths(
+    cwd: &std::path::Path,
+    toolchain: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let mut paths: Vec<String> = vec![];
+
+    if toolchain.contains_key("rust") {
+        paths.push("Cargo.toml".to_string());
+        paths.push("Cargo.lock".to_string());
+    }
+    if toolchain.contains_key("js") {
+        paths.push("package.json".to_string());
+        paths.push("tsconfig.json".to_string());
+        paths.push("package-lock.json".to_string());
+    }
+    if toolchain.contains_key("python") {
+        paths.push("pyproject.toml".to_string());
+        paths.push("requirements.txt".to_string());
+    }
+    if cwd.join("go.mod").exists() {
+        paths.push("go.mod".to_string());
+    }
+    if cwd.join("CLAUDE.md").exists() {
+        paths.push("CLAUDE.md".to_string());
+    }
+    if cwd.join(".omni").join("filters").exists() {
+        paths.push(".omni/filters/".to_string());
+    }
+    if cwd.join("Makefile").exists() {
+        paths.push("Makefile".to_string());
+    }
+
+    paths.truncate(10);
+    paths
 }
 
 fn build_summary(state: &SessionState, now: i64) -> String {
@@ -189,6 +261,29 @@ fn build_summary(state: &SessionState, now: i64) -> String {
     if let Some(err) = state.active_errors.first() {
         let clean_err = err.replace('\n', " ").chars().take(80).collect::<String>();
         out.push_str(&format!("Last error: {}. ", clean_err));
+    }
+
+    if state.estimated_tokens_saved() > 0 {
+        out.push_str(&format!(
+            "OMNI saved ~{}tok last session. ",
+            state.estimated_tokens_saved()
+        ));
+    }
+
+    out
+}
+
+fn build_summary_with_context(state: &SessionState, now: i64, store: &Store, cwd: &str) -> String {
+    let mut out = build_summary(state, now);
+
+    // Inject peer agent context (multi-agent awareness)
+    if let Some(peer_ctx) = multiagent::build_peer_context(store, cwd) {
+        out.push_str(&peer_ctx);
+    }
+
+    // Inject cross-session project knowledge
+    if let Some(knowledge_ctx) = multiagent::build_knowledge_context(store, cwd) {
+        out.push_str(&knowledge_ctx);
     }
 
     out
@@ -263,12 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn test_session_summary_leq_300_chars() {
+    fn test_session_summary_leq_800_chars() {
         let (store, _dir) = get_store();
 
         let mut state = SessionState::new();
-        state.add_hot_file(&"A".repeat(200));
-        state.add_error(&"B".repeat(200));
+        state.add_hot_file(&"A".repeat(400));
+        state.add_error(&"B".repeat(400));
         store.upsert_session(&state);
 
         let input = json!({
@@ -286,7 +381,7 @@ mod tests {
         let parsed: HookOutput =
             serde_json::from_str(&out.expect("must succeed")).expect("must succeed");
         let summary_len = parsed.hook_specific_output.system_prompt_addition.len();
-        assert!(summary_len <= 300, "Length was {}", summary_len);
+        assert!(summary_len <= 800, "Length was {}", summary_len);
     }
 
     #[test]

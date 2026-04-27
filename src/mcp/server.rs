@@ -253,9 +253,213 @@ impl OmniServer {
             report
         }
     }
+    #[tool(
+        name = "omni_history",
+        description = "Show recent distillation history with per-call token savings and compression ratios"
+    )]
+    pub async fn omni_history(&self, #[tool(param)] limit: Option<u32>) -> String {
+        let limit = limit.unwrap_or(10).min(50) as usize;
+        let session = match self.session.lock() {
+            Ok(s) => s.clone(),
+            Err(_) => return "Error: session lock failed".to_string(),
+        };
+
+        let session_id = session.session_id.clone();
+        let total_saved = session.estimated_tokens_saved();
+        let cmd_count = session.command_count;
+
+        // Query distillations from store
+        let conn_result = self.store.get_recent_distillations(&session_id, limit);
+
+        if conn_result.is_empty() {
+            return format!(
+                "No distillation history yet.\nSession: {} commands processed | ~{} tokens saved",
+                cmd_count, total_saved
+            );
+        }
+
+        let mut out = format!(
+            "OMNI Distillation History (last {}):\n\n",
+            conn_result.len()
+        );
+        for (i, row) in conn_result.iter().enumerate() {
+            let savings_pct = if row.input_bytes > 0 {
+                (1.0 - row.output_bytes as f64 / row.input_bytes as f64) * 100.0
+            } else {
+                0.0
+            };
+            out.push_str(&format!(
+                "  {:2}. {:<40} {} → {} bytes  {:.0}%  {}\n",
+                i + 1,
+                &row.command[..row.command.len().min(40)],
+                row.input_bytes,
+                row.output_bytes,
+                savings_pct,
+                row.route
+            ));
+        }
+
+        out.push_str(&format!(
+            "\nSession totals:\n  Commands: {} | Tokens saved: ~{} | Agent: {}\n",
+            cmd_count,
+            total_saved,
+            std::env::var("OMNI_AGENT_ID").unwrap_or_else(|_| "claude_code".to_string())
+        ));
+        out
+    }
+
+    #[tool(
+        name = "omni_budget",
+        description = "Show estimated token budget usage and compression efficiency for this session"
+    )]
+    pub async fn omni_budget(&self) -> String {
+        let session = match self.session.lock() {
+            Ok(s) => s.clone(),
+            Err(_) => return "Error: session lock failed".to_string(),
+        };
+
+        let total_in = session.cumulative_input_bytes;
+        let total_out = session.cumulative_output_bytes;
+        let tokens_consumed = total_in / 4;
+        let tokens_saved = session.estimated_tokens_saved();
+        let overall_pct = if total_in > 0 {
+            (1.0 - total_out as f64 / total_in as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        format!(
+            "OMNI Token Budget Estimate:\n\
+             \n  Raw processed:   ~{tokens_consumed} tokens\
+             \n  After OMNI:      ~{} tokens\
+             \n  Saved:           ~{tokens_saved} tokens ({overall_pct:.1}% reduction)\
+             \n\
+             \n  Commands processed: {}\
+             \n  Active errors:      {}\
+             \n  Hot files tracked:  {}\
+             \n\
+             \nTip: Call omni_history() for per-command breakdown.\
+             \n     Call omni_learn(noisy_output) to improve future compression.",
+            (total_out / 4),
+            session.command_count,
+            session.active_errors.len(),
+            session.hot_files.len(),
+        )
+    }
+
+    #[tool(
+        name = "omni_agents",
+        description = "Show other AI agents currently active on this project (multi-agent awareness)"
+    )]
+    pub async fn omni_agents(&self) -> String {
+        let project_path = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let project_hash = compute_project_hash_str(&project_path);
+        let my_agent = std::env::var("OMNI_AGENT_ID").unwrap_or_else(|_| "claude_code".to_string());
+
+        let peers = self
+            .store
+            .get_active_agents_for_project(&project_hash, &my_agent);
+
+        if peers.is_empty() {
+            return format!(
+                "No other agents active on this project.\nYou are: {my_agent}\nProject: {project_path}"
+            );
+        }
+
+        let mut out = format!(
+            "Active agents on this project ({}):\n\n  You: {my_agent}\n\n",
+            project_path
+        );
+
+        for peer in &peers {
+            let age_mins = (chrono::Utc::now().timestamp() - peer.last_active) / 60;
+            let age_str = if age_mins < 60 {
+                format!("{age_mins}m ago")
+            } else {
+                format!("{}h ago", age_mins / 60)
+            };
+
+            // Parse their state for useful info
+            let peer_state: serde_json::Value =
+                serde_json::from_str(&peer.state_json).unwrap_or_default();
+            let peer_task = peer_state
+                .get("inferred_task")
+                .and_then(|t| t.as_str())
+                .unwrap_or("unknown task");
+            let peer_errors = peer_state
+                .get("active_errors")
+                .and_then(|e| e.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+
+            out.push_str(&format!(
+                "  [{age_str}] {agent_id}\n    Task: {peer_task}\n    Active errors: {peer_errors}\n\n",
+                agent_id = peer.agent_id,
+            ));
+        }
+        out.push_str("Use omni_session(\"context\") to share your state with peers.");
+        out
+    }
+
+    #[tool(
+        name = "omni_knowledge",
+        description = "Query or store cross-session project knowledge (persistent across sessions)"
+    )]
+    pub async fn omni_knowledge(
+        &self,
+        #[tool(param)] action: String,
+        #[tool(param)] key: Option<String>,
+        #[tool(param)] value: Option<String>,
+    ) -> String {
+        let project_path = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        let project_hash = compute_project_hash_str(&project_path);
+
+        match action.as_str() {
+            "list" => {
+                let knowledge = self.store.get_project_knowledge(&project_hash);
+                if knowledge.is_empty() {
+                    return "No project knowledge stored yet.\nUse omni_knowledge(\"set\", \"key\", \"value\") to add.".to_string();
+                }
+                let mut out = format!("Project knowledge for {}:\n\n", project_path);
+                for (k, v, conf) in &knowledge {
+                    out.push_str(&format!("  [{:.0}%] {}: {}\n", conf * 100.0, k, v));
+                }
+                out
+            }
+            "set" => {
+                let k = key.unwrap_or_default();
+                let v = value.unwrap_or_default();
+                if k.is_empty() || v.is_empty() {
+                    return "Usage: omni_knowledge(\"set\", \"key\", \"value\")".to_string();
+                }
+                self.store.upsert_project_knowledge(&project_hash, &k, &v, 0.9);
+                format!("Stored: [{k}] = \"{v}\"\nThis knowledge persists across sessions for this project.")
+            }
+            "forget" => {
+                let k = key.unwrap_or_default();
+                if k.is_empty() {
+                    return "Usage: omni_knowledge(\"forget\", \"key\")".to_string();
+                }
+                // Set confidence to 0 effectively forgets it (below 0.5 threshold)
+                self.store.upsert_project_knowledge(&project_hash, &k, "", 0.0);
+                format!("Forgotten: [{k}]")
+            }
+            _ => "Actions: list | set | forget\nExample: omni_knowledge(\"set\", \"noise_cmd\", \"npm install always produces 200 dep warnings\")".to_string(),
+        }
+    }
 }
 
-// Requires async_trait natively for rmcp handlers
+fn compute_project_hash_str(project_path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(project_path.as_bytes());
+    hex::encode(&hasher.finalize()[..8])
+}
 #[allow(refining_impl_trait)]
 impl ServerHandler for OmniServer {
     fn call_tool<'a>(
@@ -278,6 +482,10 @@ impl ServerHandler for OmniServer {
                 "omni_trust" => Self::omni_trust_tool_call(tcc).await,
                 "omni_session" => Self::omni_session_tool_call(tcc).await,
                 "omni_search" => Self::omni_search_tool_call(tcc).await,
+                "omni_history" => Self::omni_history_tool_call(tcc).await,
+                "omni_budget" => Self::omni_budget_tool_call(tcc).await,
+                "omni_agents" => Self::omni_agents_tool_call(tcc).await,
+                "omni_knowledge" => Self::omni_knowledge_tool_call(tcc).await,
                 _ => Err(rmcp::Error::invalid_params("method not found", None)),
             }
         })

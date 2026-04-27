@@ -2,6 +2,8 @@ pub mod dispatcher;
 pub mod normalize;
 pub mod pipe;
 pub mod post_tool;
+pub mod post_tool_failure;
 pub mod pre_compact;
 pub mod pre_tool;
+pub mod session_end;
 pub mod session_start;

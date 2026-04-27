@@ -6,6 +6,17 @@ use std::path::PathBuf;
 
 pub struct AntigravityIntegration;
 
+impl AntigravityIntegration {
+    /// Returns the path to the Antigravity MCP config file.
+    /// macOS/Linux: ~/.gemini/antigravity/mcp_config.json
+    /// Windows:     %USERPROFILE%\.gemini\antigravity\mcp_config.json
+    fn config_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".gemini/antigravity/mcp_config.json")
+    }
+}
+
 impl AgentIntegration for AntigravityIntegration {
     fn id(&self) -> &'static str {
         "antigravity"
@@ -16,86 +27,89 @@ impl AgentIntegration for AntigravityIntegration {
     }
 
     fn install(&self, exe_path: &str) -> anyhow::Result<()> {
-        let extensions_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".antigravity/extensions");
-        let plugin_dir = extensions_dir.join("omni-signal-engine");
+        let config_path = Self::config_path();
 
-        fs::create_dir_all(&plugin_dir)?;
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
-        let manifest = json!({
-            "name": "omni-signal-engine",
-            "version": "0.1.0",
-            "description": "OMNI intelligent output distillation for Antigravity IDE",
-            "type": "mcp",
-            "mcp": {
-                "transport": "stdio",
-                "command": exe_path,
-                "args": ["--mcp"]
+        let mut val = if config_path.exists() {
+            let content = fs::read_to_string(&config_path)?;
+            serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+        } else {
+            json!({})
+        };
+
+        if let Some(obj) = val.as_object_mut() {
+            let mcp_servers = obj.entry("mcpServers").or_insert_with(|| json!({}));
+            if let Some(servers) = mcp_servers.as_object_mut() {
+                servers.insert(
+                    "omni".to_string(),
+                    json!({
+                        "command": exe_path,
+                        "args": ["serve"]
+                    }),
+                );
             }
-        });
+        }
 
-        fs::write(
-            plugin_dir.join("package.json"),
-            serde_json::to_string_pretty(&manifest)?,
-        )?;
-
+        fs::write(&config_path, serde_json::to_string_pretty(&val)?)?;
         println!(
-            "  {} Installed MCP Plugin to ~/.antigravity/extensions/omni-signal-engine",
+            "  {} Configured MCP Server in ~/.gemini/antigravity/mcp_config.json",
             "✓".green()
         );
         Ok(())
     }
 
     fn uninstall(&self) -> anyhow::Result<()> {
-        let plugin_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".antigravity/extensions/omni-signal-engine");
+        let config_path = Self::config_path();
 
-        if plugin_dir.exists() {
-            fs::remove_dir_all(&plugin_dir).ok();
-            println!(
-                "  {} Removed MCP Plugin from ~/.antigravity/extensions/",
-                "✓".yellow()
-            );
+        if !config_path.exists() {
+            return Ok(());
         }
+
+        let content = fs::read_to_string(&config_path)?;
+        let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return Ok(());
+        };
+
+        if let Some(obj) = val.as_object_mut()
+            && let Some(servers) = obj.get_mut("mcpServers").and_then(|v| v.as_object_mut())
+        {
+            servers.remove("omni");
+        }
+
+        fs::write(&config_path, serde_json::to_string_pretty(&val)?)?;
+        println!(
+            "  {} Removed MCP Server from ~/.gemini/antigravity/mcp_config.json",
+            "✓".yellow()
+        );
         Ok(())
     }
 
     fn doctor_check(&self, _fix_mode: bool, _warnings: &mut Vec<String>) -> bool {
-        let antigravity_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".antigravity/extensions");
+        let config_path = Self::config_path();
 
         println!("\n  {}", "Antigravity IDE:".cyan());
-        let mut ag_found = false;
-        if antigravity_dir.exists()
-            && let Ok(entries) = fs::read_dir(&antigravity_dir)
+        if config_path.exists()
+            && fs::read_to_string(&config_path)
+                .unwrap_or_default()
+                .contains("\"omni\":")
         {
-            for entry in entries.flatten() {
-                if entry
-                    .file_name()
-                    .to_string_lossy()
-                    .contains("omni-signal-engine")
-                {
-                    println!(
-                        "   {:<15} {} {}",
-                        "Config:".bright_black(),
-                        "plugin installed".bright_black(),
-                        "[OK]".green().bold()
-                    );
-                    ag_found = true;
-                    break;
-                }
-            }
-        }
-        if !ag_found {
+            println!(
+                "   {:<15} {} {}",
+                "Config:".bright_black(),
+                "~/.gemini/antigravity/mcp_config.json".bright_black(),
+                "[OK]".green().bold()
+            );
+            true
+        } else {
             println!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
-                "not configured (check GUI)".bright_black()
+                "not configured".bright_black()
             );
+            false
         }
-        ag_found
     }
 }

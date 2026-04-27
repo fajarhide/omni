@@ -5,6 +5,7 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod gemini;
+pub mod multiagent;
 pub mod openclaw;
 pub mod opencode;
 pub mod roo_code;

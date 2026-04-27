@@ -1190,6 +1190,53 @@ You can use OMNI natively with OpenClaw by installing the official skill from Cl
 - **Install Command**: `clawhub install omni-signal-engine`
 - **Automatic Setup**: OpenClaw integration is completely automatic. Run `omni doctor --fix` to fetch and install the latest plugin directly from the OMNI public repository.
 
+### Antigravity IDE
+
+OMNI integrates with Antigravity IDE as a native MCP server, registered directly in Antigravity's MCP configuration file.
+
+**Automatic Setup:**
+```bash
+omni init --antigravity
+```
+
+This registers OMNI as an MCP server at:
+- **macOS/Linux**: `~/.gemini/antigravity/mcp_config.json`
+- **Windows**: `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
+
+**Manual Setup:**
+
+If you prefer to configure manually, add the `omni` entry to your `mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "omni": {
+      "command": "/opt/homebrew/bin/omni",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+> [!NOTE]
+> Replace `/opt/homebrew/bin/omni` with the actual path to your OMNI binary. You can find it by running `which omni`.
+
+**Verification:**
+```bash
+omni doctor    # Check Antigravity integration status
+```
+
+The doctor output will show:
+```
+  Antigravity IDE:
+   Config:         ~/.gemini/antigravity/mcp_config.json [OK]
+```
+
+**Uninstall:**
+```bash
+omni reset --antigravity   # Remove OMNI from Antigravity MCP config
+```
+
 ---
 
 *This is a living document. OMNI is under active development — check the [CHANGELOG](https://github.com/fajarhide/omni/blob/main/CHANGELOG.md) for updates after each release.*

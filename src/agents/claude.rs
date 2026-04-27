@@ -338,15 +338,37 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         }));
     };
 
-    let script_path = format!("{} --pre-hook", exe_path);
+    let ensure_async_hook = |arr_val: &mut serde_json::Value, hook_cmd: &str| {
+        let arr = arr_val.as_array_mut().unwrap();
+        for v in arr.iter() {
+            if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
+                for h in inner {
+                    if h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd) {
+                        return;
+                    }
+                }
+            }
+        }
+        arr.push(json!({
+            "hooks": [{
+                "type": "command",
+                "command": hook_cmd,
+                "async": true
+            }]
+        }));
+    };
+
+    let pre_cmd = format!("{} --pre-hook", exe_path);
     let post_cmd = format!("{} --post-hook", exe_path);
     let session_cmd = format!("{} --session-start", exe_path);
     let compact_cmd = format!("{} --pre-compact", exe_path);
+    let hook_cmd = format!("{} --hook", exe_path);
 
+    // Core hooks (blocking)
     ensure_hook(
         hooks.entry("PreToolUse").or_insert_with(|| json!([])),
         "Bash",
-        &script_path,
+        &pre_cmd,
     );
     ensure_hook(
         hooks.entry("PostToolUse").or_insert_with(|| json!([])),
@@ -362,6 +384,27 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         hooks.entry("PreCompact").or_insert_with(|| json!([])),
         "",
         &compact_cmd,
+    );
+
+    // v0.5.7: New hooks (async — non-blocking, no output needed)
+    ensure_async_hook(
+        hooks.entry("SessionEnd").or_insert_with(|| json!([])),
+        &hook_cmd,
+    );
+    ensure_async_hook(
+        hooks
+            .entry("PostToolUseFailure")
+            .or_insert_with(|| json!([])),
+        &hook_cmd,
+    );
+    ensure_hook(
+        hooks.entry("SubagentStart").or_insert_with(|| json!([])),
+        "",
+        &session_cmd,
+    );
+    ensure_async_hook(
+        hooks.entry("FileChanged").or_insert_with(|| json!([])),
+        &hook_cmd,
     );
 }
 
