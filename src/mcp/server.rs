@@ -303,7 +303,8 @@ impl OmniServer {
             "\nSession totals:\n  Commands: {} | Tokens saved: ~{} | Agent: {}\n",
             cmd_count,
             total_saved,
-            std::env::var("OMNI_AGENT_ID").unwrap_or_else(|_| "claude_code".to_string())
+            std::env::var("OMNI_AGENT_ID")
+                .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id())
         ));
         out
     }
@@ -357,7 +358,8 @@ impl OmniServer {
             .unwrap_or_else(|_| "unknown".to_string());
 
         let project_hash = compute_project_hash_str(&project_path);
-        let my_agent = std::env::var("OMNI_AGENT_ID").unwrap_or_else(|_| "claude_code".to_string());
+        let my_agent = std::env::var("OMNI_AGENT_ID")
+            .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
 
         let peers = self
             .store

@@ -46,8 +46,12 @@ pub fn detect_agent_id() -> String {
     if std::env::var("AIDER_SESSION").is_ok() {
         return "aider".to_string();
     }
-    // Antigravity IDE detection
-    if std::env::var("ANTIGRAVITY_SESSION").is_ok()
+    // Antigravity IDE detection (must be before VSCODE_PID — Antigravity is a VSCode fork)
+    if std::env::var("ANTIGRAVITY_EDITOR_APP_ROOT").is_ok()
+        || std::env::var("ANTIGRAVITY_SESSION").is_ok()
+        || std::env::var("__CFBundleIdentifier")
+            .map(|v| v.contains("antigravity"))
+            .unwrap_or(false)
         || std::env::current_exe()
             .map(|p| p.to_string_lossy().contains("Antigravity"))
             .unwrap_or(false)
@@ -251,6 +255,8 @@ mod tests {
             std::env::remove_var("CURSOR_SESSION_ID");
             std::env::remove_var("CLINE_TASK_ID");
             std::env::remove_var("ANTIGRAVITY_SESSION");
+            std::env::remove_var("ANTIGRAVITY_EDITOR_APP_ROOT");
+            std::env::remove_var("__CFBundleIdentifier");
             std::env::remove_var("VSCODE_PID");
             std::env::remove_var("TERM_PROGRAM");
             std::env::remove_var("CODEX_SESSION");

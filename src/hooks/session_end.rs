@@ -42,7 +42,8 @@ pub fn process_payload(
         .unwrap_or_else(|_| "unknown".to_string());
 
     // Detect agent_id from env (set by hook dispatcher context)
-    let agent_id = std::env::var("OMNI_AGENT_ID").unwrap_or_else(|_| "claude_code".to_string());
+    let agent_id = std::env::var("OMNI_AGENT_ID")
+        .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
 
     // Find top filter from this session
     let top_filter = state

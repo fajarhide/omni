@@ -368,7 +368,15 @@ fn persist<E: Write>(
         let agent_id = if std::env::var("OMNI_CMD").is_ok() {
             "aider"
         } else {
-            "terminal"
+            let detected = crate::agents::multiagent::detect_agent_id();
+            // If a specific agent was detected (not the default), use it.
+            // Otherwise, label as "terminal" for pipe-mode usage.
+            if detected != "claude_code" {
+                // Leak a static str for the borrow — agent_id set is small and bounded
+                Box::leak(detected.into_boxed_str())
+            } else {
+                "terminal"
+            }
         };
         s.record_distillation(
             &result.session_id,
