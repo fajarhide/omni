@@ -61,7 +61,38 @@ pub fn process_payload(
             }
             return process_web_content(&content).map(wrap_hook_output);
         }
-        _ => return None, // Edit, Write, etc. — don't need distillation
+        "Edit" | "Write" | "Create" | "Move" | "Delete" | "Replace" => return None,
+        "MultiEdit" => {
+            if content.len() < 200 {
+                return None;
+            }
+            let lines: Vec<&str> = content.lines().collect();
+            let summary = format!(
+                "[OMNI MultiEdit: {} lines]\n{}",
+                lines.len(),
+                lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
+            );
+            if summary.len() < content.len() * 8 / 10 {
+                return Some(wrap_hook_output(summary));
+            }
+            return None;
+        }
+        _ => {
+            if let Some(ref s) = store {
+                s.record_unhandled_tool(&normalized.tool_name);
+            }
+            if content.len() > 2000 {
+                let lines: Vec<&str> = content.lines().collect();
+                let summary = format!(
+                    "[OMNI {}: {} lines]\n{}",
+                    normalized.tool_name,
+                    lines.len(),
+                    lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
+                );
+                return Some(wrap_hook_output(summary));
+            }
+            return None;
+        }
     }
 
     if content.len() < 50 {
@@ -988,5 +1019,56 @@ mod tests {
             out.is_some(),
             "Claude Code format harus tetap bekerja setelah refactor"
         );
+    }
+
+    #[test]
+    fn test_multiedit_tool_large_output_distilled() {
+        let mut big_output = String::new();
+        for i in 0..100 {
+            big_output.push_str(&format!("Line {} of multi-edit output\n", i));
+        }
+        let input = serde_json::json!({
+            "tool_name": "MultiEdit",
+            "tool_input": {},
+            "tool_response": {
+                "content": big_output
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some(), "Large MultiEdit must be distilled");
+        let res = out.expect("Output exists");
+        assert!(res.contains("OMNI MultiEdit"), "Must have OMNI MultiEdit label");
+    }
+
+    #[test]
+    fn test_unknown_tool_large_output_labeled_passthrough() {
+        let mut big_output = String::new();
+        for i in 0..200 {
+            big_output.push_str(&format!("Line {} of unknown tool output\n", i));
+        }
+        let input = serde_json::json!({
+            "tool_name": "SomeRandomTool",
+            "tool_input": {},
+            "tool_response": {
+                "content": big_output
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_some(), "Large unknown tool output must be passed through with label");
+        let res = out.expect("Output exists");
+        assert!(res.contains("OMNI SomeRandomTool"), "Must have OMNI SomeRandomTool label");
+    }
+
+    #[test]
+    fn test_edit_tool_still_returns_none() {
+        let input = serde_json::json!({
+            "tool_name": "Edit",
+            "tool_input": {},
+            "tool_response": {
+                "content": "File edited successfully"
+            }
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_none(), "Edit tool should still return None");
     }
 }

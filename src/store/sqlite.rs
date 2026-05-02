@@ -481,6 +481,10 @@ impl Store {
         }
     }
 
+    pub fn record_unhandled_tool(&self, _tool_name: &str) {
+        // TODO: implement
+    }
+
     pub fn store_rewind(&self, content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
