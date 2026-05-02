@@ -65,6 +65,10 @@ fn normalize_structural(trimmed: &str) -> String {
         return String::new();
     }
 
+    if is_git_hash_line(trimmed) {
+        return trimmed.to_lowercase(); // preserve as-is, hanya lowercase
+    }
+
     let mut out = String::with_capacity(trimmed.len());
     let bytes = trimmed.as_bytes();
     let mut i = 0;
@@ -83,6 +87,27 @@ fn normalize_structural(trimmed: &str) -> String {
         }
     }
     out
+}
+
+fn is_git_hash_line(trimmed: &str) -> bool {
+    let lower = trimmed.to_lowercase();
+    
+    // a. Starts with "commit " followed by 7-40 hex chars
+    if let Some(rest) = lower.strip_prefix("commit ") {
+        if rest.len() >= 7 && rest.len() <= 40 && rest.chars().all(|c| c.is_ascii_hexdigit()) {
+            return true;
+        }
+    }
+    
+    // b. Starts with 7-40 hex chars followed by space
+    if let Some(space_idx) = trimmed.find(' ') {
+        let first_word = &trimmed[..space_idx];
+        if first_word.len() >= 7 && first_word.len() <= 40 && first_word.chars().all(|c| c.is_ascii_hexdigit()) {
+            return true;
+        }
+    }
+    
+    false
 }
 
 /// Content-type aware normalization. For test/build output, use a more
@@ -717,5 +742,23 @@ mod tests {
 
         let output = result.collapsed_lines.join("\n");
         assert!(output.contains("crates compiled"));
+    }
+
+    #[test]
+    fn test_git_log_commits_not_collapsed() {
+        let input = "abc1234 First commit\nabc1235 Second commit\nabc1236 Third commit\nabc1237 Fourth commit";
+        let result = collapse(input, &CollapseMode::Generic);
+        
+        // Assert none were collapsed because each line was identified as a git hash line
+        assert_eq!(result.collapsed_lines.len(), 4);
+    }
+
+    #[test]
+    fn test_is_git_hash_line_accuracy() {
+        assert!(is_git_hash_line("abc1234 Fix bug"));
+        assert!(is_git_hash_line("commit abc1234def5678abc1234def5678abc1234def5"));
+        assert!(!is_git_hash_line("1.2.3 version")); // contains dots
+        assert!(!is_git_hash_line("cafe Fix")); // too short (4 chars)
+        assert!(!is_git_hash_line("192.168.1.1 ip")); // contains dots
     }
 }

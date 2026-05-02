@@ -43,36 +43,7 @@ pub fn classify_line(line: &str) -> SignalTier {
         return SignalTier::Critical;
     }
 
-    // Important
-    if contains_any(
-        trimmed,
-        &[
-            "warning[",
-            "WARNING:",
-            "Warning:",
-            "WARN:",
-            "modified:",
-            "deleted:",
-            "new file:",
-            "renamed:",
-            "diff --git",
-            "@@ -",
-            "--- a/",
-            "+++ b/",
-            "test result:",
-            "Tests:",
-            "PASSED",
-            "passed",
-            "✓",
-            "ok",
-            "Successfully built",
-            "Finished",
-        ],
-    ) {
-        return SignalTier::Important;
-    }
-
-    // Noise patterns
+    // Noise patterns (must be checked BEFORE Important so prefix-based noise wins over generic important keywords like 'ok')
     if contains_any(
         trimmed,
         &[
@@ -96,6 +67,38 @@ pub fn classify_line(line: &str) -> SignalTier {
         || trimmed.starts_with("TRACE ")
     {
         return SignalTier::Noise;
+    }
+
+    // Important
+    if contains_any(
+        trimmed,
+        &[
+            "warning[",
+            "WARNING:",
+            "Warning:",
+            "WARN:",
+            "modified:",
+            "deleted:",
+            "new file:",
+            "renamed:",
+            "diff --git",
+            "@@ -",
+            "--- a/",
+            "+++ b/",
+            "test result:",
+            "Tests:",
+            "PASSED",
+            "passed",
+            "✓",
+            "...ok",
+            "ok (",
+            "syntax ok",
+            "all ok",
+            "Successfully built",
+            "Finished",
+        ],
+    ) || trimmed == "ok" {
+        return SignalTier::Important;
     }
 
     // Default context
@@ -454,5 +457,29 @@ mod tests {
         let segments3 = score_segments(input3, SegmentationMode::TestGroup, None);
         assert_eq!(segments3[0].tier, SignalTier::Critical); // FAIL chunk
         assert_eq!(segments3[1].tier, SignalTier::Important); // 'test something else' chunk gets boosted!
+    }
+
+    #[test]
+    fn test_ok_exact_match_is_important() {
+        assert_eq!(classify_line("ok"), SignalTier::Important);
+    }
+
+    #[test]
+    fn test_ok_in_noise_prefix_stays_noise() {
+        assert_eq!(classify_line("Locking 142 packages ok"), SignalTier::Noise);
+        assert_eq!(classify_line("Downloading serde v1.0 ...ok"), SignalTier::Noise);
+    }
+
+    #[test]
+    fn test_docker_pull_complete_not_important() {
+        // Just checking it doesn't get Important. Without matches it should be Context
+        assert_ne!(classify_line("docker.io/library/alpine:3.18: Pull complete"), SignalTier::Important);
+    }
+
+    #[test]
+    fn test_noise_prefix_always_wins_over_ok() {
+        assert_eq!(classify_line("Compiling serde ok"), SignalTier::Noise);
+        assert_eq!(classify_line("Installing package ok"), SignalTier::Noise);
+        assert_eq!(classify_line("Fetching index ok"), SignalTier::Noise);
     }
 }
