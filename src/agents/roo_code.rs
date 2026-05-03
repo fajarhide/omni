@@ -102,7 +102,7 @@ impl AgentIntegration for RooCodeIntegration {
                 "Config:".bright_black(),
                 "not configured".bright_black()
             );
-            true
+            false
         }
     }
 }
