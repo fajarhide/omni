@@ -119,7 +119,10 @@ mod tests {
         assert_eq!(diagnosis.category, DiagnosisCategory::FailedSignalDropped);
         assert!(diagnosis.dropped_critical_lines > 0);
         assert!(
-            diagnosis.feedback_notes.iter().any(|n| n.contains("Critical signal")),
+            diagnosis
+                .feedback_notes
+                .iter()
+                .any(|n| n.contains("Critical signal")),
             "Must include feedback about dropped signal"
         );
     }
@@ -134,4 +137,3 @@ mod tests {
         assert_ne!(diagnosis.category, DiagnosisCategory::FailedSignalDropped);
     }
 }
-

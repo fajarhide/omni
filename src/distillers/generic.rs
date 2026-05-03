@@ -12,7 +12,7 @@ impl Distiller for GenericDistiller {
         _session: Option<&crate::pipeline::SessionState>,
     ) -> String {
         let max_lines = 100;
-        
+
         if segments.len() <= max_lines {
             return segments
                 .iter()
@@ -27,7 +27,9 @@ impl Distiller for GenericDistiller {
 
         // Pass 1: Select Critical & Important
         for (i, seg) in segments.iter().enumerate() {
-            if matches!(seg.tier, SignalTier::Critical | SignalTier::Important) && selected_indices.len() < max_lines {
+            if matches!(seg.tier, SignalTier::Critical | SignalTier::Important)
+                && selected_indices.len() < max_lines
+            {
                 selected_indices.insert(i);
             }
         }
@@ -60,10 +62,7 @@ impl Distiller for GenericDistiller {
         if let Some(last) = last_idx
             && last < segments.len() - 1
         {
-            out.push_str(&format!(
-                "... [{} more lines]\n",
-                segments.len() - 1 - last
-            ));
+            out.push_str(&format!("... [{} more lines]\n", segments.len() - 1 - last));
         }
 
         out.trim().to_string()
@@ -78,7 +77,11 @@ mod tests {
     fn test_generic_distiller_prioritizes_important() {
         let mut segments = Vec::new();
         for i in 0..150 {
-            let tier = if i == 120 { SignalTier::Critical } else { SignalTier::Noise };
+            let tier = if i == 120 {
+                SignalTier::Critical
+            } else {
+                SignalTier::Noise
+            };
             segments.push(OutputSegment {
                 content: format!("Line {}", i),
                 tier,
@@ -90,8 +93,11 @@ mod tests {
 
         let distiller = GenericDistiller;
         let output = distiller.distill(&segments, "", None);
-        
-        assert!(output.contains("Line 120"), "Critical line must be preserved even if it's beyond the 100 line limit");
+
+        assert!(
+            output.contains("Line 120"),
+            "Critical line must be preserved even if it's beyond the 100 line limit"
+        );
         assert!(output.contains("... [omitted]"));
     }
 }

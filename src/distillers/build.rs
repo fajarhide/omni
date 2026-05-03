@@ -140,9 +140,15 @@ mod tests {
     #[test]
     fn test_is_single_line_diagnostic() {
         // True: Python diagnostic formats
-        assert!(is_single_line_diagnostic("src/auth.py:42: error: incompatible type"));
-        assert!(is_single_line_diagnostic("src/main.py:15:80: E501 Line too long"));
-        assert!(is_single_line_diagnostic("src/utils.py:8:1: F401 imported but unused"));
+        assert!(is_single_line_diagnostic(
+            "src/auth.py:42: error: incompatible type"
+        ));
+        assert!(is_single_line_diagnostic(
+            "src/main.py:15:80: E501 Line too long"
+        ));
+        assert!(is_single_line_diagnostic(
+            "src/utils.py:8:1: F401 imported but unused"
+        ));
         // False: Rust compiler output
         assert!(!is_single_line_diagnostic("error[E0308]: mismatched types"));
         assert!(!is_single_line_diagnostic(" --> src/main.rs:1:5"));
@@ -161,15 +167,24 @@ src/auth.py:67: error: Name \"user_id\" is not defined
 src/models.py:15: note: See https://mypy.rtfd.io for help
 Found 2 errors in 2 files (checked 5 source files)
 ";
-        let segments = scorer::score_segments(
-            mypy_output,
-            crate::pipeline::SegmentationMode::Line,
-            None,
-        );
+        let segments =
+            scorer::score_segments(mypy_output, crate::pipeline::SegmentationMode::Line, None);
         let output = BuildDistiller.distill(&segments, mypy_output, None);
-        assert!(output.contains("errors"), "Must report error count: {}", output);
-        assert!(output.contains("auth.py:42"), "Must include first error location: {}", output);
-        assert!(output.contains("auth.py:67"), "Must include second error location: {}", output);
+        assert!(
+            output.contains("errors"),
+            "Must report error count: {}",
+            output
+        );
+        assert!(
+            output.contains("auth.py:42"),
+            "Must include first error location: {}",
+            output
+        );
+        assert!(
+            output.contains("auth.py:67"),
+            "Must include second error location: {}",
+            output
+        );
     }
 
     #[test]
@@ -180,13 +195,13 @@ src/main.py:15:80: E501 Line too long (92 > 79 characters)
 src/utils.py:8:1: F401 `os` imported but unused
 Found 3 errors.
 ";
-        let segments = scorer::score_segments(
-            ruff_output,
-            crate::pipeline::SegmentationMode::Line,
-            None,
-        );
+        let segments =
+            scorer::score_segments(ruff_output, crate::pipeline::SegmentationMode::Line, None);
         let output = BuildDistiller.distill(&segments, ruff_output, None);
-        assert!(output.contains("main.py:15"), "Must include line location for ruff error: {}", output);
+        assert!(
+            output.contains("main.py:15"),
+            "Must include line location for ruff error: {}",
+            output
+        );
     }
 }
-

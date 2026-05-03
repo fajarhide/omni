@@ -27,7 +27,7 @@ pub fn classify_line(line: &str) -> SignalTier {
             "error[",
             "ERROR:",
             "Error:",
-            ": error:",  // Python diagnostic format (mypy, pylint)
+            ": error:", // Python diagnostic format (mypy, pylint)
             "error TS",
             "FAILED",
             "FAIL:",
@@ -98,7 +98,8 @@ pub fn classify_line(line: &str) -> SignalTier {
             "Successfully built",
             "Finished",
         ],
-    ) || trimmed == "ok" {
+    ) || trimmed == "ok"
+    {
         return SignalTier::Important;
     }
 
@@ -276,7 +277,7 @@ pub fn score_segments(
 
 pub(crate) fn apply_positional_boost(segments: &mut [OutputSegment]) {
     let mut boost_remaining = 0;
-    
+
     for seg in segments.iter_mut() {
         if seg.tier == SignalTier::Critical {
             boost_remaining = 5;
@@ -425,7 +426,7 @@ mod tests {
     fn test_positional_boost_applies_to_git_hunk_mode() {
         let input = "diff --git a/file b/file\n@@ -1,3 +1,4 @@\n error[E0308]: mismatched types\n@@ -10,2 +11,3 @@\n   --> src/main.rs:42";
         let segments = score_segments(input, SegmentationMode::GitHunk, None);
-        
+
         // Header
         assert_eq!(segments[0].tier, SignalTier::Important); // "diff --git"
         // Hunk 1 containing error
@@ -438,13 +439,13 @@ mod tests {
     fn test_positional_boost_applies_to_test_group_mode() {
         let input = "test result: ok\n--- FAIL: TestFoo\npanicked at\nat tests/file.rs:55\n--- PASS: TestBar";
         let segments = score_segments(input, SegmentationMode::TestGroup, None);
-        
+
         // 0: test result: ok
         assert_eq!(segments[0].tier, SignalTier::Important);
         // 1: --- FAIL: TestFoo...
         assert_eq!(segments[1].tier, SignalTier::Critical);
         // 2: --- PASS: TestBar
-        
+
         // Let's test with SegmentationMode::Line as well for the backtrace
         let input2 = "test result: FAILED\npanicked at something\njust some context\nnoise line";
         let segments2 = score_segments(input2, SegmentationMode::Line, None);
@@ -452,7 +453,7 @@ mod tests {
         assert_eq!(segments2[1].tier, SignalTier::Important); // panicked at (Context boosted to Important)
         assert_eq!(segments2[2].tier, SignalTier::Important); // boosted
         assert_eq!(segments2[3].tier, SignalTier::Important); // boosted
-        
+
         // For TestGroup, let's verify if a group without Critical/Important is boosted
         let input3 = "--- FAIL: TestFoo\ntest something else\nContext line";
         let segments3 = score_segments(input3, SegmentationMode::TestGroup, None);
@@ -468,13 +469,19 @@ mod tests {
     #[test]
     fn test_ok_in_noise_prefix_stays_noise() {
         assert_eq!(classify_line("Locking 142 packages ok"), SignalTier::Noise);
-        assert_eq!(classify_line("Downloading serde v1.0 ...ok"), SignalTier::Noise);
+        assert_eq!(
+            classify_line("Downloading serde v1.0 ...ok"),
+            SignalTier::Noise
+        );
     }
 
     #[test]
     fn test_docker_pull_complete_not_important() {
         // Just checking it doesn't get Important. Without matches it should be Context
-        assert_ne!(classify_line("docker.io/library/alpine:3.18: Pull complete"), SignalTier::Important);
+        assert_ne!(
+            classify_line("docker.io/library/alpine:3.18: Pull complete"),
+            SignalTier::Important
+        );
     }
 
     #[test]

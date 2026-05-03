@@ -875,7 +875,13 @@ mod tests {
     fn test_small_output_not_silently_dropped() {
         // 500 bytes of distinct context that won't compress well
         let content: String = (0..10)
-            .map(|i| format!("unique_context_line_{}: some data here {}\n", i, "x".repeat(30 + i * 3)))
+            .map(|i| {
+                format!(
+                    "unique_context_line_{}: some data here {}\n",
+                    i,
+                    "x".repeat(30 + i * 3)
+                )
+            })
             .collect();
         let input = json!({
             "tool_name": "Bash",
@@ -887,7 +893,8 @@ mod tests {
         if let Some(res) = out {
             assert!(
                 res.contains("OMNI") || res.contains("Passthrough"),
-                "If not None, must contain OMNI label: {}", res
+                "If not None, must contain OMNI label: {}",
+                res
             );
         }
     }
@@ -1090,7 +1097,10 @@ mod tests {
         let out = process_payload(&input.to_string(), None, None);
         assert!(out.is_some(), "Large MultiEdit must be distilled");
         let res = out.expect("Output exists");
-        assert!(res.contains("OMNI MultiEdit"), "Must have OMNI MultiEdit label");
+        assert!(
+            res.contains("OMNI MultiEdit"),
+            "Must have OMNI MultiEdit label"
+        );
     }
 
     #[test]
@@ -1107,9 +1117,15 @@ mod tests {
             }
         });
         let out = process_payload(&input.to_string(), None, None);
-        assert!(out.is_some(), "Large unknown tool output must be passed through with label");
+        assert!(
+            out.is_some(),
+            "Large unknown tool output must be passed through with label"
+        );
         let res = out.expect("Output exists");
-        assert!(res.contains("OMNI SomeRandomTool"), "Must have OMNI SomeRandomTool label");
+        assert!(
+            res.contains("OMNI SomeRandomTool"),
+            "Must have OMNI SomeRandomTool label"
+        );
     }
 
     #[test]

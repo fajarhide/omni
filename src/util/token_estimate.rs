@@ -27,6 +27,9 @@ mod tests {
         let bytes = 1000;
         let code_tokens = estimate_tokens(bytes, ContentHint::Code);
         let prose_tokens = estimate_tokens(bytes, ContentHint::Prose);
-        assert!(code_tokens > prose_tokens, "Code should yield more tokens than prose for same bytes");
+        assert!(
+            code_tokens > prose_tokens,
+            "Code should yield more tokens than prose for same bytes"
+        );
     }
 }

@@ -1,5 +1,5 @@
 use crate::store::sqlite::Store;
-use crate::util::token_estimate::{estimate_tokens, ContentHint};
+use crate::util::token_estimate::{ContentHint, estimate_tokens};
 use anyhow::Result;
 use colored::*;
 use std::collections::HashMap;
