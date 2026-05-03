@@ -32,7 +32,11 @@ pub fn distill_with_command(
 
     // Phase 1: Try exact command prefix match
     let base = {
-        let first = command.split_whitespace().next().unwrap_or("");
+        let first = command
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_matches(|c| c == '"' || c == '\'');
         std::path::Path::new(first)
             .file_name()
             .and_then(|n| n.to_str())

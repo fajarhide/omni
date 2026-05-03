@@ -21,7 +21,11 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
 
     let cmd = command.trim();
     let base = {
-        let first_word = cmd.split_whitespace().next().unwrap_or(cmd);
+        let first_word = cmd
+            .split_whitespace()
+            .next()
+            .unwrap_or(cmd)
+            .trim_matches(|c| c == '"' || c == '\'');
         std::path::Path::new(first_word)
             .file_name()
             .and_then(|n| n.to_str())
@@ -309,6 +313,7 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
             let base = seg
                 .split_whitespace()
                 .next()
+                .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
                 .and_then(|w| std::path::Path::new(w).file_name()?.to_str())
                 .unwrap_or("");
             let specificity = command_specificity(base, seg);
