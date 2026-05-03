@@ -18,6 +18,21 @@
 > *Fully transparent. You're always in control.*
 ---
 
+## Table of Contents
+- [The Problem: Expensive Tokens & Noisy Outputs](#the-problem-expensive-tokens--noisy-outputs)
+- [The Solution: Omni](#the-solution-omni)
+- [The Philosophy](#the-philosophy)
+- [Features Explained](#features-explained)
+- [Architecture](#architecture)
+- [Quick Start & Installation](#quick-start--installation)
+- [How to Use It](#how-to-use-it)
+  - [Multi-Agent Support & Integrations](#multi-agent-support--integrations)
+  - [Documentation Index](#documentation-index)
+- [Works Even Better with Heimsense](#works-even-better-with-heimsense)
+- [Contributing & License](#contributing--license)
+
+---
+
 ## The Problem: Expensive Tokens & Noisy Outputs
 
 When you use autonomous AI agents (like Claude Code) in your terminal, they read *everything*. A simple `git diff`, `npm install`, or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context. 

@@ -5,8 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.7] - 2026-04-27
+## [0.5.7-rc1] - 2026-05-03
 
+### Added
+- **Automated Tool Distillation**: Implemented automated distillation for MultiEdit and unhandled tool outputs to reduce token usage natively.
+- **Context-Aware Estimation**: New token estimation utility for highly accurate cost and usage calculations within the ROI monitor.
+- **Positional Boosting**: Extracted positional boost logic to the semantic scorer, implementing dynamic priority-based segment distillation.
+
+### Improved
+- **Security Hardening**: Expanded the denylist of restricted environment variables in `sanitize_env` to prevent injection attacks.
+- **Hash Entropy**: Increased the RewindStore archive hash length from 8 to 16 hex characters, ensuring 64-bit entropy and preventing collision.
+- **Diagnostic Detection**: Enhanced the `BuildDistiller` to natively detect and prioritize single-line diagnostics and preserve git commit hashes in the collapse pipeline.
+- **Code Quality**: Applied consistent `rustfmt` formatting and resolved all emerging Clippy warnings across the codebase.
+
+### Fixed
+- **Command Routing**: Fixed a critical command detection bug by stripping surrounding quotes from command names during base path extraction, allowing Antigravity IDE and other quoted-path environments to correctly route tools to specific distillers.
+
+## [0.5.7] - 2026-04-27
 ### Added
 - **Multi-Agent Awareness (`omni_agents`)**: New MCP tool allowing agents (e.g., Claude, Cursor, Copilot) to discover and interact with each other's state on the same project.
 - **Persistent Project Knowledge (`omni_knowledge`)**: Cross-session memory for agents to permanently learn and store project-specific quirks and filter preferences.
