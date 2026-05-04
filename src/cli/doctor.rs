@@ -207,17 +207,36 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 rewinds.to_string().magenta()
             );
 
-            let (s_ts, r_ts) = store.latest_activity_timestamps().unwrap_or_default();
-            println!("\n {}", "Recent activity:".bold().bright_white());
-            if let Some(s) = s_ts {
-                println!("   Last session: {}", format_time_ago(s).bright_black());
+            let (_s_ts, r_ts) = store.latest_activity_timestamps().unwrap_or_default();
+
+            // Last distillation check: warn if no distillation in last 10 min
+            if let Some(rt) = r_ts {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                if now.saturating_sub(rt) > 600 {
+                    println!(
+                        "  {:<15} {} {} (run a noisy command to verify)",
+                        "Last distill:".bright_black(),
+                        format_time_ago(rt).bright_black(),
+                        "[IDLE]".yellow()
+                    );
+                } else {
+                    println!(
+                        "  {:<15} {} {}",
+                        "Last distill:".bright_black(),
+                        format_time_ago(rt).bright_black(),
+                        "[ACTIVE]".green().bold()
+                    );
+                }
             } else {
-                println!("   Last session: none");
-            }
-            if let Some(r) = r_ts {
-                println!("   Last distill: {}", format_time_ago(r).bright_black());
-            } else {
-                println!("   Last distill: none");
+                println!(
+                    "  {:<15} {} {}",
+                    "Last distill:".bright_black(),
+                    "never".bright_black(),
+                    "[IDLE]".yellow()
+                );
             }
         }
         Err(_) => {

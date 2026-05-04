@@ -247,7 +247,7 @@ fn main() {
                     }
                 }
 
-                "stats" | "gain" => match Store::open() {
+                "stats" => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::stats::run(&args, &store) {
                             eprintln!("[omni] Stats error: {}", e);
@@ -256,6 +256,19 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for stats: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "gain" => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::stats::run_gain(&args, &store) {
+                            eprintln!("[omni] Gain error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for gain: {}", e);
                         std::process::exit(1);
                     }
                 },

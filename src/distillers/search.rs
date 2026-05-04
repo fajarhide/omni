@@ -10,11 +10,11 @@ pub fn distill_grep(content: &str) -> Option<String> {
     let mut file_counts: HashMap<&str, usize> = HashMap::new();
 
     for line in content.lines() {
-        if let Some(file) = line.split(':').next() {
-            if !file.is_empty() {
-                by_file.entry(file).or_default().push(line);
-                *file_counts.entry(file).or_default() += 1;
-            }
+        if let Some(file) = line.split(':').next()
+            && !file.is_empty()
+        {
+            by_file.entry(file).or_default().push(line);
+            *file_counts.entry(file).or_default() += 1;
         }
     }
 
