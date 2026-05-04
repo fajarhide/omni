@@ -270,7 +270,11 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             "[ERROR]".red().bold()
         );
         for failure in built_in_tests.failures.iter().take(3) {
-            println!("   {:<15} {}", "Failure:".red().bold(), failure.bright_black());
+            println!(
+                "   {:<15} {}",
+                "Failure:".red().bold(),
+                failure.bright_black()
+            );
         }
         warnings.push("Built-in TOML filter inline tests failed.".to_string());
         all_ok = false;

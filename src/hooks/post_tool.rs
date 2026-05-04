@@ -238,13 +238,13 @@ pub fn process_payload(
     if let Some(ref s) = store {
         let retrieve_rate = s.get_retrieve_rate(&cmd_family, 7);
         if retrieve_rate > 0.25 {
-            // High retrieve rate — significantly softer compression
-            keep_threshold = (keep_threshold - 0.15).max(0.1);
-            soft_threshold = (soft_threshold - 0.10).max(0.05);
+            // High retrieve rate — significantly harder compression thresholds (require more compression to keep)
+            keep_threshold = (keep_threshold + 0.15).min(0.95);
+            soft_threshold = (soft_threshold + 0.10).min(0.85);
         } else if retrieve_rate > 0.05 {
-            // Moderate retrieve rate — slightly softer
-            keep_threshold = (keep_threshold - 0.05).max(0.15);
-            soft_threshold = (soft_threshold - 0.03).max(0.08);
+            // Moderate retrieve rate — slightly harder thresholds
+            keep_threshold = (keep_threshold + 0.05).min(0.90);
+            soft_threshold = (soft_threshold + 0.03).min(0.80);
         }
     }
 

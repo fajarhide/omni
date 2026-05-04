@@ -1,6 +1,7 @@
 pub mod agents;
 mod cli;
 mod distillers;
+mod graph;
 mod guard;
 mod hooks;
 mod mcp;
@@ -9,7 +10,6 @@ pub mod pipeline;
 mod session;
 mod store;
 mod util;
-mod graph;
 
 use colored::*;
 use std::env;
@@ -91,7 +91,10 @@ fn print_help() {
     println!("\n{}", "COMMANDS:".bold().bright_white());
     println!("  {: <12} Setup OMNI Hooks and MCP server", "init".cyan());
     println!("  {: <12} View token savings analytics", "stats".cyan());
-    println!("  {: <12} Quick savings summary (alias of stats)", "gain".cyan());
+    println!(
+        "  {: <12} Quick savings summary (alias of stats)",
+        "gain".cyan()
+    );
     println!("  {: <12} Manage session state", "session".cyan());
     println!(
         "  {: <12} Auto-generate filters from history",

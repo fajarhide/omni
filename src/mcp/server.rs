@@ -29,8 +29,7 @@ impl OmniServer {
             let agent_id = std::env::var("OMNI_AGENT_ID")
                 .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
             let family = crate::util::command_family::command_family(&cmd_prefix);
-            self.store
-                .record_retrieve_event(&family, &hash, &agent_id);
+            self.store.record_retrieve_event(&family, &hash, &agent_id);
             content
         } else {
             format!("Not found: {}", hash)
@@ -189,12 +188,28 @@ impl OmniServer {
         if ctx.imports.is_empty() {
             out.push_str("Imports: none detected\n");
         } else {
-            out.push_str(&format!("Imports: {}\n", ctx.imports.iter().take(8).cloned().collect::<Vec<_>>().join(", ")));
+            out.push_str(&format!(
+                "Imports: {}\n",
+                ctx.imports
+                    .iter()
+                    .take(8)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         if ctx.imported_by.is_empty() {
             out.push_str("Imported by: none detected\n");
         } else {
-            out.push_str(&format!("Imported by: {}\n", ctx.imported_by.iter().take(8).cloned().collect::<Vec<_>>().join(", ")));
+            out.push_str(&format!(
+                "Imported by: {}\n",
+                ctx.imported_by
+                    .iter()
+                    .take(8)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         if hot_count > 0 {
             out.push_str(&format!("Hot in session: yes ({}x)\n", hot_count));

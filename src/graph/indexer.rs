@@ -67,11 +67,7 @@ pub fn build_graph(root: &Path) -> Result<GraphIndex> {
         if !resolved.is_empty() {
             index.imports.insert(rel.clone(), resolved.clone());
             for dep in resolved {
-                index
-                    .imported_by
-                    .entry(dep)
-                    .or_default()
-                    .push(rel.clone());
+                index.imported_by.entry(dep).or_default().push(rel.clone());
             }
         }
     }
