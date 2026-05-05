@@ -102,11 +102,13 @@ pub fn generate_toml(
                 "match_command = \"^{}.*\"\n",
                 regex::escape(cmd_base)
             ));
+        } else {
+            // Safe fallback: match nothing rather than become a catch-all.
+            toml.push_str("match_command = \"^$\"\n");
         }
     } else {
-        // Omitting match_command since it's now optional in the parser.
-        // This filter will be skipped by the loader, which is safer than a catch-all.
-        toml.push_str("# match_command omitted (unknown command)\n");
+        // Safe fallback: match nothing rather than generate a skipped filter (doctor warnings).
+        toml.push_str("match_command = \"^$\"\n");
     }
 
     toml.push_str("strip_ansi = true\n");

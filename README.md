@@ -77,14 +77,18 @@ AI agents like Claude are only as smart as the context you feed them. When you f
 - **Multi-Agent Collaboration**: Omni is fully aware of its environment via `omni_agents`. If you have Cursor running alongside Claude CLI, they can seamlessly share the same filtered memory streams, active errors, and execution environments without clashing.
 - **Distill Monitor**: Track your token savings and costs over time. Use `omni_budget` and `omni_history` right inside your LLM, or run `omni stats` locally to visualize your money saved.
 - **Visual Impact (`omni diff`)**: See exactly how much money and space you are saving. Just run `omni diff` to see the bulky raw output compared side-by-side to Omni's sleek, filtered version.
+- **Lightweight Dependency Graph**: OMNI builds a fast local file relationship graph at hook time (no daemon, no LSP). When your AI reads a heavily-imported file, OMNI warns it: `"this file has 12 dependents — call omni_context for full impact map."`.
+- **Adaptive Compression**: OMNI tracks when agents retrieve omitted output. If a command family is frequently retrieved, OMNI automatically softens compression next time — self-tuning without configuration.
+- **Structured ReadFile + Grep**: Instead of raw file dumps or flat grep output, OMNI returns structured outlines (imports, public API, risk markers) and grouped grep summaries (top files by match count, priority lines first).
+- **Factual Anti-Hallucination Guards**: OMNI emits warnings only when it has hard facts — no speculation. If output is heavily compressed and no rewind exists: it says so. If a file has many dependents: it says so. Keeping your AI grounded in reality.
 
 ---
 ## Architecture
 
 ```mermaid
 flowchart TB
-    Agent["Claude Code / OpenClaw / MCP Agent"]
-    
+    Agent["Claude Code / OpenClaw / Hermes Agent / MCP Agent"]
+
     subgraph Hooks["Native Hook Layer (Transparent)"]
         Pre["Pre-Hook\n(Rewriter)"]
         Post["Post-Hook\n(Distiller)"]
@@ -107,7 +111,7 @@ flowchart TB
 
     Post --> OMNI_Engine
     Pre --> OMNI_Engine
-    
+
     subgraph Persistence["Persistence Store (SQLite)"]
         ST["SessionState"]
         RW["RewindStore"]
@@ -156,13 +160,18 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 Once installed via `omni init`, OMNI works invisibly in the background. Whether your AI Agent runs a terminal command via MCP or you manually pipe output (`ls | omni`), OMNI automatically jumps in as a transparent layer. It intelligently filters terminal output, removes the noisy logs, and hands the clean signal back to the AI.
 
-To review how many tokens (and how much money) you've saved today, just type:
+For detailed breakdown by savings, command, period, and route:
 ```bash
 omni stats
 ```
 
+To diagnose your OMNI installation (hooks, MCP, filters, database):
+```bash
+omni doctor
+```
+
 Need to see the filters in action or add your own custom rules?
-You can easily create your own rules using simple TOML files.
+You can easily create your own rules using simple TOML files in `~/.omni/filters/`.
 
 ### Multi-Agent Support & Integrations
 

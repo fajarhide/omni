@@ -258,12 +258,32 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     // 4. Agent Integrations
     println!("\n {}", "Agent Integrations:".bold().bright_white());
     let integrations = crate::agents::all_integrations();
+    let mut any_agent_ok = false;
     for agent in integrations {
-        all_ok &= agent.doctor_check(fix_mode, &mut warnings);
+        if agent.doctor_check(fix_mode, &mut warnings) {
+            any_agent_ok = true;
+        }
+        // Note: integrations are optional; "not configured" should not fail doctor
+    }
+    if !any_agent_ok {
+        warnings.push(
+            "No agent integrations are configured. Run `omni init` to set up hooks + MCP for your agent."
+                .to_string(),
+        );
+        all_ok = false;
     }
 
     // 6. Config Filters
     println!("\n {}", "Filters:".bold().bright_white());
+
+    // In --fix mode, repair legacy learned.toml *before* loading reports so warnings reflect fixes.
+    if fix_mode {
+        let learned_path = crate::paths::learned_filters_path();
+        if learned_path.exists() {
+            let _ = crate::pipeline::toml_filter::try_repair_file(&learned_path);
+        }
+    }
+
     let (built_in, user_report, local_report) =
         crate::pipeline::toml_filter::get_filters_by_source();
 

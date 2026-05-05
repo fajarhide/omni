@@ -409,6 +409,45 @@ pub fn try_repair_file(path: &Path) -> Result<bool> {
     let cleaned: Vec<String> = repaired.lines().map(|l| l.trim_end().to_string()).collect();
     repaired = cleaned.join("\n");
 
+    // 3.5 Repair learned filters missing match_command (causes noisy doctor warnings)
+    // Strategy: if a [filters.learned_*] block doesn't declare match_command, insert a safe
+    // non-matching default (match_command = "^$") right after the table header.
+    //
+    // This preserves the contract that filters must be explicit about command targeting,
+    // while avoiding "skip filter ... missing match_command" spam for legacy learned.toml.
+    if path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|n| n == "learned.toml")
+    {
+        let header_re = Regex::new(r"(?m)^\[filters\.(learned_[^\]]+)\]\s*$")?;
+        let mut out = String::new();
+        let mut last = 0;
+        for m in header_re.find_iter(&repaired) {
+            // Copy everything up to and including the header
+            out.push_str(&repaired[last..m.end()]);
+            out.push('\n');
+
+            // Look ahead until next [filters.*] header or EOF, and see if match_command exists.
+            let rest = &repaired[m.end()..];
+            let next_header_idx = rest.find("\n[filters.").unwrap_or(rest.len());
+            let block = &rest[..next_header_idx];
+            let has_match_command = Regex::new(r"(?m)^\s*match_command\s*=")?
+                .is_match(block);
+            if !has_match_command {
+                out.push_str("match_command = \"^$\"\n");
+                changed = true;
+            }
+
+            // Continue from the original position (no index drift from inserted text)
+            last = m.end();
+        }
+        if last > 0 {
+            out.push_str(&repaired[last..]);
+            repaired = out;
+        }
+    }
+
     // 4. Try to parse with standard toml crate to verify structural integrity
     match toml::from_str::<TomlDocument>(&repaired) {
         Ok(_) => {
