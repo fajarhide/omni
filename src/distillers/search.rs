@@ -91,6 +91,10 @@ pub fn distill_grep(content: &str) -> Option<String> {
             "\n... [{} more files omitted]\n",
             files.len() - 10
         ));
+        // Phase 6: factual guard — many files omitted, agent may need to retrieve
+        out.push_str(
+            "[OMNI Guard: many files omitted — use omni_find_noise or omni_search to explore further]\n",
+        );
     }
 
     if out.len() < content.len() * 8 / 10 {

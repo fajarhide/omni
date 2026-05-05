@@ -2,6 +2,39 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
+// Phase 6: mutating command detection for hot-file warnings
+fn is_mutating_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    // Direct file mutations
+    lower.contains("rm ")
+        || lower.contains("delete ")
+        || lower.contains("mv ")
+        || lower.contains("cp ")
+        // Git state changes
+        || lower.contains("git checkout")
+        || lower.contains("git reset")
+        || lower.contains("git add")
+        // Build/install (often write to target/ or node_modules/)
+        || lower.contains("cargo build")
+        || lower.contains("cargo install")
+        || lower.contains("cargo clean")
+        // JS installs/builds
+        || lower.contains("npm install")
+        || lower.contains("npm run build")
+        || lower.contains("rm -rf")
+        // Docker / k8s writes
+        || lower.contains("docker build")
+        || lower.contains("docker run")
+        || lower.contains("kubectl apply")
+        || lower.contains("kubectl delete")
+        // Generic edit-like keywords
+        || lower.contains("write ")
+        || lower.contains("edit ")
+        || lower.contains("replace ")
+        || lower.contains("touch ")
+        || lower.contains("mkdir ")
+}
+
 #[derive(Deserialize)]
 struct PreHookInput {
     tool_input: ToolInput,
@@ -64,6 +97,32 @@ fn process_payload(input_str: &str) -> Option<String> {
 
     // Conservative Context Injection Hint for Read/Search commands
     if let Some(target_file) = extract_target_file(cmd_str) {
+        // Phase 6: mutating command on hot file → warn
+        if is_mutating_command(cmd_str) {
+            let session_state = crate::pipeline::SessionState::new();
+            let hot_count = session_state
+                .hot_files
+                .get(&target_file)
+                .copied()
+                .unwrap_or(0);
+            if hot_count > 2 {
+                let updated_input = parsed.tool_input.clone();
+                let reason = format!(
+                    "OMNI Guard: {} is a hot file (accessed {}x this session). Mutating it may have wide impact. Consider reviewing dependents via omni_context.",
+                    target_file, hot_count
+                );
+                let output = PreHookOutput {
+                    hook_specific_output: HookSpecificOutput {
+                        hook_event_name: "PreToolUse",
+                        permission_decision: "allow",
+                        permission_decision_reason: reason,
+                        updated_input,
+                    },
+                };
+                return serde_json::to_string(&output).ok();
+            }
+        }
+
         // We only provide a hint, we don't modify the command
         let updated_input = parsed.tool_input.clone();
         let reason = format!(
@@ -80,6 +139,35 @@ fn process_payload(input_str: &str) -> Option<String> {
             },
         };
         return serde_json::to_string(&output).ok();
+    }
+
+    // Phase 6: mutating command without specific file target — still check if any hot file is implicated
+    if is_mutating_command(cmd_str) {
+        let session_state = crate::pipeline::SessionState::new();
+        if !session_state.hot_files.is_empty() {
+            let top_hot: Vec<String> = session_state
+                .hot_files
+                .iter()
+                .take(3)
+                .map(|(f, c)| format!("{} ({}x)", f, c))
+                .collect();
+            if !top_hot.is_empty() {
+                let updated_input = parsed.tool_input.clone();
+                let reason = format!(
+                    "OMNI Guard: mutating command detected. Current hot files: {}. Review impact before proceeding.",
+                    top_hot.join(", ")
+                );
+                let output = PreHookOutput {
+                    hook_specific_output: HookSpecificOutput {
+                        hook_event_name: "PreToolUse",
+                        permission_decision: "allow",
+                        permission_decision_reason: reason,
+                        updated_input,
+                    },
+                };
+                return serde_json::to_string(&output).ok();
+            }
+        }
     }
 
     None

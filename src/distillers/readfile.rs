@@ -1,4 +1,14 @@
 pub fn distill_readfile(content: &str, filepath: &str) -> Option<String> {
+    distill_readfile_with_context(content, filepath, 0)
+}
+
+/// `imported_by_count`: number of files that import this file (from graph).
+/// When > 3, append a factual warning suggesting omni_context.
+pub fn distill_readfile_with_context(
+    content: &str,
+    filepath: &str,
+    imported_by_count: usize,
+) -> Option<String> {
     let line_count = content.lines().count();
     if line_count < 50 {
         return None; // Small files pass through
@@ -23,10 +33,18 @@ pub fn distill_readfile(content: &str, filepath: &str) -> Option<String> {
 
     // Only return if meaningful compression achieved
     if distilled.len() < content.len() * 8 / 10 {
-        Some(format!(
+        let mut out = format!(
             "[OMNI ReadFile: {} → distilled ({} lines)]\n{}",
             filepath, line_count, distilled
-        ))
+        );
+        // Phase 6: factual guard — file has many dependents
+        if imported_by_count > 3 {
+            out.push_str(&format!(
+                "\n[OMNI Guard: {} is imported by {} files — changes here may have wide impact. Call omni_context(\"{}\") for full dependency map.]",
+                filepath, imported_by_count, filepath
+            ));
+        }
+        Some(out)
     } else {
         None
     }

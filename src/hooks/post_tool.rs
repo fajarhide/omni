@@ -47,7 +47,18 @@ pub fn process_payload(
             } else {
                 &normalized.command
             };
-            return distill_readfile(&content, filepath).map(wrap_hook_output);
+            // Phase 6: check graph for many dependents
+            let imported_by_count = std::env::current_dir()
+                .ok()
+                .and_then(|cwd| crate::graph::indexer::build_graph(&cwd).ok())
+                .map(|g| g.context_for(filepath).imported_by.len())
+                .unwrap_or(0);
+            return crate::distillers::readfile::distill_readfile_with_context(
+                &content,
+                filepath,
+                imported_by_count,
+            )
+            .map(wrap_hook_output);
         }
         "Grep" => {
             if !agent_config.grep_enabled() {
@@ -210,7 +221,24 @@ pub fn process_payload(
             ));
             rewind_hash = hash;
         } else {
-            final_out.push_str(&format!("\n[OMNI: {} lines omitted]\n", dropped_lines));
+            // Phase 6: factual guard — heavy compression but no rewind store available
+            final_out.push_str(&format!(
+                "\n[OMNI: {} lines omitted — WARNING: full output not saved (no store), recovery impossible]\n",
+                dropped_lines
+            ));
+        }
+    } else {
+        // Phase 6: heavy noise detected but not stored — warn if compression is significant
+        let noise_ratio = if check_segments.len() > 0 {
+            noise_count as f32 / check_segments.len() as f32
+        } else {
+            0.0
+        };
+        if noise_ratio > 0.6 && content.len() > 2000 {
+            final_out.push_str(&format!(
+                "\n[OMNI Guard: {:.0}% noise dropped, but full output not archived — recovery unavailable]\n",
+                noise_ratio * 100.0
+            ));
         }
     }
 
