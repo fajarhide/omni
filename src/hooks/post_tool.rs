@@ -48,17 +48,23 @@ pub fn process_payload(
                 &normalized.command
             };
             // Phase 6: check graph for many dependents
-            let imported_by_count = std::env::current_dir()
+            let graph = std::env::current_dir()
                 .ok()
-                .and_then(|cwd| crate::graph::indexer::build_graph(&cwd).ok())
-                .map(|g| g.context_for(filepath).imported_by.len())
-                .unwrap_or(0);
-            return crate::distillers::readfile::distill_readfile_with_context(
-                &content,
-                filepath,
-                imported_by_count,
-            )
-            .map(wrap_hook_output);
+                .and_then(|cwd| crate::graph::indexer::build_graph(&cwd).ok());
+
+            if let Some(g) = graph {
+                let imported_by_count = g.context_for(filepath).imported_by.len();
+                return crate::distillers::readfile::distill_readfile_with_context(
+                    &content,
+                    filepath,
+                    imported_by_count,
+                )
+                .map(wrap_hook_output);
+            }
+
+            // Fallback if graph fails
+            return crate::distillers::readfile::distill_readfile(&content, filepath)
+                .map(wrap_hook_output);
         }
         "Grep" => {
             if !agent_config.grep_enabled() {
@@ -229,7 +235,7 @@ pub fn process_payload(
         }
     } else {
         // Phase 6: heavy noise detected but not stored — warn if compression is significant
-        let noise_ratio = if check_segments.len() > 0 {
+        let noise_ratio = if !check_segments.is_empty() {
             noise_count as f32 / check_segments.len() as f32
         } else {
             0.0
@@ -436,7 +442,6 @@ fn wrap_hook_output(distilled: String) -> String {
 
 // ── NON-BASH TOOL DISTILLATION ───────────────────────────────────────
 
-use crate::distillers::readfile::distill_readfile;
 use crate::distillers::search::distill_grep;
 fn process_web_content(content: &str) -> Option<String> {
     let line_count = content.lines().count();
