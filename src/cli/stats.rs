@@ -335,7 +335,7 @@ fn run_default(store: &Store) -> Result<()> {
             };
             let bar = format_bar_with_empty(pct);
             println!(
-                "    {:<18} {}  {:>5.1}%  ({:>3}x)  {:>5.1}% saved",
+                "    {:<18} {}  {:>5.1}%  ({:>2}x)  {:>5.1}% saved",
                 name.bright_cyan(),
                 bar.bright_blue(),
                 pct,
@@ -605,7 +605,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             let padding = " ".repeat(15_usize.saturating_sub(label.len()));
 
             println!(
-                "  {}{}{:>15}  ({:>3.0}%)",
+                "  {}{}{}  ({:>2.0}%)",
                 route_color.bold(),
                 ":".bright_white().to_string() + &padding,
                 cnt,
