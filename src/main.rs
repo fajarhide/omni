@@ -91,10 +91,6 @@ fn print_help() {
     println!("\n{}", "COMMANDS:".bold().bright_white());
     println!("  {: <12} Setup OMNI Hooks and MCP server", "init".cyan());
     println!("  {: <12} View token savings analytics", "stats".cyan());
-    println!(
-        "  {: <12} Quick savings summary (alias of stats)",
-        "gain".cyan()
-    );
     println!("  {: <12} Manage session state", "session".cyan());
     println!(
         "  {: <12} Auto-generate filters from history",
@@ -256,19 +252,6 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for stats: {}", e);
-                        std::process::exit(1);
-                    }
-                },
-
-                "gain" => match Store::open() {
-                    Ok(store) => {
-                        if let Err(e) = cli::stats::run_gain(&args, &store) {
-                            eprintln!("[omni] Gain error: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[omni] Cannot open database for gain: {}", e);
                         std::process::exit(1);
                     }
                 },
