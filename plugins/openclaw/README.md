@@ -28,7 +28,7 @@ omni doctor --fix
 **Local Developer Install**
 If you cloned the repository locally:
 ```bash
-openclaw plugins install ./integrations/openclaw
+openclaw plugins install ./plugins/openclaw
 ```
 
 ## Configuration (Optional)

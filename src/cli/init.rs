@@ -30,6 +30,7 @@ fn print_help() {
         "  {: <14} Configure Antigravity IDE / Generic Webhook",
         "--antigravity".cyan()
     );
+    println!("  {: <14} Configure Hermes Agent", "--hermes".cyan());
 
     println!("\n{}", "CLAUDE SPECIFIC FLAGS:".bold().bright_white());
     println!(
@@ -81,6 +82,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     let mut is_codex = args.iter().any(|a| a == "--codex");
     let mut is_openclaw = args.iter().any(|a| a == "--openclaw");
     let mut is_antigravity = args.iter().any(|a| a == "--antigravity");
+    let mut is_hermes = args.iter().any(|a| a == "--hermes");
 
     let mut is_hook = args.iter().any(|a| a == "--hook");
     let mut is_mcp = args.iter().any(|a| a == "--mcp");
@@ -106,6 +108,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         && !is_codex
         && !is_openclaw
         && !is_antigravity
+        && !is_hermes
         && !is_status
         && !is_uninstall
         && !is_hook
@@ -128,10 +131,11 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         println!("  [{}]  Codex CLI", "9".cyan());
         println!("  [{}] OpenClaw", "10".cyan());
         println!("  [{}] Antigravity IDE", "11".cyan());
+        println!("  [{}] Hermes Agent", "12".cyan());
         println!("  [{}]  Quit\n", "q".yellow());
 
         use std::io::Write;
-        print!("Select an option [1-11, q]: ");
+        print!("Select an option [1-12, q]: ");
         std::io::stdout().flush()?;
 
         let mut input = String::new();
@@ -152,6 +156,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
             "9" => is_codex = true,
             "10" => is_openclaw = true,
             "11" => is_antigravity = true,
+            "12" => is_hermes = true,
             _ => return Ok(()),
         }
         println!();
@@ -170,6 +175,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
             "codex",
             "openclaw",
             "antigravity",
+            "hermes",
         ]
     } else {
         let mut ids = Vec::new();
@@ -205,6 +211,9 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         }
         if is_antigravity {
             ids.push("antigravity");
+        }
+        if is_hermes {
+            ids.push("hermes");
         }
         ids
     };

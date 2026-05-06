@@ -214,6 +214,7 @@ pub fn agent_display_name(agent_id: &str) -> String {
         "roo_code" => "Roo Code".to_string(),
         "copilot" => "GitHub Copilot".to_string(),
         "antigravity" => "Antigravity".to_string(),
+        "hermes" => "Hermes Agent".to_string(),
         "vscode" => "VS Code".to_string(),
         other => other.replace('_', " "),
     }
