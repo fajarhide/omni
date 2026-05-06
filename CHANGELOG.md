@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7-rc3] - 2026-05-07
+
+### Added
+- **Hermes Agent Integration**: New native plugin integration for the Hermes Agent. Features automatic `plugin.yaml` and Python hook script generation (`post_tool_call`, `pre_tool_call`, `on_session_start`) to silently filter noise in the background.
+
+### Improved
+- **Automated Doctor Fix Mode**: Massively refactored agent integrations (`cline`, `codex`, `cursor`, `gemini`, `antigravity`) to support a standardized configuration path management and automated `--fix` operations.
+- **Claude Hook Cleanup**: Implemented robust `uninstall` logic in the Claude Code integration to completely scrub OMNI hooks and MCP server entries from `settings.json` and `.claude.json`.
+- **OpenClaw Portability**: Refactored the OpenClaw plugin's TypeScript configuration to use standard `Node16`/`ES2022` settings instead of relying on sandbox-specific file paths. Also renamed the plugin directory from `integrations/openclaw` to `plugins/openclaw`.
+
+### Fixed
+- **Clippy Strictness**: Resolved hidden nested-if collapsible warnings (`clippy::collapsible_if`) inside `claude.rs` ensuring zero warnings under `#![deny(warnings)]`.
+
 ## [0.5.7-rc2] - 2026-05-06
 
 ### Added
