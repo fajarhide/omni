@@ -12,34 +12,33 @@ impl Distiller for GenericDistiller {
         _session: Option<&crate::pipeline::SessionState>,
     ) -> String {
         let max_lines = 100;
-
-        if segments.len() <= max_lines {
-            return segments
-                .iter()
-                .map(|s| s.content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n")
-                .trim()
-                .to_string();
-        }
-
         let mut selected_indices = HashSet::new();
 
-        // Pass 1: Select Critical & Important
+        // Pass 1: always prioritize Critical and Important signal.
         for (i, seg) in segments.iter().enumerate() {
-            if matches!(seg.tier, SignalTier::Critical | SignalTier::Important)
-                && selected_indices.len() < max_lines
-            {
+            if selected_indices.len() >= max_lines {
+                break;
+            }
+            if matches!(seg.tier, SignalTier::Critical | SignalTier::Important) {
                 selected_indices.insert(i);
             }
         }
 
-        // Pass 2: Fill remaining budget with Context/Noise
-        for i in 0..segments.len() {
+        // Pass 2: fill remaining budget with Context only (strictly avoid Noise).
+        for (i, seg) in segments.iter().enumerate() {
             if selected_indices.len() >= max_lines {
                 break;
             }
-            selected_indices.insert(i);
+            if seg.tier == SignalTier::Context {
+                selected_indices.insert(i);
+            }
+        }
+
+        // Absolute fallback: if all content is noise, keep a small sample.
+        if selected_indices.is_empty() {
+            for i in 0..segments.len().min(20) {
+                selected_indices.insert(i);
+            }
         }
 
         // Build output maintaining original order
@@ -57,6 +56,16 @@ impl Distiller for GenericDistiller {
                 out.push('\n');
                 last_idx = Some(i);
             }
+        }
+
+        let noise_dropped = segments
+            .iter()
+            .enumerate()
+            .filter(|(i, seg)| seg.tier == SignalTier::Noise && !selected_indices.contains(i))
+            .count();
+
+        if noise_dropped > 0 {
+            out.push_str(&format!("[{} noise lines omitted]\n", noise_dropped));
         }
 
         if let Some(last) = last_idx
@@ -98,6 +107,30 @@ mod tests {
             output.contains("Line 120"),
             "Critical line must be preserved even if it's beyond the 100 line limit"
         );
-        assert!(output.contains("... [omitted]"));
+        assert!(
+            output.contains("noise lines omitted"),
+            "Noise omission should be explicitly labeled"
+        );
+    }
+
+    #[test]
+    fn test_generic_distiller_noise_omitted_label() {
+        let segments: Vec<OutputSegment> = (0..50)
+            .map(|i| OutputSegment {
+                content: format!("Downloading crate_{}", i),
+                tier: SignalTier::Noise,
+                base_score: 0.05,
+                context_score: 0.0,
+                line_range: (i, i),
+            })
+            .collect();
+
+        let distiller = GenericDistiller;
+        let output = distiller.distill(&segments, "", None);
+
+        assert!(
+            output.contains("noise lines omitted"),
+            "Noise omission must be labeled in output"
+        );
     }
 }
