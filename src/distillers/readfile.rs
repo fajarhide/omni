@@ -2,6 +2,8 @@ pub fn distill_readfile(content: &str, filepath: &str) -> Option<String> {
     distill_readfile_with_context(content, filepath, 0)
 }
 
+const MIN_DISTILL_TOKENS: usize = 2000;
+
 /// `imported_by_count`: number of files that import this file (from graph).
 /// When > 3, append a factual warning suggesting omni_context.
 pub fn distill_readfile_with_context(
@@ -10,14 +12,16 @@ pub fn distill_readfile_with_context(
     imported_by_count: usize,
 ) -> Option<String> {
     let line_count = content.lines().count();
-    if line_count < 50 {
-        return None; // Small files pass through
-    }
-
     let ext = std::path::Path::new(filepath)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
+
+    let hint = content_hint_for_extension(ext);
+    let estimated_tokens = crate::util::token_estimate::estimate_tokens(content.len(), hint);
+    if estimated_tokens < MIN_DISTILL_TOKENS {
+        return None; // Below token threshold, passthrough
+    }
 
     let distilled = match ext {
         "rs" => distill_rust_file(content),
@@ -47,6 +51,17 @@ pub fn distill_readfile_with_context(
         Some(out)
     } else {
         None
+    }
+}
+
+fn content_hint_for_extension(ext: &str) -> crate::util::token_estimate::ContentHint {
+    match ext {
+        "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "go" | "java" | "kt" | "c" | "cpp" | "h"
+        | "hpp" | "cs" | "php" | "ruby" | "rb" => crate::util::token_estimate::ContentHint::Code,
+        "json" | "toml" | "yaml" | "yml" => crate::util::token_estimate::ContentHint::Json,
+        "log" => crate::util::token_estimate::ContentHint::BuildLog,
+        "md" | "txt" => crate::util::token_estimate::ContentHint::Prose,
+        _ => crate::util::token_estimate::ContentHint::Mixed,
     }
 }
 
@@ -336,4 +351,28 @@ fn distill_unknown_file(content: &str) -> String {
         total - 20,
         tail_rev.join("\n")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readfile_passthrough_when_below_token_threshold() {
+        let content = "pub fn a() {}\n";
+        assert!(distill_readfile(content, "src/lib.rs").is_none());
+    }
+
+    #[test]
+    fn readfile_distills_when_above_token_threshold_even_if_few_lines() {
+        let mut content = String::from("pub fn a() {}\n");
+        for _ in 0..9 {
+            content.push_str("// ");
+            content.push_str(&"a".repeat(3000));
+            content.push('\n');
+        }
+
+        let out = distill_readfile(&content, "src/lib.rs");
+        assert!(out.is_some());
+    }
 }

@@ -3,6 +3,7 @@ pub const WARN_INPUT: usize = 1024 * 1024; // 1MB
 
 pub enum InputCheck {
     Ok,
+    Warn,
     TooLarge,
     Empty,
 }
@@ -11,8 +12,10 @@ pub fn check_input(input: &str) -> InputCheck {
     let len = input.len();
     if len == 0 {
         InputCheck::Empty
-    } else if len > WARN_INPUT {
+    } else if len > MAX_INPUT {
         InputCheck::TooLarge
+    } else if len > WARN_INPUT {
+        InputCheck::Warn
     } else {
         InputCheck::Ok
     }
@@ -29,6 +32,18 @@ mod tests {
             check_input(&"a".repeat(1024 * 1024)),
             InputCheck::Ok
         )); // 1MB is Ok, just a warning in logs typically
+    }
+
+    #[test]
+    fn test_check_input_warn_for_gt_1mb() {
+        assert!(matches!(
+            check_input(&"a".repeat(WARN_INPUT + 1)),
+            InputCheck::Warn
+        ));
+        assert!(matches!(
+            check_input(&"a".repeat(MAX_INPUT)),
+            InputCheck::Warn
+        ));
     }
 
     #[test]

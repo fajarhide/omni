@@ -191,7 +191,7 @@ impl SessionState {
         // Boost if mentioning hot file
         for (path, count) in &self.hot_files {
             if text.contains(path) {
-                boost += 0.1 * (*count as f32 / 10.0).min(0.3);
+                boost += 0.1_f32 * ((*count as f32 / 10.0_f32).min(0.3_f32));
             }
         }
         // Boost if mentioning active error

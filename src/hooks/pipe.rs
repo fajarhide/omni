@@ -71,17 +71,19 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     };
 
     // Phase 2: Guard
-    if let crate::guard::limits::InputCheck::Empty = crate::guard::limits::check_input(&input_text)
-    {
+    let input_check = crate::guard::limits::check_input(&input_text);
+
+    if let crate::guard::limits::InputCheck::Empty = input_check {
         // Silent passthrough: command produced no output (e.g. failed upstream).
         // Don't error — just exit cleanly so we don't pollute Claude Code's stderr.
         return Ok(());
-    } else if let crate::guard::limits::InputCheck::TooLarge =
-        crate::guard::limits::check_input(&input_text)
-    {
+    } else if matches!(
+        input_check,
+        crate::guard::limits::InputCheck::Warn | crate::guard::limits::InputCheck::TooLarge
+    ) {
         writeln!(
             error,
-            "[omni: Warning] Input size exceeds 1MB, processing may take longer..."
+            "[omni: Warning] Large input detected; processing may take longer..."
         )?;
     }
 
