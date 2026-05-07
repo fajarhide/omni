@@ -129,12 +129,21 @@ mod tests {
 
     #[test]
     fn test_is_passthrough_enabled_by_value() {
-        std::env::set_var("OMNI_PASSTHROUGH", "1");
+        // SAFETY: Test runs single-threaded; no concurrent env access.
+        unsafe {
+            std::env::set_var("OMNI_PASSTHROUGH", "1");
+        }
         assert!(is_passthrough());
-        std::env::set_var("OMNI_PASSTHROUGH", "true");
+        unsafe {
+            std::env::set_var("OMNI_PASSTHROUGH", "true");
+        }
         assert!(is_passthrough());
-        std::env::set_var("OMNI_PASSTHROUGH", "0");
+        unsafe {
+            std::env::set_var("OMNI_PASSTHROUGH", "0");
+        }
         assert!(!is_passthrough());
-        std::env::remove_var("OMNI_PASSTHROUGH");
+        unsafe {
+            std::env::remove_var("OMNI_PASSTHROUGH");
+        }
     }
 }

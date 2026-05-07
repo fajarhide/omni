@@ -541,15 +541,18 @@ mod tests {
 
     #[test]
     fn test_readfile_large_rust_file_distilled() {
-        // Large ReadFile (>50 lines) should be distilled
-        // Generate mix of pub fn signatures + private code bodies for realistic compression
+        // Large ReadFile must exceed MIN_DISTILL_TOKENS (2000 tokens).
+        // With Code hint at 3.2 chars/token, we need ~6400+ bytes.
+        // Generate 80 functions with longer bodies for realistic compression.
         let mut big_rust = String::new();
-        for i in 0..20 {
+        for i in 0..80 {
             big_rust.push_str(&format!("pub fn function_{}() -> i32 {{\n", i));
             big_rust.push_str(&format!("    let x = {};\n", i));
             big_rust.push_str(&format!("    let y = x + {};\n", i * 2));
-            big_rust.push_str("    println!(\"computing result\");\n");
-            big_rust.push_str("    x + y\n");
+            big_rust.push_str(&format!("    let z = x * y + {};\n", i * 3));
+            big_rust.push_str("    println!(\"computing result for iteration\");\n");
+            big_rust.push_str("    let result = x + y + z;\n");
+            big_rust.push_str("    result\n");
             big_rust.push_str("}\n\n");
         }
         let input = json!({
