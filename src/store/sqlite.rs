@@ -567,10 +567,15 @@ impl Store {
         let hash_result = hasher.finalize();
         let full_hash = hex::encode(hash_result);
         let short_hash = full_hash[..16].to_string();
+        let ts_ns = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let rewind_key = format!("{}_{}", ts_ns, short_hash);
 
         let conn = match self.conn.lock() {
             Ok(c) => c,
-            Err(_) => return short_hash,
+            Err(_) => return rewind_key,
         };
 
         let ts = chrono::Utc::now().timestamp();
@@ -579,10 +584,10 @@ impl Store {
         let _ = conn.execute(
             "INSERT OR IGNORE INTO rewind_store (hash, content, ts, original_len, retrieved)
              VALUES (?1, ?2, ?3, ?4, 0)",
-            params![short_hash, content, ts, original_len],
+            params![rewind_key, content, ts, original_len],
         );
 
-        short_hash
+        rewind_key
     }
 
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
@@ -1294,7 +1299,7 @@ mod tests {
         let content = "this is some compressed content";
         let hash = store.store_rewind(content);
 
-        assert_eq!(hash.len(), 16);
+        assert!(hash.contains('_'));
 
         let retrieved = store.retrieve_rewind(&hash);
         assert_eq!(retrieved, Some(content.to_string()));
@@ -1318,7 +1323,9 @@ mod tests {
         let hash1 = store.store_rewind(content);
         let hash2 = store.store_rewind(content); // duplicate
 
-        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash2);
+        assert_eq!(store.retrieve_rewind(&hash1), Some(content.to_string()));
+        assert_eq!(store.retrieve_rewind(&hash2), Some(content.to_string()));
     }
 
     #[test]

@@ -91,12 +91,12 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bright_white()
         );
         let all_filters = crate::pipeline::toml_filter::load_all_filters();
-        let report = crate::pipeline::toml_filter::run_inline_tests(all_filters);
+        let report = crate::pipeline::toml_filter::run_inline_tests(&all_filters);
 
         let (mut built_in_fails, mut user_fails) = (0, 0);
         let (mut built_in_total, mut user_total) = (0, 0);
 
-        for filter in all_filters {
+        for filter in &all_filters {
             let count = filter.inline_tests.len();
             if filter.name.starts_with("sys_") {
                 built_in_total += count;

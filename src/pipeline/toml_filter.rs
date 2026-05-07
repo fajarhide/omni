@@ -5,7 +5,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, OnceLock};
 
 #[derive(RustEmbed)]
 #[folder = "filters/"]
@@ -621,53 +622,138 @@ pub fn run_inline_tests(filters: &[TomlFilter]) -> TestReport {
     TestReport { passes, failures }
 }
 
-static ALL_FILTERS_CACHE: OnceLock<Vec<TomlFilter>> = OnceLock::new();
+#[derive(Clone)]
+struct FiltersCache {
+    fingerprint: u64,
+    filters: Vec<TomlFilter>,
+}
 
-pub fn load_all_filters() -> &'static [TomlFilter] {
-    ALL_FILTERS_CACHE.get_or_init(|| {
-        let mut all = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+static ALL_FILTERS_CACHE: OnceLock<Mutex<FiltersCache>> = OnceLock::new();
 
-        // 1. .omni/filters/*.toml (project-local, if trusted)
-        if let Ok(cwd) = std::env::current_dir() {
-            let local_filters_dir = cwd.join(".omni").join("filters");
-            if local_filters_dir.exists() {
-                let config_path = cwd.join("omni_config.json");
-                if crate::guard::trust::is_trusted(&config_path) {
-                    let report = load_from_dir(&local_filters_dir);
-                    for f in report.filters {
-                        if !seen.contains(&f.name) {
-                            seen.insert(f.name.clone());
-                            all.push(f);
-                        }
+pub fn load_all_filters() -> Vec<TomlFilter> {
+    let cache = ALL_FILTERS_CACHE.get_or_init(|| Mutex::new(FiltersCache {
+        fingerprint: 0,
+        filters: Vec::new(),
+    }));
+
+    let fingerprint = compute_filters_fingerprint();
+    let mut guard = cache.lock().unwrap();
+
+    if guard.fingerprint == fingerprint && !guard.filters.is_empty() {
+        return guard.filters.clone();
+    }
+
+    let filters = load_all_filters_uncached();
+    guard.fingerprint = fingerprint;
+    guard.filters = filters.clone();
+    filters
+}
+
+fn load_all_filters_uncached() -> Vec<TomlFilter> {
+    let mut all = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. .omni/filters/*.toml (project-local, if trusted)
+    if let Ok(cwd) = std::env::current_dir() {
+        let local_filters_dir = cwd.join(".omni").join("filters");
+        if local_filters_dir.exists() {
+            let config_path = cwd.join("omni_config.json");
+            if crate::guard::trust::is_trusted(&config_path) {
+                let report = load_from_dir(&local_filters_dir);
+                for f in report.filters {
+                    if !seen.contains(&f.name) {
+                        seen.insert(f.name.clone());
+                        all.push(f);
                     }
                 }
             }
         }
+    }
 
-        // 2. ~/.omni/filters/*.toml (user-global)
-        let user_dir = dirs::home_dir().map(|h| h.join(".omni").join("filters"));
-        if let Some(dir) = user_dir {
-            let report = load_from_dir(&dir);
-            for f in report.filters {
-                if !seen.contains(&f.name) {
-                    seen.insert(f.name.clone());
-                    all.push(f);
-                }
-            }
-        }
-
-        // 3. Built-in filters (embedded)
-        let report = load_embedded_filters();
+    // 2. ~/.omni/filters/*.toml (user-global)
+    let user_dir = dirs::home_dir().map(|h| h.join(".omni").join("filters"));
+    if let Some(dir) = user_dir {
+        let report = load_from_dir(&dir);
         for f in report.filters {
             if !seen.contains(&f.name) {
                 seen.insert(f.name.clone());
                 all.push(f);
             }
         }
+    }
 
-        all
-    })
+    // 3. Built-in filters (embedded)
+    let report = load_embedded_filters();
+    for f in report.filters {
+        if !seen.contains(&f.name) {
+            seen.insert(f.name.clone());
+            all.push(f);
+        }
+    }
+
+    all
+}
+
+fn compute_filters_fingerprint() -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+    // 1) project-local (include trust decision + config mtime)
+    if let Ok(cwd) = std::env::current_dir() {
+        let config_path = cwd.join("omni_config.json");
+        let is_trusted = crate::guard::trust::is_trusted(&config_path);
+        is_trusted.hash(&mut hasher);
+        hash_path_metadata(&config_path, &mut hasher);
+
+        let local_filters_dir = cwd.join(".omni").join("filters");
+        hash_dir_toml_entries(&local_filters_dir, &mut hasher);
+    }
+
+    // 2) user-global
+    if let Some(dir) = dirs::home_dir().map(|h| h.join(".omni").join("filters")) {
+        hash_dir_toml_entries(&dir, &mut hasher);
+    }
+
+    hasher.finish()
+}
+
+fn hash_dir_toml_entries(dir: &Path, hasher: &mut impl Hasher) {
+    if !dir.exists() || !dir.is_dir() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    let mut paths: Vec<_> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "toml"))
+        .collect();
+    paths.sort();
+
+    for p in paths {
+        hash_path_metadata(&p, hasher);
+    }
+}
+
+fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
+    path.to_string_lossy().hash(hasher);
+
+    let Ok(meta) = fs::metadata(path) else {
+        0u64.hash(hasher);
+        return;
+    };
+
+    meta.len().hash(hasher);
+    if let Ok(modified) = meta.modified()
+        && let Ok(duration) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH)
+    {
+        duration.as_secs().hash(hasher);
+        duration.subsec_nanos().hash(hasher);
+    } else {
+        0u64.hash(hasher);
+    }
 }
 
 pub fn get_filters_by_source() -> (LoadReport, LoadReport, LoadReport) {
