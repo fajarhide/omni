@@ -26,7 +26,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_check_input_ok_for_normal_input() {
+    fn accepts_normal_input() {
         assert!(matches!(check_input("normal text"), InputCheck::Ok));
         assert!(matches!(
             check_input(&"a".repeat(1024 * 1024)),
@@ -35,7 +35,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_input_warn_for_gt_1mb() {
+    fn warns_for_input_greater_than_1mb() {
         assert!(matches!(
             check_input(&"a".repeat(WARN_INPUT + 1)),
             InputCheck::Warn
@@ -47,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_input_toolarge_for_gt_16mb() {
+    fn rejects_input_greater_than_16mb() {
         let big = "a".repeat(MAX_INPUT + 1);
         assert!(matches!(check_input(&big), InputCheck::TooLarge));
     }

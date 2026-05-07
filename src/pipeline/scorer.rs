@@ -296,7 +296,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_classify_line_error_variants_to_critical() {
+    fn classifies_error_variants_as_critical() {
         assert_eq!(classify_line("error[123]: bad loop"), SignalTier::Critical);
         assert_eq!(classify_line("fatal: ref is broken"), SignalTier::Critical);
         assert_eq!(classify_line("FAILED test_parse"), SignalTier::Critical);
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_line_warning_variants_to_important() {
+    fn classifies_warning_variants_as_important() {
         assert_eq!(
             classify_line("warning[E123]: unused import"),
             SignalTier::Important
@@ -322,19 +322,19 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_line_compiling_lines_to_noise() {
+    fn classifies_compiling_lines_as_noise() {
         assert_eq!(classify_line("Compiling omni v0.1"), SignalTier::Noise);
         assert_eq!(classify_line("Downloading crates"), SignalTier::Noise);
     }
 
     #[test]
-    fn test_classify_line_default_to_context() {
+    fn classifies_defaults_as_context() {
         assert_eq!(classify_line("fn main() {"), SignalTier::Context);
         assert_eq!(classify_line("println!(\"hello\");"), SignalTier::Context);
     }
 
     #[test]
-    fn test_score_line_with_context_tanpa_session() {
+    fn scores_line_with_context_without_session() {
         let score = score_line_with_context("error:", SignalTier::Critical, None);
         assert_eq!(score, 0.9);
 
@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_line_with_context_dengan_session_boost_hot_file() {
+    fn scores_line_with_context_with_session_boost_hot_file() {
         let mut session = SessionState::new();
         for _ in 0..5 {
             session.add_hot_file("src/main.rs");
@@ -354,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_line_with_context_dengan_session_boost_active_error() {
+    fn scores_line_with_context_with_session_boost_active_error() {
         let mut session = SessionState::new();
         session.add_error("missing semicolon");
         let score = score_line_with_context(
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_segments_returns_correct_count() {
+    fn scores_segments_returns_correct_count() {
         let input = "line 1\nline 2\nline 3";
         let segments = score_segments(input, SegmentationMode::Line, None);
         assert_eq!(segments.len(), 3);
@@ -375,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_segments_git_diff_split_by_hunk() {
+    fn scores_segments_git_diff_split_by_hunk() {
         let diff = "diff --git a/file.txt b/file.txt\nindex 1234..5678\n@@ -1,3 +1,4 @@\n line1\n line2\n@@ -10,2 +11,3 @@\n line10\n line11";
         let segments = score_segments(diff, SegmentationMode::GitHunk, None);
 
@@ -392,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_boost_not_exceed_0_4() {
+    fn context_boost_does_not_exceed_limit() {
         let mut session = SessionState::new();
         for _ in 0..50 {
             session.add_hot_file("src/main.rs");

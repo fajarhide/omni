@@ -550,7 +550,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_init_hook_membuat_settings_json_yang_valid_json() {
+    fn test_init_hook_creates_valid_settings_json() {
         let mut val = json!({});
         install_omni_hooks(&mut val, "/usr/bin/omni");
 
@@ -582,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn test_init_status_menampilkan_status_yang_benar() {
+    fn test_init_status_reports_expected_status() {
         let mut val = json!({});
         let exe = "/usr/bin/omni";
         install_omni_hooks(&mut val, exe);
@@ -597,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn test_init_uninstall_membersihkan_semua_entries() {
+    fn test_init_uninstall_removes_all_entries() {
         let mut val = json!({});
         let exe = "/usr/bin/omni";
         install_omni_hooks(&mut val, exe);

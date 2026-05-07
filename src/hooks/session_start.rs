@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fresh_session_exit_tanpa_output() {
+    fn fresh_session_exits_without_output() {
         let (store, _dir) = get_store();
         let input = json!({
             "hookEventName": "SessionStart",
@@ -332,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn test_continue_session_inject_summary() {
+    fn continue_session_injects_summary() {
         let (store, _dir) = get_store();
 
         let mut state = SessionState::new();
@@ -359,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_summary_leq_800_chars() {
+    fn session_summary_is_within_length_limit() {
         let (store, _dir) = get_store();
 
         let mut state = SessionState::new();
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn test_omni_fresh_force_fresh_session() {
+    fn force_fresh_overrides_continue() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
         store.upsert_session(&state);
@@ -406,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_gt_ttl_treat_as_fresh() {
+    fn expired_sessions_are_treated_as_fresh() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.last_active = Utc::now().timestamp() - (500 * 60); // 500 minutes ago
@@ -427,14 +427,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_error_exit_0_not_crash() {
+    fn parse_errors_do_not_crash() {
         let (store, _dir) = get_store();
         let out = process_payload("NOT JSON", store, default_config());
         assert!(out.is_none());
     }
 
     #[test]
-    fn test_claude_code_cwd_alias_accepted() {
+    fn accepts_claude_code_cwd_alias() {
         // Claude Code sends "cwd" not "workingDirectory" — this must not produce a parse error
         let (store, _dir) = get_store();
         // Claude Code sends "cwd" and snake_case field names (from actual hook transcripts)
@@ -459,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_summary_format_benar_no_sensitive_data() {
+    fn session_summary_preserves_context() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_hot_file("secret.txt");

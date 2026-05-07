@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_command_not_crash_jika_not_ada_session() {
+    fn test_session_command_does_not_crash_when_no_session_exists() {
         let (store, _dir) = get_store();
         let args = vec!["session".to_string()];
         let res = run_session(&args, store);
@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_history_menampilkan_sessions() {
+    fn test_session_history_displays_sessions() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
         store.upsert_session(&state);

@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pre_compact_output_valid_json_format() {
+    fn pre_compact_output_is_valid_json() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 
@@ -221,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_summary_leq_500_chars() {
+    fn compact_summary_is_within_length_limit() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_hot_file(&"A".repeat(300));
@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_summary_mengandung_hot_files() {
+    fn compact_summary_contains_hot_files() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_hot_file("src/main.rs");
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_summary_mengandung_active_errors() {
+    fn compact_summary_contains_active_errors() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_error("missing semicolon at line 42");
@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_state_disave_setelah_compact() {
+    fn session_state_is_saved_after_compact() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
         let session_id = state.session_id.clone();
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fts5_indexing_pada_checkpoint() {
+    fn fts5_indexing_runs_at_checkpoint() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
         let session_id = state.session_id.clone();
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_error_exit_0() {
+    fn parse_errors_do_not_crash() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
         let out = process_payload("INVALID JSON", store, session);

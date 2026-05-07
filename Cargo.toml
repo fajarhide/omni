@@ -37,7 +37,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Pattern matching
 regex = "1"
-lazy_static = "1.4"
 
 # Security & hashing
 sha2 = "0.10"

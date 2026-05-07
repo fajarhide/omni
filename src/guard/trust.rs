@@ -102,7 +102,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_is_trusted_false_for_unknown_project() {
+    fn rejects_unknown_projects() {
         let dir = tempdir().unwrap();
         // Create an untrusted omni_config.json
         let cfg = dir.path().join("omni_config.json");
@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trust_project_and_is_trusted_roundtrip() {
+    fn trust_project_roundtrip_works() {
         // Override home dir for tests to avoid writing to real ~/.omni/trusted.json
         // Wait, since we can't cleanly override home_dir globally across threads using env var natively without breaking things,
         // we'll run the test but cautiously. It's an integration-like test.
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_trusted_false_setelah_file_dimodifikasi() {
+    fn rejects_trusted_projects_after_modification() {
         let dir = tempdir().unwrap();
         let cfg = dir.path().join("omni_config.json");
         fs::write(&cfg, "{\"trusted\": true}").unwrap();

@@ -273,7 +273,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_detect_patterns_for_repetitive_build_output() {
+    fn detects_patterns_for_repetitive_build_output() {
         let input = "Waiting for connection 1\nWaiting for connection 2\nWaiting for connection 3\nFinished dev";
         let candidates = detect_patterns(input);
         assert_eq!(candidates.len(), 1);
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_patterns_for_podman_steps() {
+    fn detects_patterns_for_podman_steps() {
         let input = "[1/2] STEP 1/7: FROM alpine\n[1/2] STEP 2/7: RUN ls\n[1/2] STEP 3/7: RUN date";
         let candidates = detect_patterns(input);
         assert_eq!(candidates.len(), 1);
@@ -292,14 +292,14 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_patterns_no_false_positive_pada_diverse_text() {
+    fn ignores_diverse_text_without_repetition() {
         let input = "one two three\nfour five six\nseven eight nine\n";
         let candidates = detect_patterns(input);
         assert_eq!(candidates.len(), 0);
     }
 
     #[test]
-    fn test_generate_toml_menghasilkan_valid_toml() {
+    fn generates_valid_toml_format() {
         let c = vec![PatternCandidate {
             trigger_prefix: "Test Prefix Gen".to_string(),
             sample_line: "Test Prefix Gen is good".to_string(),
@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_to_config_not_duplicate_trigger() {
+    fn applies_to_config_without_duplicate_trigger() {
         let file = NamedTempFile::new().unwrap();
         let c = vec![PatternCandidate {
             trigger_prefix: "Test".to_string(),
@@ -329,13 +329,13 @@ mod tests {
     }
 
     #[test]
-    fn test_queue_for_learn_non_blocking() {
+    fn queues_for_learn_non_blocking() {
         // Will fire the thread in the background
         queue_for_learn("x".repeat(300).as_str(), "make build");
     }
 
     #[test]
-    fn test_generate_toml_with_numeric_placeholders() {
+    fn generates_toml_with_numeric_placeholders() {
         let c = vec![PatternCandidate {
             trigger_prefix: "Step #/#:".to_string(),
             sample_line: "Step 1/2: FROM alpine".to_string(),

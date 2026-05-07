@@ -5,6 +5,12 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+/// Guardrail: only emit distilled output if it's at least this much smaller than input
+const MIN_REDUCTION_PCT: usize = 95; // e.g., if output is 96% of input, just return original input
+
+/// Maximum output size before truncation to prevent overwhelming context windows
+pub const MAX_OUTPUT_BYTES: usize = 50_000;
+
 use crate::pipeline::{Route, SessionState, collapse, scorer, toml_filter};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
@@ -38,7 +44,7 @@ struct PipelineResult {
 
 impl PipelineResult {
     fn best_output(&self) -> &str {
-        let guardrail_len = self.input_text.len() * 95 / 100;
+        let guardrail_len = self.input_text.len() * MIN_REDUCTION_PCT / 100;
         if self.output.len() >= guardrail_len {
             &self.input_text // Guardrail: never emit output ~same size as input
         } else {
@@ -270,23 +276,6 @@ fn distill(
             }
 
             let mut r_hash = None;
-
-            // Determine Route
-            let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
-            let mut route = if r_hash.is_some() {
-                Route::Rewind
-            } else if ratio >= 0.7 {
-                Route::Keep
-            } else if ratio >= 0.3 {
-                Route::Soft
-            } else {
-                Route::Passthrough
-            };
-
-            if route == Route::Soft {
-                out.push_str("\n[Partial signal - omni learn recommended]\n");
-            }
-
             if should_store && let Some(s) = store {
                 let hash = s.store_rewind(&input_text);
                 if std::io::stdout().is_terminal() {
@@ -305,13 +294,27 @@ fn distill(
                     ));
                 }
                 r_hash = Some(hash);
-                route = Route::Rewind; // Override if stored in rewind
+            }
+
+            // Determine Route
+            let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
+            let route = if r_hash.is_some() {
+                Route::Rewind
+            } else if ratio >= 0.7 {
+                Route::Keep
+            } else if ratio >= 0.3 {
+                Route::Soft
+            } else {
+                Route::Passthrough
+            };
+
+            if route == Route::Soft {
+                out.push_str("\n[Partial signal - omni learn recommended]\n");
             }
 
             // Safety truncation
-            const MAX_OUTPUT: usize = 50_000;
-            if out.len() > MAX_OUTPUT {
-                out.truncate(MAX_OUTPUT);
+            if out.len() > MAX_OUTPUT_BYTES {
+                out.truncate(MAX_OUTPUT_BYTES);
                 out.push_str("\n[OMNI: output truncated]\n");
             }
 
@@ -608,7 +611,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_output_guardrail_passthrough_when_reduction_too_small() {
+    fn passes_through_when_reduction_is_too_small() {
         let input_text = "a".repeat(1000);
         let output = "b".repeat(960); // 4% reduction only
         let res = PipelineResult {
@@ -629,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pipe_mode_distils_git_diff() {
+    fn distills_git_diff() {
         let input = "diff --git a/foo b/foo\n@@ -1,1 +1,1 @@\n-old\n+new\n";
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -641,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pipe_mode_passthrough_for_short_input() {
+    fn passes_through_short_input() {
         let input = "hello world\nthis is short";
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -653,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pipe_mode_exit_0_selalu_as_ok() {
+    fn exit_0_is_always_treated_as_ok() {
         let binary_input: Vec<u8> = vec![0xFF, 0xFE, 0xFD];
 
         let mut out = Vec::new();

@@ -467,7 +467,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_strip_ansi() {
+    fn strips_ansi_codes() {
         let line = "\x1b[32m   Compiling serde v1.0.217\x1b[0m";
         let clean = strip_ansi(line);
         assert_eq!(clean, "   Compiling serde v1.0.217");
@@ -475,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_test_line() {
+    fn normalizes_test_lines() {
         assert_eq!(
             normalize_test_line("test module::auth::test_login_success ... ok"),
             "test _  ... ok"
@@ -487,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_build_line() {
+    fn normalizes_build_lines() {
         assert_eq!(
             normalize_build_line("Compiling serde v1.0.217"),
             "compiling _"
@@ -499,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_deterministic() {
+    fn normalization_is_deterministic() {
         let line = "test module::submod::test_case_42 ... ok";
         assert_eq!(
             normalize_for_content(line, &CollapseMode::Test),
@@ -510,7 +510,7 @@ mod tests {
     // ── Collapse: Test Output ───────────────────────────
 
     #[test]
-    fn test_collapse_test_output() {
+    fn collapses_test_output() {
         let mut lines = vec!["running 50 tests".to_string()];
         for i in 0..45 {
             lines.push(format!("test module::test_{} ... ok", i));
@@ -547,7 +547,7 @@ mod tests {
     // ── Collapse: Build Output ──────────────────────────
 
     #[test]
-    fn test_collapse_build_output() {
+    fn collapses_build_output() {
         let mut lines = Vec::new();
         for i in 0..30 {
             lines.push(format!("   Compiling dep-{} v0.{}.0", i, i));
@@ -567,7 +567,7 @@ mod tests {
     // ── Collapse: Preserves Errors ──────────────────────
 
     #[test]
-    fn test_collapse_preserves_errors() {
+    fn preserves_errors_during_collapse() {
         let mut lines = Vec::new();
         for i in 0..20 {
             lines.push(format!("INFO: Processing item {}", i));
@@ -588,7 +588,7 @@ mod tests {
     // ── Collapse: Short Input Noop ──────────────────────
 
     #[test]
-    fn test_collapse_noop_for_short_input() {
+    fn noops_for_short_input() {
         let input = "line 1\nline 2\nline 3";
         let result = collapse(input, &CollapseMode::Generic);
         assert_eq!(result.original_lines, 3);
@@ -599,7 +599,7 @@ mod tests {
     // ── Collapse: Deterministic ─────────────────────────
 
     #[test]
-    fn test_collapse_deterministic() {
+    fn collapse_is_deterministic() {
         let mut lines = Vec::new();
         for i in 0..20 {
             lines.push(format!("   Compiling dep-{} v1.{}.0", i, i));
@@ -616,7 +616,7 @@ mod tests {
     // ── Collapse: Generic Repetition ────────────────────
 
     #[test]
-    fn test_collapse_generic_repetition() {
+    fn collapses_generic_repetition() {
         let mut lines = Vec::new();
         for _i in 0..40 {
             lines.push("Processing item 1 of 100...".to_string());
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collapse_generic_low_repetition_no_collapse() {
+    fn rejects_generic_low_repetition() {
         let mut lines = Vec::new();
         for i in 0..20 {
             lines.push(format!("Unique line {}: {}", i, "x".repeat(i + 1)));
@@ -650,7 +650,7 @@ mod tests {
     // ── Collapse: Empty Input ───────────────────────────
 
     #[test]
-    fn test_collapse_empty_input() {
+    fn handles_empty_input() {
         let result = collapse("", &CollapseMode::Generic);
         assert_eq!(result.original_lines, 0);
         assert_eq!(result.collapsed_to, 0);
@@ -659,7 +659,7 @@ mod tests {
     // ── Collapse: Infra Output ──────────────────────────
 
     #[test]
-    fn test_collapse_infra_cache_lines() {
+    fn collapses_infra_cache_lines() {
         let mut lines = Vec::new();
         lines.push("Step 1/20 : FROM alpine:latest".to_string());
         for i in 2..=18 {
@@ -715,7 +715,7 @@ mod tests {
     // ── Fixture-based Tests ─────────────────────────────
 
     #[test]
-    fn test_collapse_cargo_test_500_fixture() {
+    fn collapses_cargo_test_500_fixture() {
         let input = include_str!("../../tests/fixtures/cargo_test_500.txt");
         let result = collapse(input, &CollapseMode::Test);
 
@@ -733,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collapse_cargo_build_fixture() {
+    fn collapses_cargo_build_fixture() {
         let input = include_str!("../../tests/fixtures/cargo_build_large.txt");
         let result = collapse(input, &CollapseMode::Build);
 
@@ -750,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn test_git_log_commits_not_collapsed() {
+    fn git_log_commits_are_not_collapsed() {
         let input = "abc1234 First commit\nabc1235 Second commit\nabc1236 Third commit\nabc1237 Fourth commit";
         let result = collapse(input, &CollapseMode::Generic);
 
@@ -759,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_git_hash_line_accuracy() {
+    fn detects_git_hashes_accurately() {
         assert!(is_git_hash_line("abc1234 Fix bug"));
         assert!(is_git_hash_line(
             "commit abc1234def5678abc1234def5678abc1234def5"

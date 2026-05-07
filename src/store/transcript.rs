@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transcript_new_has_correct_fields() {
+    fn new_transcript_has_correct_fields() {
         let t = Transcript::new("sess_123", "/tmp/project");
         assert_eq!(t.session_id, "sess_123");
         assert_eq!(t.working_directory, "/tmp/project");
@@ -397,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn test_entry_new_input_creates_pending_entry() {
+    fn input_entry_creates_pending_status() {
         let entry = TranscriptEntry::new_input("ls -la output here", Some("ls"));
         assert_eq!(entry.kind, EntryKind::PipeInput);
         assert_eq!(entry.status, EntryStatus::Pending);
@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_entry_new_hook_truncates_large_payload() {
+    fn hook_entry_truncates_large_payload() {
         let large = "x".repeat(5000);
         let entry = TranscriptEntry::new_hook("PostToolUse", &large);
         assert_eq!(entry.kind, EntryKind::HookInput);
@@ -416,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_and_load_roundtrip() {
+    fn save_and_load_roundtrip_works() {
         let _dir = setup_test_dir();
 
         let mut t = Transcript::new("roundtrip_1", "/project");
@@ -430,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn test_atomic_write_no_corrupt_file() {
+    fn atomic_write_prevents_corruption() {
         let _dir = setup_test_dir();
 
         let t = Transcript::new("atomic_1", "/project");
@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_last_completed() {
+    fn marks_last_entry_as_completed() {
         let _dir = setup_test_dir();
 
         let mut t = Transcript::new("complete_1", "/project");
@@ -463,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_last_failed() {
+    fn marks_last_entry_as_failed() {
         let _dir = setup_test_dir();
 
         let mut t = Transcript::new("fail_1", "/project");
@@ -483,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pending_count() {
+    fn counts_pending_entries_correctly() {
         let mut t = Transcript::new("count_1", "/project");
         assert_eq!(t.pending_count(), 0);
 
@@ -499,13 +499,13 @@ mod tests {
     }
 
     #[test]
-    fn test_find_pending_with_no_transcripts() {
+    fn find_pending_returns_none_when_empty() {
         let _dir = setup_test_dir();
         assert!(find_pending().is_none());
     }
 
     #[test]
-    fn test_find_pending_finds_interrupted_session() {
+    fn find_pending_identifies_interrupted_sessions() {
         let _dir = setup_test_dir();
 
         let mut t = Transcript::new("interrupted_1", "/project");
@@ -518,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_pending_skips_completed_sessions() {
+    fn find_pending_skips_completed_sessions() {
         let _dir = setup_test_dir();
 
         let mut t = Transcript::new("done_1", "/project");
@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_or_new_creates_if_missing() {
+    fn load_or_new_creates_missing_transcripts() {
         let _dir = setup_test_dir();
 
         let t = Transcript::load_or_new("new_session", "/project");
@@ -539,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_or_new_loads_if_exists() {
+    fn load_or_new_loads_existing_transcripts() {
         let _dir = setup_test_dir();
 
         let mut original = Transcript::new("existing_1", "/project");
@@ -553,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_old_removes_stale_transcripts() {
+    fn cleanup_removes_stale_transcripts() {
         let _dir = setup_test_dir();
 
         // Create a transcript with very old updated_at
@@ -572,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn test_list_recent_returns_all() {
+    fn lists_recent_transcripts() {
         let _dir = setup_test_dir();
 
         let t1 = Transcript::new("list_a", "/project");
@@ -590,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interrupted_summary_format() {
+    fn formats_interrupted_summary() {
         let mut t = Transcript::new("summary_1", "/project");
         t.entries
             .push(TranscriptEntry::new_input("cargo test --all", None));
@@ -602,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn test_snapshot_state_persists() {
+    fn snapshots_state_persists() {
         let _dir = setup_test_dir();
 
         let mut t = Transcript::new("state_1", "/project");
@@ -620,13 +620,13 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_payload_preserves_short_strings() {
+    fn truncate_payload_preserves_short_strings() {
         let short = "hello world";
         assert_eq!(truncate_payload(short, 1024), short);
     }
 
     #[test]
-    fn test_truncate_payload_truncates_long_strings() {
+    fn truncate_payload_truncates_long_strings() {
         let long = "x".repeat(2000);
         let truncated = truncate_payload(&long, 100);
         assert!(truncated.len() < 200);

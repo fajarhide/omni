@@ -199,6 +199,5 @@ fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref RE_GIT_LOG_HASH: regex::Regex = regex::Regex::new(r"^[a-f0-9]{7,40} ").unwrap();
-}
+pub static RE_GIT_LOG_HASH: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"^[a-f0-9]{7,40} ").unwrap());

@@ -501,7 +501,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_bash_tool_dengan_git_diff_output() {
+    fn bash_tool_with_git_diff_output() {
         let diff_str = "diff --git a/test.txt b/test.txt\nindex 123..456 100644\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n+new line 2\n".to_string();
 
         let mut big_diff = diff_str.clone();
@@ -526,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn test_non_bash_tool_small_file_passthrough() {
+    fn non_bash_tool_small_file_passthrough() {
         // Small ReadFile content (<50 lines) should pass through (None)
         let input = json!({
             "tool_name": "Read",
@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn test_readfile_large_rust_file_distilled() {
+    fn distills_large_rust_readfile() {
         // Large ReadFile must exceed MIN_DISTILL_TOKENS (2000 tokens).
         // With Code hint at 3.2 chars/token, we need ~6400+ bytes.
         // Generate 80 functions with longer bodies for realistic compression.
@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn test_grep_tool_distilled_with_file_count() {
+    fn distills_grep_tool_with_file_count() {
         let grep_output = (0..50)
             .map(|i| format!("src/file{}.rs:42:    some match text here", i % 5))
             .collect::<Vec<_>>()
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn test_edit_tool_returns_none() {
+    fn edit_tool_returns_none() {
         let input = json!({
             "tool_name": "Edit",
             "tool_input": {},
@@ -609,14 +609,14 @@ mod tests {
     }
 
     #[test]
-    fn test_html_strip_removes_tags() {
+    fn html_strip_removes_tags() {
         let html = "<h1>Title</h1><p>Content here</p>";
         let stripped = strip_html_simple(html);
         assert_eq!(stripped.trim(), "TitleContent here");
     }
 
     #[test]
-    fn test_content_less_than_50_chars() {
+    fn ignores_content_less_than_50_chars() {
         let input = json!({
             "tool_name": "Bash",
             "tool_input": { "command": "echo a" },
@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_significant_reduction_labeled_passthrough_small() {
+    fn labels_passthrough_for_small_output_without_reduction() {
         let noise = "a".repeat(100);
         let input = json!({
             "tool_name": "Bash",
@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn test_small_output_not_silently_dropped() {
+    fn small_output_is_not_silently_dropped() {
         // 500 bytes of distinct context that won't compress well
         let content: String = (0..10)
             .map(|i| {
@@ -680,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_significant_reduction_labeled_passthrough_for_large_output() {
+    fn labels_passthrough_for_large_output_without_reduction() {
         // Create 20 lines of exactly 60 chars each (total 1200+ chars)
         let noise = (0..30)
             .map(|i| {
@@ -706,13 +706,13 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_error_exit_tanpa_output() {
+    fn parse_error_exits_without_output() {
         let out = process_payload("{ invalid json }", None, None);
         assert!(out.is_none());
     }
 
     #[test]
-    fn test_array_content_format_extracted_correctly() {
+    fn extracts_array_content_format_correctly() {
         // Verify array content extraction via normalize (Cursor/Windsurf format)
         let input = json!({
             "tool_name": "Bash",
@@ -732,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_code_stdout_format() {
+    fn processes_claude_code_stdout_format() {
         let mut big_output =
             "total 42\ndrwxr-xr-x  15 user  staff  480 Apr 10 10:00 .\n".to_string();
         for i in 0..80 {
@@ -760,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_code_stdout_with_stderr() {
+    fn processes_claude_code_stdout_with_stderr() {
         let mut big_output = String::new();
         for i in 0..30 {
             big_output.push_str(&format!("line {} of output\n", i));
@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_code_empty_stdout_ignored() {
+    fn ignores_empty_claude_code_stdout() {
         let input = json!({
             "tool_name": "Bash",
             "tool_input": { "command": "true" },
@@ -796,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn test_content_field_still_preferred_over_stdout() {
+    fn prefers_content_field_over_stdout() {
         let mut big_diff = "diff --git a/test.txt b/test.txt\nindex 123..456 100644\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n+new line 2\n".to_string();
         for _ in 0..50 {
             big_diff.push_str(" \n");
@@ -819,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_payload_opencode_format() {
+    fn processes_opencode_payload_format() {
         let input = r#"{"type":"tool_result","tool":"shell","output":"pytest\n5 passed in 2.1s","command":"pytest"}"#;
         // OpenCode format harus diproses sama seperti Claude Code
         let _out = process_payload(input, None, None);

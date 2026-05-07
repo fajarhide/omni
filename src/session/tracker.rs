@@ -1,17 +1,16 @@
 use crate::pipeline::{DistillResult, SessionState};
 use crate::store::sqlite::Store;
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 
-lazy_static! {
-    static ref FILE_PATH_RE: Regex = Regex::new(
+static FILE_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r#"(?ix)(?:^|[\s"'/:=])(?:(?:[a-zA-Z0-9_\-\.][a-zA-Z0-9_\-\./]*)/)?[a-zA-Z0-9_\-\.]+\.(?:rs|py|js|jsx|ts|tsx|go|rb|md|json|toml|yml|yaml|c|cpp|h|hpp|sh|bash|zsh)(?:[\s"':]|$)"#
-    ).unwrap();
-}
+    ).unwrap()
+});
 
 pub struct SessionTracker {
     session: Arc<Mutex<SessionState>>,
@@ -361,7 +360,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_extract_file_paths_for_cargo_output() {
+    fn extracts_file_paths_from_cargo_output() {
         let text = "Compiling src/main.rs\nerror in tests/my_test.rs:42";
         let paths = extract_file_paths(text);
         assert!(paths.contains(&"src/main.rs".to_string()));
@@ -369,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_file_paths_for_git_diff() {
+    fn extracts_file_paths_from_git_diff() {
         let text = "diff --git a/components/Button.tsx b/components/Button.tsx";
         let paths = extract_file_paths(text);
         // It might extract 'a/components/Button.tsx' or 'components/Button.tsx' based on words fallback
@@ -377,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_errors_for_rust_compile_error() {
+    fn extracts_errors_from_rust_compile_output() {
         let text = "warning: unused trait\nerror[E0061]: this function takes 1 arg but 0 were supplied\n  --> src/main.rs\n\nSome other message";
         let errs = extract_errors(text);
         assert_eq!(errs.len(), 1);
@@ -386,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_errors_for_python_traceback() {
+    fn extracts_errors_from_python_traceback() {
         let text = "Traceback (most recent call last):\n  File \"script.py\", line 10, in <module>\nValueError: invalid literal for int()";
         let errs = extract_errors(text);
         assert_eq!(errs.len(), 1);
@@ -394,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_domain_for_hot_files_dengan_common_prefix() {
+    fn infers_domain_from_hot_file_common_prefix() {
         let mut state = SessionState::new();
         state.add_hot_file("src/auth/mod.rs");
         state.add_hot_file("src/auth/jwt.rs");
@@ -407,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_domain_fallback_when_only_basenames() {
+    fn infers_domain_from_basenames_when_no_common_prefix() {
         let mut state = SessionState::new();
         state.add_hot_file("jwt.rs");
         state.add_hot_file("mod.rs");
@@ -421,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_task_for_command_error_pattern() {
+    fn infers_task_from_command_error_pattern() {
         let mut state = SessionState::new();
         state.add_command("cargo test auth");
         state.add_error("missing semicolon");
@@ -431,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn test_track_command_non_blocking() {
+    fn tracks_command_non_blocking() {
         let dir = tempdir().unwrap();
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
         let session = Arc::new(Mutex::new(SessionState::new()));

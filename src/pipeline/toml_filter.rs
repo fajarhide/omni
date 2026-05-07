@@ -789,7 +789,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_load_from_file_berhasil_for_valid_toml() {
+    fn test_load_from_file_succeeds_for_valid_toml() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
@@ -807,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_from_file_skip_filter_yang_invalid_warning_no_crash() {
+    fn test_load_from_file_skips_invalid_filters_without_crashing() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
@@ -846,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tomlfilter_apply_pipeline_stages_dalam_urutan() {
+    fn test_tomlfilter_applies_pipeline_stages_in_order() {
         let filter = TomlFilter {
             name: "sc".to_string(),
             description: None,
@@ -866,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match_output_short_circuit_sebelum_line_filter() {
+    fn test_match_output_short_circuits_before_line_filtering() {
         let filter = TomlFilter {
             name: "sc".to_string(),
             description: None,
@@ -889,7 +889,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_inline_tests_pass_for_semua_built_in_filters() {
+    fn test_run_inline_tests_succeeds_for_all_built_in_filters() {
         let dir = tempdir().unwrap();
         let filters_dir = dir.path().join("filters");
         fs::create_dir(&filters_dir).unwrap();
@@ -925,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn test_project_filters_not_dimuat_jika_not_trusted() {
+    fn test_project_filters_are_not_loaded_when_untrusted() {
         // Mocking an untrusted `.omni/filters` configuration.
         // Because trust evaluates `is_trusted` false by default locally for unknown bounfores.
         // The project local load won't pick up mock files if `omni_config.json` doesn't exist/trust.

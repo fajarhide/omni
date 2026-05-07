@@ -14,7 +14,7 @@ struct HookPeeker {
 
 pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Result<()> {
     let session_clone = session.clone();
-    match std::panic::catch_unwind(|| {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let stdin = io::stdin();
         let mut input_str = String::new();
         if stdin
@@ -36,7 +36,7 @@ pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Resu
         }
 
         Ok(())
-    }) {
+    })) {
         Ok(res) => res,
         Err(_) => {
             // Transcript: mark failed on panic so crash is recorded
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dispatcher_routes_post_tool_use_ke_correct_handler() {
+    fn routes_post_tool_use_to_correct_handler() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dispatcher_routes_session_start_ke_correct_handler() {
+    fn routes_session_start_to_correct_handler() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_command("cargo build");
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dispatcher_routes_pre_compact_ke_correct_handler() {
+    fn routes_pre_compact_to_correct_handler() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 

@@ -174,7 +174,9 @@ fn main() {
                 // Background cleanup to prevent DB bloating
                 let s_clone = Arc::clone(&s);
                 std::thread::spawn(move || {
-                    s_clone.cleanup_old(30); // keep last 30 days
+                    /// Number of days to retain session history in the database
+                    const SESSION_RETENTION_DAYS: u32 = 30;
+                    s_clone.cleanup_old(SESSION_RETENTION_DAYS);
                 });
                 let _ = hooks::dispatcher::run(s, ss);
             }

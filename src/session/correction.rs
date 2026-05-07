@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ErrorType {
@@ -46,36 +46,45 @@ pub struct CorrectionRule {
     pub example_error: String,
 }
 
-lazy_static! {
-    static ref UNKNOWN_FLAG_RE: Regex = Regex::new(
+static UNKNOWN_FLAG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?i)(unexpected argument|unknown (option|flag)|unrecognized (option|flag)|invalid (option|flag))"
-    ).unwrap();
+    ).unwrap()
+});
 
-    static ref CMD_NOT_FOUND_RE: Regex = Regex::new(
-        r"(?i)(command not found|not recognized as an internal|no such file or directory.*command)"
-    ).unwrap();
+static CMD_NOT_FOUND_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)(command not found|not recognized as an internal|no such file or directory.*command)",
+    )
+    .unwrap()
+});
 
-    static ref WRONG_SYNTAX_RE: Regex = Regex::new(
-        r"(?i)(unexpected syntax|invalid syntax|syntax error|parse error|expected.*but found)"
-    ).unwrap();
+static WRONG_SYNTAX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)(unexpected syntax|invalid syntax|syntax error|parse error|expected.*but found)",
+    )
+    .unwrap()
+});
 
-    static ref WRONG_PATH_RE: Regex = Regex::new(
-        r"(?i)(no such file or directory|cannot find the path|file not found)"
-    ).unwrap();
+static WRONG_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(no such file or directory|cannot find the path|file not found)").unwrap()
+});
 
-    static ref MISSING_ARG_RE: Regex = Regex::new(
+static MISSING_ARG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?i)(requires a value|requires an argument|missing (required )?argument|expected.*argument)"
-    ).unwrap();
+    ).unwrap()
+});
 
-    static ref PERMISSION_DENIED_RE: Regex = Regex::new(
-        r"(?i)(permission denied|access denied|not permitted)"
-    ).unwrap();
+static PERMISSION_DENIED_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(permission denied|access denied|not permitted)").unwrap());
 
-    // User rejection patterns - NOT actual errors
-    static ref USER_REJECTION_RE: Regex = Regex::new(
+// User rejection patterns - NOT actual errors
+static USER_REJECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?i)(user (doesn't want|declined|rejected|cancelled)|operation (cancelled|aborted) by user)"
-    ).unwrap();
-}
+    ).unwrap()
+});
 
 /// Filters out user rejections - requires actual error-indicating content
 pub fn is_command_error(output: &str) -> bool {
@@ -370,20 +379,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_command_error_content() {
+    fn detects_command_errors_in_content() {
         assert!(is_command_error("error: unknown flag"));
         assert!(is_command_error("bash: gti: command not found"));
         assert!(!is_command_error("success: all tests passed"));
     }
 
     #[test]
-    fn test_is_command_error_filters_user_rejection() {
+    fn ignores_user_rejections_as_errors() {
         assert!(!is_command_error("Operation cancelled by user"));
         assert!(is_command_error("error: permission denied"));
     }
 
     #[test]
-    fn test_classify_error_types() {
+    fn classifies_error_types_correctly() {
         assert_eq!(
             classify_error("unexpected argument '--foo'"),
             ErrorType::UnknownFlag
@@ -399,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_base_command() {
+    fn extracts_base_command_correctly() {
         assert_eq!(extract_base_command("git commit -m 'fix'"), "git commit");
         assert_eq!(extract_base_command("cargo test --lib"), "cargo test");
         assert_eq!(extract_base_command("ls -la"), "ls");
@@ -410,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_command_similarity() {
+    fn computes_command_similarity_correctly() {
         assert_eq!(command_similarity("git commit", "git commit"), 1.0);
         assert_eq!(command_similarity("git status", "npm install"), 0.0);
         // Typo in base
@@ -421,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_corrections_logic() {
+    fn finds_corrections_from_execution_history() {
         let commands = vec![
             CommandExecution {
                 command: "git commit --ammend".to_string(),
@@ -442,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn test_deduplicate_corrections() {
+    fn deduplicates_correction_rules() {
         let pairs = vec![
             CorrectionPair {
                 wrong_command: "git committ".to_string(),
@@ -466,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_tdd_cycle_error() {
+    fn detects_tdd_cycle_errors() {
         assert!(is_tdd_cycle_error("error[E0425]: cannot find value `x`"));
         assert!(is_tdd_cycle_error(
             "test result: FAILED. 10 passed; 1 failed"
@@ -474,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn test_differs_only_by_path() {
+    fn detects_commands_differing_only_by_path() {
         // High similarity but different paths
         assert!(differs_only_by_path(
             "cat /very/long/path/to/file1.txt --flag --opt",

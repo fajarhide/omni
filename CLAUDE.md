@@ -170,3 +170,173 @@ OMNI must compile and pass tests gracefully across Linux, macOS, and Windows. Al
 
 ### Essential Reading
 - [tests/README.md#critical-guardrails](tests/README.md#critical-guardrails) — **Mandatory: Prevent deadlocks & test hangs**
+
+## Rust 2024 Idiomatic Standards
+
+All contributors (AI and human) must adhere to these modern Rust practices:
+
+### 1. Modern Statics & Concurrency
+*   **Prefer `std::sync::LazyLock`**: Replace `lazy_static!` with `LazyLock`. It is built-in and more idiomatic in Rust 2024.
+*   **Poison Handling**: When using `Mutex<SessionState>`, prefer `.lock().unwrap_or_else(|p| p.into_inner())` to recover from panics, especially in long-running background tasks.
+
+### 2. Control Flow & Patterns
+*   **Use `let-chains`**: Combine multiple checks into a single flattened `if let ... && ...` to reduce nesting.
+*   **Pattern Matching**: Use exhaustive matching. Avoid `_ => {}` unless truly necessary; prefer explicit variants.
+
+### 3. Performance & Memory
+*   **Zero-Copy with `Cow`**: Use `std::borrow::Cow<'_, str>` for string manipulation in hot paths (like `scorer` or `collapse`) to avoid unnecessary allocations when no modification is needed.
+*   **Avoid `.clone()`**: Before calling `.clone()`, check if a reference `&T` or `std::mem::take()` suffices.
+*   **Capacity Hints**: Use `Vec::with_capacity()` and `String::with_capacity()` when the final size is predictable.
+
+### 4. Safety & Lints
+*   **No `unwrap()` in Production**: Never use `.unwrap()` on user input or IO operations. Use `.expect("contextual message")` or better, return a `Result`.
+*   **Strict Clippy**: All code must pass `cargo clippy -- -D warnings`.
+
+---
+
+## Architectural Guardrails
+
+### 1. Library-First Design
+*   The `main.rs` file should be a "thin" entry point. 
+*   All core logic, types, and business rules must reside in `lib.rs` or its submodules. 
+*   This ensures OMNI can be tested as a crate and integrated into other tools.
+
+### 2. Single Source of Truth (SSOT)
+*   **Command Mapping**: Centralize all command-to-behavior mappings in `pipeline/registry.rs`. Do not duplicate `if matches!(cmd, ...)` blocks in distillers or scorers.
+*   **Constants**: Store magic numbers (thresholds, history limits, timeouts) as named `pub const` in `pipeline/mod.rs` or `guard/limits.rs`.
+
+### 3. Separation of Concerns
+*   **IO vs. Logic**: Pure functions (scoring, filtering) should take `&str` or `impl Read` and return data, not perform filesystem or network side effects.
+*   **Pipeline Stages**: Maintain the strict order: `Read → Guard → Score → Collapse → Distill → Persist`.
+
+---
+
+## Error Handling Standards
+
+OMNI uses `anyhow` for top-level application errors and `thiserror` for library-level errors if specific error variants are needed for matching.
+
+*   **Contextualize**: Always use `.with_context(|| "...")` when propagating errors from IO or third-party crates.
+*   **User-Friendly Messages**: Error messages should explain *what* happened and *how* to fix it (e.g., "failed to read ~/.omni/filters: permission denied").
+*   **Panic Boundaries**: Use `catch_unwind` at the highest possible entry point (e.g., `dispatcher.rs`) to ensure a single failing hook doesn't crash the entire agent session. Wrap captured state in `AssertUnwindSafe`.
+
+---
+
+## Security & Trust
+
+*   **Sanitize Input**: Treat all tool output as untrusted. Sanitize ANSI codes and control characters before distillation.
+*   **Environment Hygiene**: In `guard/env.rs`, ensure sensitive environment variables (like `LD_PRELOAD`) are sanitized before executing subcommands.
+*   **Config Trust**: Only load `.omni/filters` from the project root if the directory is explicitly "trusted" (see `guard/trust.rs`).
+
+---
+
+## Rust Testing Standards
+
+All tests in OMNI must follow idiomatic Rust testing conventions.
+
+### Test Naming Conventions
+
+Use descriptive, behavior-oriented names in `snake_case`.
+
+Preferred patterns:
+
+```rust
+test_<function>_<expected_behavior>
+test_<behavior>_when_<condition>
+test_<action>_<result>
+```
+
+Good examples:
+
+```rust
+test_load_config_returns_default_when_file_missing
+test_session_summary_excludes_sensitive_data
+test_pipe_mode_treats_exit_0_as_ok
+test_cleanup_old_removes_stale_entries
+```
+
+Avoid:
+
+```rust
+test_config_ok
+test_valid_json
+test_works
+test_benar
+test_handle_it
+```
+
+Rules:
+
+*   **English only**: No Indonesian words.
+*   **Explicit assertion naming**: Prefer `returns_expected_*`, `does_not_crash`, `preserves_*`, `skips_*`.
+*   **Avoid vague words**: `works`, `valid`, `correct`, `bagus`, `handles`.
+
+### Test Design Principles
+
+#### 1. Test Observable Behavior
+Test outputs and side effects, not implementation details.
+Prefer: `assert_eq!(result.status, Status::Ready);`
+Avoid: `assert!(internal_cache.len() > 0);`
+
+#### 2. One Behavioral Assertion Per Test
+Each test should validate one primary behavior.
+Good: `test_session_summary_excludes_sensitive_data`
+Avoid: `test_session_summary_everything`
+
+#### 3. Arrange / Act / Assert Structure
+Use explicit sections for readability.
+
+```rust
+#[test]
+fn test_load_config_returns_default_when_file_missing() {
+    // Arrange
+    let path = tempdir().unwrap();
+
+    // Act
+    let config = load_config(path.path());
+
+    // Assert
+    assert_eq!(config.mode, Mode::Default);
+}
+```
+
+---
+
+## Required Test Coverage For New Features
+
+Every non-trivial feature should include:
+
+*   **Success case**: "Happy path" execution.
+*   **Edge case**: Limits, boundaries, very large or small inputs.
+*   **Malformed input case**: Invalid JSON, binary noise, interrupted streams.
+*   **Regression case**: If fixing a bug, add a test that would have failed before.
+*   **No-panic case**: Explicitly test that malformed input returns an `Err`, not a panic.
+
+Checklist:
+
+```text
+[ ] Happy path
+[ ] Edge case
+[ ] Invalid input
+[ ] Empty input
+[ ] Cross-platform safe
+[ ] Deterministic
+[ ] No panic
+[ ] Fast execution
+```
+
+---
+
+## AI Agent Instructions
+
+When generating or modifying code:
+
+*   **Modernize**: If you see `lazy_static!` or old `if let` nesting, refactor it to Rust 2024 standards.
+*   **Preserve Style**: Maintain the consistent "pure logic" vs "IO wrapper" separation.
+*   **Safety First**: Ensure `AssertUnwindSafe` is used when capturing state in panics.
+*   **Run Gates**:
+    1. `cargo fmt`
+    2. `cargo clippy -- -D warnings`
+    3. `cargo test`
+    before finalizing changes.
+
+Never silently weaken assertions or remove security checks just to make tests pass.

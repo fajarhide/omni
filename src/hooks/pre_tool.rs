@@ -197,7 +197,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_pre_hook_rewrites_git_status() {
+    fn pre_hook_rewrites_git_status() {
         let input = json!({
             "tool_input": {
                 "command": "git status"
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pre_hook_context_hint_for_cat() {
+    fn pre_hook_provides_context_hint_for_cat() {
         let input = json!({
             "tool_input": {
                 "command": "cat src/main.rs"
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pre_hook_ignores_unknown_command() {
+    fn pre_hook_ignores_unknown_command() {
         let input = json!({
             "tool_input": {
                 "command": "ls -la"
@@ -240,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pre_hook_handles_shell_pipes() {
+    fn pre_hook_handles_shell_pipes() {
         let input = json!({
             "tool_input": {
                 "command": "git status | grep foo"

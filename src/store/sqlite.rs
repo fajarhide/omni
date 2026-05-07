@@ -1248,7 +1248,7 @@ mod tests {
     }
 
     #[test]
-    fn test_open_creates_database_and_schema() {
+    fn open_creates_database_and_schema() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
 
@@ -1273,7 +1273,7 @@ mod tests {
     }
 
     #[test]
-    fn test_record_distillation_fire_and_forget_not_panic() {
+    fn record_distillation_does_not_panic() {
         let (store, _dir) = get_temp_store();
         let res = DistillResult {
             output: "hello".to_string(),
@@ -1294,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_store_rewind_and_retrieve_rewind_roundtrip() {
+    fn rewinds_and_retrieves_content() {
         let (store, _dir) = get_temp_store();
         let content = "this is some compressed content";
         let hash = store.store_rewind(content);
@@ -1317,7 +1317,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_rewind_hash_not_error() {
+    fn duplicate_rewind_hashes_are_unique() {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
         let hash1 = store.store_rewind(content);
@@ -1329,7 +1329,7 @@ mod tests {
     }
 
     #[test]
-    fn test_index_event_and_search_session_events_fts5() {
+    fn indexes_and_searches_session_events() {
         let (store, _dir) = get_temp_store();
         store.index_event("sess_1", "command", "git status is running fast");
         store.index_event("sess_1", "command", "npm install");
@@ -1341,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fts5_porter_stemming_running_matches_run() {
+    fn fts5_stems_search_terms() {
         let (store, _dir) = get_temp_store();
         store.index_event("sess_2", "log", "The server is running now");
 
@@ -1352,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_old_menghapus_entries_lama() {
+    fn cleanup_removes_stale_entries() {
         let (store, _dir) = get_temp_store();
         let old_ts = chrono::Utc::now().timestamp() - (5 * 86400); // 5 days ago
 

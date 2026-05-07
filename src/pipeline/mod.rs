@@ -8,6 +8,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
+/// Maximum number of recent errors to track in session context
+pub const MAX_ACTIVE_ERRORS: usize = 5;
+
+/// Maximum number of recent commands to remember in session
+pub const MAX_COMMAND_HISTORY: usize = 20;
+
+/// Maximum number of significant distillations to track per session
+pub const MAX_DISTILLATION_HISTORY: usize = 5;
+
+/// Threshold for meaningful compression (e.g., 0.90 means at least 10% savings)
+pub const MEANINGFUL_COMPRESSION_THRESHOLD: f64 = 0.90;
+
 // 1. Segmentation Strategy — how to split tokens
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SegmentationMode {
@@ -114,8 +126,8 @@ impl DistillResult {
     }
 
     pub fn is_meaningful(&self) -> bool {
-        // Return false if there is no significant compression (< 10%)
-        self.output_bytes < (self.input_bytes as f64 * 0.90) as usize
+        // Return false if there is no significant compression (e.g., < 10%)
+        self.output_bytes < (self.input_bytes as f64 * MEANINGFUL_COMPRESSION_THRESHOLD) as usize
     }
 }
 
@@ -134,14 +146,14 @@ pub struct SessionState {
     pub hot_files: BTreeMap<String, u32>,
 
     // Recent errors to boost relevance
-    pub active_errors: Vec<String>, // last 5 error messages
+    pub active_errors: Vec<String>, // last MAX_ACTIVE_ERRORS error messages
 
     // Command history
     pub command_count: u32,
-    pub last_commands: Vec<String>, // last 20 commands
+    pub last_commands: Vec<String>, // last MAX_COMMAND_HISTORY commands
 
     // Distillation Telemetry
-    pub last_significant_distillations: VecDeque<DistillSummary>, // max 5 entries
+    pub last_significant_distillations: VecDeque<DistillSummary>, // max MAX_DISTILLATION_HISTORY entries
     pub cumulative_input_bytes: u64,
     pub cumulative_output_bytes: u64,
     pub top_command_info: Option<(String, f32)>, // (command, savings_pct)
@@ -165,7 +177,7 @@ impl SessionState {
             session_id: id,
             started_at: now,
             last_active: now,
-            last_significant_distillations: VecDeque::with_capacity(5),
+            last_significant_distillations: VecDeque::with_capacity(MAX_DISTILLATION_HISTORY),
             ..Default::default()
         }
     }
@@ -211,13 +223,13 @@ impl SessionState {
     pub fn add_error(&mut self, error: &str) {
         self.active_errors
             .insert(0, error[..error.len().min(200)].to_string());
-        self.active_errors.truncate(5);
+        self.active_errors.truncate(MAX_ACTIVE_ERRORS);
     }
 
     pub fn add_command(&mut self, cmd: &str) {
         self.command_count += 1;
         self.last_commands.insert(0, cmd.to_string());
-        self.last_commands.truncate(20);
+        self.last_commands.truncate(MAX_COMMAND_HISTORY);
         self.last_active = chrono::Utc::now().timestamp();
     }
 }
@@ -287,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_state_context_boost_dengan_hot_files() {
+    fn context_boosts_with_hot_files() {
         let mut state = SessionState::new();
         state.add_hot_file("src/main.rs");
         // base count is 1 => boost = 0.1 * min(1/10, 0.3) = 0.01
@@ -304,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_state_context_boost_dengan_active_errors() {
+    fn context_boosts_with_active_errors() {
         let mut state = SessionState::new();
         state.add_error("expected identifier, found keyword `fn`");
 
@@ -317,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn test_output_segment_final_score_clamp_0_1() {
+    fn output_segment_final_score_is_clamped() {
         let seg1 = OutputSegment {
             content: "test".to_string(),
             tier: SignalTier::Noise,

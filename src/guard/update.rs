@@ -150,7 +150,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_newer() {
+    fn detects_newer_versions() {
         assert!(is_newer("0.5.3", "0.5.2"));
         assert!(is_newer("0.6.0", "0.5.9"));
         assert!(is_newer("1.0.0", "0.9.9"));

@@ -1006,7 +1006,6 @@ dependencies = [
  "indicatif",
  "insta",
  "is-terminal",
- "lazy_static",
  "regex",
  "rmcp",
  "rusqlite",

@@ -873,7 +873,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_format_bytes_semua_ranges() {
+    fn test_format_bytes_handles_all_ranges() {
         assert_eq!(format_bytes(0), "0 B");
         assert_eq!(format_bytes(512), "512 B");
         assert_eq!(format_bytes(1023), "1023 B");
@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn test_est_cost_usd_kalkulasi_benar() {
+    fn test_est_cost_usd_returns_expected_value() {
         let expected_price_per_m = (3.0 + 3.0 + 2.5) / 3.0; // ~2.833
 
         let cost = est_cost_usd(3_800_000); // 1M tokens
@@ -905,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_default_not_crash_jika_db_kosong() {
+    fn test_stats_default_does_not_crash_when_db_is_empty() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into()];
@@ -914,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_detail_not_crash_jika_db_kosong() {
+    fn test_stats_detail_does_not_crash_when_db_is_empty() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--detail".into()];
@@ -923,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stats_json_not_crash_jika_db_kosong() {
+    fn test_stats_json_does_not_crash_when_db_is_empty() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
         let args: Vec<String> = vec!["stats".into(), "--json".into()];

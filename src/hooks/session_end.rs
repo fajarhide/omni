@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_end_returns_none() {
+    fn session_end_returns_none() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
         let session = Arc::new(Mutex::new(state));
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_end_saves_summary() {
+    fn session_end_saves_summary() {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_command("cargo test");
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_end_ignores_wrong_event() {
+    fn ignores_wrong_event_type() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 

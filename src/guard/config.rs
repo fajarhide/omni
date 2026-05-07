@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_distillation_mode_parsing_backward_compatibility() {
+    fn parses_distillation_mode_with_backward_compatibility() {
         // Test new exact key
         let toml_str = r#"
             [global]
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn test_route_thresholds_logic() {
+    fn computes_correct_route_thresholds() {
         let mut cfg = AgentConfig {
             mode: Some(DistillationMode::Debug),
             ..Default::default()

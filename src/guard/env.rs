@@ -86,7 +86,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sanitize_env_menghapus_ld_preload() {
+    fn test_sanitize_env_removes_ld_preload() {
         let mock_env = vec![
             ("LD_PRELOAD".to_string(), "bad.so".to_string()),
             ("NORMAL_VAR".to_string(), "123".to_string()),
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_env_menghapus_semua_denylist_entries() {
+    fn test_sanitize_env_removes_all_denylist_entries() {
         let mock_env: Vec<(String, String)> = DENYLIST
             .iter()
             .map(|key| (key.to_string(), "malicious_payload".to_string()))
@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_env_mempertahankan_path_and_normal_vars() {
+    fn test_sanitize_env_preserves_path_and_normal_vars() {
         let mock_env = vec![
             ("PATH".to_string(), "/usr/bin:/bin".to_string()),
             ("NORMAL_VAR".to_string(), "123".to_string()),
