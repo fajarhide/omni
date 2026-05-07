@@ -328,6 +328,44 @@ Checklist:
 
 ---
 
+## Documentation & Internationalization (i18n)
+
+OMNI is a global project. All user-facing documentation must be synchronized across all supported languages.
+
+### 1. README Synchronization
+Whenever a feature, installation step, or technical explanation is added to the main `README.md`, it **must** be reflected in all files under the `i18n/` directory:
+*   `README-ja.md` (Japanese)
+*   `README-zh.md` (Chinese)
+*   `README-ar.md` (Arabic)
+*   `README-id.md` (Indonesian)
+*   `README-vi.md` (Vietnamese)
+*   `README-ko.md` (Korean)
+
+### 2. Technical Terminology Guardrails
+To prevent confusion across languages, certain technical terms should be handled with care:
+
+| Term | Strategy | Notes |
+| :--- | :--- | :--- |
+| **OMNI** | Keep as is | Always uppercase. |
+| **RewindStore** | Keep as is | Branding for the compression archive. |
+| **MCP** | Keep as is | Refers to Model Context Protocol. |
+| **Token** | Translate carefully | Use the standard local technical term (e.g., "Token" in ID, "トークン" in JA). |
+| **Distillation** | Translate with context | Refers to semantic filtering (e.g., "Distilasi" in ID, "蒸留" in JA). |
+| **Hook** | Keep as is or local tech term | Refers to pipeline entry points. |
+| **Semantic Signal Engine** | Translate | The core description of OMNI. |
+
+### 3. File Pathing in i18n
+Files in `i18n/` are one level deeper than the root. Ensure assets and links are adjusted:
+*   Use `../media/logo.png` instead of `media/logo.png`.
+*   Links to root files should use `../` (e.g., `[English](../README.md)`).
+
+### 4. Tone of Voice
+*   **Professional but Passionate**: OMNI is a "passion project" for the agentic AI era.
+*   **Transparent**: Emphasize that the user is always in control.
+*   **Action-Oriented**: Use clear imperatives in instructions.
+
+---
+
 ## AI Agent Instructions
 
 When generating or modifying code:

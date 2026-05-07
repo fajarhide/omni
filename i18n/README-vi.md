@@ -81,8 +81,11 @@ Các tác nhân AI như Claude chỉ thông minh như những ngữ cảnh mà b
 - **Tác động thị giác (`omni diff`)**: Xem chính xác bạn đang tiết kiệm được bao nhiêu tiền và không gian. Chỉ cần chạy `omni diff` để xem output thô cồng kềnh so sánh song song với phiên bản mượt mà, được lọc của Omni.
 - **Biểu đồ Dependency nhẹ**: OMNI xây dựng một đồ thị mối quan hệ tệp cục bộ nhanh chóng tại thời điểm hook (không có daemon, không có LSP). Khi AI của bạn đọc một tệp bị import nhiều lần, OMNI sẽ cảnh báo: `"file này có 12 dependency — gọi omni_context để xem sơ đồ tác động đầy đủ."`.
 - **Nén thích ứng**: OMNI theo dõi khi nào các tác nhân truy xuất các output bị bỏ qua. Nếu một loại lệnh được truy cập thường xuyên, OMNI sẽ tự động làm mềm quy trình nén cho lần tiếp theo — tự điều chỉnh mà không cần cấu hình.
-- **ReadFile có cấu trúc + Grep**: Thay vì dump toàn bộ file thô hay output grep dạng phẳng, OMNI trả về các outline có cấu trúc (imports, API public, dấu hiệu rủi ro) và các báo cáo tóm tắt grep được nhóm (các file xếp hạng cao nhất theo số lượng khớp, các dòng ưu tiên được đưa lên đầu).
-- **Cảnh báo chống ảo giác dựa trên sự thật (Factual Anti-Hallucination Guards)**: OMNI chỉ đưa ra cảnh báo khi nó có những sự thật chắc chắn — không suy đoán. Nếu output bị nén quá mức và không có phiên bản khôi phục: nó sẽ cho biết. Nếu một file có nhiều dependency: nó cũng sẽ cho biết. Giữ AI của bạn luôn gắn liền với thực tế.
+- **Bỏ qua Tốc độ cao Thông minh**: Để đảm bảo độ trễ bằng không cho các tác vụ nhỏ, OMNI tự động bỏ qua quá trình chưng cất cho các đầu ra dưới ngưỡng 2000 token. Điều này ưu tiên tốc độ trong khi vẫn ghi lại dữ liệu lớn khi cần thiết.
+- **Khả năng Hiển thị Nội dung bị loại bỏ**: OMNI hiện gắn nhãn rõ ràng cho nội dung đã bị xóa (ví dụ: `[OMNI: omitted X lines of noise]`) trong đầu ra, giúp tác nhân AI của bạn nhận biết tình huống tốt hơn về những gì đã bị lọc.
+- **Chế độ Debug Passthrough**: Cần xem đầu ra thô trong giây lát? Chỉ cần đặt `OMNI_PASSTHROUGH=1` trong môi trường của bạn để bỏ qua hoàn toàn công cụ và xem từng ký tự của đầu ra gốc.
+- **ReadFile + Grep có cấu trúc**: Thay vì kết xuất tệp thô hoặc đầu ra grep phẳng, OMNI trả về các phác thảo có cấu trúc (import, API công khai, dấu hiệu rủi ro) và các tóm tắt grep được nhóm (các tệp hàng đầu theo số lượng khớp, các dòng ưu tiên trước).
+- **Vệ binh Chống ảo giác Dựa trên Thực tế**: OMNI chỉ đưa ra cảnh báo khi có sự thật rõ ràng — không suy đoán. Nếu đầu ra bị nén mạnh và không có tính năng tua lại: nó sẽ thông báo. Nếu một tệp có nhiều thành phần phụ thuộc: nó sẽ thông báo. Giữ cho AI của bạn luôn dựa trên thực tế.
 
 ---
 ## Kiến trúc

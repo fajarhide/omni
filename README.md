@@ -81,6 +81,9 @@ AI agents like Claude are only as smart as the context you feed them. When you f
 - **Visual Impact (`omni diff`)**: See exactly how much money and space you are saving. Just run `omni diff` to see the bulky raw output compared side-by-side to Omni's sleek, filtered version.
 - **Lightweight Dependency Graph**: OMNI builds a fast local file relationship graph at hook time (no daemon, no LSP). When your AI reads a heavily-imported file, OMNI warns it: `"this file has 12 dependents — call omni_context for full impact map."`.
 - **Adaptive Compression**: OMNI tracks when agents retrieve omitted output. If a command family is frequently retrieved, OMNI automatically softens compression next time — self-tuning without configuration.
+- **Smart High-Speed Bypass**: To ensure zero latency for small tasks, OMNI automatically bypasses distillation for outputs under a 2000-token threshold. This prioritizes speed while still capturing the big data when it matters.
+- **Omission Visibility**: OMNI now explicitly labels removed content (e.g., `[OMNI: omitted X lines of noise]`) in the output, giving your AI agent better situational awareness of what was filtered.
+- **Debug Passthrough**: Need to see the raw output for a moment? Just set `OMNI_PASSTHROUGH=1` in your environment to completely bypass the engine and see every single character of the original output.
 - **Structured ReadFile + Grep**: Instead of raw file dumps or flat grep output, OMNI returns structured outlines (imports, public API, risk markers) and grouped grep summaries (top files by match count, priority lines first).
 - **Factual Anti-Hallucination Guards**: OMNI emits warnings only when it has hard facts — no speculation. If output is heavily compressed and no rewind exists: it says so. If a file has many dependents: it says so. Keeping your AI grounded in reality.
 
