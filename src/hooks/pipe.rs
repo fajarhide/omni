@@ -61,9 +61,9 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     } else {
         None
     };
-    let command_to_use = command_name.or(detected_cmd.as_deref()).map(|c| {
-        c.strip_prefix("omni exec ").unwrap_or(c)
-    });
+    let command_to_use = command_name
+        .or(detected_cmd.as_deref())
+        .map(|c| c.strip_prefix("omni exec ").unwrap_or(c));
 
     let start_time = Instant::now();
 
