@@ -408,6 +408,7 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
             }
         }
         arr.push(json!({
+            "matcher": "",
             "hooks": [{
                 "type": "command",
                 "command": hook_cmd,
@@ -594,6 +595,23 @@ mod tests {
         // Check status with incorrect path
         let (post_f, sess_f, pre_f) = check_status(&val, "/different/omni");
         assert!(!post_f && !sess_f && !pre_f);
+    }
+
+    #[test]
+    fn test_init_hook_writes_matcher_for_all_events() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/usr/bin/omni");
+
+        let hooks = val.get("hooks").unwrap().as_object().unwrap();
+        for (event, entries) in hooks {
+            for entry in entries.as_array().unwrap() {
+                let matcher = entry.get("matcher");
+                assert!(
+                    matches!(matcher, Some(v) if v.is_string()),
+                    "{event} entry missing string matcher: {entry}"
+                );
+            }
+        }
     }
 
     #[test]
