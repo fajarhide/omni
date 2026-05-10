@@ -237,19 +237,20 @@ impl AgentIntegration for PiIntegration {
 
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let mut healthy = true;
+        println!("\n  {}", "Pi Agent:".cyan());
 
         // 1. Pi binary
         if let Some(_bin) = find_pi_binary() {
             println!(
-                "  {:<15} {} {}",
-                "Pi:".bright_black(),
+                "   {:<15} {} {}",
+                "Binary:".bright_black(),
                 "installed".yellow(),
                 "[OK]".green().bold()
             );
         } else {
             println!(
-                "  {:<15} not found on PATH {}",
-                "Pi:".bright_black(),
+                "   {:<15} not found on PATH {}",
+                "Binary:".bright_black(),
                 "[MISSING]".yellow().bold()
             );
             // Pi is optional — warn but don't fail doctor
@@ -260,20 +261,20 @@ impl AgentIntegration for PiIntegration {
         let snapshot = PiSettingsSnapshot::load();
         if snapshot.has_omni_package() {
             println!(
-                "  {:<15} OMNI package registered {}",
-                "Pi pkg:".bright_black(),
+                "   {:<15} OMNI package registered {}",
+                "Package:".bright_black(),
                 "[OK]".green().bold()
             );
         } else {
             println!(
-                "  {:<15} no OMNI package found {}",
-                "Pi pkg:".bright_black(),
-                "[NOT CONFIGURED]".yellow().bold()
+                "   {:<15} not configured {}",
+                "Package:".bright_black(),
+                "[WARNING]".yellow().bold()
             );
             if fix_mode {
                 let source = package_source();
                 println!(
-                    "  {:<15} installing OMNI Pi package...",
+                    "   {:<15} installing OMNI Pi package...",
                     "Fix:".bright_black()
                 );
                 if let Err(e) = run_install_with_mode(&source, &PiInstallMode::Global) {
@@ -292,13 +293,13 @@ impl AgentIntegration for PiIntegration {
         let duplicates = snapshot.duplicate_sources();
         if duplicates.len() > 1 {
             println!(
-                "  {:<15} {} OMNI sources detected {}",
-                "Pi dupes:".bright_black(),
+                "   {:<15} {} OMNI sources detected {}",
+                "Duplicates:".bright_black(),
                 duplicates.len().to_string().red(),
                 "[WARNING]".yellow().bold()
             );
             for src in &duplicates {
-                println!("    {} {}", "•".yellow(), src.bright_black());
+                println!("     {} {}", "•".yellow(), src.bright_black());
             }
             warnings.push(
                 "Multiple OMNI Pi sources detected. This may cause double-loading. Remove duplicates manually.".to_string(),
@@ -309,8 +310,8 @@ impl AgentIntegration for PiIntegration {
         let legacy = legacy_extension_path();
         if legacy.exists() {
             println!(
-                "  {:<15} {} {}",
-                "Pi legacy:".bright_black(),
+                "   {:<15} {} {}",
+                "Legacy:".bright_black(),
                 legacy.display(),
                 "[WARNING]".yellow().bold()
             );
@@ -323,8 +324,8 @@ impl AgentIntegration for PiIntegration {
         // 5. Invalid settings JSON
         if snapshot.json.is_none() && pi_settings_path().exists() {
             println!(
-                "  {:<15} invalid JSON {}",
-                "Pi settings:".bright_black(),
+                "   {:<15} invalid JSON {}",
+                "Settings:".bright_black(),
                 "[ERROR]".red().bold()
             );
             warnings.push(format!(
