@@ -118,7 +118,7 @@ snapshot_test!(test_my_type_distillation, "my_type_example.txt", ContentType::My
 
 ## How to Add a TOML Filter
 
-Create a file in `~/.omni/filters/my_filter.toml`:
+Create a file in `~/.omni/signals/my_signal.toml`:
 ```toml
 schema_version = 1
 

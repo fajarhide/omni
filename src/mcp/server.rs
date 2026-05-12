@@ -68,7 +68,7 @@ impl OmniServer {
             ));
         }
 
-        // 3. If apply=true: write to ~/.omni/filters/learned.toml
+        // 3. If apply=true: write to ~/.omni/signals/learned.toml
         if apply {
             let filter_name = format!("learned_{}", chrono::Utc::now().timestamp_micros());
             let _toml_content = generate_toml(&candidates, &filter_name, None);
@@ -455,7 +455,7 @@ impl OmniServer {
                 p.confidence
             ));
         }
-        out.push_str("\nSuggested TOML Filter (add to ~/.omni/filters/user.toml):\n\n```toml\n");
+        out.push_str("\nSuggested TOML Signal (add to ~/.omni/signals/user.toml):\n\n```toml\n");
         out.push_str(&toml_snippet);
         out.push_str("\n```");
         out

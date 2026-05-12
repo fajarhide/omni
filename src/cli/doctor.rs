@@ -273,8 +273,8 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         all_ok = false;
     }
 
-    // 6. Config Filters
-    println!("\n {}", "Filters:".bold().bright_white());
+    // 6. Config Signals
+    println!("\n {}", "Signals:".bold().bright_white());
 
     // In --fix mode, repair legacy learned.toml *before* loading reports so warnings reflect fixes.
     if fix_mode {
@@ -319,10 +319,18 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         all_ok = false;
     }
 
-    let user_dir = conf_dir.join("filters");
+    let user_dir = {
+        let signals_path = conf_dir.join("signals");
+        if signals_path.exists() {
+            signals_path
+        } else {
+            conf_dir.join("filters") // backward compat
+        }
+    };
     if user_dir.exists() {
+        let dir_name = if user_dir.ends_with("signals") { "signals" } else { "filters" };
         println!(
-            "   {:<15} ~/.omni/filters/ ({} filters)",
+            "   {:<15} ~/.omni/{dir_name}/ ({} signals)",
             "User:".bright_black(),
             user_report.filters.len().to_string().yellow()
         );
@@ -369,11 +377,15 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     }
 
     if let Ok(cwd) = std::env::current_dir() {
-        let local_filters_dir = cwd.join(".omni").join("filters");
-        if local_filters_dir.exists() {
+        let local_signals_dir = {
+            let s = cwd.join(".omni").join("signals");
+            if s.exists() { s } else { cwd.join(".omni").join("filters") }
+        };
+        if local_signals_dir.exists() {
+            let dir_label = if local_signals_dir.ends_with("signals") { "signals" } else { "filters" };
             if crate::guard::trust::is_trusted(&cwd.join("omni_config.json")) {
                 println!(
-                    "   {:<15} .omni/filters/ ({} filters, TRUSTED) {}",
+                    "   {:<15} .omni/{dir_label}/ ({} signals, TRUSTED) {}",
                     "Project:".bright_black(),
                     local_report.filters.len().to_string().yellow(),
                     "[OK]".green().bold()
@@ -382,19 +394,19 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 if fix_mode {
                     let _ = crate::guard::trust::trust_project(&cwd);
                     println!(
-                        "   {:<15} .omni/filters/ (TRUSTED) {}",
+                        "   {:<15} .omni/{dir_label}/ (TRUSTED) {}",
                         "Project:".bright_black(),
                         "[FIXED]".green().bold()
                     );
                 } else {
                     println!(
-                        "   {:<15} .omni/filters/ ({} filters, NOT TRUSTED) {}",
+                        "   {:<15} .omni/{dir_label}/ ({} signals, NOT TRUSTED) {}",
                         "Project:".bright_black(),
                         local_report.filters.len().to_string().yellow(),
                         "[WARNING]".yellow().bold()
                     );
                     warnings.push(
-                        "Project filters found but not trusted. Run: `omni doctor --fix`."
+                        "Project signals found but not trusted. Run: `omni doctor --fix`."
                             .to_string(),
                     );
                     all_ok = false;

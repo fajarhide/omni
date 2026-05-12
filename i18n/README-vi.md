@@ -176,7 +176,7 @@ omni doctor
 ```
 
 Bạn cần xem các filter đang hoạt động hoặc thêm custom rules (luật do người dùng tự tạo)?
-Bạn có thể dễ dàng tạo bộ rule của riêng mình bằng cách sử dụng các tệp TOML đơn giản trong `~/.omni/filters/`.
+Bạn có thể dễ dàng tạo bộ rule của riêng mình bằng cách sử dụng các tệp TOML đơn giản trong `~/.omni/signals/`.
 
 ### Hỗ trợ đa tác nhân & Tích hợp
 

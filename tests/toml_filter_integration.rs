@@ -1,7 +1,7 @@
-//! Integration tests for TOML filter command matching and output filtering.
+//! Integration tests for TOML signal command matching and output filtering.
 //!
-//! These tests load the actual filter TOML files from `filters/` and verify
-//! that each filter's `match_command` regex correctly matches all expected
+//! These tests load the actual signal TOML files from `signals/` and verify
+//! that each signal's `match_command` regex correctly matches all expected
 //! command variants. Negative tests ensure no false-positive cross-matching.
 //!
 //! To add tests for a new filter, add a new module below following the pattern.
@@ -10,11 +10,11 @@ use std::path::Path;
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
-/// Load all filters from the project's filters/ directory.
+/// Load all signals from the project's signals/ directory (recursive).
 fn load_filters() -> Vec<omni::pipeline::toml_filter::TomlFilter> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let filters_dir = Path::new(&manifest_dir).join("filters");
-    omni::pipeline::toml_filter::load_from_dir(&filters_dir).filters
+    let signals_dir = Path::new(&manifest_dir).join("signals");
+    omni::pipeline::toml_filter::load_from_dir(&signals_dir).filters
 }
 
 /// Find a filter by exact name.
@@ -607,7 +607,7 @@ fn all_filter_files_loaded() {
     for name in expected {
         assert!(
             filters.iter().any(|f| f.name == name),
-            "filter '{}' should be loaded from filters/ directory",
+            "signal '{}' should be loaded from signals/ directory",
             name
         );
     }

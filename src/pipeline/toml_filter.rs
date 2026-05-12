@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(RustEmbed)]
-#[folder = "filters/"]
+#[folder = "signals/"]
 struct Asset;
 
 #[derive(Debug, Deserialize)]
@@ -477,9 +477,16 @@ pub fn load_from_dir(dir: &Path) -> LoadReport {
     }
 
     if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
+        let mut sorted_entries: Vec<_> = entries.flatten().collect();
+        sorted_entries.sort_by_key(|e| e.path());
+        for entry in sorted_entries {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "toml") {
+            if path.is_dir() {
+                // Recurse into subdirectories (tools/, domains/, composite/)
+                let sub = load_from_dir(&path);
+                all_filters.extend(sub.filters);
+                all_warnings.extend(sub.warnings);
+            } else if path.extension().is_some_and(|ext| ext == "toml") {
                 match load_from_file(&path) {
                     Ok(mut report) => {
                         all_filters.append(&mut report.filters);
@@ -651,17 +658,42 @@ pub fn load_all_filters() -> Vec<TomlFilter> {
     filters
 }
 
+/// Resolve the effective signal directory for a given base path.
+/// Prefers `<base>/.omni/signals/` (new), falls back to `<base>/.omni/filters/` (legacy).
+fn resolve_signal_dir(base: &Path) -> std::path::PathBuf {
+    let new_path = base.join(".omni").join("signals");
+    if new_path.exists() {
+        new_path
+    } else {
+        base.join(".omni").join("filters")
+    }
+}
+
+/// Resolve the effective user-global signal directory.
+/// Prefers `~/.omni/signals/` (new), falls back to `~/.omni/filters/` (legacy).
+fn resolve_user_signal_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| {
+        let new_path = h.join(".omni").join("signals");
+        if new_path.exists() {
+            new_path
+        } else {
+            h.join(".omni").join("filters")
+        }
+    })
+}
+
 fn load_all_filters_uncached() -> Vec<TomlFilter> {
     let mut all = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    // 1. .omni/filters/*.toml (project-local, if trusted)
+    // 1. .omni/signals/*.toml (project-local, if trusted)
+    //    Falls back to .omni/filters/ for backward compatibility.
     if let Ok(cwd) = std::env::current_dir() {
-        let local_filters_dir = cwd.join(".omni").join("filters");
-        if local_filters_dir.exists() {
+        let local_signals_dir = resolve_signal_dir(&cwd);
+        if local_signals_dir.exists() {
             let config_path = cwd.join("omni_config.json");
             if crate::guard::trust::is_trusted(&config_path) {
-                let report = load_from_dir(&local_filters_dir);
+                let report = load_from_dir(&local_signals_dir);
                 for f in report.filters {
                     if !seen.contains(&f.name) {
                         seen.insert(f.name.clone());
@@ -672,9 +704,9 @@ fn load_all_filters_uncached() -> Vec<TomlFilter> {
         }
     }
 
-    // 2. ~/.omni/filters/*.toml (user-global)
-    let user_dir = dirs::home_dir().map(|h| h.join(".omni").join("filters"));
-    if let Some(dir) = user_dir {
+    // 2. ~/.omni/signals/*.toml (user-global)
+    //    Falls back to ~/.omni/filters/ for backward compatibility.
+    if let Some(dir) = resolve_user_signal_dir() {
         let report = load_from_dir(&dir);
         for f in report.filters {
             if !seen.contains(&f.name) {
@@ -684,7 +716,7 @@ fn load_all_filters_uncached() -> Vec<TomlFilter> {
         }
     }
 
-    // 3. Built-in filters (embedded)
+    // 3. Built-in signals (embedded from signals/ directory)
     let report = load_embedded_filters();
     for f in report.filters {
         if !seen.contains(&f.name) {
@@ -706,12 +738,12 @@ fn compute_filters_fingerprint() -> u64 {
         is_trusted.hash(&mut hasher);
         hash_path_metadata(&config_path, &mut hasher);
 
-        let local_filters_dir = cwd.join(".omni").join("filters");
-        hash_dir_toml_entries(&local_filters_dir, &mut hasher);
+        let local_signals_dir = resolve_signal_dir(&cwd);
+        hash_dir_toml_entries(&local_signals_dir, &mut hasher);
     }
 
     // 2) user-global
-    if let Some(dir) = dirs::home_dir().map(|h| h.join(".omni").join("filters")) {
+    if let Some(dir) = resolve_user_signal_dir() {
         hash_dir_toml_entries(&dir, &mut hasher);
     }
 
@@ -761,8 +793,7 @@ fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
 pub fn get_filters_by_source() -> (LoadReport, LoadReport, LoadReport) {
     let built_in = load_embedded_filters();
 
-    let user_dir = dirs::home_dir().map(|h| h.join(".omni").join("filters"));
-    let user_filters = user_dir
+    let user_filters = resolve_user_signal_dir()
         .map(|d| load_from_dir(&d))
         .unwrap_or_else(|| LoadReport {
             filters: Vec::new(),
@@ -774,7 +805,7 @@ pub fn get_filters_by_source() -> (LoadReport, LoadReport, LoadReport) {
         warnings: Vec::new(),
     };
     if let Ok(cwd) = std::env::current_dir() {
-        let local_dir = cwd.join(".omni").join("filters");
+        let local_dir = resolve_signal_dir(&cwd);
         local_filters = load_from_dir(&local_dir);
     }
 

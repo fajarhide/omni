@@ -1,0 +1,27 @@
+schema_version = 1
+# Domain signal for all build tools (cargo, npm, gradle, maven, cmake, etc.)
+# This is a meta-signal that applies cross-tool build noise reduction.
+# For tool-specific signals, see signals/tools/
+
+[filters.build_domain]
+match_command = "^(cargo|npm|yarn|pnpm|bun|gradle|mvn|cmake|make|msbuild|swift build|dotnet build)"
+strip_ansi = true
+description = "Domain-level noise reduction for all build tools"
+
+strip_lines_matching = [
+    # Generic progress/status noise
+    "^\\s*$",
+    "^={10,}",
+    "^-{10,}",
+    # Generic download/fetch noise
+    "Resolving dependencies",
+    "Refreshing state",
+    "^Locking ",
+]
+
+on_empty = "[build] Output fully reduced — only signal content remained"
+
+[[tests.build_domain]]
+name = "strips_empty_lines_and_separators"
+input = "Building project\n\n====================\nError: build failed"
+expected = "Building project\nError: build failed"
