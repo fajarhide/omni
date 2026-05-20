@@ -12,7 +12,10 @@ const OMNI_AGENT_ID = "pi";
 const DEFAULT_OMNI_PATH = "omni";
 const OMNI_TIMEOUT_MS = 10_000;
 const OMNI_STDIN_LIMIT_BYTES = 16 * 1024 * 1024;
-const MUTATION_TOOLS = new Set(["edit", "write"]);
+
+/** Patterns that identify file-mutating tools (both built-in and custom names). */
+const MUTATION_TOOL_PATTERNS = ["edit", "write", "apply", "patch", "modify"] as const;
+
 type JsonObject = Record<string, unknown>;
 
 /** Output shape from OMNI hook subprocesses */
@@ -26,6 +29,12 @@ type OmniHookOutput = {
 
 let omniEnabled = true;
 let pendingSystemPromptAddition: string | undefined;
+
+/** Detect whether a tool mutates files — covers both built-in and custom tool names. */
+function isMutationTool(toolName: string): boolean {
+  const lower = toolName.toLowerCase().trim();
+  return MUTATION_TOOL_PATTERNS.some((pat) => lower.includes(pat));
+}
 
 function omniPathFromContext(ctx: ExtensionContext | undefined): string {
   const ctxObj = ctx as unknown as Record<string, unknown> | undefined;
@@ -129,7 +138,7 @@ async function runOmniForBeforeAgentStart(
       hookEventName: "BeforeAgentStart",
       sessionId: sessionIdFromManager(ctx),
       systemPromptLength: event.systemPrompt.length,
-      mutationTools: Array.from(MUTATION_TOOLS),
+      mutationTools: Array.from(MUTATION_TOOL_PATTERNS),
     },
     ctx,
   );
@@ -145,7 +154,7 @@ async function runOmniForPreCompact(
   const result = await runOmni(
     ["--pre-compact"],
     {
-      hookEventName: "Pre Compact",
+      hookEventName: "PreCompact",
       sessionId: sessionIdFromManager(ctx),
       compactionReason: event.customInstructions || "context_limit_reached",
     },
@@ -249,9 +258,9 @@ export default function omniExtension(pi: ExtensionAPI): void {
       }
 
       const status = omniEnabled ? "enabled" : "disabled";
-      omniPathFromContext(ctx); // force context usage
+      const skipList = Array.from(MUTATION_TOOL_PATTERNS).join(", ");
       ctx.ui.notify(
-        `OMNI is ${status}\nTools tracked: ${Array.from(MUTATION_TOOLS).join(", ")}`,
+        `OMNI is ${status}\nMutation tools skipped: ${skipList}`,
         "info",
       );
     },
@@ -288,8 +297,12 @@ export default function omniExtension(pi: ExtensionAPI): void {
 
   pi.on("tool_result", async (event, ctx) => {
     if (!omniEnabled) return;
+
     const toolName = event.toolName;
-    if (!MUTATION_TOOLS.has(toolName)) {
+
+    // Skip file-mutating tools — OMNI only distills non-mutating tool results.
+    // Per PDD canvas: "tool_result calls omni --post-hook for non-mutating tools"
+    if (isMutationTool(toolName)) {
       return;
     }
 
@@ -306,7 +319,7 @@ export default function omniExtension(pi: ExtensionAPI): void {
         ctx,
       );
     } catch {
-      // OMNI fails silent — never crash the host
+      // OMNI fails silently — never crash the host
     }
   });
 }
