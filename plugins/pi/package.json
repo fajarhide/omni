@@ -1,6 +1,6 @@
 {
   "name": "@fajarhide/omni-pi",
-  "version": "0.6.0-pi-alpha",
+  "version": "0.6.0-pi-alpha.5",
   "description": "Pi extension for OMNI semantic output distillation.",
   "type": "module",
   "exports": {

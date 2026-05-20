@@ -37,11 +37,9 @@ fn detect_mode(args: &[String]) -> Mode {
         match args[1].as_str() {
             "--hook" | "--post-hook" => return Mode::PostHook,
             "--mcp" => return Mode::Mcp,
-            "--session-start" => return Mode::SessionStart,
+            "--session-start" | "--before-agent-start" => return Mode::SessionStart,
             "--pre-compact" => return Mode::PreCompact,
-"--pre-hook" => return Mode::PreHook,
-            "--before-agent-start" => return Mode::PostHook,
-            _ => {}
+            "--pre-hook" => return Mode::PreHook,
             _ => {}
         }
     }
@@ -342,5 +340,47 @@ fn main() {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(flags: &[&str]) -> Vec<String> {
+        std::iter::once("omni")
+            .chain(flags.iter().copied())
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn detects_before_agent_start_mode() {
+        // Regression: --before-agent-start must route to SessionStart, not PostHook
+        assert_eq!(
+            detect_mode(&args(&["--before-agent-start"])),
+            Mode::SessionStart
+        );
+    }
+
+    #[test]
+    fn detects_session_start_mode() {
+        assert_eq!(detect_mode(&args(&["--session-start"])), Mode::SessionStart);
+    }
+
+    #[test]
+    fn detects_post_hook_aliases() {
+        assert_eq!(detect_mode(&args(&["--hook"])), Mode::PostHook);
+        assert_eq!(detect_mode(&args(&["--post-hook"])), Mode::PostHook);
+    }
+
+    #[test]
+    fn detects_pre_compact_mode() {
+        assert_eq!(detect_mode(&args(&["--pre-compact"])), Mode::PreCompact);
+    }
+
+    #[test]
+    fn treats_unknown_flag_as_cli() {
+        assert_eq!(detect_mode(&args(&["nonexistent-cmd-xyz"])), Mode::Cli);
     }
 }

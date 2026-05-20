@@ -197,6 +197,7 @@ export default function omniExtension(pi: ExtensionAPI): void {
       {
         hookEventName: "SessionStart",
         sessionId: sessionId(ctx),
+        workingDirectory: ctx.cwd,
         reason: event.reason,
       },
       ctx.cwd,
@@ -216,6 +217,7 @@ export default function omniExtension(pi: ExtensionAPI): void {
         {
           hookEventName: "BeforeAgentStart",
           sessionId: sessionId(ctx),
+          workingDirectory: ctx.cwd,
           systemPromptLength: event.systemPrompt.length,
           mutationTools: Array.from(EXCLUDE_TOOL_NAMES),
         },
