@@ -28,6 +28,15 @@ type OmniHookOutput = {
 /** State shared across hooks — toggled by /omni command */
 let omniEnabled = true;
 
+/** Centralized setter: updates state + footer status in one call. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function setOmniEnabled(ctx: any, enabled: boolean): void {
+  omniEnabled = enabled;
+  const label = enabled ? "on" : "off";
+  ctx.ui.setStatus("omni", ctx.ui.theme.fg("dim", `omni (${label})`));
+}
+
+
 function omniPathOrDefault(config?: unknown): string {
   if (typeof config === "object" && config !== null) {
     const obj = config as Record<string, unknown>;
@@ -170,12 +179,12 @@ export default function omniExtension(pi: ExtensionAPI): void {
     async handler(argStr, ctx) {
       const arg = argStr.trim().toLowerCase();
       if (arg === "off" || arg === "disable") {
-        omniEnabled = false;
+        setOmniEnabled(ctx, false);
         ctx.ui.notify("OMNI disabled", "info");
         return;
       }
       if (arg === "on" || arg === "enable") {
-        omniEnabled = true;
+        setOmniEnabled(ctx, true);
         ctx.ui.notify("OMNI enabled", "info");
         return;
       }
@@ -188,7 +197,8 @@ export default function omniExtension(pi: ExtensionAPI): void {
 
   // ── Hook: session_start ──
 
-  pi.on("session_start", async (event, ctx) => {
+pi.on("session_start", async (event, ctx) => {
+    setOmniEnabled(ctx, omniEnabled);
     if (!omniEnabled) return;
     runOmni(
       "--session-start",
