@@ -187,6 +187,7 @@ omni doctor
 1. **VS Code و Continue.dev**: استخدم موفر سياق MCP الخاص بنا (`integrations/continue-dev/`).
 2. **OpenCode و Codex CLI**: تقوم الأغلفة المضمنة تلقائيًا بتوجيه إخراج الأوامر إلى OMNI.
 3. **Antigravity IDE**: يُسجل OMNI كخادم MCP محلي في تكوين Antigravity (`~/.gemini/antigravity/mcp_config.json`). قم بتشغيل `omni init --antigravity` للإعداد تلقائيًا.
+4. **Pi Agent**: حزمة OMNI الأصلية لـ Pi. قم بتشغيل `omni init --pi` لتثبيت حزمة OMNI Pi عبر مثبت حزم Pi. استخدم أوامر Slash في Pi لتفعيل أو تعطيل الامتداد.
 
 **ضبط الوكلاء المتعددين (`~/.omni/config.toml`)**
 الوكلاء المختلفون لديهم نقاط ألم مختلفة. حافظ على نظافة دردشة VS Code، مع السماح لـ OpenCode بقراءة المزيد من البيانات. اضبطها بشكل فردي:

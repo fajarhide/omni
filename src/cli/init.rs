@@ -52,16 +52,6 @@ fn print_help() {
 
     println!("  {: <14} Show this help message", "--help, -h".cyan());
 
-    println!("\n{}", "PI SPECIFIC FLAGS:".bold().bright_white());
-    println!(
-        "  {: <14} Install Pi package project-locally",
-        "--pi-local".cyan()
-    );
-    println!(
-        "  {: <14} Print Pi install command without running",
-        "--pi-manual".cyan()
-    );
-
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
         "  omni init             {}",
@@ -97,8 +87,6 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     let mut is_hermes = args.iter().any(|a| a == "--hermes");
     let mut is_vscode = args.iter().any(|a| a == "--vscode");
     let mut is_pi = args.iter().any(|a| a == "--pi");
-    let is_pi_local = args.iter().any(|a| a == "--pi-local");
-    let is_pi_manual = args.iter().any(|a| a == "--pi-manual");
 
     let mut is_hook = args.iter().any(|a| a == "--hook");
     let mut is_mcp = args.iter().any(|a| a == "--mcp");
@@ -127,8 +115,6 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         && !is_hermes
         && !is_vscode
         && !is_pi
-        && !is_pi_local
-        && !is_pi_manual
         && !is_status
         && !is_uninstall
         && !is_hook
@@ -332,13 +318,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         if target_ids.contains(&agent.id()) {
             println!("{}", format!("🤖 {} Setup", agent.name()).bold().cyan());
 
-            // Pi uses a specialized install path that respects --pi-local and --pi-manual.
-            if agent.id() == "pi" {
-                let mode = crate::agents::pi::install_mode_from_flags(args);
-                if let Err(e) = crate::agents::pi::install_with_mode(&exe_path, &mode) {
-                    eprintln!("  {} Failed: {}", "✗".red(), e);
-                }
-            } else if let Err(e) = agent.install(&exe_path) {
+            if let Err(e) = agent.install(&exe_path) {
                 eprintln!("  {} Failed: {}", "✗".red(), e);
             }
 

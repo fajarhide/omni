@@ -1256,4 +1256,49 @@ omni reset --antigravity   # Remove OMNI from Antigravity MCP config
 
 ---
 
+## 17. Pi Agent Integration
+
+OMNI integrates with [Pi](https://github.com/mariozechner/pi) as a first-class agent through Pi's native package installer.
+
+### Setup
+
+```bash
+omni init --pi
+```
+
+This installs the OMNI Pi package via `pi install git:github.com/fajarhide/omni`. Pi's installer updates your Pi settings automatically — OMNI does not mutate settings directly.
+
+**Verification:**
+```bash
+omni doctor    # Check Pi integration status
+```
+
+The doctor output will show:
+```
+  Pi:
+   Extension:     [OK] installed
+```
+
+### Runtime Behavior
+
+Once installed, the Pi extension:
+- `session_start` calls `omni --session-start`
+- `before_agent_start` injects pending OMNI system prompt additions
+- `session_before_compact` calls `omni --pre-compact`
+- `tool_result` calls `omni --post-hook` for non-mutating tools
+- `edit` and `write` tool results are skipped
+- All OMNI subprocess failures fail open so Pi continues normally
+
+The extension sets `OMNI_AGENT_ID=pi` for every OMNI invocation, enabling OMNI to apply Pi-specific behavioral logic.
+
+### Toggling the Extension
+
+Use Pi's built-in slash commands to enable or disable the OMNI extension without uninstalling the package.
+
+### Uninstall
+
+```bash
+omni reset --pi    # Prints cleanup instructions
+```
+
 *This is a living document. OMNI is under active development — check the [CHANGELOG](https://github.com/fajarhide/omni/blob/main/CHANGELOG.md) for updates after each release.*

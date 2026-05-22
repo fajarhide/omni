@@ -11,6 +11,7 @@ pub enum AgentFormat {
     CursorWindsurf, // seperti ClaudeCode tapi content bisa array
     Aider,          // piped stdin, OMNI_CMD env
     GenericMCP,     // JSON-RPC 2.0 tool result
+    Pi,             // camelCase toolName + toolResponse from Pi extension
     Unknown,        // fallback ke ClaudeCode parser
 }
 
@@ -39,6 +40,12 @@ pub fn detect_agent(input: &str) -> AgentFormat {
     };
 
     // Deteksi berdasarkan key signatures yang unik per agent:
+
+    // Pi extension: camelCase "toolName" + "toolResponse" (not snake_case)
+    // Must be checked BEFORE ClaudeCode since both could match on partial keys
+    if obj.contains_key("toolName") && obj.contains_key("toolResponse") {
+        return AgentFormat::Pi;
+    }
 
     // ClaudeCode / CursorWindsurf: punya "tool_name" dan "tool_response"
     if obj.contains_key("tool_name") && obj.contains_key("tool_response") {
@@ -95,6 +102,7 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
         AgentFormat::CodexCLI => normalize_codex(input, agent_id),
         AgentFormat::Aider => normalize_aider(input, agent_id),
         AgentFormat::GenericMCP => normalize_generic_mcp(input, agent_id),
+        AgentFormat::Pi => normalize_pi(input, agent_id),
     }
 }
 
@@ -112,6 +120,7 @@ pub fn detect_agent_id(agent: &AgentFormat) -> String {
         AgentFormat::CursorWindsurf => "cursor".to_string(),
         AgentFormat::Aider => "aider".to_string(),
         AgentFormat::GenericMCP => "mcp_generic".to_string(),
+        AgentFormat::Pi => "pi".to_string(),
         AgentFormat::Unknown => "unknown".to_string(),
     }
 }
@@ -181,6 +190,59 @@ fn normalize_cursor(input: &str, agent_id: String) -> Option<NormalizedInput> {
     let mut norm = normalize_claude_code(input, agent_id)?;
     norm.agent = AgentFormat::CursorWindsurf;
     Some(norm)
+}
+
+// ── PI EXTENSION ─────────────────────────────────────────────────────
+fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
+    // Pi extension sends camelCase JSON:
+    // {
+    //   "hookEventName": "ToolResult",
+    //   "toolName": "Bash",
+    //   "toolResponse": { "toolName": "Bash", "result": "...", "isError": false },
+    //   "isError": false
+    // }
+    #[derive(Deserialize)]
+    struct PiInput {
+        #[serde(rename = "toolName")]
+        tool_name: Option<String>,
+        #[serde(rename = "toolResponse")]
+        tool_response: Option<PiToolResponse>,
+    }
+    #[derive(Deserialize)]
+    struct PiToolResponse {
+        result: Option<Value>,
+        #[allow(dead_code)]
+        #[serde(default)]
+        #[serde(rename = "isError")]
+        is_error: bool,
+    }
+
+    let parsed: PiInput = serde_json::from_str(input).ok()?;
+
+    let tool_name = parsed.tool_name?;
+    let response = parsed.tool_response.as_ref()?;
+
+    // Extract content from "result" field (string or object with nested fields)
+    let content = if let Some(ref r) = response.result {
+        extract_value_content(r)?
+    } else {
+        return None;
+    };
+
+    if content.is_empty() {
+        return None;
+    }
+
+    // Normalize tool name using OMNI's internal standard
+    let normalized_name = normalize_tool_name(&tool_name);
+
+    Some(NormalizedInput {
+        agent: AgentFormat::Pi,
+        tool_name: normalized_name,
+        command: String::new(), // Pi doesn't provide the raw command separately
+        content,
+        agent_id,
+    })
 }
 
 // ── OPENCODE ──────────────────────────────────────────────────────────
@@ -475,5 +537,57 @@ mod tests {
         assert_eq!(norm.agent_id, "opencode");
         assert_eq!(norm.tool_name, "Bash");
         assert_eq!(norm.content, "hello");
+    }
+
+    #[test]
+    fn test_detect_pi() {
+        let input = r#"{"hookEventName":"ToolResult","toolName":"Bash","toolResponse":{"toolName":"Bash","result":"hello","isError":false},"isError":false}"#;
+        assert_eq!(detect_agent(input), AgentFormat::Pi);
+    }
+
+    #[test]
+    fn test_normalize_pi_bash() {
+        let input = r#"{"hookEventName":"ToolResult","toolName":"Bash","toolResponse":{"toolName":"Bash","result":"hello world","isError":false},"isError":false}"#;
+        let norm = normalize(input).expect("Normalized Pi payload");
+        assert_eq!(norm.agent_id, "pi");
+        assert_eq!(norm.tool_name, "Bash");
+        assert_eq!(norm.content, "hello world");
+    }
+
+    #[test]
+    fn test_normalize_pi_read() {
+        let input = r#"{"hookEventName":"ToolResult","toolName":"Read","toolResponse":{"toolName":"Read","result":"fn main() { println!(\"hi\"); }","isError":false},"isError":false}"#;
+        let norm = normalize(input).expect("Normalized Pi Read payload");
+        assert_eq!(norm.agent_id, "pi");
+        assert_eq!(norm.tool_name, "Read");
+        assert!(norm.content.contains("fn main"));
+    }
+
+    #[test]
+    fn test_normalize_pi_empty_result() {
+        let input = r#"{"hookEventName":"ToolResult","toolName":"Bash","toolResponse":{"toolName":"Bash","result":"","isError":false},"isError":false}"#;
+        assert!(
+            normalize(input).is_none(),
+            "Empty result should return None"
+        );
+    }
+
+    #[test]
+    fn test_normalize_pi_missing_tool_response() {
+        let input = r#"{"hookEventName":"ToolResult","toolName":"Bash","isError":false}"#;
+        assert!(
+            normalize(input).is_none(),
+            "Missing toolResponse should return None"
+        );
+    }
+
+    #[test]
+    fn test_pi_vs_claude_code_disambiguation() {
+        // Claude Code uses snake_case, Pi uses camelCase
+        let claude = r#"{"tool_name":"Bash","tool_response":{"stdout":"hi"}}"#;
+        let pi = r#"{"toolName":"Bash","toolResponse":{"result":"hi","isError":false}}"#;
+
+        assert_eq!(detect_agent(claude), AgentFormat::ClaudeCode);
+        assert_eq!(detect_agent(pi), AgentFormat::Pi);
     }
 }

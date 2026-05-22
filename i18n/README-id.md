@@ -185,6 +185,7 @@ Secara default, `omni init --claude` secara otomatis masuk ke **Claude Code**. N
 1. **VS Code & Continue.dev**: Gunakan penyedia konteks MCP kami (`integrations/continue-dev/`).
 2. **OpenCode & Codex CLI**: Wrapper bawaan secara otomatis menyalurkan output perintah ke OMNI.
 3. **Antigravity IDE**: OMNI mendaftar sebagai server MCP asli dalam konfigurasi Antigravity (`~/.gemini/antigravity/mcp_config.json`). Jalankan `omni init --antigravity` untuk mengatur secara otomatis.
+4. **Pi Agent**: Paket OMNI asli untuk Pi. Jalankan `omni init --pi` untuk menginstal paket OMNI Pi melalui penginstal paket Pi. Gunakan perintah slash Pi untuk mengaktifkan atau menonaktifkan ekstensi.
 
 **Penyetelan Multi-Agen (`~/.omni/config.toml`)**
 Agen yang berbeda memiliki titik nyeri yang berbeda. Jaga agar obrolan VS Code tetap bersih, sambil membiarkan OpenCode membaca lebih banyak data. Setel secara individual:

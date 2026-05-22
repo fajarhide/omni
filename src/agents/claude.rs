@@ -161,48 +161,42 @@ impl AgentIntegration for ClaudeIntegration {
                             !w.contains("hook") && !w.contains("Claude settings not found")
                         });
                     }
-                } else {
-                    if fix_mode {
-                        if let Ok(exe_path) = std::env::current_exe() {
-                            let _ = self.install(&exe_path.to_string_lossy());
-                        }
-                        println!(
-                            "   {:<15} {}",
-                            "Hooks:".bright_black(),
-                            "[FIXED] installed".green().bold()
-                        );
-                    } else {
-                        println!(
-                            "   {:<15} {}",
-                            "Hooks:".bright_black(),
-                            "[WARNING] no hooks found".yellow().bold()
-                        );
-                        warnings
-                            .push("OMNI hooks are not configured. Run `omni init`.".to_string());
-                        all_ok = false;
+                } else if fix_mode {
+                    if let Ok(exe_path) = std::env::current_exe() {
+                        let _ = self.install(&exe_path.to_string_lossy());
                     }
+                    println!(
+                        "   {:<15} {}",
+                        "Hooks:".bright_black(),
+                        "[FIXED] installed".green().bold()
+                    );
+                } else {
+                    println!(
+                        "   {:<15} {}",
+                        "Hooks:".bright_black(),
+                        "[WARNING] no hooks found".yellow().bold()
+                    );
+                    warnings.push("OMNI hooks are not configured. Run `omni init`.".to_string());
+                    all_ok = false;
                 }
             }
+        } else if fix_mode {
+            if let Ok(exe_path) = std::env::current_exe() {
+                let _ = self.install(&exe_path.to_string_lossy());
+            }
+            println!(
+                "   {:<15} {}",
+                "Hooks:".bright_black(),
+                "[FIXED] installed".green().bold()
+            );
         } else {
-            if fix_mode {
-                if let Ok(exe_path) = std::env::current_exe() {
-                    let _ = self.install(&exe_path.to_string_lossy());
-                }
-                println!(
-                    "   {:<15} {}",
-                    "Hooks:".bright_black(),
-                    "[FIXED] installed".green().bold()
-                );
-            } else {
-                println!(
-                    "   {:<15} {}",
-                    "Hooks:".bright_black(),
-                    "[ERROR] settings.json missing".red()
-                );
-                warnings
-                    .push("Claude settings not found. Have you installed Claude Code?".to_string());
-                all_ok = false;
-            }
+            println!(
+                "   {:<15} {}",
+                "Hooks:".bright_black(),
+                "[ERROR] settings.json missing".red()
+            );
+            warnings.push("Claude settings not found. Have you installed Claude Code?".to_string());
+            all_ok = false;
         }
 
         let mcp_path = dirs::home_dir()

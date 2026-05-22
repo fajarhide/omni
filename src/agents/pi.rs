@@ -5,21 +5,6 @@ use std::path::PathBuf;
 use std::process::Command;
 
 // ---------------------------------------------------------------------------
-// Install mode
-// ---------------------------------------------------------------------------
-
-/// How the user wants to install the OMNI Pi package.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PiInstallMode {
-    /// `pi install git:github.com/<owner>/omni`
-    Global,
-    /// `pi install git:github.com/<owner>/omni --local`
-    Local,
-    /// Print the command but do not execute it.
-    Manual,
-}
-
-// ---------------------------------------------------------------------------
 // Configuration defaults
 // ---------------------------------------------------------------------------
 
@@ -162,25 +147,6 @@ fn collect_omni_sources_recursive(val: &Value, out: &mut Vec<String>) {
 }
 
 // ---------------------------------------------------------------------------
-// Install args construction
-// ---------------------------------------------------------------------------
-
-/// Build the argument list for `pi install`.
-fn build_install_args(source: &str, mode: &PiInstallMode) -> Vec<String> {
-    let mut args = vec!["install".to_string(), source.to_string()];
-    if *mode == PiInstallMode::Local {
-        args.push("--local".to_string());
-    }
-    args
-}
-
-/// Print the install command without executing it.
-fn print_manual_command(source: &str, mode: &PiInstallMode) {
-    let args = build_install_args(source, mode);
-    println!("  {} pi {}", "$".bright_black(), args.join(" ").cyan());
-}
-
-// ---------------------------------------------------------------------------
 // PiIntegration
 // ---------------------------------------------------------------------------
 
@@ -197,8 +163,7 @@ impl AgentIntegration for PiIntegration {
 
     fn install(&self, _exe_path: &str) -> anyhow::Result<()> {
         let source = package_source();
-        let mode = PiInstallMode::Global;
-        run_install_with_mode(&source, &mode)
+        run_install(&source)
     }
 
     fn uninstall(&self) -> anyhow::Result<()> {
@@ -223,7 +188,11 @@ impl AgentIntegration for PiIntegration {
 
         // 1. Pi binary
         if find_pi_binary().is_none() {
-            println!("   {:<15} {}", "Config:".bright_black(), "not configured".bright_black());
+            println!(
+                "   {:<15} {}",
+                "Config:".bright_black(),
+                "not configured".bright_black()
+            );
             return true;
         }
 
@@ -247,13 +216,11 @@ impl AgentIntegration for PiIntegration {
                     "   {:<15} installing OMNI Pi package...",
                     "Fix:".bright_black()
                 );
-                if let Err(e) = run_install_with_mode(&source, &PiInstallMode::Global) {
+                if let Err(e) = run_install(&source) {
                     warnings.push(format!("Failed to install Pi package: {e}"));
                 }
             } else {
-                warnings.push(
-                    "Pi Extension is not registered. Run: omni init --pi".to_string(),
-                );
+                warnings.push("Pi Extension is not registered. Run: omni init --pi".to_string());
             }
             return false;
         }
@@ -296,26 +263,15 @@ impl AgentIntegration for PiIntegration {
 // Install logic
 // ---------------------------------------------------------------------------
 
-/// Execute the Pi package install (or delegate to manual mode).
-fn run_install_with_mode(source: &str, mode: &PiInstallMode) -> anyhow::Result<()> {
-    match mode {
-        PiInstallMode::Manual => {
-            println!("  {} Manual install commands:\n", "ℹ".blue());
-            print_manual_command(source, &PiInstallMode::Global);
-            print_manual_command(source, &PiInstallMode::Local);
-            println!();
-            return Ok(());
-        }
-        PiInstallMode::Global | PiInstallMode::Local => {}
-    }
-
+/// Execute the Pi package install.
+fn run_install(source: &str) -> anyhow::Result<()> {
     let pi_bin = find_pi_binary().ok_or_else(|| {
         anyhow::anyhow!(
             "Pi binary not found on PATH. Install Pi first: https://github.com/earendil-works/pi"
         )
     })?;
 
-    let args = build_install_args(source, mode);
+    let args = vec!["install".to_string(), source.to_string()];
     println!("  {} Running: pi {}", "⟳".yellow(), args.join(" ").cyan());
 
     let output = Command::new(&pi_bin).args(&args).output()?;
@@ -370,60 +326,12 @@ fn run_install_with_mode(source: &str, mode: &PiInstallMode) -> anyhow::Result<(
 }
 
 // ---------------------------------------------------------------------------
-// Public helpers for CLI
-// ---------------------------------------------------------------------------
-
-/// Determine install mode from CLI flags.
-pub fn install_mode_from_flags(args: &[String]) -> PiInstallMode {
-    if args.iter().any(|a| a == "--pi-manual") {
-        PiInstallMode::Manual
-    } else if args.iter().any(|a| a == "--pi-local") {
-        PiInstallMode::Local
-    } else {
-        PiInstallMode::Global
-    }
-}
-
-/// Install with a specific mode (called from `omni init --pi`).
-pub fn install_with_mode(exe_path: &str, mode: &PiInstallMode) -> anyhow::Result<()> {
-    let source = package_source();
-    let _integration = PiIntegration;
-    if matches!(mode, PiInstallMode::Manual) {
-        return run_install_with_mode(&source, mode);
-    }
-    // For Global/Local, we still use the integration but override mode.
-    let _ = exe_path;
-    run_install_with_mode(&source, mode)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn returns_global_args_by_default() {
-        let args = build_install_args("git:github.com/fajarhide/omni", &PiInstallMode::Global);
-        assert_eq!(args, vec!["install", "git:github.com/fajarhide/omni"]);
-    }
-
-    #[test]
-    fn appends_local_flag_for_local_mode() {
-        let args = build_install_args("git:github.com/fajarhide/omni", &PiInstallMode::Local);
-        assert_eq!(
-            args,
-            vec!["install", "git:github.com/fajarhide/omni", "--local"]
-        );
-    }
-
-    #[test]
-    fn manual_mode_returns_no_args_for_execution() {
-        let args = build_install_args("git:github.com/fajarhide/omni", &PiInstallMode::Manual);
-        assert_eq!(args, vec!["install", "git:github.com/fajarhide/omni"]);
-    }
 
     #[test]
     fn detects_omni_package_in_settings() {
@@ -458,38 +366,6 @@ mod tests {
         assert_eq!(sources.len(), 2);
         assert!(sources[0].contains("omni"));
         assert!(sources[1].contains("omni"));
-    }
-
-    #[test]
-    fn install_mode_global_from_default_flags() {
-        let args: Vec<String> = vec!["--pi".to_string()];
-        let mode = install_mode_from_flags(&args);
-        assert_eq!(mode, PiInstallMode::Global);
-    }
-
-    #[test]
-    fn install_mode_local_from_flag() {
-        let args: Vec<String> = vec!["--pi".to_string(), "--pi-local".to_string()];
-        let mode = install_mode_from_flags(&args);
-        assert_eq!(mode, PiInstallMode::Local);
-    }
-
-    #[test]
-    fn install_mode_manual_from_flag() {
-        let args: Vec<String> = vec!["--pi".to_string(), "--pi-manual".to_string()];
-        let mode = install_mode_from_flags(&args);
-        assert_eq!(mode, PiInstallMode::Manual);
-    }
-
-    #[test]
-    fn manual_takes_priority_over_local() {
-        let args: Vec<String> = vec![
-            "--pi".to_string(),
-            "--pi-local".to_string(),
-            "--pi-manual".to_string(),
-        ];
-        let mode = install_mode_from_flags(&args);
-        assert_eq!(mode, PiInstallMode::Manual);
     }
 
     #[test]
