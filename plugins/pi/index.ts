@@ -33,7 +33,7 @@ let omniEnabled = true;
 function setOmniEnabled(ctx: any, enabled: boolean): void {
   omniEnabled = enabled;
   const label = enabled ? "on" : "off";
-  ctx.ui.setStatus("omni", ctx.ui.theme.fg("dim", `omni (${label})`));
+ctx.ui.setStatus("omni", ctx.ui.theme.fg("muted", `omni (${label})`));
 }
 
 
