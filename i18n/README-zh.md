@@ -185,7 +185,6 @@ omni doctor
 1. **VS Code & Continue.dev**: 使用我们的 MCP 上下文提供者 (`integrations/continue-dev/`)。
 2. **OpenCode & Codex CLI**: 内置包装器自动将命令输出管道到 OMNI。
 3. **Antigravity IDE**: OMNI 在 Antigravity 的配置 (`~/.gemini/antigravity/mcp_config.json`) 中注册为本机 MCP 服务器。运行 `omni init --antigravity` 自动设置。
-4. **Pi Agent**: Pi 原生 OMNI 包。运行 `omni init --pi` 通过 Pi 的包安装程序安装 OMNI Pi 包。使用 Pi 的斜杠命令来开启或关闭扩展。
 
 **多智能体调优 (`~/.omni/config.toml`)**
 不同的代理有不同的痛点。保持 VS Code 聊天整洁，同时让 OpenCode 读取更多数据。单独调整它们：

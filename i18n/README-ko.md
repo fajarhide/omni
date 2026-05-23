@@ -185,7 +185,6 @@ omni doctor
 1. **VS Code & Continue.dev**: 당사의 MCP 컨텍스트 공급자(`integrations/continue-dev/`)를 사용합니다.
 2. **OpenCode & Codex CLI**: 내장 래퍼(wrapper)가 명령 출력을 OMNI로 자동 파이프합니다.
 3. **Antigravity IDE**: OMNI는 Antigravity의 구성(`~/.gemini/antigravity/mcp_config.json`)에 기본 MCP 서버로 등록됩니다. `omni init --antigravity`를 실행하여 자동으로 설정합니다.
-4. **Pi Agent**: Pi용 네이티브 OMNI 패키지입니다. `omni init --pi`를 실행하여 Pi 패키지 인스톨러를 통해 OMNI Pi 패키지를 설치합니다. Pi의 슬래시 명령을 사용하여 확장을 켜거나 끌 수 있습니다.
 
 **다중 에이전트 튜닝 (`~/.omni/config.toml`)**
 에이전트마다 문제점(pain points)이 다릅니다. VS Code 채팅을 깨끗하게 유지하면서 OpenCode가 더 많은 데이터를 읽을 수 있도록 허용하세요. 개별적으로 조정합니다:

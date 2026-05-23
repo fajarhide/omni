@@ -185,7 +185,6 @@ Theo mặc định, `omni init --claude` sẽ tự động hook vào **Claude Co
 1. **VS Code & Continue.dev**: Sử dụng provider context MCP của chúng tôi (`integrations/continue-dev/`).
 2. **OpenCode & Codex CLI**: Các wrapper tích hợp sẽ tự động truyền đầu ra lệnh tới OMNI.
 3. **Antigravity IDE**: OMNI đăng ký dưới dạng một máy chủ MCP bản địa trong config của Antigravity (`~/.gemini/antigravity/mcp_config.json`). Chạy `omni init --antigravity` để tự động thiết lập.
-4. **Pi Agent**: Gói OMNI gốc cho Pi. Chạy `omni init --pi` để cài đặt gói OMNI Pi thông qua trình cài đặt gói Pi. Sử dụng lệnh slash của Pi để bật hoặc tắt tiện ích mở rộng.
 
 **Tùy chỉnh nhiều tác nhân (`~/.omni/config.toml`)**
 Các tác nhân khác nhau có những điểm yếu khác nhau. Giữ cho cửa sổ trò chuyện VS Code luôn gọn gàng, trong khi vẫn cho phép OpenCode đọc nhiều dữ liệu hơn. Tùy chỉnh riêng cho chúng:
