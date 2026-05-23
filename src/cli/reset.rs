@@ -35,6 +35,7 @@ fn print_help() {
         "--antigravity".cyan()
     );
     println!("  {: <14} Uninstall Hermes Agent", "--hermes".cyan());
+    println!("  {: <14} Uninstall Pi Agent", "--pi".cyan());
     println!(
         "  {: <14} Display this help message",
         "--help, -h".bright_black()
@@ -63,6 +64,7 @@ pub fn handle_reset() -> anyhow::Result<()> {
     let mut is_codex = args.iter().any(|a| a == "--codex");
     let mut is_antigravity = args.iter().any(|a| a == "--antigravity");
     let mut is_hermes = args.iter().any(|a| a == "--hermes");
+    let mut is_pi = args.iter().any(|a| a == "--pi");
 
     // Check if no flags
     let no_flags = !is_claude
@@ -75,7 +77,8 @@ pub fn handle_reset() -> anyhow::Result<()> {
         && !is_opencode
         && !is_codex
         && !is_antigravity
-        && !is_hermes;
+        && !is_hermes
+        && !is_pi;
 
     if no_flags && !is_all {
         println!(
@@ -99,9 +102,10 @@ pub fn handle_reset() -> anyhow::Result<()> {
         println!("  [{}] Codex CLI", "10".cyan());
         println!("  [{}] Antigravity IDE", "11".cyan());
         println!("  [{}] Hermes Agent", "12".cyan());
+        println!("  [{}] Pi Agent", "13".cyan());
         println!("  [{}] Cancel\n", "q".yellow());
 
-        print!("Select an option [1-12, q]: ");
+        print!("Select an option [1-13, q]: ");
         std::io::stdout().flush()?;
 
         let mut input = String::new();
@@ -119,6 +123,7 @@ pub fn handle_reset() -> anyhow::Result<()> {
             "10" => is_codex = true,
             "11" => is_antigravity = true,
             "12" => is_hermes = true,
+            "13" => is_pi = true,
             _ => return Ok(()),
         }
         println!();
@@ -157,6 +162,9 @@ pub fn handle_reset() -> anyhow::Result<()> {
     }
     if is_hermes {
         target_ids.push("hermes");
+    }
+    if is_pi {
+        target_ids.push("pi");
     }
 
     perform_reset(is_all, target_ids)

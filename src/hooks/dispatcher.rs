@@ -77,6 +77,10 @@ pub fn process_payload(
             let cfg = session_start::SessionConfig::from_env();
             session_start::process_payload(input_str, store, cfg)
         }
+        "BeforeAgentStart" => {
+            let cfg = session_start::SessionConfig::from_env();
+            session_start::process_before_agent_start_payload(input_str, store, cfg)
+        }
         "SessionEnd" => session_end::process_payload(input_str, store, session.clone()),
         "PreCompact" => pre_compact::process_payload(input_str, store, session.clone()),
         "PostToolUseFailure" => {
@@ -86,7 +90,14 @@ pub fn process_payload(
             handle_file_changed(input_str, session.clone());
             None
         }
-        _ => post_tool::process_payload(input_str, Some(store), Some(session.clone())),
+        // Default: treat as PostToolUse for backward compatibility with payloads
+        // that omit `hookEventName` (peeker defaults to "PostToolUse" above) and
+        // for explicit "PostToolUse" / "ToolResult" events. Unknown explicit
+        // events fall through to the wildcard arm below and fail open.
+        "PostToolUse" | "ToolResult" => {
+            post_tool::process_payload(input_str, Some(store), Some(session.clone()))
+        }
+        _ => None,
     };
 
     // Transcript: mark completed + snapshot state after dispatch
@@ -185,6 +196,77 @@ mod tests {
         assert!(
             out.expect("must succeed").contains("SessionStart"),
             "Dispatched output must be SessionStart"
+        );
+    }
+
+    #[test]
+    fn routes_before_agent_start_to_startup_logic() {
+        let (store, _dir) = get_store();
+        // Seed a recent session so BeforeAgentStart has something to summarize
+        let mut state = SessionState::new();
+        state.add_command("cargo build");
+        store.upsert_session(&state);
+
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        // Force continuation so the test is deterministic regardless of clock
+        unsafe {
+            std::env::set_var("OMNI_CONTINUE", "1");
+        }
+
+        let input = json!({
+            "hookEventName": "BeforeAgentStart",
+            "sessionId": "pi-disp",
+            "workingDirectory": "/tmp"
+        });
+
+        let out = process_payload(&input.to_string(), store, session);
+
+        unsafe {
+            std::env::remove_var("OMNI_CONTINUE");
+        }
+
+        let res = out.expect("must produce output for continued session");
+        assert!(res.contains("BeforeAgentStart"));
+        assert!(res.contains("systemPromptAddition"));
+    }
+
+    #[test]
+    fn routes_tool_result_to_post_tool() {
+        let (store, _dir) = get_store();
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        let mut big_diff = "diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n".to_string();
+        for _ in 0..50 {
+            big_diff.push_str(" \n");
+        }
+
+        let input = json!({
+            "hookEventName": "ToolResult",
+            "tool_name": "Bash",
+            "tool_input": { "command": "git diff" },
+            "tool_response": { "content": big_diff }
+        });
+
+        let out = process_payload(&input.to_string(), store, session);
+        assert!(out.is_some(), "ToolResult must route to post_tool handler");
+    }
+
+    #[test]
+    fn ignores_unknown_explicit_hook_event() {
+        let (store, _dir) = get_store();
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        let input = json!({
+            "hookEventName": "SomeFutureEvent",
+            "tool_name": "Bash",
+            "tool_response": { "content": "ignored" }
+        });
+
+        let out = process_payload(&input.to_string(), store, session);
+        assert!(
+            out.is_none(),
+            "Unknown explicit hook event must fail open, not silently run post_tool"
         );
     }
 

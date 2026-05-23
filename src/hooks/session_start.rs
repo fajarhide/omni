@@ -12,8 +12,12 @@ struct HookInput {
     hook_event_name: String,
     #[serde(rename = "sessionId", alias = "session_id")]
     session_id: String,
-    #[serde(rename = "workingDirectory", alias = "working_directory")]
-    #[serde(alias = "cwd")]
+    #[serde(
+        rename = "workingDirectory",
+        alias = "working_directory",
+        alias = "cwd",
+        default
+    )]
     working_directory: String,
 }
 
@@ -191,6 +195,71 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     }
 
     None
+}
+
+/// Handle a `BeforeAgentStart` hook payload.
+///
+/// This is similar to [`process_payload`] but is intended for the per-agent-turn
+/// pre-prompt hook (currently only the Pi extension emits this). It does NOT
+/// bootstrap a fresh session, write transcripts, or register watch paths.
+/// It only emits a `systemPromptAddition` summary when there is a recent
+/// session to continue from. Otherwise it returns `None` (fail-open).
+pub fn process_before_agent_start_payload(
+    input_str: &str,
+    store: Arc<Store>,
+    cfg: SessionConfig,
+) -> Option<String> {
+    let parsed: HookInput = match serde_json::from_str(input_str) {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("[omni] parse error");
+            return None;
+        }
+    };
+
+    if parsed.hook_event_name != "BeforeAgentStart" {
+        return None;
+    }
+
+    if cfg.force_fresh {
+        return None;
+    }
+
+    let state = store.find_latest_session()?;
+
+    let now = Utc::now().timestamp();
+    let age_mins = (now - state.last_active) / 60;
+    if !cfg.force_continue && age_mins >= cfg.ttl_mins {
+        return None;
+    }
+
+    let cwd_for_ctx = if parsed.working_directory.is_empty() {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    } else {
+        parsed.working_directory.clone()
+    };
+
+    let summary = build_summary_with_context(&state, now, &store, &cwd_for_ctx);
+    let mut summary_truncated = summary.trim().to_string();
+    if summary_truncated.is_empty() {
+        return None;
+    }
+    if summary_truncated.len() > 800 {
+        summary_truncated.truncate(797);
+        summary_truncated.push_str("...");
+    }
+
+    let out = HookOutput {
+        hook_specific_output: HookSpecificOutput {
+            hook_event_name: "BeforeAgentStart".to_string(),
+            system_prompt_addition: summary_truncated,
+            watch_paths: vec![],
+        },
+    };
+
+    serde_json::to_string(&out).ok()
 }
 
 /// Auto-detect critical project files to watch based on toolchain
@@ -456,6 +525,134 @@ mod tests {
             store.find_latest_session().is_some(),
             "session must be written to DB when cwd alias is used"
         );
+    }
+
+    #[test]
+    fn session_start_accepts_missing_working_directory() {
+        let (store, _dir) = get_store();
+        // No workingDirectory / cwd field at all — must not produce a parse error.
+        // The handler falls back to current_dir() and may emit watch paths if the
+        // cwd looks like a project, but the critical guarantee is: no parse error
+        // and the session is persisted.
+        let input = json!({
+            "hookEventName": "SessionStart",
+            "sessionId": "no-cwd-1"
+        });
+
+        let _ = process_payload(&input.to_string(), store.clone(), default_config());
+        assert!(
+            store.find_latest_session().is_some(),
+            "session must still be persisted even when workingDirectory is omitted"
+        );
+    }
+
+    #[test]
+    fn before_agent_start_accepts_missing_working_directory() {
+        let (store, _dir) = get_store();
+        let mut state = SessionState::new();
+        state.add_command("cargo test");
+        store.upsert_session(&state);
+
+        let input = json!({
+            "hookEventName": "BeforeAgentStart",
+            "sessionId": "no-cwd-2"
+        });
+
+        let mut cfg = default_config();
+        cfg.force_continue = true;
+
+        let out = process_before_agent_start_payload(&input.to_string(), store.clone(), cfg);
+        assert!(out.is_some(), "must succeed without workingDirectory");
+        assert!(out.expect("must succeed").contains("BeforeAgentStart"));
+    }
+
+    #[test]
+    fn before_agent_start_returns_system_prompt_for_continued_session() {
+        let (store, _dir) = get_store();
+        let mut state = SessionState::new();
+        state.add_command("cargo build");
+        state.add_hot_file("src/main.rs");
+        store.upsert_session(&state);
+
+        let input = json!({
+            "hookEventName": "BeforeAgentStart",
+            "sessionId": "pi-1",
+            "workingDirectory": "/tmp"
+        });
+
+        let mut cfg = default_config();
+        cfg.force_continue = true;
+
+        let out = process_before_agent_start_payload(&input.to_string(), store.clone(), cfg);
+        assert!(out.is_some());
+        let res = out.expect("must succeed");
+        let parsed: HookOutput = serde_json::from_str(&res).expect("must be valid JSON");
+        assert_eq!(
+            parsed.hook_specific_output.hook_event_name,
+            "BeforeAgentStart"
+        );
+        assert!(
+            !parsed
+                .hook_specific_output
+                .system_prompt_addition
+                .is_empty()
+        );
+        assert!(parsed.hook_specific_output.watch_paths.is_empty());
+    }
+
+    #[test]
+    fn before_agent_start_returns_none_when_no_previous_session() {
+        let (store, _dir) = get_store();
+
+        let input = json!({
+            "hookEventName": "BeforeAgentStart",
+            "sessionId": "pi-empty",
+            "workingDirectory": "/tmp"
+        });
+
+        let out = process_before_agent_start_payload(&input.to_string(), store, default_config());
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn before_agent_start_rejects_mismatched_event() {
+        let (store, _dir) = get_store();
+
+        let input = json!({
+            "hookEventName": "SessionStart",
+            "sessionId": "wrong-event",
+            "workingDirectory": "/tmp"
+        });
+
+        let out = process_before_agent_start_payload(&input.to_string(), store, default_config());
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn before_agent_start_ignores_expired_session() {
+        let (store, _dir) = get_store();
+        let mut state = SessionState::new();
+        state.last_active = Utc::now().timestamp() - (500 * 60);
+        store.upsert_session(&state);
+
+        let input = json!({
+            "hookEventName": "BeforeAgentStart",
+            "sessionId": "pi-expired",
+            "workingDirectory": "/tmp"
+        });
+
+        let mut cfg = default_config();
+        cfg.ttl_mins = 240;
+
+        let out = process_before_agent_start_payload(&input.to_string(), store, cfg);
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn before_agent_start_fail_open_on_invalid_json() {
+        let (store, _dir) = get_store();
+        let out = process_before_agent_start_payload("not json {{{", store, default_config());
+        assert!(out.is_none());
     }
 
     #[test]

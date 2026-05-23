@@ -9,6 +9,7 @@ pub mod hermes;
 pub mod multiagent;
 pub mod openclaw;
 pub mod opencode;
+pub mod pi;
 pub mod roo_code;
 pub mod vscode;
 pub mod zed;
@@ -23,6 +24,7 @@ pub use gemini::GeminiIntegration;
 pub use hermes::HermesIntegration;
 pub use openclaw::OpenClawIntegration;
 pub use opencode::OpenCodeIntegration;
+pub use pi::PiIntegration;
 pub use roo_code::RooCodeIntegration;
 pub use vscode::VscodeIntegration;
 pub use zed::ZedIntegration;
@@ -61,6 +63,7 @@ pub fn all_integrations() -> Vec<Box<dyn AgentIntegration>> {
         Box::new(openclaw::OpenClawIntegration),
         Box::new(antigravity::AntigravityIntegration),
         Box::new(hermes::HermesIntegration),
+        Box::new(pi::PiIntegration),
         Box::new(vscode::VscodeIntegration),
     ]
 }
