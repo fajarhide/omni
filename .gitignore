@@ -22,7 +22,6 @@ target/
 **/*.rs.bk
 # --- OMNI specific ---
 /.omni/
-/.pdd/
 /filters_compiled/
 *.html
 .agents

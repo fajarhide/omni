@@ -9,7 +9,7 @@ use std::process::Command;
 // ---------------------------------------------------------------------------
 
 /// Default git package source for `pi install`.
-const DEFAULT_PACKAGE_SOURCE: &str = "git:github.com/wayanjimmy/omni@v0.6.0-pi-alpha";
+const DEFAULT_PACKAGE_SOURCE: &str = "git:github.com/fajarhide/omni";
 
 /// Environment variable override for the package source.
 const PACKAGE_SOURCE_ENV: &str = "OMNI_PI_PACKAGE_SOURCE";
