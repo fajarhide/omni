@@ -78,15 +78,13 @@ impl Distiller for BuildDistiller {
                     is_error_block = true;
                 }
                 current_block.push(seg.content.clone());
-            } else {
-                if !current_block.is_empty() {
-                    if is_error_block {
-                        errors.push(current_block.join("\n"));
-                    } else {
-                        warnings.push(current_block.join("\n"));
-                    }
-                    current_block.clear();
+            } else if !current_block.is_empty() {
+                if is_error_block {
+                    errors.push(current_block.join("\n"));
+                } else {
+                    warnings.push(current_block.join("\n"));
                 }
+                current_block.clear();
             }
         }
         if !current_block.is_empty() {

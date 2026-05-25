@@ -1,0 +1,23 @@
+{
+  "name": "@fajarhide/omni-pi",
+  "version": "0.6.0",
+  "description": "Pi extension for OMNI semantic output distillation.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.3",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

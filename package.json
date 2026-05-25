@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "pi": {
+    "extensions": ["./plugins/pi/index.ts"]
+  }
+}

@@ -185,6 +185,7 @@ By default, `omni init --claude` automatically hooks into **Claude Code**. Howev
 1. **VS Code & Continue.dev**: Use our MCP context provider (`integrations/continue-dev/`).
 2. **OpenCode & Codex CLI**: Built-in wrappers automatically pipe command output to OMNI.
 3. **Antigravity IDE**: OMNI registers as a native MCP server in Antigravity's config (`~/.gemini/antigravity/mcp_config.json`). Run `omni init --antigravity` to set up automatically.
+4. **Pi Agent**: Native OMNI package for Pi. Run `omni init --pi` to install the OMNI Pi package via Pi's package installer. Use Pi's slash commands to toggle the extension on or off.
 
 **Multi-Agent Tuning (`~/.omni/config.toml`)**
 Different agents have different pain points. Keep VS Code chat clean, whilst letting OpenCode read more data. Tune them individually:

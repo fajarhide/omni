@@ -170,25 +170,22 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 all_ok = false;
             }
         }
+    } else if fix_mode && fs::create_dir_all(&conf_dir).is_ok() {
+        println!(
+            "  {:<15} ~/.omni/ {}",
+            "Config dir:".bright_black(),
+            "[FIXED]".green().bold()
+        );
     } else {
-        if fix_mode && fs::create_dir_all(&conf_dir).is_ok() {
-            println!(
-                "  {:<15} ~/.omni/ {}",
-                "Config dir:".bright_black(),
-                "[FIXED]".green().bold()
-            );
-        } else {
-            println!(
-                "  {:<15} ~/.omni/ {}",
-                "Config dir:".bright_black(),
-                "[ERROR]".red().bold()
-            );
-            warnings.push(
-                "Config directory ~/.omni/ is missing or not writable. Run `omni init`."
-                    .to_string(),
-            );
-            all_ok = false;
-        }
+        println!(
+            "  {:<15} ~/.omni/ {}",
+            "Config dir:".bright_black(),
+            "[ERROR]".red().bold()
+        );
+        warnings.push(
+            "Config directory ~/.omni/ is missing or not writable. Run `omni init`.".to_string(),
+        );
+        all_ok = false;
     }
 
     // 3. Database
@@ -441,6 +438,13 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                     "Project:".bright_black(),
                     local_report.filters.len().to_string().yellow(),
                     "[OK]".green().bold()
+                );
+            } else if fix_mode {
+                let _ = crate::guard::trust::trust_project(&cwd);
+                println!(
+                    "   {:<15} .omni/filters/ (TRUSTED) {}",
+                    "Project:".bright_black(),
+                    "[FIXED]".green().bold()
                 );
             } else {
                 if fix_mode {

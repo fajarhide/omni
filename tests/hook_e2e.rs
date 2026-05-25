@@ -193,6 +193,134 @@ fn test_pipe_mode_via_binary() {
 }
 
 #[test]
+fn before_agent_start_returns_valid_hook_json() {
+    // Use a single shared temp DB across the two child invocations
+    // by sharing OMNI_DB_PATH explicitly.
+    let temp_db = tempfile::NamedTempFile::new().expect("Failed to create temp DB");
+    let db_path = temp_db.path().to_path_buf();
+
+    // 1) Seed: send a SessionStart so there is a "latest session" to continue.
+    let seed = serde_json::json!({
+        "hookEventName": "SessionStart",
+        "sessionId": "pi-e2e-seed",
+        "workingDirectory": "/tmp"
+    });
+
+    let mut seed_child = Command::new(omni_binary())
+        .arg("--session-start")
+        .env("OMNI_DB_PATH", &db_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn omni for seed");
+
+    seed_child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(seed.to_string().as_bytes())
+        .expect("Failed to write seed stdin");
+
+    let seed_out = seed_child
+        .wait_with_output()
+        .expect("Failed to wait for seed");
+    assert!(
+        seed_out.status.success(),
+        "Seed --session-start should exit 0, got {:?}",
+        seed_out.status
+    );
+
+    // 2) Invoke: --before-agent-start with the same DB. Force continue via env
+    //    so the test is deterministic regardless of clock.
+    let input = serde_json::json!({
+        "hookEventName": "BeforeAgentStart",
+        "sessionId": "pi-e2e-1",
+        "workingDirectory": "/tmp"
+    });
+
+    let mut child = Command::new(omni_binary())
+        .arg("--before-agent-start")
+        .env("OMNI_DB_PATH", &db_path)
+        .env("OMNI_CONTINUE", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn omni");
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.to_string().as_bytes())
+        .expect("Failed to write stdin");
+
+    let output = child.wait_with_output().expect("Failed to wait");
+
+    assert!(
+        output.status.success(),
+        "--before-agent-start should exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    assert!(
+        !trimmed.is_empty(),
+        "--before-agent-start should produce JSON output when there is a session to continue"
+    );
+
+    let parsed: serde_json::Value = serde_json::from_str(trimmed)
+        .unwrap_or_else(|e| panic!("Output is not valid JSON: {} — output: {}", e, stdout));
+
+    let hook_specific = parsed
+        .get("hookSpecificOutput")
+        .expect("missing hookSpecificOutput");
+    assert_eq!(
+        hook_specific
+            .get("hookEventName")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+        "BeforeAgentStart"
+    );
+    assert!(
+        hook_specific
+            .get("systemPromptAddition")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        "systemPromptAddition must be present and non-empty"
+    );
+}
+
+#[test]
+fn before_agent_start_fail_open_on_invalid_json() {
+    let (mut cmd, _db) = omni_cmd();
+    let mut child = cmd
+        .arg("--before-agent-start")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn omni");
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"not json at all {{")
+        .unwrap();
+
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "--before-agent-start must fail open on invalid JSON, got {:?}",
+        output.status
+    );
+}
+
+#[test]
 fn test_cli_version() {
     let (mut cmd, _db) = omni_cmd();
     let output = cmd.arg("version").output().expect("Failed to run");
