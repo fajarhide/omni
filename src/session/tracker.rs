@@ -44,6 +44,8 @@ impl SessionTracker {
             // Update Distillation Telemetry
             session_locked.cumulative_input_bytes += result_clone.input_bytes as u64;
             session_locked.cumulative_output_bytes += result_clone.output_bytes as u64;
+            session_locked.cumulative_raw_tokens += result_clone.raw_tokens as u64;
+            session_locked.cumulative_filtered_tokens += result_clone.filtered_tokens as u64;
 
             let savings_pct = result_clone.savings_pct() as f32;
             let current_top = session_locked
@@ -63,7 +65,7 @@ impl SessionTracker {
             {
                 let summary = crate::pipeline::DistillSummary {
                     command: cmd.clone(),
-                    route: result_clone.route,
+                    route: result_clone.route.clone(),
                     input_bytes: result_clone.input_bytes,
                     output_bytes: result_clone.output_bytes,
                     timestamp: chrono::Utc::now().timestamp(),
@@ -76,13 +78,21 @@ impl SessionTracker {
                 }
             }
 
+            let tool_family = crate::util::command_family::command_family(&cmd);
+
             for p in paths.iter().chain(cmd_paths.iter()) {
                 session_locked.add_hot_file(p);
             }
 
-            for err in errors {
-                session_locked.add_error(&err);
-                store.index_event(&session_locked.session_id, "Error", &err);
+            if errors.is_empty() && result_clone.route.clone() != crate::pipeline::Route::Error {
+                // Command succeeded, mark recent patterns for this tool as resolved
+                store.resolve_pattern(&tool_family, &cmd);
+            } else {
+                for err in &errors {
+                    session_locked.add_error(err);
+                    store.index_event(&session_locked.session_id, "Error", err);
+                    store.upsert_pattern(err, &tool_family);
+                }
             }
 
             if let Some(task) = infer_task(&session_locked) {
@@ -451,6 +461,8 @@ mod tests {
             segments_kept: 0,
             segments_dropped: 0,
             collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
         };
 
         tracker.track_command("git status", "On branch main", &res);

@@ -1,0 +1,28 @@
+schema_version = 1
+# Domain signal for deploy/infra tools (docker, kubectl, terraform, ansible, etc.)
+# This is a meta-signal that applies cross-tool deploy noise reduction.
+# For tool-specific signals, see signals/tools/
+
+[filters.deploy_domain]
+match_command = "^(docker|kubectl|terraform|ansible|helm|aws|gcloud|az |pulumi|serverless)"
+strip_ansi = true
+description = "Domain-level noise reduction for all deploy/infra tools"
+
+strip_lines_matching = [
+    # Generic layer/step progress noise
+    "^Step [0-9]+/[0-9]+",
+    "^\\s*--->",
+    "^Removing intermediate container",
+    "^Successfully tagged",
+    # kubectl get wide-format noise
+    "^NAME\\s+READY\\s+STATUS\\s+RESTARTS",
+    # Terraform refresh noise
+    "^(data|aws|google|azurerm)\\.[a-z_]+\\.[a-z_]+: Refreshing state",
+]
+
+on_empty = "[deploy] Output reduced — no deployment errors detected"
+
+[[tests.deploy_domain]]
+name = "strips_docker_build_steps"
+input = "Step 1/4 : FROM node:18\n ---> abc123def\nRemoving intermediate container xyz\nERROR: failed to build image\nSuccessfully tagged myapp:latest"
+expected = "ERROR: failed to build image"

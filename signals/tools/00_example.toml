@@ -1,5 +1,6 @@
-# OMNI Filter Example Template
-# Place this file at ~/.omni/filters/my_custom_filter.toml or in your project at .omni/filters/
+# OMNI Signal Example Template
+# Place this file at ~/.omni/signals/my_custom_signal.toml or in your project at .omni/signals/
+# (Legacy path ~/.omni/filters/ is also supported for backward compatibility)
 schema_version = 1
 
 [filters.production_logs]

@@ -175,7 +175,7 @@ fn test_hook_json_escaping_quotes_and_newlines() {
     });
 
     if let Some(output) = process_payload(&input.to_string(), None, None) {
-        // Output harus valid JSON
+        // Output should be valid JSON
         let parsed: serde_json::Value = serde_json::from_str(&output)
             .expect("Hook output must be valid JSON even with special chars");
         assert!(parsed["hookSpecificOutput"]["updatedResponse"].is_string());

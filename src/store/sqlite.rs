@@ -8,7 +8,7 @@ use crate::pipeline::DistillResult;
 use crate::pipeline::SessionState;
 
 pub struct Store {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
 }
 
 impl Store {
@@ -88,23 +88,33 @@ impl Store {
     }
 
     /// Aggregate distillation stats since a given timestamp
-    pub fn aggregate_stats(&self, since: i64) -> Result<(u64, u64, u64, u64, i64)> {
+    pub fn aggregate_stats(&self, since: i64) -> Result<(u64, u64, u64, u64, i64, u64, u64)> {
         let conn = self.conn.lock().unwrap();
-        // returns (count, total_input, total_output, sum_latency, max_latency)
+        // returns (count, total_input, total_output, sum_latency, max_latency, raw_tokens, filtered_tokens)
         let r = conn.query_row(
-            "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0), COALESCE(SUM(latency_ms),0), COALESCE(MAX(latency_ms),0) FROM distillations WHERE ts >= ?1",
+            "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0), COALESCE(SUM(latency_ms),0), COALESCE(MAX(latency_ms),0), COALESCE(SUM(raw_tokens),0), COALESCE(SUM(filtered_tokens),0) FROM distillations WHERE ts >= ?1",
             params![since],
-            |row| Ok((row.get::<_,u64>(0)?, row.get::<_,u64>(1)?, row.get::<_,u64>(2)?, row.get::<_,u64>(3)?, row.get::<_,i64>(4)?)),
-        ).unwrap_or((0, 0, 0, 0, 0));
+            |row| Ok((
+                row.get::<_,u64>(0)?,
+                row.get::<_,u64>(1)?,
+                row.get::<_,u64>(2)?,
+                row.get::<_,u64>(3)?,
+                row.get::<_,i64>(4)?,
+                row.get::<_,u64>(5)?,
+                row.get::<_,u64>(6)?
+            )),
+        ).unwrap_or((0, 0, 0, 0, 0, 0, 0));
         Ok(r)
     }
 
     /// Per-filter breakdown: (filter_name, count, avg_reduction_pct)
-    pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
+    #[allow(clippy::type_complexity)]
+    pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), 
-                    COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0)
+                    COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0),
+                    COALESCE(SUM(raw_tokens), 0), COALESCE(SUM(filtered_tokens), 0)
              FROM distillations WHERE ts >= ?1 GROUP BY grp_name ORDER BY COUNT(*) DESC"
         )?;
         let rows = stmt
@@ -114,6 +124,8 @@ impl Store {
                     row.get::<_, u64>(1)?,
                     row.get::<_, u64>(2)?,
                     row.get::<_, u64>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, u64>(5)?,
                 ))
             })?
             .filter_map(|r| r.ok())
@@ -342,6 +354,21 @@ impl Store {
             );
             CREATE INDEX IF NOT EXISTS idx_as_project ON agent_sessions(project_hash);
 
+            -- 11b. Pattern memory — cross-session error pattern tracking
+            CREATE TABLE IF NOT EXISTS pattern_memory (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_hash    TEXT NOT NULL UNIQUE,
+                pattern_text    TEXT NOT NULL,
+                tool_family     TEXT DEFAULT '',
+                first_seen      INTEGER NOT NULL,
+                last_seen       INTEGER NOT NULL,
+                occurrence_count INTEGER DEFAULT 1,
+                was_resolved    INTEGER DEFAULT 0,
+                resolution_hint TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_pm_tool ON pattern_memory(tool_family);
+            CREATE INDEX IF NOT EXISTS idx_pm_last ON pattern_memory(last_seen);
+
             -- 11. One-time data migrations tracker
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id           TEXT PRIMARY KEY,
@@ -398,7 +425,6 @@ impl Store {
             )?;
         }
 
-        // Safe migration: add collapse columns if not present
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN collapse_original INTEGER DEFAULT 0",
             [],
@@ -413,6 +439,14 @@ impl Store {
         );
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN agent_id TEXT DEFAULT 'unknown'",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN raw_tokens INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN filtered_tokens INTEGER DEFAULT 0",
             [],
         );
 
@@ -449,6 +483,28 @@ impl Store {
             tx.commit()?;
         }
 
+        let migration_id2 = "2026_05_token_backfill";
+        let already_applied2: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_id2],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if already_applied2.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            // Use 3.8 chars/token (~4 bytes/token heuristic) for backfill
+            tx.execute(
+                "UPDATE distillations SET raw_tokens = input_bytes / 4, filtered_tokens = output_bytes / 4 WHERE raw_tokens = 0",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_id2, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         Ok(())
     }
 
@@ -469,8 +525,8 @@ impl Store {
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
         let res = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path, agent_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path, agent_id, raw_tokens, filtered_tokens)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 session_id,
                 ts,
@@ -487,6 +543,8 @@ impl Store {
                 col_to as i64,
                 project_path,
                 agent_id,
+                result.raw_tokens as i64,
+                result.filtered_tokens as i64,
             ],
         );
 
@@ -757,18 +815,21 @@ impl Store {
         results
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn get_per_command_stats(
         &self,
         since: i64,
         limit: usize,
-    ) -> Result<Vec<(String, u64, u64, u64)>> {
+    ) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT
                 command,
                 COUNT(*) as calls,
                 COALESCE(SUM(input_bytes), 0) as total_input,
-                COALESCE(SUM(output_bytes), 0) as total_output
+                COALESCE(SUM(output_bytes), 0) as total_output,
+                COALESCE(SUM(raw_tokens), 0) as raw_tok,
+                COALESCE(SUM(filtered_tokens), 0) as filt_tok
             FROM distillations
             WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
             GROUP BY command
@@ -783,6 +844,8 @@ impl Store {
                     row.get::<_, u64>(1)?,
                     row.get::<_, u64>(2)?,
                     row.get::<_, u64>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, u64>(5)?,
                 ))
             })?
             .filter_map(|r| r.ok())
@@ -859,8 +922,9 @@ impl Store {
         Ok(rows)
     }
 
-    /// Multi-period stats: Vec of (period_label, count, input_bytes, output_bytes)
-    pub fn multi_period_stats(&self) -> Result<Vec<(String, u64, u64, u64)>> {
+    /// Multi-period stats: Vec of (period_label, count, input_bytes, output_bytes, raw_tokens, filtered_tokens)
+    #[allow(clippy::type_complexity)]
+    pub fn multi_period_stats(&self) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
         let now = chrono::Utc::now().timestamp();
         let midnight = now - (now % 86400);
         let week_ago = now - 7 * 86400;
@@ -871,8 +935,8 @@ impl Store {
             ("This Week", week_ago),
             ("All Time", 0i64),
         ] {
-            let (count, input, output, _, _) = self.aggregate_stats(since)?;
-            periods.push((label.to_string(), count, input, output));
+            let (count, input, output, _, _, raw_tok, filt_tok) = self.aggregate_stats(since)?;
+            periods.push((label.to_string(), count, input, output, raw_tok, filt_tok));
         }
         Ok(periods)
     }
@@ -1202,9 +1266,169 @@ impl Store {
             Err(_) => vec![],
         }
     }
+
+    // ── Pattern Memory (AI-5) ────────────────────────────────────────
+
+    /// Record or update a recurring error pattern
+    pub fn upsert_pattern(&self, pattern_text: &str, tool_family: &str) {
+        let hash = Self::pattern_hash(pattern_text);
+        let now = chrono::Utc::now().timestamp();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "INSERT INTO pattern_memory (pattern_hash, pattern_text, tool_family, first_seen, last_seen, occurrence_count)
+             VALUES (?1, ?2, ?3, ?4, ?4, 1)
+             ON CONFLICT(pattern_hash) DO UPDATE SET
+               last_seen = ?4,
+               occurrence_count = occurrence_count + 1,
+               tool_family = CASE WHEN tool_family = '' THEN ?3 ELSE tool_family END",
+            params![hash, &pattern_text[..pattern_text.len().min(500)], tool_family, now],
+        );
+    }
+
+    /// Mark a pattern as resolved (command succeeded after failure)
+    pub fn resolve_pattern(&self, tool_family: &str, resolution_hint: &str) {
+        let now = chrono::Utc::now().timestamp();
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        // Resolve patterns for this tool family that were seen in the last hour
+        let _ = conn.execute(
+            "UPDATE pattern_memory SET was_resolved = 1, resolution_hint = ?1
+             WHERE tool_family = ?2 AND was_resolved = 0 AND last_seen > ?3",
+            params![
+                &resolution_hint[..resolution_hint.len().min(500)],
+                tool_family,
+                now - 3600
+            ],
+        );
+    }
+
+    /// Get recurring patterns for a tool family (sorted by occurrence count)
+    pub fn get_patterns(&self, tool_family: Option<&str>, limit: usize) -> Vec<PatternMemoryRow> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let (query, tool_val) = if let Some(tool) = tool_family {
+            (
+                "SELECT pattern_hash, pattern_text, tool_family, first_seen, last_seen, \
+                 occurrence_count, was_resolved, resolution_hint \
+                 FROM pattern_memory WHERE tool_family = ?1 \
+                 ORDER BY occurrence_count DESC LIMIT ?2",
+                tool.to_string(),
+            )
+        } else {
+            (
+                "SELECT pattern_hash, pattern_text, tool_family, first_seen, last_seen, \
+                 occurrence_count, was_resolved, resolution_hint \
+                 FROM pattern_memory WHERE 1=1 \
+                 ORDER BY occurrence_count DESC LIMIT ?2",
+                String::new(),
+            )
+        };
+
+        let mut stmt = match conn.prepare(query) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        if tool_family.is_some() {
+            match stmt.query_map(params![tool_val, limit as i64], |row| {
+                Ok(PatternMemoryRow {
+                    pattern_hash: row.get(0)?,
+                    pattern_text: row.get(1)?,
+                    tool_family: row.get(2)?,
+                    first_seen: row.get(3)?,
+                    last_seen: row.get(4)?,
+                    occurrence_count: row.get(5)?,
+                    was_resolved: row.get::<_, i64>(6)? != 0,
+                    resolution_hint: row.get(7)?,
+                })
+            }) {
+                Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+                Err(_) => vec![],
+            }
+        } else {
+            match stmt.query_map(params!["", limit as i64], |row| {
+                Ok(PatternMemoryRow {
+                    pattern_hash: row.get(0)?,
+                    pattern_text: row.get(1)?,
+                    tool_family: row.get(2)?,
+                    first_seen: row.get(3)?,
+                    last_seen: row.get(4)?,
+                    occurrence_count: row.get(5)?,
+                    was_resolved: row.get::<_, i64>(6)? != 0,
+                    resolution_hint: row.get(7)?,
+                })
+            }) {
+                Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+                Err(_) => vec![],
+            }
+        }
+    }
+
+    /// Get top recurring issues across all tools
+    pub fn get_top_insights(&self, limit: usize) -> Vec<PatternMemoryRow> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT pattern_hash, pattern_text, tool_family, first_seen, last_seen, \
+             occurrence_count, was_resolved, resolution_hint \
+             FROM pattern_memory \
+             WHERE occurrence_count >= 2 \
+             ORDER BY occurrence_count DESC, last_seen DESC \
+             LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        match stmt.query_map(params![limit as i64], |row| {
+            Ok(PatternMemoryRow {
+                pattern_hash: row.get(0)?,
+                pattern_text: row.get(1)?,
+                tool_family: row.get(2)?,
+                first_seen: row.get(3)?,
+                last_seen: row.get(4)?,
+                occurrence_count: row.get(5)?,
+                was_resolved: row.get::<_, i64>(6)? != 0,
+                resolution_hint: row.get(7)?,
+            })
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    fn pattern_hash(text: &str) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let normalized = text.trim().to_lowercase();
+        let mut hasher = DefaultHasher::new();
+        normalized.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
 }
 
 // ── v0.5.7 Row Types ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PatternMemoryRow {
+    pub pattern_hash: String,
+    pub pattern_text: String,
+    pub tool_family: String,
+    pub first_seen: i64,
+    pub last_seen: i64,
+    pub occurrence_count: i64,
+    pub was_resolved: bool,
+    pub resolution_hint: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct DistillationRow {
@@ -1288,6 +1512,8 @@ mod tests {
             segments_kept: 1,
             segments_dropped: 0,
             collapse_savings: None,
+            raw_tokens: 20,
+            filtered_tokens: 5,
         };
         // Should not panic
         store.record_distillation("sess_123", &res, "npm start", "", "claude_code");

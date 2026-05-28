@@ -288,7 +288,9 @@ fn detect_watch_paths(
     if cwd.join("CLAUDE.md").exists() {
         paths.push("CLAUDE.md".to_string());
     }
-    if cwd.join(".omni").join("filters").exists() {
+    if cwd.join(".omni").join("signals").exists() {
+        paths.push(".omni/signals/".to_string());
+    } else if cwd.join(".omni").join("filters").exists() {
         paths.push(".omni/filters/".to_string());
     }
     if cwd.join("Makefile").exists() {

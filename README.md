@@ -176,7 +176,7 @@ omni doctor
 ```
 
 Need to see the filters in action or add your own custom rules?
-You can easily create your own rules using simple TOML files in `~/.omni/filters/`.
+You can easily create your own rules using simple TOML files in `~/.omni/signals/`.
 
 ### Multi-Agent Support & Integrations
 

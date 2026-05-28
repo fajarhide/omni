@@ -1,0 +1,28 @@
+schema_version = 1
+# Domain signal for all test runners (pytest, jest, cargo test, go test, rspec, etc.)
+# This is a meta-signal that applies cross-tool test noise reduction.
+# For tool-specific signals, see signals/tools/
+
+[filters.test_domain]
+match_command = "^(pytest|jest|vitest|cargo test|go test|rspec|phpunit|mocha|tap|ava|bun test)"
+strip_ansi = true
+description = "Domain-level noise reduction for all test runners"
+
+strip_lines_matching = [
+    # Generic passing test spam (tool-specific passes are handled by tool signals)
+    "^\\s+at Object\\.",                        # Jest/Node stack frame noise
+    "^\\s+at Module\\.",
+    "^\\s+at Function\\.",
+    "^\\s+at runNextTicks",
+    "^\\s+at processTicksAndRejections",
+    # Generic test progress dots/chars
+    "^\\.+$",
+    "^\\.\\.\\.",
+]
+
+on_empty = "[test] All test output reduced to signal — no failures detected"
+
+[[tests.test_domain]]
+name = "strips_node_stack_noise"
+input = "FAIL src/app.test.js\n  at Object.<anonymous> (src/app.test.js:5:3)\n  at Module._compile\n  at Function.Module._load"
+expected = "FAIL src/app.test.js"

@@ -2,6 +2,7 @@ pub mod analyzer;
 pub mod collapse;
 pub mod registry;
 pub mod scorer;
+pub mod semantic;
 pub mod toml_filter;
 
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,27 @@ impl OutputSegment {
     }
 }
 
+impl From<semantic::SemanticBlock> for OutputSegment {
+    fn from(block: semantic::SemanticBlock) -> Self {
+        let tier = match block.class {
+            semantic::SemanticClass::Critical => SignalTier::Critical,
+            semantic::SemanticClass::Diagnostic => SignalTier::Important,
+            semantic::SemanticClass::Context => SignalTier::Context,
+            semantic::SemanticClass::Progress => SignalTier::Noise,
+            semantic::SemanticClass::Noise => SignalTier::Noise,
+            semantic::SemanticClass::Data => SignalTier::Context,
+        };
+
+        Self {
+            content: block.lines.join("\n"),
+            tier,
+            base_score: block.score,
+            context_score: 0.0,
+            line_range: block.line_range,
+        }
+    }
+}
+
 // 5. Distillation result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistillResult {
@@ -115,6 +137,8 @@ pub struct DistillResult {
     pub segments_kept: usize,
     pub segments_dropped: usize,
     pub collapse_savings: Option<(usize, usize)>, // (original_lines, collapsed_to)
+    pub raw_tokens: usize,
+    pub filtered_tokens: usize,
 }
 
 impl DistillResult {
@@ -156,6 +180,8 @@ pub struct SessionState {
     pub last_significant_distillations: VecDeque<DistillSummary>, // max MAX_DISTILLATION_HISTORY entries
     pub cumulative_input_bytes: u64,
     pub cumulative_output_bytes: u64,
+    pub cumulative_raw_tokens: u64,
+    pub cumulative_filtered_tokens: u64,
     pub top_command_info: Option<(String, f32)>, // (command, savings_pct)
     pub toolchain_hints: std::collections::HashMap<String, String>,
 }
@@ -180,6 +206,11 @@ impl SessionState {
             last_significant_distillations: VecDeque::with_capacity(MAX_DISTILLATION_HISTORY),
             ..Default::default()
         }
+    }
+
+    pub fn actual_tokens_saved(&self) -> u64 {
+        self.cumulative_raw_tokens
+            .saturating_sub(self.cumulative_filtered_tokens)
     }
 
     pub fn estimated_tokens_saved(&self) -> u64 {
@@ -262,6 +293,8 @@ mod tests {
             segments_kept: 0,
             segments_dropped: 0,
             collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
         };
         assert_eq!(res.savings_pct(), 75.0);
 
@@ -288,6 +321,8 @@ mod tests {
             segments_kept: 0,
             segments_dropped: 0,
             collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
         };
         assert!(res.is_meaningful());
 

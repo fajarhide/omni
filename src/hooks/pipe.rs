@@ -218,6 +218,7 @@ fn distill(
                 &input_text,
                 profile.segmentation,
                 session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+                cmd,
             );
 
             // 2. Collapse
@@ -236,6 +237,7 @@ fn distill(
                     &effective_input,
                     profile.segmentation,
                     session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+                    cmd,
                 )
             } else {
                 segments
@@ -356,6 +358,11 @@ fn persist<E: Write>(
 ) {
     if let Some(s) = store_opt {
         use crate::pipeline::DistillResult;
+        let raw_tokens =
+            crate::util::token_estimate::count_tokens(&result.input_text, "cl100k_base");
+        let filtered_tokens =
+            crate::util::token_estimate::count_tokens(result.best_output(), "cl100k_base");
+
         let distill_result = DistillResult {
             output: result.best_output().to_string(), // use the best output for persistence
             route: result.route.clone(),
@@ -369,6 +376,8 @@ fn persist<E: Write>(
             segments_kept: result.segments_kept,
             segments_dropped: result.segments_dropped,
             collapse_savings: result.collapse_savings,
+            raw_tokens,
+            filtered_tokens,
         };
 
         let agent_id = resolve_pipe_agent_id();

@@ -21,8 +21,24 @@ fn print_help() {
     println!("  • Filter trust and loading status");
     println!("\n{}", "FLAGS:".bold().bright_white());
     println!(
-        "  {: <12} Automatically fix configuration and integration issues",
+        "  {: <32} Automatically fix configuration and integration issues",
         "--fix".cyan()
+    );
+    println!(
+        "  {: <32} Run inline tests for a specific filter",
+        "--test-filter <name>".cyan()
+    );
+    println!(
+        "  {: <32} Run filter tests and report slow filters (> 5ms)",
+        "--benchmark".cyan()
+    );
+    println!(
+        "  {: <32} Analyze filter coverage against past commands",
+        "--coverage".cyan()
+    );
+    println!(
+        "  {: <32} Validate a TOML filter file (syntax and tests)",
+        "--validate <file.toml>".cyan()
     );
     println!();
 
@@ -58,6 +74,28 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     {
         print_help();
         return Ok(());
+    }
+
+    let mut i = 1; // Assuming args[0] is "doctor"
+    if !args.is_empty() && args[0] != "doctor" {
+        i = 0;
+    } // Adjust if args doesn't contain the command itself
+    while i < args.len() {
+        match args[i].as_str() {
+            "--test-filter" if i + 1 < args.len() => {
+                return run_test_filter(&args[i + 1]);
+            }
+            "--test-filter" => {} // Handle edge case
+            "--benchmark" => return run_benchmark(),
+            "--coverage" => return run_coverage(),
+            "--validate" if i + 1 < args.len() => {
+                return run_validate(&args[i + 1]);
+            }
+            "--validate" => {} // Handle edge case
+            "doctor" => {}
+            _ => {}
+        }
+        i += 1;
     }
 
     let fix_mode = args.iter().any(|a| a == "--fix");
@@ -270,8 +308,8 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         all_ok = false;
     }
 
-    // 6. Config Filters
-    println!("\n {}", "Filters:".bold().bright_white());
+    // 6. Config Signals
+    println!("\n {}", "Signals:".bold().bright_white());
 
     // In --fix mode, repair legacy learned.toml *before* loading reports so warnings reflect fixes.
     if fix_mode {
@@ -316,10 +354,22 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         all_ok = false;
     }
 
-    let user_dir = conf_dir.join("filters");
+    let user_dir = {
+        let signals_path = conf_dir.join("signals");
+        if signals_path.exists() {
+            signals_path
+        } else {
+            conf_dir.join("filters") // backward compat
+        }
+    };
     if user_dir.exists() {
+        let dir_name = if user_dir.ends_with("signals") {
+            "signals"
+        } else {
+            "filters"
+        };
         println!(
-            "   {:<15} ~/.omni/filters/ ({} filters)",
+            "   {:<15} ~/.omni/{dir_name}/ ({} signals)",
             "User:".bright_black(),
             user_report.filters.len().to_string().yellow()
         );
@@ -366,11 +416,23 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     }
 
     if let Ok(cwd) = std::env::current_dir() {
-        let local_filters_dir = cwd.join(".omni").join("filters");
-        if local_filters_dir.exists() {
+        let local_signals_dir = {
+            let s = cwd.join(".omni").join("signals");
+            if s.exists() {
+                s
+            } else {
+                cwd.join(".omni").join("filters")
+            }
+        };
+        if local_signals_dir.exists() {
+            let dir_label = if local_signals_dir.ends_with("signals") {
+                "signals"
+            } else {
+                "filters"
+            };
             if crate::guard::trust::is_trusted(&cwd.join("omni_config.json")) {
                 println!(
-                    "   {:<15} .omni/filters/ ({} filters, TRUSTED) {}",
+                    "   {:<15} .omni/{dir_label}/ ({} signals, TRUSTED) {}",
                     "Project:".bright_black(),
                     local_report.filters.len().to_string().yellow(),
                     "[OK]".green().bold()
@@ -378,19 +440,19 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             } else if fix_mode {
                 let _ = crate::guard::trust::trust_project(&cwd);
                 println!(
-                    "   {:<15} .omni/filters/ (TRUSTED) {}",
+                    "   {:<15} .omni/{dir_label}/ (TRUSTED) {}",
                     "Project:".bright_black(),
                     "[FIXED]".green().bold()
                 );
             } else {
                 println!(
-                    "   {:<15} .omni/filters/ ({} filters, NOT TRUSTED) {}",
+                    "   {:<15} .omni/{dir_label}/ ({} signals, NOT TRUSTED) {}",
                     "Project:".bright_black(),
                     local_report.filters.len().to_string().yellow(),
                     "[WARNING]".yellow().bold()
                 );
                 warnings.push(
-                    "Project filters found but not trusted. Run: `omni doctor --fix`.".to_string(),
+                    "Project signals found but not trusted. Run: `omni doctor --fix`.".to_string(),
                 );
                 all_ok = false;
             }
@@ -456,6 +518,199 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             .bright_black()
             .bold()
     );
+
+    Ok(())
+}
+
+fn run_test_filter(filter_name: &str) -> anyhow::Result<()> {
+    println!(
+        "\n {} Testing filter: {}\n",
+        "🔬".cyan(),
+        filter_name.bold()
+    );
+    let filters = crate::pipeline::toml_filter::load_all_filters();
+    let target = filters.into_iter().find(|f| f.name == filter_name);
+
+    match target {
+        Some(filter) => {
+            if filter.inline_tests.is_empty() {
+                println!(
+                    "  {} No inline tests defined for this filter.",
+                    "⚠".yellow()
+                );
+                return Ok(());
+            }
+
+            let mut passed = 0;
+            let total = filter.inline_tests.len();
+            for test in &filter.inline_tests {
+                let actual = filter.apply(&test.input);
+                if actual.trim() == test.expected.trim() {
+                    passed += 1;
+                    println!("  {} {} {}", "✓".green(), "PASS".green().bold(), test.name);
+                } else {
+                    println!("\n  {} {} {}", "✗".red(), "FAIL".red().bold(), test.name);
+                    println!("    {}", "Expected:".bright_black());
+                    for line in test.expected.lines() {
+                        println!("      {}", line.green());
+                    }
+                    println!("    {}", "Got:".bright_black());
+                    for line in actual.lines() {
+                        println!("      {}", line.red());
+                    }
+                    println!();
+                }
+            }
+
+            println!("\n  {} / {} tests passed.", passed, total);
+            if passed != total {
+                std::process::exit(1);
+            }
+        }
+        None => {
+            println!("  {} Filter '{}' not found.", "✗".red(), filter_name);
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn run_benchmark() -> anyhow::Result<()> {
+    println!("\n {} Benchmarking filters...\n", "⏱ ".cyan());
+    let filters = crate::pipeline::toml_filter::load_all_filters();
+
+    let mut slow_count = 0;
+    for filter in filters {
+        if filter.inline_tests.is_empty() {
+            continue;
+        }
+
+        let start = std::time::Instant::now();
+        for test in &filter.inline_tests {
+            let _ = filter.apply(&test.input);
+        }
+        let elapsed = start.elapsed();
+        let avg = elapsed.as_secs_f64() * 1000.0 / (filter.inline_tests.len() as f64);
+
+        if avg > 5.0 {
+            println!(
+                "  {} {} ({:.2}ms avg)",
+                "⚠".yellow(),
+                filter.name.yellow(),
+                avg
+            );
+            slow_count += 1;
+        } else {
+            println!(
+                "  {} {} ({:.2}ms avg)",
+                "✓".green(),
+                filter.name.green(),
+                avg
+            );
+        }
+    }
+
+    if slow_count > 0 {
+        println!("\n  Found {} slow filters (> 5ms).", slow_count);
+    } else {
+        println!("\n  All tested filters are fast!");
+    }
+
+    Ok(())
+}
+
+fn run_coverage() -> anyhow::Result<()> {
+    println!("\n {} Filter Coverage Analysis\n", "📊".cyan());
+
+    let store = Store::open()?;
+    let conn = store.conn.lock().unwrap();
+
+    // Find most frequent commands that are passing through unfiltered
+    let mut stmt = conn.prepare(
+        "SELECT command, COUNT(*) as count 
+         FROM distillations 
+         WHERE route = 'passthrough' 
+         GROUP BY command 
+         ORDER BY count DESC 
+         LIMIT 10",
+    )?;
+
+    let iter = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+
+    let mut found = false;
+    for row in iter.flatten() {
+        if !found {
+            println!("  Top unfiltered commands (candidates for new filters):\n");
+            found = true;
+        }
+        println!(
+            "  {:<5} {}",
+            row.1.to_string().yellow(),
+            row.0.bright_black()
+        );
+    }
+
+    if !found {
+        println!(
+            "  {} Excellent! No highly-repeated unfiltered commands found.",
+            "✓".green()
+        );
+    }
+
+    Ok(())
+}
+
+fn run_validate(path_str: &str) -> anyhow::Result<()> {
+    println!(
+        "\n {} Validating TOML filter: {}\n",
+        "🔍".cyan(),
+        path_str.bold()
+    );
+    let path = std::path::Path::new(path_str);
+
+    if !path.exists() {
+        println!("  {} File not found.", "✗".red());
+        std::process::exit(1);
+    }
+
+    let report = crate::pipeline::toml_filter::load_from_file(path)?;
+
+    let mut ok = true;
+    for warning in report.warnings {
+        println!("  {} {}", "⚠".yellow(), warning);
+        ok = false;
+    }
+
+    for filter in report.filters {
+        println!("  {} Parsed filter '{}'", "✓".green(), filter.name);
+
+        let test_report =
+            crate::pipeline::toml_filter::run_inline_tests(std::slice::from_ref(&filter));
+        if !test_report.failures.is_empty() {
+            println!("    {} Inline tests failed:", "✗".red());
+            for f in test_report.failures {
+                println!("      {}", f.bright_black());
+            }
+            ok = false;
+        } else if filter.inline_tests.is_empty() {
+            println!("    {} No inline tests found.", "⚠".yellow());
+        } else {
+            println!(
+                "    {} All {} inline tests passed.",
+                "✓".green(),
+                test_report.passes
+            );
+        }
+    }
+
+    if !ok {
+        println!("\n  {} Validation failed.", "✗".red());
+        std::process::exit(1);
+    } else {
+        println!("\n  {} File is valid and ready.", "✓".green().bold());
+    }
 
     Ok(())
 }

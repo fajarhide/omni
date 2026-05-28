@@ -68,7 +68,7 @@ impl OmniServer {
             ));
         }
 
-        // 3. If apply=true: write to ~/.omni/filters/learned.toml
+        // 3. If apply=true: write to ~/.omni/signals/learned.toml
         if apply {
             let filter_name = format!("learned_{}", chrono::Utc::now().timestamp_micros());
             let _toml_content = generate_toml(&candidates, &filter_name, None);
@@ -113,6 +113,7 @@ impl OmniServer {
             &text,
             crate::pipeline::SegmentationMode::Line,
             Some(&current_session),
+            "omni_density",
         );
 
         let mut critical_lines = 0;
@@ -138,6 +139,85 @@ impl OmniServer {
             "Signal analysis:\n  Critical: {} lines\n  Important: {} lines\n  Context: {} lines\n  Noise: {} lines\n  Est. reduction: {:.1}%",
             critical_lines, important_lines, context_lines, noise_lines, pct
         )
+    }
+
+    #[tool(
+        name = "omni_query",
+        description = "Query distillation history using OmniQL. Supported queries: 'errors in last N commands', 'warnings from <tool>', 'context for <file_path>', 'timeline today'"
+    )]
+    pub async fn omni_query(&self, #[tool(param)] query: String) -> String {
+        match self.store.execute_omni_query(&query) {
+            Ok(result) => serde_json::to_string_pretty(&result)
+                .unwrap_or_else(|e| format!("Serialization error: {}", e)),
+            Err(e) => format!("OmniQL error: {}", e),
+        }
+    }
+
+    #[tool(
+        name = "omni_recall",
+        description = "Recall cross-session error patterns for a specific tool (e.g., cargo, npm) and what fixed them"
+    )]
+    pub async fn omni_recall(&self, #[tool(param)] tool: String) -> String {
+        let patterns = self.store.get_patterns(Some(&tool), 5);
+        if patterns.is_empty() {
+            return format!("No recurring patterns found for tool: {}", tool);
+        }
+
+        let mut report = format!(
+            "Found {} recurring patterns for {}:\n\n",
+            patterns.len(),
+            tool
+        );
+        for (i, p) in patterns.iter().enumerate() {
+            report.push_str(&format!(
+                "[{}] Seen {}x | Status: {}\n",
+                i + 1,
+                p.occurrence_count,
+                if p.was_resolved { "RESOLVED" } else { "ACTIVE" }
+            ));
+
+            let lines: Vec<&str> = p.pattern_text.lines().collect();
+            for line in lines.iter().take(3) {
+                report.push_str(&format!("  {}\n", line));
+            }
+            if lines.len() > 3 {
+                report.push_str("  ...\n");
+            }
+            if p.was_resolved && !p.resolution_hint.is_empty() {
+                report.push_str(&format!("  Fix hint: {}\n", p.resolution_hint));
+            }
+            report.push('\n');
+        }
+        report
+    }
+
+    #[tool(
+        name = "omni_insight",
+        description = "Show the top recurring issues and error patterns across the entire project"
+    )]
+    pub async fn omni_insight(&self) -> String {
+        let patterns = self.store.get_top_insights(5);
+        if patterns.is_empty() {
+            return "No recurring issues detected yet.".to_string();
+        }
+
+        let mut report = format!("Top {} recurring issues:\n\n", patterns.len());
+        for (i, p) in patterns.iter().enumerate() {
+            report.push_str(&format!(
+                "[{}] Tool: {} | Seen {}x | Status: {}\n",
+                i + 1,
+                p.tool_family,
+                p.occurrence_count,
+                if p.was_resolved { "RESOLVED" } else { "ACTIVE" }
+            ));
+            let mut pattern_preview = p.pattern_text.replace('\n', " ");
+            if pattern_preview.len() > 100 {
+                pattern_preview.truncate(97);
+                pattern_preview.push_str("...");
+            }
+            report.push_str(&format!("  Pattern: {}\n\n", pattern_preview));
+        }
+        report
     }
 
     #[tool(
@@ -455,7 +535,7 @@ impl OmniServer {
                 p.confidence
             ));
         }
-        out.push_str("\nSuggested TOML Filter (add to ~/.omni/filters/user.toml):\n\n```toml\n");
+        out.push_str("\nSuggested TOML Signal (add to ~/.omni/signals/user.toml):\n\n```toml\n");
         out.push_str(&toml_snippet);
         out.push_str("\n```");
         out
@@ -463,7 +543,7 @@ impl OmniServer {
 
     #[tool(
         name = "omni_budget",
-        description = "Show estimated token budget usage and compression efficiency for this session"
+        description = "Show token budget usage and compression efficiency for this session"
     )]
     pub async fn omni_budget(&self) -> String {
         let session = match self.session.lock() {
@@ -471,21 +551,47 @@ impl OmniServer {
             Err(_) => return "Error: session lock failed".to_string(),
         };
 
-        let total_in = session.cumulative_input_bytes;
-        let total_out = session.cumulative_output_bytes;
-        let tokens_consumed = total_in / 4;
-        let tokens_saved = session.estimated_tokens_saved();
-        let overall_pct = if total_in > 0 {
-            (1.0 - total_out as f64 / total_in as f64) * 100.0
+        let raw_tokens = session.cumulative_raw_tokens;
+        let filtered_tokens = session.cumulative_filtered_tokens;
+        let tokens_saved = session.actual_tokens_saved();
+
+        let overall_pct = if raw_tokens > 0 {
+            (1.0 - filtered_tokens as f64 / raw_tokens as f64) * 100.0
+        } else if session.cumulative_input_bytes > 0 {
+            (1.0 - session.cumulative_output_bytes as f64 / session.cumulative_input_bytes as f64)
+                * 100.0
         } else {
             0.0
         };
 
+        let is_actual = raw_tokens > 0;
+        let method = if is_actual { "actual" } else { "estimated" };
+
+        // Fallback for legacy
+        let display_raw = if is_actual {
+            raw_tokens
+        } else {
+            session.cumulative_input_bytes / 4
+        };
+        let display_filtered = if is_actual {
+            filtered_tokens
+        } else {
+            session.cumulative_output_bytes / 4
+        };
+        let display_saved = if is_actual {
+            tokens_saved
+        } else {
+            session.estimated_tokens_saved()
+        };
+
+        let tilde = if is_actual { "" } else { "~" };
+
         format!(
-            "OMNI Token Budget Estimate:\n\
-             \n  Raw processed:   ~{tokens_consumed} tokens\
-             \n  After OMNI:      ~{} tokens\
-             \n  Saved:           ~{tokens_saved} tokens ({overall_pct:.1}% reduction)\
+            "OMNI Token Budget Report:\n\
+             \n  Measurement Method: {}\n\
+             \n  Raw processed:   {}{display_raw} tokens\
+             \n  After OMNI:      {}{display_filtered} tokens\
+             \n  Saved:           {}{display_saved} tokens ({overall_pct:.1}% reduction)\
              \n\
              \n  Commands processed: {}\
              \n  Active errors:      {}\
@@ -493,7 +599,10 @@ impl OmniServer {
              \n\
              \nTip: Call omni_history() for per-command breakdown.\
              \n     Call omni_learn(noisy_output) to improve future compression.",
-            (total_out / 4),
+            method,
+            tilde,
+            tilde,
+            tilde,
             session.command_count,
             session.active_errors.len(),
             session.hot_files.len(),

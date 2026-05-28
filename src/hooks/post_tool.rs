@@ -148,8 +148,12 @@ pub fn process_payload(
         let profile = crate::pipeline::registry::resolve_profile_for_chain(clean_command);
 
         // 1. Initial Scoring (to evaluate learning/stats)
-        let segments =
-            scorer::score_segments(&content, profile.segmentation, session_guard.as_deref());
+        let segments = scorer::score_segments(
+            &content,
+            profile.segmentation,
+            session_guard.as_deref(),
+            clean_command,
+        );
 
         // 2. Collapse repetitive lines SEBELUM distill
         let collapse_result = collapse::collapse(&content, &profile.collapse);
@@ -166,6 +170,7 @@ pub fn process_payload(
                 &effective_input,
                 profile.segmentation,
                 session_guard.as_deref(),
+                clean_command,
             )
         } else {
             segments
@@ -197,7 +202,8 @@ pub fn process_payload(
 
     // Re-check segments from content for metadata/learning
     let profile = crate::pipeline::registry::resolve_profile(clean_command);
-    let check_segments = scorer::score_segments(&content, profile.segmentation, None);
+    let check_segments =
+        scorer::score_segments(&content, profile.segmentation, None, clean_command);
 
     let noise_count = check_segments
         .iter()
@@ -322,6 +328,9 @@ pub fn process_payload(
     let latency_ms = start.elapsed().as_millis() as u32;
 
     let kept = check_segments.len() - noise_count;
+    let raw_tokens = crate::util::token_estimate::count_tokens(&content, "cl100k_base");
+    let filtered_tokens = crate::util::token_estimate::count_tokens(&final_out, "cl100k_base");
+
     let result = DistillResult {
         output: final_out.clone(),
         route: route.clone(),
@@ -339,6 +348,8 @@ pub fn process_payload(
         segments_kept: kept,
         segments_dropped: noise_count,
         collapse_savings: collapse_savings_data,
+        raw_tokens,
+        filtered_tokens,
     };
 
     if let Some(ref s) = store {
@@ -821,10 +832,10 @@ mod tests {
     #[test]
     fn processes_opencode_payload_format() {
         let input = r#"{"type":"tool_result","tool":"shell","output":"pytest\n5 passed in 2.1s","command":"pytest"}"#;
-        // OpenCode format harus diproses sama seperti Claude Code
+        // OpenCode format should be processed same as Claude Code
         let _out = process_payload(input, None, None);
-        // Jika content < threshold, bisa None — tapi jangan crash
-        // Test ini memverifikasi tidak ada panic
+        // If content < threshold, can be None — but don't crash
+        // This test verifies there is no panic
     }
 
     #[test]
@@ -836,11 +847,11 @@ mod tests {
             "result": long_output
         });
         let out = process_payload(&input.to_string(), None, None);
-        // Harus ada output (bukan None) untuk input panjang
-        // (cargo build dengan 200 baris harusnya di-distilasi)
+        // Should have output (not None) for long input
+        // (cargo build with 200 lines should be distilled)
         assert!(
             out.is_some(),
-            "Codex format harus di-distilasi jika output panjang"
+            "Codex format should be distilled if output is long"
         );
     }
 
@@ -857,7 +868,7 @@ mod tests {
         let out = process_payload(&input.to_string(), None, None);
         assert!(
             out.is_some(),
-            "Claude Code format harus tetap bekerja setelah refactor"
+            "Claude Code format should still work after refactor"
         );
     }
 

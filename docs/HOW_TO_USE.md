@@ -78,7 +78,7 @@ flowchart TD
     Learn --> Custom
 
     subgraph Custom [Advanced: Custom Filters]
-        Write["Write .toml filter\nin ~/.omni/filters/"] --> Verify["omni learn --verify"]
+        Write["Write .toml signal\nin ~/.omni/signals/"] --> Verify["omni learn --verify"]
     end
 ```
 
@@ -421,7 +421,7 @@ cat build.log | omni learn --apply
 ```
 
 This will:
-- Create (or append to) `~/.omni/filters/learned.toml`.
+- Create (or append to) `~/.omni/signals/learned.toml`.
 - Assign a unique ID to the filter (e.g., `learned_1711234567`).
 - Include **inline tests** based on the actual log data to ensure the filter works as expected.
 
@@ -443,8 +443,8 @@ OMNI supports user-defined TOML filters for distilling output from any command â
 | Directory | Priority | Description |
 |---|---|---|
 | **Built-in (embedded)** | Lowest | Compiled into the OMNI binary |
-| **User** (`~/.omni/filters/`) | Medium | Personal/User-global filters |
-| **Project** (`.omni/filters/`) | Highest | Project-specific (requires `omni trust`) |
+| **User** (`~/.omni/signals/`) | Medium | Personal/User-global signals |
+| **Project** (`.omni/signals/`) | Highest | Project-specific (requires `omni trust`) |
 
 ### Hierarchy Logic
 1. **Project-local filters** override User filters.
@@ -452,7 +452,7 @@ OMNI supports user-defined TOML filters for distilling output from any command â
 3. **Built-in filters** are the fallback for standard commands.
 
 > [!NOTE]
-> **Built-in** filters are not visible in the filesystem because they are compiled into the binary (`embedded`). If you want to modify them, create a file with the same name in `~/.omni/filters/` to override their behavior.
+> **Built-in** signals are not visible in the filesystem because they are compiled into the binary (`embedded`). If you want to modify them, create a file with the same name in `~/.omni/signals/` to override their behavior.
 
 ### Basic Structure
 
@@ -719,18 +719,18 @@ omni learn --dry-run < output.log
 omni learn --apply < output.log
 ```
 
-### Project-local Filters (.omni/filters/)
+### Project-local Signals (.omni/signals/)
 
-This filter level is extremely useful for teams or repositories that have specific internal tooling. By placing filters inside the project folder, you ensure that the entire team (and their AI agents) gets consistent signal distillation.
+This signal level is extremely useful for teams or repositories that have specific internal tooling. By placing signals inside the project folder, you ensure that the entire team (and their AI agents) gets consistent signal distillation.
 
 ### Usage Guide (Step-by-Step)
 
-1. **Create Directory**: In your project root, create the `.omni/filters/` directory.
+1. **Create Directory**: In your project root, create the `.omni/signals/` directory.
    ```bash
-   mkdir -p .omni/filters
+   mkdir -p .omni/signals
    ```
 
-2. **Add Filter**: Create a TOML file, for example `.omni/filters/setup-backend.toml`.
+2. **Add Signal**: Create a TOML file, for example `.omni/signals/setup-backend.toml`.
    ```toml
    schema_version = 1
    [filters.setup-backend]
@@ -744,13 +744,13 @@ This filter level is extremely useful for teams or repositories that have specif
    omni trust
    ```
 
-### Benefits of Project Filters
-- **Checked into Git**: These filters can be added to the repository (`git add .omni/filters`), ensuring anyone who clones the repo immediately gets the same token savings.
+### Benefits of Project Signals
+- **Checked into Git**: These signals can be added to the repository (`git add .omni/signals`), ensuring anyone who clones the repo immediately gets the same token savings.
 - **Custom Signalling**: Perfect for internal scripts that produce noisy output but only contain small bits of information relevant to the AI.
 
-### Trust for Project Filters
+### Trust for Project Signals
 
-Project-local filters (`.omni/filters/`) will not be loaded until you explicitly "trust" the project. This is a security feature to prevent malicious filters from untrusted repositories.
+Project-local signals (`.omni/signals/`) will not be loaded until you explicitly "trust" the project. This is a security feature to prevent malicious signals from untrusted repositories.
 
 ```bash
 omni trust    # Review and approve filters in the current project

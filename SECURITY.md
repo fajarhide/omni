@@ -36,7 +36,7 @@ We will acknowledge your report within 48 hours and provide a timeline for a fix
 
 ## 1. Project Trust Boundary
 
-OMNI will **not** load project-local configurations or custom TOML filters (inside `.omni/filters/`) until you explicitly trust the project. This prevents a malicious repository from injecting custom filter rules that could hide important output from your AI agent.
+OMNI will **not** load project-local configurations or custom TOML signals (inside `.omni/signals/`) until you explicitly trust the project. This prevents a malicious repository from injecting custom signal rules that could hide important output from your AI agent.
 
 ### How it Works
 
@@ -44,8 +44,8 @@ OMNI uses `omni_config.json` as the trust anchor for a repository.
 
 ```
  Your Project/
- ├── omni_config.json   ← OMNI sees this but WON'T load filters unless trusted
- ├── .omni/filters/     ← Local custom rules
+ ├── omni_config.json   ← OMNI sees this but WON'T load signals unless trusted
+ ├── .omni/signals/     ← Local custom rules
  └── ...
 
  ~/.omni/
@@ -54,8 +54,8 @@ OMNI uses `omni_config.json` as the trust anchor for a repository.
 
 1. OMNI detects project-local configurations.
 2. It checks `~/.omni/trusted-projects.json` for the project path **and** a matching SHA-256 hash of the `omni_config.json` anchor file.
-3. If not found or hash doesn't match → **local configs & filters are skipped**, OMNI logs a warning.
-4. If trusted and hash matches → configs and local `.omni/filters/` are loaded normally.
+3. If not found or hash doesn't match → **local configs & signals are skipped**, OMNI logs a warning.
+4. If trusted and hash matches → configs and local `.omni/signals/` are loaded normally.
 
 ### Quick Start
 
@@ -77,7 +77,7 @@ omni trust
 Run it again to re-verify and update the hash.
 
 > [!IMPORTANT]
-> If you modify `omni_config.json` after trusting, OMNI will **stop loading project filters** until you re-trust. This protects against silent repo tampering.
+> If you modify `omni_config.json` after trusting, OMNI will **stop loading project signals** until you re-trust. This protects against silent repo tampering.
 
 ### Trust Flow
 

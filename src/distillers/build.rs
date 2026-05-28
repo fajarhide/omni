@@ -165,8 +165,12 @@ src/auth.py:67: error: Name \"user_id\" is not defined
 src/models.py:15: note: See https://mypy.rtfd.io for help
 Found 2 errors in 2 files (checked 5 source files)
 ";
-        let segments =
-            scorer::score_segments(mypy_output, crate::pipeline::SegmentationMode::Line, None);
+        let segments = scorer::score_segments(
+            mypy_output,
+            crate::pipeline::SegmentationMode::Line,
+            None,
+            "mypy",
+        );
         let output = BuildDistiller.distill(&segments, mypy_output, None);
         assert!(
             output.contains("errors"),
@@ -193,8 +197,12 @@ src/main.py:15:80: E501 Line too long (92 > 79 characters)
 src/utils.py:8:1: F401 `os` imported but unused
 Found 3 errors.
 ";
-        let segments =
-            scorer::score_segments(ruff_output, crate::pipeline::SegmentationMode::Line, None);
+        let segments = scorer::score_segments(
+            ruff_output,
+            crate::pipeline::SegmentationMode::Line,
+            None,
+            "ruff",
+        );
         let output = BuildDistiller.distill(&segments, ruff_output, None);
         assert!(
             output.contains("main.py:15"),

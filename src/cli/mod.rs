@@ -4,6 +4,8 @@ pub mod exec;
 pub mod init;
 pub mod learn;
 pub mod optimize;
+pub mod patterns;
+pub mod query;
 pub mod reset;
 pub mod rewind;
 pub mod rewrite;

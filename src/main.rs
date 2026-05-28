@@ -101,6 +101,11 @@ fn print_help() {
         "rewind".cyan()
     );
     println!(
+        "  {: <12} Query distillation history (OmniQL)",
+        "query".cyan()
+    );
+    println!("  {: <12} View recurring error patterns", "patterns".cyan());
+    println!(
         "  {: <12} Run self-optimizing loop on traces",
         "optimize".cyan()
     );
@@ -295,6 +300,32 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for rewind: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "query" => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::query::run_query(&args, &store) {
+                            eprintln!("[omni] Query error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for query: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "patterns" => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::patterns::run_patterns(&args, &store) {
+                            eprintln!("[omni] Patterns error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for patterns: {}", e);
                         std::process::exit(1);
                     }
                 },

@@ -10,7 +10,7 @@ pub fn score_with_command(
     let profile = registry::resolve_profile(command);
 
     // 2. Score segments based on segmentation mode
-    score_segments(input, profile.segmentation, session)
+    score_segments(input, profile.segmentation, session, command)
 }
 
 fn contains_any(trimmed: &str, keywords: &[&str]) -> bool {
@@ -157,29 +157,30 @@ pub fn score_segments(
     input: &str,
     mode: SegmentationMode,
     session: Option<&SessionState>,
+    command: &str,
 ) -> Vec<OutputSegment> {
     let mut segments = Vec::new();
+    let tool_family = command.split_whitespace().next();
 
     match mode {
         SegmentationMode::GitHunk => {
             let hunks = split_into_hunks(input);
             for (content, start_line, end_line) in hunks {
-                let tier = classify_line(&content);
-                let base_score = match tier {
-                    SignalTier::Critical => 0.9,
-                    SignalTier::Important => 0.7,
-                    SignalTier::Context => 0.4,
-                    SignalTier::Noise => 0.05,
-                };
+                let lines: Vec<&str> = content.lines().collect();
+                let (class, score) = crate::pipeline::semantic::classify_block(&lines, tool_family);
                 let context_score = session.map(|s| s.context_boost(&content)).unwrap_or(0.0);
 
-                segments.push(OutputSegment {
-                    content,
-                    tier,
-                    base_score,
-                    context_score,
-                    line_range: (start_line, end_line),
-                });
+                let block = crate::pipeline::semantic::SemanticBlock::new(
+                    class,
+                    lines.into_iter().map(String::from).collect(),
+                    score,
+                    tool_family.map(String::from),
+                    (start_line, end_line),
+                );
+
+                let mut seg: OutputSegment = block.into();
+                seg.context_score = context_score;
+                segments.push(seg);
             }
         }
         SegmentationMode::TestGroup => {
@@ -196,24 +197,24 @@ pub fn score_segments(
                     || line.contains("test result:")
                 {
                     if !current_chunk.is_empty() {
-                        let tier = classify_line(&current_chunk);
-                        let base_score = match tier {
-                            SignalTier::Critical => 0.9,
-                            SignalTier::Important => 0.7,
-                            SignalTier::Context => 0.4,
-                            SignalTier::Noise => 0.05,
-                        };
+                        let lines: Vec<&str> = current_chunk.lines().collect();
+                        let (class, score) =
+                            crate::pipeline::semantic::classify_block(&lines, tool_family);
                         let context_score = session
                             .map(|s| s.context_boost(&current_chunk))
                             .unwrap_or(0.0);
 
-                        segments.push(OutputSegment {
-                            content: current_chunk.clone(),
-                            tier,
-                            base_score,
-                            context_score,
-                            line_range: (start_line, line_num - 1),
-                        });
+                        let block = crate::pipeline::semantic::SemanticBlock::new(
+                            class,
+                            lines.into_iter().map(String::from).collect(),
+                            score,
+                            tool_family.map(String::from),
+                            (start_line, line_num - 1),
+                        );
+
+                        let mut seg: OutputSegment = block.into();
+                        seg.context_score = context_score;
+                        segments.push(seg);
                         current_chunk.clear();
                     }
                     start_line = line_num;
@@ -226,46 +227,43 @@ pub fn score_segments(
             }
 
             if !current_chunk.is_empty() {
-                let tier = classify_line(&current_chunk);
-                let base_score = match tier {
-                    SignalTier::Critical => 0.9,
-                    SignalTier::Important => 0.7,
-                    SignalTier::Context => 0.4,
-                    SignalTier::Noise => 0.05,
-                };
+                let lines: Vec<&str> = current_chunk.lines().collect();
+                let (class, score) = crate::pipeline::semantic::classify_block(&lines, tool_family);
                 let context_score = session
                     .map(|s| s.context_boost(&current_chunk))
                     .unwrap_or(0.0);
 
-                segments.push(OutputSegment {
-                    content: current_chunk,
-                    tier,
-                    base_score,
-                    context_score,
-                    line_range: (start_line, line_num - 1),
-                });
+                let block = crate::pipeline::semantic::SemanticBlock::new(
+                    class,
+                    lines.into_iter().map(String::from).collect(),
+                    score,
+                    tool_family.map(String::from),
+                    (start_line, line_num - 1),
+                );
+
+                let mut seg: OutputSegment = block.into();
+                seg.context_score = context_score;
+                segments.push(seg);
             }
         }
         SegmentationMode::Line => {
             // Segment per line
             for (line_num, line) in (1..).zip(input.lines()) {
-                let tier = classify_line(line);
-
-                let base_score = match tier {
-                    SignalTier::Critical => 0.9,
-                    SignalTier::Important => 0.7,
-                    SignalTier::Context => 0.4,
-                    SignalTier::Noise => 0.05,
-                };
+                let lines = vec![line];
+                let (class, score) = crate::pipeline::semantic::classify_block(&lines, tool_family);
                 let context_score = session.map(|s| s.context_boost(line)).unwrap_or(0.0);
 
-                segments.push(OutputSegment {
-                    content: line.to_string(),
-                    tier,
-                    base_score,
-                    context_score,
-                    line_range: (line_num, line_num),
-                });
+                let block = crate::pipeline::semantic::SemanticBlock::new(
+                    class,
+                    vec![line.to_string()],
+                    score,
+                    tool_family.map(String::from),
+                    (line_num, line_num),
+                );
+
+                let mut seg: OutputSegment = block.into();
+                seg.context_score = context_score;
+                segments.push(seg);
             }
         }
     }
@@ -368,7 +366,7 @@ mod tests {
     #[test]
     fn scores_segments_returns_correct_count() {
         let input = "line 1\nline 2\nline 3";
-        let segments = score_segments(input, SegmentationMode::Line, None);
+        let segments = score_segments(input, SegmentationMode::Line, None, "test");
         assert_eq!(segments.len(), 3);
         assert_eq!(segments[0].line_range, (1, 1));
         assert_eq!(segments[2].line_range, (3, 3));
@@ -377,7 +375,7 @@ mod tests {
     #[test]
     fn scores_segments_git_diff_split_by_hunk() {
         let diff = "diff --git a/file.txt b/file.txt\nindex 1234..5678\n@@ -1,3 +1,4 @@\n line1\n line2\n@@ -10,2 +11,3 @@\n line10\n line11";
-        let segments = score_segments(diff, SegmentationMode::GitHunk, None);
+        let segments = score_segments(diff, SegmentationMode::GitHunk, None, "test");
 
         assert_eq!(segments.len(), 3);
         // Header
@@ -407,7 +405,7 @@ mod tests {
     #[test]
     fn test_positional_boost_line_mode() {
         let input = "normal line\nerror[E001]: bad\n  --> src/main.rs:10\n    | code\n    | more code\nnoise line\nnoise line\nback to normal";
-        let segments = score_segments(input, SegmentationMode::Line, None);
+        let segments = score_segments(input, SegmentationMode::Line, None, "test");
         // segment 0: normal
         assert_eq!(segments[0].tier, SignalTier::Context);
         // segment 1: error
@@ -425,7 +423,7 @@ mod tests {
     #[test]
     fn test_positional_boost_applies_to_git_hunk_mode() {
         let input = "diff --git a/file b/file\n@@ -1,3 +1,4 @@\n error[E0308]: mismatched types\n@@ -10,2 +11,3 @@\n   --> src/main.rs:42";
-        let segments = score_segments(input, SegmentationMode::GitHunk, None);
+        let segments = score_segments(input, SegmentationMode::GitHunk, None, "test");
 
         // Header
         assert_eq!(segments[0].tier, SignalTier::Important); // "diff --git"
@@ -438,7 +436,7 @@ mod tests {
     #[test]
     fn test_positional_boost_applies_to_test_group_mode() {
         let input = "test result: ok\n--- FAIL: TestFoo\npanicked at\nat tests/file.rs:55\n--- PASS: TestBar";
-        let segments = score_segments(input, SegmentationMode::TestGroup, None);
+        let segments = score_segments(input, SegmentationMode::TestGroup, None, "test");
 
         // 0: test result: ok
         assert_eq!(segments[0].tier, SignalTier::Important);
@@ -448,7 +446,7 @@ mod tests {
 
         // Let's test with SegmentationMode::Line as well for the backtrace
         let input2 = "test result: FAILED\npanicked at something\njust some context\nnoise line";
-        let segments2 = score_segments(input2, SegmentationMode::Line, None);
+        let segments2 = score_segments(input2, SegmentationMode::Line, None, "test");
         assert_eq!(segments2[0].tier, SignalTier::Critical); // test result: FAILED
         assert_eq!(segments2[1].tier, SignalTier::Important); // panicked at (Context boosted to Important)
         assert_eq!(segments2[2].tier, SignalTier::Important); // boosted
@@ -456,7 +454,7 @@ mod tests {
 
         // For TestGroup, let's verify if a group without Critical/Important is boosted
         let input3 = "--- FAIL: TestFoo\ntest something else\nContext line";
-        let segments3 = score_segments(input3, SegmentationMode::TestGroup, None);
+        let segments3 = score_segments(input3, SegmentationMode::TestGroup, None, "test");
         assert_eq!(segments3[0].tier, SignalTier::Critical); // FAIL chunk
         assert_eq!(segments3[1].tier, SignalTier::Important); // 'test something else' chunk gets boosted!
     }

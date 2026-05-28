@@ -125,7 +125,7 @@ pub fn detect_agent_id(agent: &AgentFormat) -> String {
     }
 }
 
-// ── CLAUDE CODE (existing format, harus tetap identik) ────────────────
+// ── CLAUDE CODE (existing format, should be removed after all agents are migrated) ────────────────
 fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInput> {
     #[derive(Deserialize)]
     struct ClaudeInput {

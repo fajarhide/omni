@@ -139,7 +139,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             if user_fails > 0 {
                 println!(
                     "\n{}",
-                    "TIP: Learned filters often fail if the noise pattern has changed. You can clear them by deleting ~/.omni/filters/learned.toml"
+                    "TIP: Learned signals often fail if the noise pattern has changed. You can clear them by deleting ~/.omni/signals/learned.toml (or ~/.omni/filters/learned.toml if using legacy path)"
                         .dimmed()
                 );
             }
