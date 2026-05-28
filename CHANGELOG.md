@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8-rc2] - 2026-05-28
+
+### Added
+- **Pi Agent Integration**: Added first-class support for Pi Agent integration with init, reset, and doctor support, including hooks, extension, and toggle functionality.
+- **VS Code MCP Initialization**: Introduced the `--vscode` flag to the `omni init` command for automatic VS Code MCP server configuration.
+- **Enhanced Token Metrics**: The `omni stats --detail` pipeline now accurately tracks and displays raw vs filtered token counts in a dedicated "Tokens Reduced" column, providing precise visibility into token savings.
+
+### Changed
+- **Semantic Classification Engine**: Refactored the core pipeline filtering system to utilize a semantic classification engine for segments with tool-aware scoring logic.
+- **Filter Configuration Layout**: Migrated filter definitions from the legacy `filters/` directory to structured `signals/tools/` and `signals/domains/` configurations.
+- **MCP Framework Upgrade**: Upgraded `rmcp` to `1.7.0`, migrating all MCP tool handlers to strongly-typed `Parameters<T>` structs and `JsonSchema` for robust, type-safe request routing.
+
+### Fixed
+- **Claude Code Async Hooks**: Ensured Claude emits an empty matcher for async hook entries to prevent stalling.
+- **Hermes Integration**: Fixed the detection logic for packaged Hermes OMNI plugins during `doctor` and initialization checks.
+
 ## [0.5.8-rc1] - 2026-05-08
 
 ### Added
