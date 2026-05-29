@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8-rc3] - 2026-05-29
+
+### Added
+- **Context Pressure Management**: Implemented multi-stage context pressure warnings (Normal, Warning, Critical) to proactively manage session token budgets.
+- **Critical File Pinning**: Added automatic context pinning for critical rule files (e.g., `.cursorrules`, `AGENTS.md`) during session compaction.
+- **File Re-read Guard**: Introduced preventive warnings and hot-file mutation protection to stop redundant reads of files already in context.
+- **Performance Documentation**: Added a comprehensive `docs/PERFOMANCE.md` showcase and updated all global `README.md` (and `i18n` translations) with actual ROI and noise-reduction benchmarks.
+- **AGENTS.md**: Established `AGENTS.md` to define multi-agent coordination rules, development gates, and context lifecycle management protocols.
+
+### Changed
+- **Pipeline Fail-Open Architecture**: Reinforced pipeline hooks (`pre_tool`, `post_tool`, `pre_compact`, `session_start`) with strict fail-open logic to ensure zero disruption to agent operations.
+- **Dependency Update**: Validated and integrated `rmcp` 1.7.0 updates using structured `Parameters<T>` and `JsonSchema` across the MCP integration.
+- **CLI Formatting**: Minor styling improvements to `omni stats` terminal output.
+
 ## [0.5.8-rc2] - 2026-05-28
 
 ### Added
