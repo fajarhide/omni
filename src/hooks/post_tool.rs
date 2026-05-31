@@ -136,7 +136,11 @@ pub fn process_payload(
 
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
-    let toml_match = toml_filters.iter().find(|f| f.matches(clean_command));
+    let toml_match = if clean_command.is_empty() {
+        None
+    } else {
+        toml_filters.iter().find(|f| f.matches(clean_command))
+    };
 
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
