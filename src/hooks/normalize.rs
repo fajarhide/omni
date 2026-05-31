@@ -205,6 +205,9 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
     struct PiInput {
         #[serde(rename = "toolName")]
         tool_name: Option<String>,
+        #[serde(rename = "toolInput")]
+        tool_input: Option<Value>,
+        command: Option<String>,
         #[serde(rename = "toolResponse")]
         tool_response: Option<PiToolResponse>,
     }
@@ -235,14 +238,43 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
 
     // Normalize tool name using OMNI's internal standard
     let normalized_name = normalize_tool_name(&tool_name);
+    let command = parsed
+        .command
+        .or_else(|| {
+            parsed
+                .tool_input
+                .as_ref()
+                .and_then(|input| extract_pi_command(&normalized_name, input))
+        })
+        .unwrap_or_default();
 
     Some(NormalizedInput {
         agent: AgentFormat::Pi,
         tool_name: normalized_name,
-        command: String::new(), // Pi doesn't provide the raw command separately
+        command,
         content,
         agent_id,
     })
+}
+
+fn extract_pi_command(tool_name: &str, input: &Value) -> Option<String> {
+    if let Some(s) = input.as_str() {
+        return Some(s.to_string());
+    }
+    let obj = input.as_object()?;
+    let keys: &[&str] = match tool_name {
+        "Bash" => &["command", "cmd", "script"],
+        "Read" => &["path", "file_path", "filePath"],
+        "LS" => &["path", "dir", "directory"],
+        "Grep" => &["pattern", "query", "path"],
+        "WebFetch" => &["url"],
+        _ => &["command", "path"],
+    };
+
+    keys.iter()
+        .filter_map(|key| obj.get(*key).and_then(Value::as_str))
+        .find(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 // ── OPENCODE ──────────────────────────────────────────────────────────

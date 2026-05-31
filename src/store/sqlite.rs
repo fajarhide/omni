@@ -112,7 +112,7 @@ impl Store {
     pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT CASE WHEN command != '' THEN command ELSE filter_name END as grp_name, COUNT(*), 
+            "SELECT CASE WHEN command != '' THEN command ELSE '[unknown command]' END as grp_name, COUNT(*),
                     COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0),
                     COALESCE(SUM(raw_tokens), 0), COALESCE(SUM(filtered_tokens), 0)
              FROM distillations WHERE ts >= ?1 GROUP BY grp_name ORDER BY COUNT(*) DESC"
@@ -894,14 +894,14 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT
-                command,
+                CASE WHEN command != '' THEN command ELSE '[unknown command]' END as command_name,
                 COALESCE(agent_id, 'unknown') as agent,
                 COUNT(*) as calls,
                 COALESCE(SUM(input_bytes), 0) as total_input,
                 COALESCE(SUM(output_bytes), 0) as total_output
             FROM distillations
-            WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
-            GROUP BY command, agent
+            WHERE ts >= ?1 AND command != '[pipe]'
+            GROUP BY command_name, agent
             ORDER BY calls DESC
             LIMIT ?2",
         )?;

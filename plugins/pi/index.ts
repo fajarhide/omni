@@ -150,6 +150,32 @@ function extractText(value: unknown): string {
   return "";
 }
 
+function toolInputForOmni(event: ToolResultEvent): unknown {
+  const obj = event as unknown as JsonObject;
+  return obj.toolInput ?? obj.input ?? obj.parameters ?? obj.args;
+}
+
+function commandFromToolInput(toolName: string, toolInput: unknown): string | undefined {
+  if (typeof toolInput === "string") return toolInput;
+  if (typeof toolInput !== "object" || toolInput === null) return undefined;
+
+  const input = toolInput as JsonObject;
+  const keysByTool: Record<string, string[]> = {
+    Bash: ["command", "cmd", "script"],
+    Read: ["path", "file_path", "filePath"],
+    LS: ["path", "dir", "directory"],
+    Grep: ["pattern", "query", "path"],
+    WebFetch: ["url"],
+  };
+
+  for (const key of keysByTool[toolName] ?? ["command", "path"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+
+  return undefined;
+}
+
 function toolResultPayload(event: ToolResultEvent): JsonObject {
   const text = (event as { content?: unknown[] }).content
     ?.map((c) => {
@@ -282,13 +308,19 @@ pi.on("session_start", async (event, ctx) => {
     const name = (event as { toolName: string }).toolName;
     if (EXCLUDE_TOOL_NAMES.has(name)) return undefined;
 
+    const toolName = toolNameForOmni(name);
+    const toolInput = toolInputForOmni(event);
+    const command = commandFromToolInput(toolName, toolInput);
+
     try {
       const out = await runOmni(
         "--post-hook",
         {
           hookEventName: "ToolResult",
           sessionId: sessionId(ctx),
-          toolName: toolNameForOmni(name),
+          toolName,
+          toolInput,
+          command,
           toolResponse: toolResultPayload(event),
           isError: !!(event as { isError?: boolean }).isError,
         },
