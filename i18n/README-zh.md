@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="../media/logo.png" alt="OMNI" width="250" />
+  <img src="../media/hero.svg" alt="OMNI" width="800" />
   
-  **更少的噪音。更多的信号。将您的AI Token消耗削减高达90%。**
+  **AI智能体的上下文操作系统。减少噪音，增加信号。将Token消耗降低高达90%。**
 
   [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
 
@@ -15,143 +15,162 @@
 
 <br/>
 
-> **OMNI** 是一个智能终端层，它在命令输出到达您的AI代理之前对其进行智能过滤和优先级排序。通过防止您的AI被嘈杂的输出弄糊涂，您可以更快地获得准确的答案，同时节省大量的Token成本。
+> **OMNI** 是一款高性能的**语义信号引擎**和**上下文操作系统**，它在终端输出到达您的AI智能体之前，智能地拦截、分析并提炼它们。它充当 shell 和 AI 之间的透明信号优化层，确保发送给模型的每个 token 都具有高价值、相关性强且无噪音。通过防止您的 AI 被嘈杂的输出所迷惑，您可以更快地获得准确的答案，同时节省大量的 token 成本。
 > 
-> *完全透明。一切尽在您的掌控之中。*
+> *完全透明。您始终掌控一切。*
 ---
 
 ## 目录
-- [问题：昂贵的Token与嘈杂的输出](#问题昂贵的token与嘈杂的输出)
+- [问题：上下文膨胀、昂贵的Token与嘈杂的输出](#问题上下文膨胀昂贵的token与嘈杂的输出)
 - [解决方案：Omni](#解决方案omni)
-- [设计理念](#设计理念)
-- [性能与使用案例](#性能与使用案例)
+- [理念](#理念)
+- [真实场景应用](#真实场景应用)
+- [性能与基准测试](#性能与基准测试)
 - [功能解析](#功能解析)
+- [幕后：Omni 是如何工作的](#幕后omni-是如何工作的)
 - [架构](#架构)
-- [快速开始与安装](#快速开始与安装)
-- [使用方法](#使用方法)
+- [快速入门与安装](#快速入门与安装)
+- [如何使用](#如何使用)
   - [多智能体支持与集成](#多智能体支持与集成)
   - [文档索引](#文档索引)
-- [搭配 Heimsense 效果更佳](#搭配-heimsense-效果更佳)
+- [与 Heimsense 结合使用效果更好](#与-heimsense-结合使用效果更好)
 - [贡献与许可证](#贡献与许可证)
 
 ---
 
-## 问题：昂贵的Token与嘈杂的输出
+## 问题：上下文膨胀、昂贵的Token与嘈杂的输出
 
-当您在终端中使用自主AI代理（例如 Claude Code）时，它们会读取*所有内容*。一个简单的 `git diff`、`npm install` 或 `cargo test` 命令就能轻易将10,000到25,000个Token的无用终端噪音丢入您AI的上下文中。
+当您在终端中使用自主 AI 智能体（如 Claude Code 或 Cursor）时，它们会读取*所有内容*。一个简单的 `git diff`、`npm install` 或 `cargo test` 命令就能轻易将 10,000 到 25,000 个无用的终端噪音 token 倾倒进您的 AI 上下文中。
 
 这导致了三个巨大的问题：
-1. **极其昂贵**：您为那些垃圾输出的每一个Token支付了真金白银。
-2. **让AI变“笨”**：关键错误被掩埋在数兆字节的警告日志和加载条之下，迷惑了AI并削弱了它的推理能力。
-3. **模型锁定**：高级代理框架迫使您使用它们最昂贵的旗舰模型，仅仅是为了拥有一个足够大的上下文窗口来处理所有这些噪音。
+1. **非常昂贵**：您为那些垃圾输出的每一个 token 支付真金白银。
+2. **让 AI 变“笨”**：关键错误被掩埋在数兆字节的警告日志和加载条之下，使 AI 感到困惑并削弱其推理能力。
+3. **模型锁定**：高级智能体框架迫使您使用它们最昂贵的旗舰模型，仅仅是为了拥有一个足够大的上下文窗口来处理所有这些噪音。
+4. **Token 感知不足的执行**：智能体缺乏对 token 成本和输出的感知，导致不必要的消耗。
+5. **上下文膨胀**：终端输出的数量扰乱了 AI 的上下文，降低了专注度和准确性。
 
 ## 解决方案：Omni
 
-我构建Omni是因为我想在自己的工作流程中每天高效、廉价地运行AI代理。
+我构建 Omni 是因为我希望在自己的工作流程中每天高效且廉价地运行 AI 智能体。
 
-**Omni 充当了您的终端和AI之间完美的过滤器。**
+**Omni 充当您的终端和您的 AI 之间的完美过滤器。**
 
-**结果呢？** 您可以在超高级框架上运行您的AI代理，并为其提供*零噪音*。因为AI只被提供高度聚焦、直击要害的上下文，即使是平价或普通的模型也能表现得与昂贵的旗舰模型一样出色，因为它们永远不会被垃圾数据分散注意力。
+**结果呢？** 您可以在超高级框架上运行您的 AI 智能体并向其输入*零噪音*。因为 AI 只被提供高度集中、直奔主题的上下文，即使是价格合理的普通模型也能表现出与昂贵的旗舰模型相当的性能，因为它们永远不会被垃圾数据分散注意力。
 
-我的终极热情不是为了将其货币化——而是为了智能体AI时代构建终极开源工具带。通过积极地节省Token成本，我今天就可以稳健且高性价比地开发软件，你也可以做到。
+我的终极热情不是将它货币化——而是为 Agentic AI 时代构建终极的开源工具带。通过积极节省 token 成本，我今天可以稳健且经济高效地开发软件，您也可以。
 
----
-
-## 设计理念
-
-OMNI 的诞生不仅仅是为了“削减上下文”或“节省Token”——这些只是令人开心的副作用。OMNI背后的真正理念是 **上下文质量（Context Quality）**。
-
-像Claude这样的AI代理，其聪明程度取决于您提供给它的上下文。当您用以兆字节计的依赖项日志或加载条淹没它们时，您就迫使它们在垃圾中筛选以寻找实际问题。这会稀释它们的推理，并导致回复质量下降或毫无帮助。
-
-**OMNI的目标是向您的AI输入纯净、高密度的信号。** 这意味着只抓取对Claude真正重要和有意义的上下文。我们清理了AI不需要的噪音，这意味着：
-1. 自动地，您使用的Token大大减少。
-2. AI回复的**质量显著提高**，因为它的上下文窗口像激光一样聚焦于真正的问题。
-
-**尝试一周吧。** 感受一下当您的AI以纯净信号而非原始终端噪音为食时，其推理质量和速度的区别。
+上下文既昂贵又嘈杂，Omni 在此修复它。通过优化上下文，Omni 使 AI 智能体更高效、更具成本效益且易于使用。这是通过减少发送到 AI 智能体的上下文数量来实现的，这反过来又减少了生成响应所需的处理时间和内存数量。
 
 ---
 
-## 性能与用例
+## 理念
+
+OMNI 的构建不仅仅是为了“削减上下文”或“节省 token”——这些只是令人高兴的副作用。OMNI 背后的真正理念是 **上下文质量**。
+
+像 Claude 这样的 AI 智能体只有在您提供给它们的上下文时才聪明。当您用几兆字节的依赖项日志或加载条淹没它们时，您迫使它们在垃圾中筛选以寻找实际问题。这削弱了它们的推理能力，并导致退化或无用的响应。
+
+**OMNI 的目标是为您的 AI 提供纯净、高密度的信号。** 这意味着只抓取对 Claude 真正重要和有意义的上下文。我们清理 AI 不需要噪音，这意味着：
+1. 您使用的 token 自动大幅减少。
+2. AI 响应的**质量显著提高**，因为它的上下文窗口激光般聚焦于实际问题。
+
+**试用一周。** 体验 AI 推理的质量和速度的差异，当它被喂食纯净的信号而不是原始的终端噪音时。
+
+---
+
+## 真实场景应用
+
+OMNI 旨在解决 Agentic AI 开发者的日常挫折。以下是 OMNI 如何改变您的工作流程：
+
+1. **单一代码库中的“无限死亡循环”**
+   - **场景**: 您要求 Claude 在大型 monorepo 中运行 `npm install` 和 `npm run build`。它输出 20,000 行依赖警告，末尾带有一个小构建错误。AI 被警告分散了注意力，试图修复不相关的依赖问题，烧光了您的 token，让您陷入无限循环。
+   - **OMNI的修复**: OMNI 拦截构建。它完全使数百个 `peer dependency` 警告静音，只在堆栈跟踪旁边显示确切的 `Build Error: Cannot find module 'X'`。AI 看到一个 50 token 的输出，并立即修复了代码。
+
+2. **大文件上的“静默幻觉”**
+   - **场景**: AI 想了解项目并运行 `cat src/utils.ts`。文件有 3,000 行长。AI 努力将其全部保留在工作记忆中，并开始对函数签名产生幻觉。
+   - **OMNI的修复**: OMNI 拦截原始的 `cat`，并用 **结构化大纲 (Structured Outline)** 替换它。它向 AI 显示导入、公共 API（函数名和类型）和风险标记，将输出减少 80%。OMNI 然后警告 AI：`"该文件有 12 个依赖项 — 使用 omni_context 获取完整的影响图。"` 引导 AI 进行更安全、基于事实的编辑。
+
+3. **多智能体协作**
+   - **场景**: 您使用 Cursor IDE 进行快速编辑，使用 Claude Code CLI 进行繁重的工作。它们都需要知道发生了什么，而无需运行多余的命令并浪费 token。
+   - **OMNI的修复**: OMNI 充当共享内存层。使用 `omni_agents` 及其本地 SQLite `Store`，Cursor 和 Claude 共享相同的过滤内存流、活动错误和执行环境。它们协作而不会发生冲突。
+
+---
+
+## 性能与基准测试
 <div align="center">
-<img src="../https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
+<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-OMNI 使用 Rust 构建，可实现零开销执行和极高的效率。以下是在 release 二进制文件上测量的实际基准测试结果：
+OMNI 使用 Rust 构建，以实现零开销执行和无情的效率。以下是在发布二进制文件上测量的实际基准：
 
 | 命令 / 上下文 | 输入大小 | 输出大小 | Token 节省 | 对 AI 的影响 |
-|---------------|----------|----------|------------|--------------|
-| `docker build` (多阶段) | 9.2 KB | 49 bytes | **99.5%** | 消除缓存噪音；AI 可以立即看到真正的构建错误。 |
-| `cargo test` (大型套件) | 16.5 KB | 4.3 KB | **78.0%** | 剥离数百个“ok”测试；AI 只关注失败和堆栈跟踪。 |
-| `git status` (dirty) | 496 bytes | 113 bytes | **77.2%** | 删除干净的文件和提示；仅保留修改/未跟踪的文件。 |
-| `kubectl get pods` | 840 bytes | 762 bytes | **10.0%** | 有选择地显示 CrashLoopBackOff/Error pod，跳过健康的 pod。 |
-| `git diff` (多文件) | 397 bytes | 220 bytes | **50.0%** | 保留有更改的区块，丢弃过多的上下文行。 |
+|-------------------|------------|-------------|---------------|--------------|
+| `docker build` (多阶段) | 9.2 KB | 49 bytes | **99.5%** | 消除缓存噪音；AI 立即看到真正的构建错误。 |
+| `cargo test` (大型套件) | 16.5 KB | 4.3 KB | **78.0%** | 剥离数百个“ok”测试；AI 仅关注失败和堆栈跟踪。 |
+| `git status` (脏) | 496 bytes | 113 bytes | **77.2%** | 移除干净的文件和提示；仅保留修改/未跟踪的文件。 |
+| `kubectl get pods` | 840 bytes | 762 bytes | **10.0%** | 选择性地显示 CrashLoopBackOff/Error pods，跳过健康的 pods。 |
+| `git diff` (多文件) | 397 bytes | 220 bytes | **50.0%** | 保留带有更改的片段，丢弃过多的上下文行。 |
 
-- **管道延迟**: **< 100ms**（端到端，包括二进制启动）
-- **历史总节省**: 在平均开发会话中，Token 减少了 **97.3%**。
-- **投资回报率 (ROI)**: 每个开发者每月节省 **$35+ USD**（与旗舰模型相比）。
+- **管道延迟**: **< 100ms** (端到端，包括二进制启动)
+- **历史总节省**: **97.3%** 在平均开发会话中的 token 减少。
+- **ROI**: **$35+ USD** 每个开发者/月节省 (针对旗舰模型测量)。
 
-*要查看您自己实际节省的 Token，只需在使用几天后运行 `omni stats` 即可。*
+*要查看您自己的实际 token 节省，只需在使用几天后运行 `omni stats`。*
 
 ---
 
 ## 功能解析
 
-- **不再有AI困惑**：Omni 就像一个智能筛子。如果测试失败，它*只*向AI显示具体的错误行和堆栈跟踪。您的AI不再被加载微调器或嘈杂的依赖项日志所干扰，从而使其能够直接专注于实际问题。
-- **减少90%的Token**：通过彻底消除无用的终端噪音，您可以在瞬间大幅削减您的代理API账单。
-- **零信息丢失**：担心Omni过滤了重要的东西？别担心。Omni将原始输出保存在本地存档（`RewindStore`）中。如果AI确实需要完整的日志，它可以通过使用 `omni_retrieve` 自动请求。
-- **会话智能**：Omni 记得您在做什么。它知道您正在主动编辑哪些文件，并停止向AI提供它已经知道的上下文。跨会话内存现在能够通过 `omni_knowledge` 永久保留特定的修复程序。
-- **多智能体协作**：Omni通过 `omni_agents` 完全了解其环境。如果您同时运行 Cursor 和 Claude CLI，它们可以无缝共享相同的过滤内存流、活动错误和执行环境而不会发生冲突。
-- **提取监视器**：随着时间的推移跟踪您的Token节省情况和成本。直接在您的LLM内部使用 `omni_budget` 和 `omni_history`，或者在本地运行 `omni stats` 以可视化您节省的资金。
-- **视觉冲击 (`omni diff`)**：准确查看您节省了多少金钱和空间。只需运行 `omni diff` 即可并排查看笨重的原始输出与Omni时尚的过滤版本的对比。
-- **轻量级依赖图**：OMNI在hook时建立快速的本地文件关系图（没有守护进程，没有LSP）。当您的AI读取一个被大量导入的文件时，OMNI会警告它：`"this file has 12 dependents — call omni_context for full impact map."`。
-- **自适应压缩**：OMNI跟踪代理何时检索被省略的输出。如果一个命令家族经常被检索，OMNI会在下次自动软化压缩——无需配置即可自我调整。
-- **智能高速旁路**：为了确保小型任务的零延迟，OMNI 自动跳过低于 2000 token 阈值的输出的蒸馏。这在优先考虑速度的同时，仍能在关键时刻捕获大数据。
-- **省略可见性**：OMNI 现在在输出中明确标记已删除的内容（例如 `[OMNI: omitted X lines of noise]`），让您的 AI 代理更好地了解被过滤掉的内容。
-- **调试直通**：需要查看原始输出？只需在环境中设置 `OMNI_PASSTHROUGH=1` 即可完全绕过引擎，查看原始输出的每一个字符。
-- **结构化 ReadFile + Grep**：OMNI 不再提供原始文件转储或扁平的 grep 输出，而是返回结构化大纲（导入、公共 API、风险标记）和分组的 grep 摘要（按匹配计数排序的前几名文件，优先显示关键行）。
-- **基于事实的反幻觉保护**：OMNI 仅在拥有确凿事实时才发出警告——绝不推测。如果输出被高度压缩且不存在回溯：它会说明。如果一个文件有许多依赖项：它会说明。让您的 AI 立足于现实。
+### 🧠 核心提炼引擎 (Core Distillation Engine)
+- **告别AI困惑**: Omni像一个智能过滤器。如果测试失败，它*仅*向AI显示特定的错误行和堆栈跟踪，屏蔽嘈杂的依赖日志。
+- **90% Token 减少**: 通过消除无用的终端噪音，您可瞬间大幅削减Agent API账单。
+- **自适应压缩 (Adaptive Compression)**: OMNI会跟踪Agent何时检索被省略的输出。如果某个命令频繁被检索，OMNI会在下次自动放宽压缩（无需配置的自动调整）。
+- **智能高速旁路**: 为确保小任务的零延迟，OMNI自动对低于2000 token阈值的输出绕过提炼。
+
+### 🛡️ 上下文安全与事实防护 (Context Safety)
+- **零信息丢失**: 担心Omni过滤了重要信息？别担心。Omni将原始输出保存在本地(`RewindStore`)。AI可以使用`omni_retrieve`自动请求它。
+- **反幻觉事实守卫**: OMNI仅在有确凿事实时发出警告。如果输出被严重压缩，或者文件有大量依赖，OMNI会注入系统警告，让AI立足于现实。
+- **省略可见性**: OMNI明确标记输出中被删除的内容（例如 `[OMNI: omitted X lines of noise]`），为AI提供完美的态势感知。
+
+### 🤝 多智能体与工作区智能
+- **多智能体协作**: 通过`omni_agents`完全感知其环境。如果您同时运行Cursor和Claude CLI，它们可以无缝共享相同的过滤记忆流和错误，而不会发生冲突。
+- **会话智能**: OMNI会记住您正在做的事情。它知道您正在编辑哪些文件，并停止向AI提供多余的上下文。
+- **结构化的 ReadFile + Grep**: OMNI不再提供原始文件转储，而是返回结构化大纲（导入、公共API）和分组的grep摘要。
+- **轻量级依赖图**: OMNI在执行时构建快速的本地文件关系图。如果您的AI读取了一个被大量导入的文件，OMNI会向其警告影响范围图。
+
+### 📊 监控与调试
+- **提炼监视器**: 在LLM内部使用`omni_budget`和`omni_history`跟踪token节省情况，或在本地运行`omni stats`。
+- **视觉对比 (`omni diff`)**: 运行`omni diff`以并排比较笨重的原始输出和Omni精简过滤后的版本。
+- **调试直通**: 需要原始输出？设置`OMNI_PASSTHROUGH=1`可完全绕过引擎并查看原始输出的每个字符。
 
 ---
+
+## 幕后：Omni 是如何工作的
+
+OMNI 不仅仅是一个正则表达式脚本；它是一个用 Rust 编写的高性能 **语义信号引擎**。但是，它是如何在大约 100 毫秒内将 token 消耗降低 90% 的呢？
+
+当您的 AI 智能体输入像 `cargo test` 这样的命令时，在 OMNI 代码库内部发生的事情是这样的：
+
+1. **拦截 (`src/hooks` & `src/main.rs`)**: 当 AI 击中“Enter”的那一刻，OMNI 拦截了执行。`main.rs` 动态检测上下文（无论是管道、钩子还是 MCP 调用）。`hooks` 模块无缝包装了命令，允许 OMNI 捕获原始终端输出作为高速数据流，而不会降低实际执行的速度。
+2. **流式管道 (`src/pipeline`)**: OMNI 不是等待命令完成并将兆字节的文本转储到内存中，而是使用内存高效的流式管道逐行处理输出。这确保了即使命令吐出 10,000 行日志，OMNI 的内存占用也几乎保持平坦。
+3. **语义大脑 (`src/distillers` & `src/guard`)**: 随着文本的流入，它通过 Distillers。在声明性 TOML 规则（`signals/`）的驱动下，蒸馏器分析输出的语义含义。
+   - 这是一个加载转轮吗？*丢弃它。*
+   - 这是一个包含 500 个通过测试的列表吗？*丢弃它。*
+   - 这是 panic 堆栈跟踪吗？**保留它。**
+   同时，`guard` 模块确保保留事实，保证 OMNI 永远不会静默更改关键的诊断信息。
+4. **安全网 (`src/store`)**: 如果 AI 实际上需要查看那 500 个通过的测试怎么办？OMNI 遵循严格的“零信息丢失”策略。在丢弃任何噪音之前，原始未编辑的输出都安全地隐藏在一个本地、快速的 SQLite 数据库（`Store`）中。OMNI 在 AI 的上下文中留下了一个小面包屑：`[OMNI: omitted 1,200 lines of noise. Use omni_retrieve to view]`。
+5. **多智能体接口 (`src/mcp` & `src/session`)**: 最后，提取的、高信号输出返回给 AI。在幕后，`session` 管理器跟踪当前的 token 预算，而 `mcp`（模型上下文协议）服务器随时待命。如果 AI 想要查询历史错误、获取省略的原始日志或检查依赖关系图（`src/graph`），MCP 工具提供即时的结构化访问。
+
+**结果:** 臃肿的 `25,000` token 终端转储变成了一份简明的 `400` token 错误报告。AI 瞬间明白问题所在，而您节省了真金白银。
+
+---
+
 ## 架构
 
-```mermaid
-flowchart TB
-    Agent["Claude Code / OpenClaw / Hermes Agent / MCP Agent"]
+<div align="center">
+  <img src="../media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
+</div>
 
-    subgraph Hooks["原生 Hook 层 (透明)"]
-        Pre["Pre-Hook\n(Rewriter)"]
-        Post["Post-Hook\n(Distiller)"]
-        Sess["Session-Start\n(Context)"]
-        Comp["Pre-Compact\n(Summary)"]
-    end
-
-    Agent --> Pre
-    Pre -->|"omni exec"| Output["原始数据流 (Raw Stream)"]
-    Output --> Post
-    Post --> Agent
-
-    subgraph OMNI_Engine["OMNI — 语义信号引擎"]
-        direction LR
-        R["Registry\n(Filters)"]
-        S["Scorer\n(Context Boost)"]
-        D["Distiller\n(Semantic Magic)"]
-        R --> S --> D
-    end
-
-    Post --> OMNI_Engine
-    Pre --> OMNI_Engine
-
-    subgraph Persistence["持久化存储 (SQLite)"]
-        ST["SessionState"]
-        RW["RewindStore"]
-    end
-
-    OMNI_Engine <--> Persistence
-    Sess --> ST
-    Comp --> ST
-```
-
-## 快速开始与安装
+## 快速入门与安装
 
 Omni 的设置非常简单。它原生集成到您的终端中。
 
@@ -160,13 +179,13 @@ Omni 的设置非常简单。它原生集成到您的终端中。
 # 1. 通过 Homebrew 安装
 brew install fajarhide/tap/omni
 
-# 2. 设置 Omni (用于 Claude, VS Code, OpenCode, Codex, Antigravity 的交互式菜单)
+# 2. 设置 Omni（针对 Claude, VS Code, OpenCode, Codex, Antigravity 的交互式菜单）
 omni init
 
 # 3. 验证它是否正常工作
 omni doctor
 
-# 4. 或者自动修复任何问题
+# 4. 或自动修复任何问题
 omni doctor --fix
 
 # 5. 检查当前状态
@@ -185,33 +204,34 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
-## 使用方法
+## 如何使用
 
-一旦通过 `omni init` 安装，OMNI 就会在后台无形地工作。无论您的AI代理通过MCP运行终端命令，还是您手动管道输出 (`ls | omni`)，OMNI 都会作为透明层自动介入。它智能地过滤终端输出，消除嘈杂的日志，并将清晰的信号交还给AI。
+通过 `omni init` 安装后，OMNI 在后台隐形工作。无论是您的 AI 智能体通过 MCP 运行终端命令，还是您手动通过管道输出（`ls | omni`），OMNI 都会自动作为透明层跳入。它智能过滤终端输出，删除嘈杂日志，并将干净的信号交还给 AI。
 
-按节省量、命令、周期和路线的详细分类：
+有关按节省、命令、时段和路由的详细细分：
 ```bash
 omni stats
 ```
 
-诊断您的OMNI安装（hooks, MCP, filters, database）：
+诊断您的 OMNI 安装（钩子、MCP、过滤器、数据库）：
 ```bash
 omni doctor
 ```
 
-需要看看过滤器的实际效果或添加您自己的自定义规则吗？
-您可以使用 `~/.omni/signals/` 中简单的TOML文件轻松创建自己的规则。
+需要查看过滤器的实际操作或添加您自己的自定义规则吗？
+您可以使用 `~/.omni/signals/` 中的简单 TOML 文件轻松创建自己的规则。
 
 ### 多智能体支持与集成
 
-默认情况下，`omni init --claude` 会自动hook进入 **Claude Code**。但是，OMNI通过其内置集成与任何代理AI完美配合！运行 `omni init` 查看交互式菜单。
+默认情况下，`omni init --claude` 自动挂钩到 **Claude Code**。然而，OMNI 通过其内置集成与任何 Agentic AI 完美配合！运行 `omni init` 查看交互式菜单。
 
-1. **VS Code & Continue.dev**: 使用我们的 MCP 上下文提供者 (`integrations/continue-dev/`)。
-2. **OpenCode & Codex CLI**: 内置包装器自动将命令输出管道到 OMNI。
-3. **Antigravity IDE**: OMNI 在 Antigravity 的配置 (`~/.gemini/antigravity/mcp_config.json`) 中注册为本机 MCP 服务器。运行 `omni init --antigravity` 自动设置。
+1. **VS Code & Continue.dev**: 使用我们的 MCP 上下文提供程序（`integrations/continue-dev/`）。
+2. **OpenCode & Codex CLI**: 内置包装器自动将命令输出通过管道传送到 OMNI。
+3. **Antigravity IDE**: OMNI 在 Antigravity 的配置中注册为原生 MCP 服务器（`~/.gemini/antigravity/mcp_config.json`）。运行 `omni init --antigravity` 自动设置。
+4. **Pi Agent**: Pi 的原生 OMNI 包。运行 `omni init --pi` 通过 Pi 的包安装程序安装 OMNI Pi 包。
 
-**多智能体调优 (`~/.omni/config.toml`)**
-不同的代理有不同的痛点。保持 VS Code 聊天整洁，同时让 OpenCode 读取更多数据。单独调整它们：
+**多智能体微调 (`~/.omni/config.toml`)**
+不同的智能体有不同的痛点。保持 VS Code 聊天干净，同时让 OpenCode 读取更多数据。单独微调它们：
 ```toml
 [global]
 aggressiveness = "balanced"
@@ -227,13 +247,13 @@ enable_readfile_distillation = false
 
 ### 文档索引
 
-**致用户：**
-- [终极指南 (HOW_TO_USE.md)](../docs/HOW_TO_USE.md) — 您需要的一切：安装，`omni learn`，自定义 TOML 过滤器和 CLI 命令。
-- [OpenClaw 集成](https://clawhub.ai/fajarhide/omni-signal-engine) — 用于原生 OMNI 提取的官方 OpenClaw 插件。安装：`openclaw plugins install clawhub:@fajarhide/omni-signal-engine`
-- [Hermes Agent 集成](https://github.com/wysie/hermes-omni-plugin) — 社区 Hermes Agent 插件，用于本机 OMNI 提取。安装：`uv pip install --python ~/.hermes/hermes-agent/venv/bin/python git+https://github.com/wysie/hermes-omni-plugin.git`
+**对于用户:**
+- [终极指南 (HOW_TO_USE.md)](../docs/HOW_TO_USE.md) — 您需要的一切：安装、自定义 TOML 过滤器和 CLI 命令。
+- [OpenClaw 集成](https://clawhub.ai/fajarhide/omni-signal-engine) — 用于原生 OMNI 蒸馏的官方 OpenClaw 插件。
+- [Hermes Agent 集成](https://github.com/wysie/hermes-omni-plugin) — 用于原生 OMNI 蒸馏的社区 Hermes Agent 插件。
 
-**致开发者和系统集成商：**
-- [开发指南](../docs/DEVELOPMENT.md) — 如何构建和为 OMNI 代码库做贡献。
+**对于开发者和系统集成商:**
+- [开发指南](../docs/DEVELOPMENT.md) — 如何构建和为 OMNI 代码库做出贡献。
 - [测试架构](../docs/TESTING.md) — 质量保证和上下文安全。
 - [会话连续性](../docs/SESSION.md) — 深入了解 OMNI 的工作记忆。
 - [路线图](../docs/ROADMAP.md) — 当前开发状态和即将推出的功能。
@@ -241,21 +261,21 @@ enable_readfile_distillation = false
 
 ---
 
-## 搭配 Heimsense 效果更佳
+## 与 Heimsense 结合使用效果更好
 
-Omni 是我个人 AI 工具带的一部分。如果您使用 `claude-code`，我强烈建议将 Omni 与我的另一个项目配对使用：**[Heimsense](https://github.com/fajarhide/heimsense)**。
+Omni 是我个人 AI 工具带的一部分。如果您使用 `claude-code`，我强烈建议将 Omni 与我的另一个项目 **[Heimsense](https://github.com/fajarhide/heimsense)** 配对。
 
-Heimsense 解锁了像 `claude-code` 这样的受限环境，使其可以使用*任何*免费或与 OpenAI 兼容的模型运行，而不是强迫您使用昂贵的 Anthropic 模型。
-**Omni + Heimsense** = 零噪音、高精准度，使用平价模型运行世界级的Agent框架。
+Heimsense 解锁了像 `claude-code` 这样受限的环境，可以使用 *任何* 免费或与 OpenAI 兼容的模型运行，而不是强迫您使用昂贵的 Anthropic 模型。
+**Omni + Heimsense** = 使用负担得起的模型运行世界级智能体框架，实现零噪音和精确定位准确性。
 
 ---
 
 ## 贡献与许可证
 
-这是一个为智能体AI时代构建的热情项目。无论您来这里是为了节省Token费用，测试免费模型，还是帮助构建终极智能体工具带，我们都随时欢迎您的贡献！
+这是一个为 Agentic AI 时代构建的热情项目。无论您是来这里节省 token 资金、测试免费模型，还是帮助构建终极 agentic 工具带，都随时欢迎您的贡献！
 
-- **开发**：想要从源码构建？运行 `make ci` 和 `cargo build`。阅读我们的 [CONTRIBUTING.md](../CONTRIBUTING.md) 了解详情。
-- **许可证**：[MIT License](../LICENSE)
+- **开发**: 想要从源代码构建？运行 `make ci` 和 `cargo build`。阅读我们的 [CONTRIBUTING.md](../CONTRIBUTING.md) 了解详细信息。
+- **许可证**: [MIT License](../LICENSE)
 
 <!-- Star History -->
 <p align="center">
@@ -268,4 +288,4 @@ Heimsense 解锁了像 `claude-code` 这样的受限环境，使其可以使用*
   </a>
 </p>
 
-由 [Fajar Hidayat](https://github.com/fajarhide) 用 ❤️ 构建
+Dibuat dengan ❤️ oleh [Fajar Hidayat](https://github.com/fajarhide)

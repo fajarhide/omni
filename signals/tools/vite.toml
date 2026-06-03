@@ -1,0 +1,18 @@
+schema_version = 2
+
+[filters.vite]
+description = "Distills Vite build output"
+trigger_pattern = "^(vite|npx vite) "
+strip_ansi = true
+confidence = 0.9
+stream_mode = false
+
+strip_lines_matching = [
+    "^\\s*$",
+    "^vite v\\d+\\.\\d+\\.\\d+ building",
+    "^transforming \\(",
+    "^✓ \\d+ modules transformed\\."
+]
+
+max_lines = 150
+fallback_message = "vite: build completed successfully"

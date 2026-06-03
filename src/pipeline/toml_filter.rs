@@ -86,6 +86,11 @@ struct FilterConfig {
     /// Priority weight override (default 100). Higher = evaluated first.
     #[serde(default = "default_priority")]
     priority: u32,
+
+    /// If true, the filter processes output in a streaming fashion (line-by-line/chunk-by-chunk)
+    /// to prevent memory spikes for long-running noisy commands (e.g., docker pull, npm ci).
+    #[serde(default)]
+    stream_mode: bool,
 }
 
 fn default_priority() -> u32 {
@@ -137,6 +142,7 @@ pub struct TomlFilter {
     pub compress_ratio_target: Option<f32>,
     pub tool_family: Option<String>,
     pub priority: u32,
+    pub stream_mode: bool,
 }
 
 #[derive(Clone)]
@@ -436,6 +442,7 @@ pub fn load_from_file(path: &Path) -> Result<LoadReport> {
                 compress_ratio_target: config.compress_ratio_target,
                 tool_family: config.tool_family,
                 priority: config.priority,
+                stream_mode: config.stream_mode,
             });
         }
     }
@@ -676,6 +683,7 @@ fn create_filter_from_config(
         compress_ratio_target: config.compress_ratio_target,
         tool_family: config.tool_family,
         priority: config.priority,
+        stream_mode: config.stream_mode,
     })
 }
 
@@ -946,6 +954,7 @@ mod tests {
             compress_ratio_target: None,
             tool_family: None,
             priority: 100,
+            stream_mode: false,
         };
         let input = "hello\nnoisy line\nworld";
         let score = filter.score(input);
@@ -972,6 +981,7 @@ mod tests {
             compress_ratio_target: None,
             tool_family: None,
             priority: 100,
+            stream_mode: false,
         };
         let input = "\x1b[31mhello\x1b[0m\nnoisy\nworld";
         assert_eq!(filter.apply(input), "hello\nworld");
@@ -1001,6 +1011,7 @@ mod tests {
             compress_ratio_target: None,
             tool_family: None,
             priority: 100,
+            stream_mode: false,
         };
         assert_eq!(filter.apply("Wait\nSUCCESS\nNoisy"), "done");
     }
@@ -1093,6 +1104,7 @@ mod tests {
             compress_ratio_target: None,
             tool_family: None,
             priority: 100,
+            stream_mode: false,
         };
 
         // It should match since we are in a Rust project context

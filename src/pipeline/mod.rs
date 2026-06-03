@@ -231,6 +231,10 @@ pub struct SessionState {
     pub pinned_files: Vec<String>,
     #[serde(default)]
     pub pinned_refresh_count: u32,
+
+    // Context Composition (Phase 1)
+    #[serde(default)]
+    pub current_turn: crate::analytics::context_composition::ContextTurn,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

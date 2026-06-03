@@ -379,6 +379,15 @@ pub fn process_payload(
         );
 
         if let Some(ref sess) = session {
+            // Phase 1: Context Composition Analyzer
+            if let Ok(mut state) = sess.lock() {
+                state.current_turn.session_id = state.session_id.clone();
+                state.current_turn.turn_number = state.command_count;
+                state.current_turn.timestamp = chrono::Utc::now().timestamp();
+                state.current_turn.tool_output_tokens += result.filtered_tokens as u64;
+                s.record_context_turn(&state.current_turn);
+            }
+
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
             tracker.track_command(&command, &content, &result);
         }

@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="../media/logo.png" alt="OMNI" width="250" />
+  <img src="../media/hero.svg" alt="OMNI" width="800" />
   
-  **Sedikit noise. Lebih banyak sinyal. Kurangi konsumsi token AI Anda hingga 90%.**
+  **Sistem Operasi Konteks untuk Agen AI. Sedikit noise. Lebih banyak sinyal. Kurangi konsumsi token hingga 90%.**
 
   [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
 
@@ -15,17 +15,19 @@
 
 <br/>
 
-> **OMNI** adalah lapisan terminal pintar yang menyaring dan memprioritaskan output command secara cerdas sebelum mencapai agen AI Anda. Dengan mencegah AI Anda kebingungan oleh output yang bising, Anda mendapatkan jawaban akurat lebih cepat sekaligus menghemat biaya token secara besar-besaran.
+> **OMNI** adalah **Semantic Signal Engine** berkinerja tinggi dan **Sistem Operasi Konteks** yang secara cerdas mencegat, menganalisis, dan menyaring output terminal sebelum mencapai Agen AI Anda. Ini bertindak sebagai lapisan optimasi sinyal yang transparan di antara shell dan AI, memastikan setiap token yang dikirim bernilai tinggi, relevan, dan bebas noise. Dengan mencegah AI Anda kebingungan oleh output yang bising, Anda mendapatkan jawaban akurat lebih cepat sekaligus menghemat biaya token secara masif.
 > 
 > *Sepenuhnya transparan. Anda selalu memegang kendali.*
 ---
 
 ## Daftar Isi
-- [Masalah: Token Mahal & Output Bising](#masalah-token-mahal--output-bising)
+- [Masalah: Konteks Membengkak, Token Mahal & Output Bising](#masalah-konteks-membengkak-token-mahal--output-bising)
 - [Solusi: Omni](#solusi-omni)
 - [Filosofi](#filosofi)
-- [Performansi & Kasus Penggunaan](#performansi--kasus-penggunaan)
+- [Kasus Penggunaan Dunia Nyata](#kasus-penggunaan-dunia-nyata)
+- [Performa & Tolok Ukur](#performa--tolok-ukur)
 - [Penjelasan Fitur](#penjelasan-fitur)
+- [Di Balik Layar: Cara Kerja Omni](#di-balik-layar-cara-kerja-omni)
 - [Arsitektur](#arsitektur)
 - [Mulai Cepat & Instalasi](#mulai-cepat--instalasi)
 - [Cara Menggunakan](#cara-menggunakan)
@@ -36,14 +38,16 @@
 
 ---
 
-## Masalah: Token Mahal & Output Bising
+## Masalah: Konteks Membengkak, Token Mahal & Output Bising
 
-Ketika Anda menggunakan agen AI otonom (seperti Claude Code) di terminal Anda, mereka membaca *semuanya*. Command sederhana seperti `git diff`, `npm install`, atau `cargo test` dapat dengan mudah membuang 10.000 hingga 25.000 token dari kebisingan terminal yang tidak berguna ke dalam konteks AI Anda.
+Ketika Anda menggunakan agen AI otonom (seperti Claude Code atau Cursor) di terminal Anda, mereka membaca *semuanya*. Perintah sederhana seperti `git diff`, `npm install`, atau `cargo test` dapat dengan mudah membuang 10.000 hingga 25.000 token dari kebisingan terminal yang tidak berguna ke dalam konteks AI Anda.
 
-Hal ini menyebabkan tiga masalah besar:
+Hal ini menyebabkan masalah besar:
 1. **Sangat mahal**: Anda membayar dengan uang sungguhan untuk setiap token dari output sampah tersebut.
-2. **Membuat AI menjadi "bodoh"**: Kesalahan kritis terkubur di bawah log peringatan dan loading bar berukuran megabyte, membingungkan AI dan mencairkan penalarannya.
+2. **Membuat AI menjadi "bodoh"**: Kesalahan kritis terkubur di bawah megabyte log peringatan dan loading bar, membingungkan AI dan mencairkan penalarannya.
 3. **Penguncian Model**: Kerangka kerja agen canggih memaksa Anda menggunakan model unggulan mereka yang paling mahal hanya agar memiliki jendela konteks yang cukup besar untuk menangani semua kebisingan tersebut.
+4. **Eksekusi Rawan Token**: Agen tidak menyadari biaya token dan output, yang mengarah pada konsumsi yang tidak perlu.
+5. **Konteks Membengkak**: Volume output terminal mengacaukan konteks AI, mengurangi fokus dan akurasi.
 
 ## Solusi: Omni
 
@@ -54,6 +58,8 @@ Saya membangun Omni karena saya ingin menjalankan agen AI secara efisien dan mur
 **Hasilnya?** Anda dapat menjalankan agen AI Anda pada kerangka kerja yang sangat canggih dan memberinya *nol kebisingan*. Karena AI hanya diberi konteks yang sangat terfokus dan langsung pada intinya, bahkan model yang terjangkau atau biasa pun akan berkinerja setara dengan model unggulan yang mahal, karena mereka tidak pernah terganggu oleh data sampah.
 
 Gairah utama saya bukanlah untuk memonetisasi ini—melainkan untuk membangun perangkat sumber terbuka pamungkas untuk era Agentic AI. Dengan menghemat biaya token secara agresif, saya dapat mengembangkan perangkat lunak secara tangguh dan hemat biaya hari ini, dan Anda juga bisa.
+
+Konteks itu mahal dan bising, dan Omni hadir untuk memperbaikinya. Dengan mengoptimalkan konteks, Omni membuat agen AI lebih efisien, hemat biaya, dan mudah digunakan. Ini dilakukan dengan mengurangi jumlah konteks yang dikirim ke agen AI, yang pada gilirannya mengurangi jumlah waktu pemrosesan dan memori yang diperlukan untuk menghasilkan respons.
 
 ---
 
@@ -71,9 +77,27 @@ Agen AI seperti Claude hanya sepintar konteks yang Anda berikan kepada mereka. K
 
 ---
 
-## Performa & Kasus Penggunaan
+## Kasus Penggunaan Dunia Nyata
+
+OMNI dirancang untuk memecahkan frustrasi harian para pengembang Agentic AI. Berikut cara OMNI mengubah alur kerja Anda:
+
+1. **"Infinite Loop of Death" di Monorepo**
+   - **Skenario**: Anda meminta Claude menjalankan `npm install` dan `npm run build` di monorepo besar. Terminal mengeluarkan 20.000 baris peringatan dependensi dan kesalahan build kecil di akhir. AI terganggu oleh peringatan dan mencoba memperbaiki masalah dependensi yang tidak relevan, membakar token Anda dan menjebak Anda dalam putaran tanpa akhir.
+   - **Solusi OMNI**: OMNI mencegat proses build. Ia sepenuhnya membisukan ratusan peringatan `peer dependency` dan hanya memunculkan `Build Error: Cannot find module 'X'` beserta stack trace-nya. AI melihat output 50 token dan segera memperbaiki kodenya.
+
+2. **"Silent Hallucination" pada File Besar**
+   - **Skenario**: AI ingin memahami proyek dan menjalankan `cat src/utils.ts`. File tersebut panjangnya 3.000 baris. AI kesulitan menyimpan semuanya di memori kerja dan mulai berhalusinasi fungsi.
+   - **Solusi OMNI**: OMNI memblokir perintah `cat` mentah dan menggantinya dengan **Structured Outline**. OMNI menunjukkan kepada AI impor, API publik (nama fungsi dan tipe), dan penanda risiko, mengurangi output sebesar 80%. OMNI lalu memperingatkan AI: `"File ini memiliki 12 dependensi — gunakan omni_context untuk peta dampak."` AI diarahkan untuk melakukan pengeditan faktual yang lebih aman.
+
+3. **Kolaborasi Multi-Agen**
+   - **Skenario**: Anda menggunakan Cursor IDE untuk pengeditan cepat dan Claude Code CLI untuk tugas berat. Keduanya perlu tahu apa yang terjadi tanpa menjalankan perintah berulang dan membuang token.
+   - **Solusi OMNI**: OMNI bertindak sebagai lapisan memori bersama. Melalui `omni_agents` dan `Store` SQLite lokal, Cursor dan Claude berbagi aliran memori terfilter, error aktif, dan lingkungan eksekusi yang sama. Mereka berkolaborasi tanpa bentrok.
+
+---
+
+## Performa & Tolok Ukur
 <div align="center">
-<img src="../https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
+<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
 OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Berikut adalah tolok ukur aktual yang diukur pada binary release:
@@ -88,7 +112,7 @@ OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Be
 
 - **Latensi Pipeline**: **< 100ms** (end-to-end, termasuk startup binary)
 - **Penghematan Sepanjang Waktu**: **97.3%** pengurangan token di seluruh sesi pengembangan rata-rata.
-- **ROI**: **$35+ USD** dihemat per pengembang/bulan (diukur terhadap model flagship).
+- **ROI**: **$35+ USD** dihemat per pengembang/bulan (diukur terhadap model unggulan).
 
 *Untuk melihat penghematan token aktual Anda sendiri, jalankan saja `omni stats` setelah beberapa hari penggunaan.*
 
@@ -96,60 +120,55 @@ OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Be
 
 ## Penjelasan Fitur
 
-- **Tidak Ada Lagi Kebingungan AI**: Omni bertindak seperti saringan pintar. Jika tes gagal, ia menunjukkan kepada AI *hanya* garis kesalahan spesifik dan pelacakan tumpukan (stack trace). AI Anda berhenti terganggu oleh loading spinner atau log dependensi yang bising, memungkinkannya untuk fokus langsung pada masalah sebenarnya.
-- **Pengurangan Token 90%**: Dengan menghilangkan sepenuhnya kebisingan terminal yang tidak berguna, Anda secara drastis memotong tagihan API agen Anda secara instan.
-- **Nol Kehilangan Informasi**: Khawatir Omni memfilter sesuatu yang penting? Jangan khawatir. Omni menyimpan output mentah di arsip lokal (`RewindStore`). Jika AI benar-benar membutuhkan log lengkap, ia dapat memintanya secara otomatis menggunakan `omni_retrieve`.
-- **Kecerdasan Sesi**: Omni mengingat apa yang sedang Anda lakukan. Ia tahu file mana yang sedang Anda edit secara aktif dan berhenti memberi AI konteks yang sudah ia ketahui. Memori lintas sesi kini mampu mempertahankan perbaikan spesifik secara permanen melalui `omni_knowledge`.
-- **Kolaborasi Multi-Agen**: Omni sepenuhnya sadar akan lingkungannya melalui `omni_agents`. Jika Anda menjalankan Cursor di samping Claude CLI, mereka dapat berbagi aliran memori terfilter yang sama, kesalahan aktif, dan lingkungan eksekusi dengan lancar tanpa bentrok.
-- **Monitor Distilasi**: Lacak penghematan token dan biaya Anda dari waktu ke waktu. Gunakan `omni_budget` dan `omni_history` langsung di dalam LLM Anda, atau jalankan `omni stats` secara lokal untuk memvisualisasikan uang yang Anda hemat.
-- **Dampak Visual (`omni diff`)**: Lihat persis berapa banyak uang dan ruang yang Anda hemat. Cukup jalankan `omni diff` untuk melihat output mentah yang besar dibandingkan berdampingan dengan versi Omni yang ramping dan terfilter.
-- **Grafik Dependensi Ringan**: OMNI membangun grafik hubungan file lokal yang cepat pada saat hook (tanpa daemon, tanpa LSP). Ketika AI Anda membaca file yang banyak diimpor, OMNI memperingatkannya: `"file ini memiliki 12 tanggungan — panggil omni_context untuk peta dampak penuh."`.
-- **Kompresi Adaptif**: OMNI melacak kapan agen mengambil output yang dihilangkan. Jika sebuah keluarga command sering diambil, OMNI secara otomatis melembutkan kompresi pada waktu berikutnya — menyetel sendiri tanpa konfigurasi.
-- **Smart High-Speed Bypass**: Untuk menjamin latensi nol pada tugas-tugas kecil, OMNI secara otomatis melewati proses distilasi untuk output di bawah ambang batas 2000 token. Ini memprioritaskan kecepatan sambil tetap menangkap data besar saat dibutuhkan.
-- **Omission Visibility**: OMNI sekarang secara eksplisit memberi label pada konten yang dihapus (misalnya, `[OMNI: omitted X lines of noise]`) dalam output, memberikan agen AI Anda kesadaran situasional yang lebih baik tentang apa yang difilter.
-- **Debug Passthrough**: Perlu melihat output mentah untuk sesaat? Cukup setel `OMNI_PASSTHROUGH=1` di lingkungan Anda untuk melewati mesin sepenuhnya dan melihat setiap karakter dari output asli.
-- **ReadFile + Grep Terstruktur**: Alih-alih dump file mentah atau output grep datar, OMNI mengembalikan kerangka terstruktur (impor, API publik, penanda risiko) dan ringkasan grep yang dikelompokkan (file teratas berdasarkan jumlah kecocokan, baris prioritas terlebih dahulu).
-- **Penjaga Anti-Halusinasi Faktual**: OMNI hanya mengeluarkan peringatan ketika memiliki fakta keras — bukan spekulasi. Jika output dikompresi berat dan tidak ada rewind yang ada: ia mengatakannya. Jika file memiliki banyak tanggungan: ia mengatakannya. Menjaga AI Anda tetap berpijak pada kenyataan.
+### 🧠 Core Distillation Engine (Mesin Distilasi Inti)
+- **Tidak Ada Lagi Kebingungan AI**: Omni bertindak seperti saringan pintar. Jika tes gagal, ia hanya menunjukkan baris kesalahan dan stack trace, memblokir log dependensi yang bising.
+- **Pengurangan Token 90%**: Dengan menghilangkan noise terminal, Anda memotong tagihan API agen secara drastis.
+- **Kompresi Adaptif**: OMNI melacak kapan agen mengambil output yang dihilangkan dan secara otomatis melunakkan kompresi pada waktu berikutnya — menyetel sendiri secara otomatis.
+- **Smart High-Speed Bypass**: Untuk menjamin latensi nol pada tugas kecil, OMNI secara otomatis melewati distilasi untuk output di bawah ambang 2000-token.
+
+### 🛡️ Context Safety & Factual Guards (Keamanan Konteks)
+- **Nol Kehilangan Informasi**: Output mentah disimpan secara lokal (`RewindStore`). AI dapat memintanya secara otomatis menggunakan `omni_retrieve`.
+- **Penjaga Anti-Halusinasi Faktual**: OMNI menyuntikkan peringatan sistem (seperti file dengan dependensi masif) untuk menjaga AI Anda tetap berpijak pada fakta.
+- **Visibilitas Penghilangan**: OMNI melabeli konten yang dihapus secara eksplisit (mis. `[OMNI: omitted X lines of noise]`), memberi agen kesadaran situasional.
+
+### 🤝 Multi-Agent & Workspace Intelligence (Kecerdasan Ruang Kerja)
+- **Kolaborasi Multi-Agen**: Jika Anda menjalankan Cursor bersama Claude CLI, mereka berbagi aliran memori terfilter yang sama tanpa bentrok.
+- **Kecerdasan Sesi**: OMNI mengingat file yang sedang Anda edit dan berhenti memberikan konteks berulang.
+- **Structured ReadFile + Grep**: Alih-alih dump file mentah, OMNI mengembalikan kerangka terstruktur (impor, API) dan ringkasan grep yang dikelompokkan.
+- **Grafik Dependensi Ringan**: OMNI membangun grafik relasi file lokal yang cepat. Jika AI membaca file penting, OMNI memperingatkan tentang peta dampaknya.
+
+### 📊 Monitoring & Debugging (Pemantauan)
+- **Monitor Distilasi**: Lacak penghematan token menggunakan `omni_budget` di dalam LLM, atau jalankan `omni stats` secara lokal.
+- **Dampak Visual (`omni diff`)**: Jalankan `omni diff` untuk membandingkan output mentah dengan versi Omni yang ramping secara berdampingan.
+- **Debug Passthrough**: Setel `OMNI_PASSTHROUGH=1` untuk melewati mesin sepenuhnya dan melihat output asli.
 
 ---
+
+## Di Balik Layar: Cara Kerja Omni
+
+OMNI lebih dari sekadar skrip regex; ia adalah **Semantic Signal Engine** berkinerja tinggi yang ditulis dengan Rust. Namun bagaimana cara kerjanya memotong 90% konsumsi token dalam waktu kurang dari 100ms?
+
+Inilah kisah tentang apa yang terjadi di dalam kode OMNI saat Agen AI Anda mengetik perintah seperti `cargo test`:
+
+1. **Intersepsi (`src/hooks` & `src/main.rs`)**: Saat AI menekan "Enter", OMNI mencegat eksekusi secara dinamis. Modul `hooks` membungkus perintah dengan mulus, memungkinkan OMNI menangkap output mentah sebagai aliran data berkecepatan tinggi tanpa memperlambat eksekusi aktual.
+2. **Streaming Pipeline (`src/pipeline`)**: Alih-alih menunggu perintah selesai dan membuang megabyte teks ke dalam memori, OMNI memproses baris demi baris melalui pipeline streaming. Jejak memori OMNI tetap datar meskipun menghadapi 10.000 baris log.
+3. **Otak Semantik (`src/distillers` & `src/guard`)**: Saat teks masuk, ia melewati Distiller (didukung oleh aturan TOML di `signals/`). 
+   - Apakah ini loading spinner? *Buang.* 
+   - Apakah ini daftar 500 tes yang lulus? *Buang.* 
+   - Apakah ini panic stack trace? **Simpan.** 
+   Modul `guard` memastikan fakta dipertahankan dan OMNI tidak pernah mengubah informasi diagnostik penting.
+4. **Jaring Pengaman (`src/store`)**: Bagaimana jika AI benar-benar perlu melihat 500 tes yang lulus? OMNI menyimpan output mentah yang belum diedit dengan aman di database SQLite lokal yang sangat cepat (`Store`). OMNI hanya meninggalkan jejak di konteks AI: `[OMNI: omitted 1,200 lines of noise. Use omni_retrieve to view]`.
+5. **Antarmuka Multi-Agen (`src/mcp` & `src/session`)**: Output ber-sinyal tinggi akhirnya dikembalikan ke AI. Di belakang layar, server `mcp` bersiap. Jika AI ingin menanyakan riwayat kesalahan atau mengambil log mentah, alat MCP OMNI menyediakan akses terstruktur instan.
+
+**Hasilnya:** Output terminal `25.000` token yang membengkak menjadi laporan kesalahan `400` token yang padat. AI memahami masalahnya secara instan, dan Anda menghemat uang sungguhan.
+
+---
+
 ## Arsitektur
 
-```mermaid
-flowchart TB
-    Agent["Claude Code / OpenClaw / Hermes Agent / MCP Agent"]
-
-    subgraph Hooks["Lapisan Hook Native (Transparan)"]
-        Pre["Pre-Hook\n(Rewriter)"]
-        Post["Post-Hook\n(Distiller)"]
-        Sess["Session-Start\n(Context)"]
-        Comp["Pre-Compact\n(Summary)"]
-    end
-
-    Agent --> Pre
-    Pre -->|"omni exec"| Output["Raw Stream"]
-    Output --> Post
-    Post --> Agent
-
-    subgraph OMNI_Engine["OMNI — Semantic Signal Engine"]
-        direction LR
-        R["Registry\n(Filters)"]
-        S["Scorer\n(Context Boost)"]
-        D["Distiller\n(Semantic Magic)"]
-        R --> S --> D
-    end
-
-    Post --> OMNI_Engine
-    Pre --> OMNI_Engine
-
-    subgraph Persistence["Persistence Store (SQLite)"]
-        ST["SessionState"]
-        RW["RewindStore"]
-    end
-
-    OMNI_Engine <--> Persistence
-    Sess --> ST
-    Comp --> ST
-```
+<div align="center">
+  <img src="../media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
+</div>
 
 ## Mulai Cepat & Instalasi
 
@@ -209,6 +228,7 @@ Secara default, `omni init --claude` secara otomatis masuk ke **Claude Code**. N
 1. **VS Code & Continue.dev**: Gunakan penyedia konteks MCP kami (`integrations/continue-dev/`).
 2. **OpenCode & Codex CLI**: Wrapper bawaan secara otomatis menyalurkan output perintah ke OMNI.
 3. **Antigravity IDE**: OMNI mendaftar sebagai server MCP asli dalam konfigurasi Antigravity (`~/.gemini/antigravity/mcp_config.json`). Jalankan `omni init --antigravity` untuk mengatur secara otomatis.
+4. **Pi Agent**: Paket OMNI native untuk Pi. Jalankan `omni init --pi` untuk menginstal melalui installer paket Pi.
 
 **Penyetelan Multi-Agen (`~/.omni/config.toml`)**
 Agen yang berbeda memiliki titik nyeri yang berbeda. Jaga agar obrolan VS Code tetap bersih, sambil membiarkan OpenCode membaca lebih banyak data. Setel secara individual:
@@ -228,9 +248,9 @@ enable_readfile_distillation = false
 ### Indeks Dokumentasi
 
 **Untuk Pengguna:**
-- [Panduan Utama (HOW_TO_USE.md)](../docs/HOW_TO_USE.md) — Segala yang Anda butuhkan: Instalasi, `omni learn`, Filter TOML Khusus, dan Perintah CLI.
-- [Integrasi OpenClaw](https://clawhub.ai/fajarhide/omni-signal-engine) — Plugin OpenClaw resmi untuk distilasi OMNI native. Instal: `openclaw plugins install clawhub:@fajarhide/omni-signal-engine`
-- [Integrasi Hermes Agent](https://github.com/wysie/hermes-omni-plugin) — Plugin Hermes Agent komunitas untuk distilasi OMNI native. Instal: `uv pip install --python ~/.hermes/hermes-agent/venv/bin/python git+https://github.com/wysie/hermes-omni-plugin.git`
+- [Panduan Utama (HOW_TO_USE.md)](../docs/HOW_TO_USE.md) — Segala yang Anda butuhkan: Instalasi, Filter TOML Khusus, dan Perintah CLI.
+- [Integrasi OpenClaw](https://clawhub.ai/fajarhide/omni-signal-engine) — Plugin OpenClaw resmi untuk distilasi OMNI native.
+- [Integrasi Hermes Agent](https://github.com/wysie/hermes-omni-plugin) — Plugin Hermes Agent komunitas untuk distilasi OMNI native.
 
 **Untuk Developer & System Integrator:**
 - [Panduan Pengembangan](../docs/DEVELOPMENT.md) — Cara membangun dan berkontribusi pada basis kode OMNI.
@@ -246,7 +266,7 @@ enable_readfile_distillation = false
 Omni adalah bagian dari sabuk alat AI pribadi saya. Jika Anda menggunakan `claude-code`, saya sangat menyarankan memasangkan Omni dengan proyek saya yang lain: **[Heimsense](https://github.com/fajarhide/heimsense)**.
 
 Heimsense membuka kunci lingkungan terbatas seperti `claude-code` untuk berjalan dengan model gratis atau yang kompatibel dengan OpenAI *apa pun*, alih-alih memaksa Anda untuk menggunakan model Anthropic yang mahal.
-**Omni + Heimsense** = Jalankan kerangka kerja agen kelas dunia menggunakan model yang terjangkau dengan nol kebisingan dan akurasi yang tepat sasaran.
+**Omni + Heimsense** = Jalankan kerangka kerja agen menggunakan model yang terjangkau dengan nol kebisingan dan akurasi yang tepat sasaran.
 
 ---
 

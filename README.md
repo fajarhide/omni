@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="media/logo.png" alt="OMNI" width="250" />
+  <img src="media/hero.svg" alt="OMNI" width="800" />
   
-  **Less noise. More signal. Cut your AI token consumption by up to 90%.**
+  **The Context Operating System for AI Agents. Less noise. More signal. Cut token consumption by up to 90%.**
 
   [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
 
@@ -15,7 +15,7 @@
 
 <br/>
 
-> **OMNI** is a smart terminal layer that intelligently filters and prioritizes command output before it reaches your AI agent. By preventing your AI from getting confused by noisy output, you get accurate answers faster while saving massive amounts of token costs.
+> **OMNI** is a high-performance **Semantic Signal Engine** and **Context Operating System** that intelligently intercepts, analyzes, and distills terminal outputs before they reach your AI Agent. It acts as a transparent signal optimization layer that sits between the shell and the AI, ensuring every token sent to the model is high-value, relevant, and noise-free. By preventing your AI from getting confused by noisy output, you get accurate answers faster while saving massive amounts of token costs.
 > 
 > *Fully transparent. You're always in control.*
 ---
@@ -24,8 +24,10 @@
 - [The Problem: Expensive Tokens & Noisy Outputs](#the-problem-expensive-tokens--noisy-outputs)
 - [The Solution: Omni](#the-solution-omni)
 - [The Philosophy](#the-philosophy)
-- [Performance & Use Cases](#performance--use-cases)
+- [Real-World Use Cases](#real-world-use-cases)
+- [Performance & Benchmarks](#performance--benchmarks)
 - [Features Explained](#features-explained)
+- [Under the Hood: How Omni Works](#under-the-hood-how-omni-works)
 - [Architecture](#architecture)
 - [Quick Start & Installation](#quick-start--installation)
 - [How to Use It](#how-to-use-it)
@@ -36,14 +38,16 @@
 
 ---
 
-## The Problem: Expensive Tokens & Noisy Outputs
+## The Problem: Context Bloat, Expensive Tokens & Noisy Outputs
 
-When you use autonomous AI agents (like Claude Code) in your terminal, they read *everything*. A simple `git diff`, `npm install`, or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context. 
+When you use autonomous AI agents (like Claude Code or Cursor) in your terminal, they read *everything*. A simple `git diff`, `npm install`, or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context. 
 
 This causes three huge problems:
 1. **It's extremely expensive**: You pay real money for every single token of that junk output.
 2. **It makes the AI "dumb"**: Critical errors get buried under megabytes of warning logs and loading bars, confusing the AI and diluting its reasoning.
 3. **Model Lock-in**: Advanced agent frameworks force you to use their most expensive flagship models just to have a context window big enough to handle all that noise.
+4. **Token-Aware Execution**: Agents lack awareness of token costs and outputs, leading to unnecessary consumption.
+5. **Context Bloat**: The volume of terminal output clutters the AI's context, reducing focus and accuracy.
 
 ## The Solution: Omni
 
@@ -53,7 +57,9 @@ I built Omni because I wanted to run AI agents efficiently and cheaply every sin
 
 **The result?** You can run your AI agent on a super-advanced framework and feed it *zero noise*. Because the AI is only fed highly focused, straight-to-the-point context, even affordable or ordinary models will perform on-par with expensive flagship models, since they are never distracted by junk data.
 
-My ultimate passion isn't to monetize this—it's to build the ultimate open-source toolbelt for the Agentic AI era. By aggressively saving token costs, I can develop software robustly and cost-effectively today, and you can too.
+My ultimate passion isn't to monetize this—it's to build the ultimate open-source toolbelt for the Agentic AI era. By aggressively saving token costs, I can develop software robustly and cost-effectively today, and you can too. 
+
+Context is expensive and noisy, and Omni is here to fix that. By optimizing context, Omni makes AI agents more efficient, cost-effective, and easier to use. This is done by reducing the amount of context that is sent to the AI agent, which in turn reduces the amount of processing time and memory required to generate a response.
 
 ---
 
@@ -71,7 +77,25 @@ AI agents like Claude are only as smart as the context you feed them. When you f
 
 ---
 
-## Performance & Use Cases
+## Real-World Use Cases
+
+OMNI is designed to solve the daily frustrations of Agentic AI developers. Here is how it transforms your workflow:
+
+1. **The "Infinite Loop of Death" in Monorepos**
+   - **Scenario**: You ask Claude to run `npm install` and `npm run build` in a large monorepo. It outputs 20,000 lines of dependency warnings and a small build error at the end. The AI gets distracted by the warnings and tries to fix unrelated dependency issues, burning through your tokens and trapping you in an infinite loop.
+   - **OMNI's Fix**: OMNI intercepts the build. It completely mutes the hundreds of `peer dependency` warnings and only surfaces the exact `Build Error: Cannot find module 'X'` alongside the stack trace. The AI sees a 50-token output and fixes the code instantly.
+
+2. **The "Silent Hallucination" on Large Files**
+   - **Scenario**: The AI wants to understand a project and runs `cat src/utils.ts`. The file is 3,000 lines long. The AI struggles to keep all of it in working memory and starts hallucinating function signatures.
+   - **OMNI's Fix**: OMNI blocks the raw `cat` and replaces it with a **Structured Outline**. It shows the AI the imports, the public API (function names and types), and risk markers, reducing the output by 80%. OMNI then warns the AI: `"This file has 12 dependents — use omni_context for full impact map."` The AI is guided to make safer, factual edits.
+
+3. **Multi-Agent Collaboration**
+   - **Scenario**: You are using Cursor IDE for quick edits and Claude Code CLI for heavy lifting. They both need to know what's happening without running redundant commands and wasting tokens.
+   - **OMNI's Fix**: OMNI acts as a shared memory layer. Using `omni_agents` and its local SQLite `Store`, Cursor and Claude share the same filtered memory streams, active errors, and execution environments. They collaborate without clashing.
+
+---
+
+## Performance & Benchmarks
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
@@ -96,60 +120,55 @@ OMNI is built in Rust for zero-overhead execution and ruthless efficiency. Here 
 
 ## Features Explained
 
-- **No More AI Confusion**: Omni acts like a smart sieve. If a test fails, it shows the AI *only* the specific error line and stack trace. Your AI stops getting distracted by loading spinners or noisy dependency logs, allowing it to focus directly on the real problem.
-- **90% Token Reduction**: By completely eliminating useless terminal noise, you drastically cut your agentic API bills instantly.
-- **Zero Information Loss**: Worried Omni filtered something important? Don't be. Omni saves the raw output in a local archive (`RewindStore`). If the AI actually needs the full log, it can just automatically ask for it using `omni_retrieve`.
-- **Session Intelligence**: Omni remembers what you are doing. It knows which files you are actively editing and stops feeding the AI context it already knows. Cross-session memory is now capable of preserving specific fixes permanently via `omni_knowledge`.
-- **Multi-Agent Collaboration**: Omni is fully aware of its environment via `omni_agents`. If you have Cursor running alongside Claude CLI, they can seamlessly share the same filtered memory streams, active errors, and execution environments without clashing.
-- **Distill Monitor**: Track your token savings and costs over time. Use `omni_budget` and `omni_history` right inside your LLM, or run `omni stats` locally to visualize your money saved.
-- **Visual Impact (`omni diff`)**: See exactly how much money and space you are saving. Just run `omni diff` to see the bulky raw output compared side-by-side to Omni's sleek, filtered version.
-- **Lightweight Dependency Graph**: OMNI builds a fast local file relationship graph at hook time (no daemon, no LSP). When your AI reads a heavily-imported file, OMNI warns it: `"this file has 12 dependents — call omni_context for full impact map."`.
+### 🧠 Core Distillation Engine
+- **No More AI Confusion**: Omni acts like a smart sieve. If a test fails, it shows the AI *only* the specific error line and stack trace, blocking noisy dependency logs and loading spinners.
+- **90% Token Reduction**: By eliminating useless terminal noise, you drastically cut your agentic API bills instantly.
 - **Adaptive Compression**: OMNI tracks when agents retrieve omitted output. If a command family is frequently retrieved, OMNI automatically softens compression next time — self-tuning without configuration.
-- **Smart High-Speed Bypass**: To ensure zero latency for small tasks, OMNI automatically bypasses distillation for outputs under a 2000-token threshold. This prioritizes speed while still capturing the big data when it matters.
-- **Omission Visibility**: OMNI now explicitly labels removed content (e.g., `[OMNI: omitted X lines of noise]`) in the output, giving your AI agent better situational awareness of what was filtered.
-- **Debug Passthrough**: Need to see the raw output for a moment? Just set `OMNI_PASSTHROUGH=1` in your environment to completely bypass the engine and see every single character of the original output.
-- **Structured ReadFile + Grep**: Instead of raw file dumps or flat grep output, OMNI returns structured outlines (imports, public API, risk markers) and grouped grep summaries (top files by match count, priority lines first).
-- **Factual Anti-Hallucination Guards**: OMNI emits warnings only when it has hard facts — no speculation. If output is heavily compressed and no rewind exists: it says so. If a file has many dependents: it says so. Keeping your AI grounded in reality.
+- **Smart High-Speed Bypass**: To ensure zero latency for small tasks, OMNI automatically bypasses distillation for outputs under a 2000-token threshold.
+
+### 🛡️ Context Safety & Factual Guards
+- **Zero Information Loss**: Worried Omni filtered something important? Don't be. Omni saves the raw output locally (`RewindStore`). The AI can automatically request it using `omni_retrieve`.
+- **Factual Anti-Hallucination Guards**: OMNI emits warnings only when it has hard facts. If output is heavily compressed or a file has massive dependencies, OMNI injects a system warning to keep your AI grounded in reality.
+- **Omission Visibility**: OMNI explicitly labels removed content (e.g., `[OMNI: omitted X lines of noise]`) in the output, giving your AI agent perfect situational awareness.
+
+### 🤝 Multi-Agent & Workspace Intelligence
+- **Multi-Agent Collaboration**: Fully aware of its environment via `omni_agents`. If you have Cursor running alongside Claude CLI, they seamlessly share the same filtered memory streams and active errors without clashing.
+- **Session Intelligence**: OMNI remembers what you are doing. It knows which files you are actively editing and stops feeding the AI redundant context. Fixes are preserved permanently via `omni_knowledge`.
+- **Structured ReadFile + Grep**: Instead of raw file dumps, OMNI returns structured outlines (imports, public API) and grouped grep summaries (priority lines first).
+- **Lightweight Dependency Graph**: OMNI builds a fast local file relationship graph at hook time (no daemon). If your AI reads a heavily-imported file, OMNI warns it of the impact map.
+
+### 📊 Monitoring & Debugging
+- **Distill Monitor**: Track token savings over time. Use `omni_budget` and `omni_history` right inside your LLM, or run `omni stats` locally to visualize money saved.
+- **Visual Impact (`omni diff`)**: Run `omni diff` to see the bulky raw output compared side-by-side to Omni's sleek, filtered version.
+- **Debug Passthrough**: Need the raw output? Set `OMNI_PASSTHROUGH=1` to completely bypass the engine and see every character of the original output.
 
 ---
+
+## Under the Hood: How Omni Works
+
+OMNI is more than just a regex script; it's a high-performance **Semantic Signal Engine** written in Rust. But how does it actually cut 90% of token consumption in under 100ms? 
+
+Here is the story of what happens inside the OMNI codebase when your AI Agent types a command like `cargo test`:
+
+1. **The Interception (`src/hooks` & `src/main.rs`)**: The moment the AI hits "Enter", OMNI intercepts the execution. `main.rs` dynamically detects the context (whether it's a pipe, a hook, or an MCP call). The `hooks` module seamlessly wraps the command, allowing OMNI to capture the raw terminal output as a high-speed data stream without slowing down the actual execution.
+2. **The Streaming Pipeline (`src/pipeline`)**: Instead of waiting for the command to finish and dumping megabytes of text into memory, OMNI processes the output line-by-line using a memory-efficient streaming pipeline. This ensures that even if a command spits out 10,000 lines of logs, OMNI's memory footprint remains nearly flat.
+3. **The Semantic Brain (`src/distillers` & `src/guard`)**: As the text streams in, it passes through the Distillers. Powered by declarative TOML rules (`signals/`), the distillers analyze the semantic meaning of the output. 
+   - Is this a loading spinner? *Drop it.* 
+   - Is this a list of 500 passing tests? *Drop it.* 
+   - Is this a panic stack trace? **Keep it.** 
+   Meanwhile, the `guard` module ensures facts are preserved, guaranteeing that OMNI never silently alters critical diagnostic information.
+4. **The Safety Net (`src/store`)**: What if the AI actually needed to see the 500 passing tests? OMNI follows a strict "Zero Information Loss" policy. Before any noise is discarded, the raw, unedited output is safely tucked away in a local, lightning-fast SQLite database (`Store`). OMNI leaves a small breadcrumb in the AI's context: `[OMNI: omitted 1,200 lines of noise. Use omni_retrieve to view]`.
+5. **The Multi-Agent Interface (`src/mcp` & `src/session`)**: Finally, the distilled, high-signal output is returned to the AI. Behind the scenes, the `session` manager tracks the current token budget, while the `mcp` (Model Context Protocol) server stands ready. If the AI wants to query historical errors, fetch the omitted raw logs, or check the dependency graph (`src/graph`), the MCP tools provide instant, structured access.
+
+**The Result:** A bloated `25,000` token terminal dump becomes a concise `400` token error report. The AI understands the problem instantly, and you save real money.
+
+---
+
 ## Architecture
 
-```mermaid
-flowchart TB
-    Agent["Claude Code / OpenClaw / Hermes Agent / MCP Agent"]
-
-    subgraph Hooks["Native Hook Layer (Transparent)"]
-        Pre["Pre-Hook\n(Rewriter)"]
-        Post["Post-Hook\n(Distiller)"]
-        Sess["Session-Start\n(Context)"]
-        Comp["Pre-Compact\n(Summary)"]
-    end
-
-    Agent --> Pre
-    Pre -->|"omni exec"| Output["Raw Stream"]
-    Output --> Post
-    Post --> Agent
-
-    subgraph OMNI_Engine["OMNI — Semantic Signal Engine"]
-        direction LR
-        R["Registry\n(Filters)"]
-        S["Scorer\n(Context Boost)"]
-        D["Distiller\n(Semantic Magic)"]
-        R --> S --> D
-    end
-
-    Post --> OMNI_Engine
-    Pre --> OMNI_Engine
-
-    subgraph Persistence["Persistence Store (SQLite)"]
-        ST["SessionState"]
-        RW["RewindStore"]
-    end
-
-    OMNI_Engine <--> Persistence
-    Sess --> ST
-    Comp --> ST
-```
+<div align="center">
+  <img src="media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
+</div>
 
 ## Quick Start & Installation
 

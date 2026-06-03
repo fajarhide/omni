@@ -1,0 +1,17 @@
+schema_version = 2
+
+[filters.az]
+description = "Distills Azure CLI output"
+trigger_pattern = "^az "
+strip_ansi = true
+confidence = 0.85
+stream_mode = false
+
+strip_lines_matching = [
+    "^\\s*$",
+    "^Command ran in ",
+    "^WARNING: "
+]
+
+max_lines = 150
+fallback_message = "az: operation completed successfully"

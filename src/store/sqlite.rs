@@ -369,6 +369,24 @@ impl Store {
             CREATE INDEX IF NOT EXISTS idx_pm_tool ON pattern_memory(tool_family);
             CREATE INDEX IF NOT EXISTS idx_pm_last ON pattern_memory(last_seen);
 
+            -- 12. Context Turns
+            CREATE TABLE IF NOT EXISTS context_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                turn_number INTEGER NOT NULL,
+                ts INTEGER NOT NULL,
+                estimated_total_tokens INTEGER DEFAULT 0,
+                file_read_tokens INTEGER DEFAULT 0,
+                tool_output_tokens INTEGER DEFAULT 0,
+                conversation_tokens INTEGER DEFAULT 0,
+                system_prompt_tokens INTEGER DEFAULT 0,
+                has_duplicate_reads INTEGER DEFAULT 0,
+                duplicate_files TEXT DEFAULT '[]',
+                largest_read_file TEXT DEFAULT '',
+                largest_read_tokens INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_turns(session_id);
+
             -- 11. One-time data migrations tracker
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id           TEXT PRIMARY KEY,
@@ -767,6 +785,40 @@ impl Store {
             serde_json::from_str(&json).ok()
         } else {
             None
+        }
+    }
+
+    pub fn record_context_turn(&self, turn: &crate::analytics::context_composition::ContextTurn) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let duplicate_files_json =
+            serde_json::to_string(&turn.duplicate_files).unwrap_or_else(|_| "[]".to_string());
+
+        let res = conn.execute(
+            "INSERT INTO context_turns 
+             (session_id, turn_number, ts, estimated_total_tokens, file_read_tokens, tool_output_tokens, conversation_tokens, system_prompt_tokens, has_duplicate_reads, duplicate_files, largest_read_file, largest_read_tokens)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                turn.session_id,
+                turn.turn_number,
+                turn.timestamp,
+                turn.estimated_total_tokens as i64,
+                turn.file_read_tokens as i64,
+                turn.tool_output_tokens as i64,
+                turn.conversation_tokens as i64,
+                turn.system_prompt_tokens as i64,
+                turn.has_duplicate_file_reads as i32,
+                duplicate_files_json,
+                turn.largest_single_read.0,
+                turn.largest_single_read.1 as i64,
+            ],
+        );
+
+        if let Err(e) = res {
+            eprintln!("[omni:error] failed to record context turn: {}", e);
         }
     }
 

@@ -1,6 +1,7 @@
 // OMNI Library — re-exports for integration tests and external usage.
 
 pub mod agents;
+pub mod analytics;
 pub mod cli;
 pub mod distillers;
 pub mod graph;

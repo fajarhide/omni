@@ -1,0 +1,17 @@
+schema_version = 2
+
+[filters.deno]
+description = "Distills Deno runtime and build output"
+trigger_pattern = "^deno "
+strip_ansi = true
+confidence = 0.9
+stream_mode = false
+
+strip_lines_matching = [
+    "^\\s*$",
+    "^Download ",
+    "^Warning: "
+]
+
+max_lines = 150
+fallback_message = "deno: operation completed successfully"

@@ -1,0 +1,21 @@
+schema_version = 2
+
+[filters.webpack]
+description = "Distills Webpack build output"
+trigger_pattern = "^(webpack|npx webpack) "
+strip_ansi = true
+confidence = 0.9
+stream_mode = false
+
+strip_lines_matching = [
+    "^\\s*$",
+    "^\\s*asset ",
+    "^\\s*entrypoint ",
+    "^\\s*cached modules ",
+    "^\\s*orphan modules ",
+    "^\\s*runtime modules ",
+    "^\\s*built modules "
+]
+
+max_lines = 150
+fallback_message = "webpack: build completed successfully"

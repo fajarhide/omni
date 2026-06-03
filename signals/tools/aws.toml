@@ -1,0 +1,20 @@
+schema_version = 2
+
+[filters.aws]
+description = "Distills AWS CLI output to remove pagination and raw JSON noise"
+trigger_pattern = "^aws "
+strip_ansi = true
+confidence = 0.85
+stream_mode = false
+
+strip_lines_matching = [
+    "^\\s*$",
+    "^\\s*\"ResponseMetadata\":",
+    "^\\s*\"RequestId\":",
+    "^\\s*\"HTTPStatusCode\":",
+    "^\\s*\"HTTPHeaders\":",
+    "^\\s*\"RetryAttempts\":"
+]
+
+max_lines = 150
+fallback_message = "aws: operation completed successfully"

@@ -71,6 +71,21 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         .or(detected_cmd.as_deref())
         .map(|c| c.strip_prefix("omni exec ").unwrap_or(c));
 
+    // Phase 0.5: Streaming Distillation Check
+    let mut stream_filter = None;
+    if let Some(cmd) = command_to_use {
+        let filters = toml_filter::load_all_filters();
+        if let Some(f) = filters.iter().find(|filter| filter.matches(cmd))
+            && f.stream_mode
+        {
+            stream_filter = Some(f.clone());
+        }
+    }
+
+    if let Some(filter) = stream_filter {
+        return stream_distill(input, output, error, filter, store, session, command_to_use);
+    }
+
     let start_time = Instant::now();
 
     // Phase 1: Read
@@ -155,6 +170,139 @@ fn read_input<R: Read, W: Write>(mut input: R, mut output: W) -> Result<Option<S
             Ok(None)
         }
     }
+}
+
+fn stream_distill<R: Read, W: Write, E: Write>(
+    input: R,
+    mut output: W,
+    mut error: E,
+    filter: toml_filter::TomlFilter,
+    store: Option<Arc<Store>>,
+    session: Option<Arc<Mutex<SessionState>>>,
+    command_name: Option<&str>,
+) -> Result<()> {
+    let start_time = Instant::now();
+    let mut reader = std::io::BufReader::new(input);
+
+    let mut raw_bytes = 0;
+    let mut filtered_bytes = 0;
+    let mut line_buffer = Vec::new();
+
+    // Streaming loop
+    loop {
+        line_buffer.clear();
+        // We read byte by byte until \n or \r to support progress bars correctly
+        let mut b = [0u8; 1];
+        let mut eof = false;
+        loop {
+            match reader.read(&mut b) {
+                Ok(0) => {
+                    eof = true;
+                    break;
+                }
+                Ok(_) => {
+                    let ch = b[0];
+                    line_buffer.push(ch);
+                    if ch == b'\n' || ch == b'\r' {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        if line_buffer.is_empty() && eof {
+            break;
+        }
+
+        raw_bytes += line_buffer.len();
+
+        let line_str = String::from_utf8_lossy(&line_buffer);
+        let is_cr = line_str.ends_with('\r');
+        let clean_line = line_str.trim_end_matches(['\n', '\r']);
+
+        // We apply filter line by line
+        let filtered = filter.apply(clean_line);
+        if !filtered.trim().is_empty() {
+            output.write_all(filtered.as_bytes())?;
+            filtered_bytes += filtered.len();
+
+            if is_cr {
+                output.write_all(b"\r")?;
+                filtered_bytes += 1;
+            } else {
+                output.write_all(b"\n")?;
+                filtered_bytes += 1;
+            }
+            output.flush()?;
+        }
+
+        if eof {
+            break;
+        }
+    }
+
+    // Persist streaming stats without saving full input/output to prevent memory spikes
+    if let Some(s) = store {
+        use crate::pipeline::DistillResult;
+        let session_id = with_session(&session, |g| g.session_id.clone())
+            .unwrap_or_else(|| "pipe_session".to_string());
+
+        let agent_id = resolve_pipe_agent_id();
+        let project_path = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let cmd = command_name.unwrap_or("");
+
+        let reduction = if raw_bytes > 0 {
+            100.0 * (1.0 - (filtered_bytes as f64 / raw_bytes as f64))
+        } else {
+            0.0
+        };
+
+        if !crate::guard::env::is_quiet() {
+            let msg = format!(
+                "{} {:.1}% reduction ({} → {}) {}ms (Streaming)",
+                "⏺".cyan(),
+                reduction,
+                crate::cli::stats::format_bytes(raw_bytes as u64).bright_black(),
+                crate::cli::stats::format_bytes(filtered_bytes as u64).green(),
+                start_time.elapsed().as_millis().to_string().bright_black()
+            );
+            let _ = writeln!(error, "{} {}", "[OMNI Active]".bold().cyan(), msg);
+        }
+
+        let distill_result = DistillResult {
+            output: format!(
+                "[Streaming Mode - Output omitted from memory. Raw: {}, Filtered: {}]",
+                raw_bytes, filtered_bytes
+            ),
+            route: Route::Keep,
+            filter_name: filter.name.clone(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: raw_bytes,
+            output_bytes: filtered_bytes,
+            latency_ms: start_time.elapsed().as_millis() as u64,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: (raw_bytes / 4),
+            filtered_tokens: (filtered_bytes / 4),
+        };
+
+        s.record_distillation(&session_id, &distill_result, cmd, &project_path, &agent_id);
+
+        if let Some(sess) = &session {
+            let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
+            tracker.track_command(cmd, "[Streaming Mode - Input Omitted]", &distill_result);
+        }
+    }
+
+    Ok(())
 }
 
 fn with_session<F, R>(session: &Option<Arc<Mutex<SessionState>>>, f: F) -> Option<R>

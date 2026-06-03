@@ -5,6 +5,7 @@ description = "Filter Bun runtime noise — strip download progress, dependency 
 match_command = "^bun\\b"
 strip_ansi = true
 confidence = 0.88
+stream_mode = true
 strip_lines_matching = [
     "^\\s*$",
     "^\\s*Resolving dependencies",
