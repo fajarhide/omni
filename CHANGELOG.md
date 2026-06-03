@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-06-03
+
+### Added
+- **Streaming Distillation Pipeline**: Introduced memory-efficient, line-by-line processing (`src/hooks/pipe.rs`) to handle long-running and piped commands without memory exhaustion.
+- **Expanded Semantic Distillers**: Added new declarative TOML signal profiles for 9 developer tools: `aws`, `az`, `bun`, `deno`, `docker`, `gcloud`, `npm`, `vite`, and `webpack`.
+- **Brand & Documentation Modernization**: Completely overhauled the English `README.md` and all 6 `i18n` localized versions with professional SVG visual assets (`hero.svg`, `architecture.svg`), new "Under the Hood", and "Real-World Use Cases" sections.
+- **Advanced Context Analytics**: Implemented context composition metrics in `omni stats` (`src/analytics/context_composition.rs`) to provide deeper visibility into token reduction and signal density.
+
+### Improved
+- **SQLite Storage Enhancements**: Updated `src/store/sqlite.rs` to seamlessly support high-throughput, chunked streaming outputs from the new distillation pipeline.
+- **MCP & Tooling Synchronization**: Refined `pre_tool` and `post_tool` hook routing to align with the new semantic models.
+
 ## [0.5.8-rc3] - 2026-05-29
 
 ### Added
