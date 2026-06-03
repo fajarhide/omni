@@ -82,7 +82,7 @@ pub fn run(
 
 fn process_payload(
     input_str: &str,
-    _store: Option<Arc<crate::store::sqlite::Store>>,
+    store: Option<Arc<crate::store::sqlite::Store>>,
     session: Option<Arc<Mutex<crate::pipeline::SessionState>>>,
 ) -> Option<String> {
     let parsed: PreHookInput = serde_json::from_str(input_str).ok()?;
@@ -106,9 +106,37 @@ fn process_payload(
     // Conservative Context Injection Hint for Read/Search commands
     if let Some(target_file) = extract_target_file(cmd_str) {
         // Feature C: File Re-Read Guard & Hot File Mutation Warning
+        // Phase 1: Context Composition Analyzer tracking
         let hot_count = if let Some(ref lock) = session {
-            if let Ok(state) = lock.lock() {
-                state.hot_files.get(&target_file).copied().unwrap_or(0)
+            if let Ok(mut state) = lock.lock() {
+                let count = state.hot_files.get(&target_file).copied().unwrap_or(0);
+
+                let size_bytes = std::fs::metadata(&target_file)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                let est_tokens = size_bytes / 4;
+
+                state.current_turn.session_id = state.session_id.clone();
+                state.current_turn.turn_number = state.command_count;
+                state.current_turn.timestamp = chrono::Utc::now().timestamp();
+                state.current_turn.file_read_tokens += est_tokens;
+
+                if count > 0 {
+                    state.current_turn.has_duplicate_file_reads = true;
+                    if !state.current_turn.duplicate_files.contains(&target_file) {
+                        state.current_turn.duplicate_files.push(target_file.clone());
+                    }
+                }
+
+                if est_tokens > state.current_turn.largest_single_read.1 {
+                    state.current_turn.largest_single_read = (target_file.clone(), est_tokens);
+                }
+
+                if let Some(s) = &store {
+                    s.record_context_turn(&state.current_turn);
+                }
+
+                count
             } else {
                 0
             }

@@ -239,11 +239,14 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let detail_flag = args.iter().any(|a| a == "--detail");
     let json_flag = args.iter().any(|a| a == "--json");
     let project_flag = args.iter().any(|a| a == "--project");
+    let context_flag = args.iter().any(|a| a == "--context");
     let filter_flag = args
         .iter()
         .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
 
-    let mode = if detail_flag {
+    let mode = if context_flag {
+        "context"
+    } else if detail_flag {
         "detail"
     } else if json_flag {
         "json"
@@ -256,11 +259,82 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
         "json" => run_json(store),
         _ => run_default(store),
     }
+}
+
+// ─── Context Mode: Context Composition Analyzer ────────
+fn run_context_stats(store: &Store) -> Result<()> {
+    println!();
+    print_separator();
+    println!(
+        " {}",
+        "OMNI Context Composition Analyzer".bold().bright_white()
+    );
+    print_separator();
+
+    if let Some(session) = store.find_latest_session() {
+        let turn = &session.current_turn;
+        println!(
+            "  {:<25} {}",
+            "Session ID:".bright_black(),
+            session.session_id.cyan()
+        );
+        println!(
+            "  {:<25} {}",
+            "Commands (Turns):".bright_black(),
+            format_number(session.command_count as u64).cyan()
+        );
+        println!("\n  {}", "Token Breakdown:".bold().bright_white());
+        println!(
+            "    {:<25} {} tokens",
+            "File Reads:".bright_black(),
+            format_exact_tokens(turn.file_read_tokens).yellow()
+        );
+        println!(
+            "    {:<25} {} tokens",
+            "Tool Outputs:".bright_black(),
+            format_exact_tokens(turn.tool_output_tokens).green()
+        );
+
+        let est_total = turn.file_read_tokens + turn.tool_output_tokens;
+        println!(
+            "\n  {:<27} {} tokens",
+            "Estimated Context Total:".bold().bright_white(),
+            format_exact_tokens(est_total).bright_cyan()
+        );
+
+        if turn.has_duplicate_file_reads {
+            println!(
+                "\n  {}",
+                "WARNING: Duplicate File Reads Detected!"
+                    .bold()
+                    .bright_red()
+            );
+            for f in turn.duplicate_files.iter().take(5) {
+                println!("    - {}", f.red());
+            }
+        }
+
+        if turn.largest_single_read.1 > 0 {
+            println!(
+                "\n  {:<27} {} ({} tokens)",
+                "Largest File Read:".bright_black(),
+                turn.largest_single_read.0.cyan(),
+                format_exact_tokens(turn.largest_single_read.1).yellow()
+            );
+        }
+    } else {
+        println!("  {}", "No active session found.".bright_black().italic());
+    }
+
+    print_separator();
+    println!();
+    Ok(())
 }
 
 // ─── Default Mode: Gain-Focused Multi-Period ────────────

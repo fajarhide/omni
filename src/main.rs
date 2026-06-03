@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod analytics;
 mod cli;
 mod distillers;
 mod graph;

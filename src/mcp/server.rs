@@ -693,6 +693,20 @@ impl OmniServer {
     }
 
     #[tool(
+        name = "omni_context_breakdown",
+        description = "Show token breakdown by source for the current context turn"
+    )]
+    pub async fn omni_context_breakdown(&self) -> String {
+        let session = match self.session.lock() {
+            Ok(s) => s.clone(),
+            Err(_) => return "Error: session lock failed".to_string(),
+        };
+
+        let turn = &session.current_turn;
+        serde_json::to_string_pretty(turn).unwrap_or_else(|_| "Serialization error".to_string())
+    }
+
+    #[tool(
         name = "omni_agents",
         description = "Show other AI agents currently active on this project (multi-agent awareness)"
     )]
