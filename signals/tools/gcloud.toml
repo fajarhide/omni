@@ -1,0 +1,19 @@
+schema_version = 2
+
+[filters.gcloud]
+description = "Distills gcloud CLI output"
+trigger_pattern = "^gcloud "
+strip_ansi = true
+confidence = 0.85
+stream_mode = false
+
+strip_lines_matching = [
+    "^\\s*$",
+    "^WARNING: ",
+    "^Updates are available for some Google Cloud CLI components",
+    "^To install them, please run:",
+    "^\\s*\\$ gcloud components update"
+]
+
+max_lines = 150
+fallback_message = "gcloud: operation completed successfully"

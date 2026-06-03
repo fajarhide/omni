@@ -1,6 +1,6 @@
 # OMNI — Performance & Capabilities Showcase
 
-![OMNI Performance Dashboard](../https://omni.weekndlabs.com/media/performance.png)
+![OMNI Performance Dashboard](https://omni.weekndlabs.com/media/performance.png)
 
 ---
 

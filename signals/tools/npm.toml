@@ -4,6 +4,7 @@ schema_version = 1
 description = "Filter noise from npm/yarn/pnpm/bun install and run scripts"
 match_command = "^(npm|yarn|pnpm|bun) (install|ci|add|remove|run)"
 strip_ansi = true
+stream_mode = true
 strip_lines_matching = [
     "^npm warn",
     "^npm WARN",

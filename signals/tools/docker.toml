@@ -5,6 +5,7 @@ description = "Distills Docker and Podman build/run output"
 match_command = "^(docker|podman) (build|run|pull|push|image|ps).*"
 strip_ansi = true
 confidence = 0.9
+stream_mode = true
 
 # 1. Clean up progress and layer noise
 strip_lines_matching = [

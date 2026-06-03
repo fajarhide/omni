@@ -207,6 +207,10 @@ fn print_help() {
         "  {: <12} Display breakdown per project path",
         "--project".cyan()
     );
+    println!(
+        "  {: <12} Show context composition signals",
+        "--context".cyan()
+    );
     println!("  {: <12} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -271,10 +275,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 fn run_context_stats(store: &Store) -> Result<()> {
     println!();
     print_separator();
-    println!(
-        " {}",
-        "OMNI Context Composition Analyzer".bold().bright_white()
-    );
+    println!(" {}", "OMNI Signal Report — Context".bold().bright_white());
     print_separator();
 
     if let Some(session) = store.find_latest_session() {

@@ -38,7 +38,7 @@ pub fn run_exec(
         format!("{} {}", cmd, cmd_args.join(" "))
     };
 
-    let (child, cmd_name) = if needs_shell {
+    let (mut child, cmd_name) = if needs_shell {
         #[cfg(target_family = "windows")]
         let mut c = Command::new("cmd");
         #[cfg(target_family = "windows")]
@@ -76,14 +76,14 @@ pub fn run_exec(
         (c, full_cmd)
     };
 
-    let output = child.wait_with_output()?;
+    let child_stdout = child.stdout.take().expect("Failed to open stdout");
 
     let stdout = std::io::stdout().lock();
     let stderr = std::io::stderr().lock();
 
     // Pipe the stdout of the child process through OMNI's pipeline
     run_inner(
-        &output.stdout[..],
+        child_stdout,
         stdout,
         stderr,
         store.clone(),
@@ -91,12 +91,14 @@ pub fn run_exec(
         Some(&cmd_name),
     )?;
 
-    if !output.status.success() {
+    let status = child.wait()?;
+
+    if !status.success() {
         if let (Some(sess), Some(st)) = (&session, &store) {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), st.clone());
-            tracker.track_error(&String::from_utf8_lossy(&output.stderr));
+            tracker.track_error(""); // stderr is inherited, so we just track the failure
         }
-        std::process::exit(output.status.code().unwrap_or(1));
+        std::process::exit(status.code().unwrap_or(1));
     }
 
     Ok(())
