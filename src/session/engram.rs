@@ -131,7 +131,7 @@ pub fn summarize_tool_calls(log: &VecDeque<ToolCallEntry>) -> Vec<ToolFamilySumm
         .collect();
 
     // Sort by total_calls descending for relevance
-    summaries.sort_by(|a, b| b.total_calls.cmp(&a.total_calls));
+    summaries.sort_by_key(|s| std::cmp::Reverse(s.total_calls));
     summaries
 }
 
