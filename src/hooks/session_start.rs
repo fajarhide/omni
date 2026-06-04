@@ -352,6 +352,19 @@ fn build_summary(state: &SessionState, now: i64) -> String {
         ));
     }
 
+    // Phase 2: Inject engram progress into session resume
+    if !state.engrams.is_empty() {
+        out.push_str("Progress: ");
+        let engram_strs: Vec<String> = state
+            .engrams
+            .iter()
+            .take(3)
+            .map(|e| format!("[{}] {}", e.trigger, e.label))
+            .collect();
+        out.push_str(&engram_strs.join("; "));
+        out.push_str(". ");
+    }
+
     out
 }
 

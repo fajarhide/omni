@@ -26,6 +26,10 @@ fn print_help() {
         "  {: <16} View transcript of recent session",
         "--transcript".cyan()
     );
+    println!(
+        "  {: <16} Visual session health dashboard",
+        "--health".cyan()
+    );
     println!("  {: <16} Show this help message", "--help, -h".cyan());
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
@@ -64,6 +68,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     let is_inject = args.iter().any(|a| a == "--inject");
     let is_resume = args.iter().any(|a| a == "--resume");
     let is_transcript = args.iter().any(|a| a == "--transcript");
+    let is_health = args.iter().any(|a| a == "--health");
 
     // If no flags, show help
     if !is_history
@@ -73,6 +78,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         && !is_inject
         && !is_resume
         && !is_transcript
+        && !is_health
     {
         print_help();
         return Ok(());
@@ -86,6 +92,11 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     // --transcript: view transcript of most recent session
     if is_transcript {
         return run_transcript();
+    }
+
+    // --health: visual session health dashboard
+    if is_health {
+        return run_health(&store);
     }
 
     if is_history {
@@ -477,6 +488,163 @@ fn run_transcript() -> anyhow::Result<()> {
     println!(
         "\n{}",
         "─────────────────────────────────────────"
+            .bright_black()
+            .bold()
+    );
+    Ok(())
+}
+
+// ── Health: Visual session health dashboard ───────────
+
+fn run_health(store: &Store) -> anyhow::Result<()> {
+    let state = match store.find_latest_session() {
+        Some(s) => s,
+        None => {
+            println!("\n{} No active session found.\n", "ℹ".blue());
+            return Ok(());
+        }
+    };
+
+    println!(
+        "\n{}",
+        "═══════════════════════════════════════════"
+            .bright_black()
+            .bold()
+    );
+    println!(" {} — Session Health Dashboard", "OMNI".bold().cyan());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════"
+            .bright_black()
+            .bold()
+    );
+
+    // ── Context Pressure Indicator ──
+    let window = state.context_window_size();
+    let pct = if window > 0 {
+        (state.estimated_current_tokens as f64 / window as f64 * 100.0) as u32
+    } else {
+        0
+    };
+    let bar_width = 30;
+    let filled = (pct as usize * bar_width / 100).min(bar_width);
+    let empty = bar_width - filled;
+    let bar_char = "█";
+    let empty_char = "░";
+
+    let bar_color = match state.context_pressure {
+        crate::pipeline::ContextPressure::Normal => bar_char.repeat(filled).green(),
+        crate::pipeline::ContextPressure::Warning => bar_char.repeat(filled).yellow(),
+        crate::pipeline::ContextPressure::Critical => bar_char.repeat(filled).red(),
+    };
+
+    println!(
+        "\n  {} {}{}  {}% ({}k/{}k tokens)",
+        "Pressure:".bold().bright_white(),
+        bar_color,
+        empty_char.repeat(empty).bright_black(),
+        pct,
+        state.estimated_current_tokens / 1000,
+        window / 1000
+    );
+
+    let pressure_label = match state.context_pressure {
+        crate::pipeline::ContextPressure::Normal => "Normal".green().bold(),
+        crate::pipeline::ContextPressure::Warning => "Warning".yellow().bold(),
+        crate::pipeline::ContextPressure::Critical => "CRITICAL".red().bold(),
+    };
+    println!("  {: <15} {}", "Status:".bright_black(), pressure_label);
+
+    // ── Tokens Saved ──
+    let tokens_saved = state.estimated_tokens_saved();
+    println!(
+        "  {: <15} {} tokens",
+        "Tokens saved:".bright_black(),
+        format!("~{}", tokens_saved).green().bold()
+    );
+    println!(
+        "  {: <15} {}",
+        "Commands:".bright_black(),
+        state.command_count.to_string().yellow()
+    );
+
+    // ── Engrams ──
+    println!(
+        "\n  {} ({} recorded)",
+        "Engrams:".bold().bright_white(),
+        state.engrams.len().to_string().cyan()
+    );
+    if state.engrams.is_empty() {
+        println!("  {} none yet", "•".bright_black());
+    } else {
+        for engram in state.engrams.iter().take(5) {
+            println!("  {} {}", "•".cyan(), engram.compact());
+        }
+    }
+
+    // ── Tool Activity ──
+    let summaries = crate::session::engram::summarize_tool_calls(&state.tool_call_log);
+    println!(
+        "\n  {} ({} families)",
+        "Tool Activity:".bold().bright_white(),
+        summaries.len().to_string().cyan()
+    );
+    if summaries.is_empty() {
+        println!("  {} none yet", "•".bright_black());
+    } else {
+        for s in summaries.iter().take(6) {
+            let status_icon = if s.error_count > 0 {
+                "⚠".yellow()
+            } else {
+                "✓".green()
+            };
+            println!(
+                "  {} {: <12} {}x ({}ok/{}err) last:{}",
+                status_icon,
+                s.family.cyan(),
+                s.total_calls.to_string().yellow(),
+                s.success_count.to_string().green(),
+                s.error_count.to_string().red(),
+                s.last_status
+            );
+        }
+    }
+
+    // ── Hot Files ──
+    let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
+    hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
+    println!("\n  {}", "Hot Files:".bold().bright_white());
+    if hot_vec.is_empty() {
+        println!("  {} none", "•".bright_black());
+    } else {
+        for (path, count) in hot_vec.iter().take(5) {
+            println!(
+                "  {} {: <40} {}x",
+                "•".bright_black(),
+                path.cyan(),
+                count.to_string().yellow()
+            );
+        }
+    }
+
+    // ── Recent Commands ──
+    println!("\n  {}", "Recent Commands:".bold().bright_white());
+    if state.last_commands.is_empty() {
+        println!("  {} none", "•".bright_black());
+    } else {
+        for cmd in state.last_commands.iter().take(5) {
+            let display = if cmd.len() > 60 {
+                format!("{}...", &cmd[..57])
+            } else {
+                cmd.clone()
+            };
+            println!("  {} {}", "$".bright_black(), display);
+        }
+    }
+
+    println!(
+        "\n{}",
+        "═══════════════════════════════════════════"
             .bright_black()
             .bold()
     );

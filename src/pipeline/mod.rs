@@ -235,6 +235,22 @@ pub struct SessionState {
     // Context Composition (Phase 1)
     #[serde(default)]
     pub current_turn: crate::analytics::context_composition::ContextTurn,
+
+    // Phase 2: Engram — Automatic Subtask Digest
+    #[serde(default)]
+    pub engrams: VecDeque<crate::session::engram::Engram>,
+
+    // Phase 2: Rolling Tool Call Log (last 50 calls)
+    #[serde(default)]
+    pub tool_call_log: VecDeque<crate::session::engram::ToolCallEntry>,
+
+    // Phase 2: Last command_count when pinned files were re-injected
+    #[serde(default)]
+    pub pinned_reinject_at: u32,
+
+    // Phase 2: Hash of last compact snapshot for delta detection
+    #[serde(default)]
+    pub last_compact_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -313,6 +329,22 @@ impl SessionState {
         self.last_commands.insert(0, cmd.to_string());
         self.last_commands.truncate(MAX_COMMAND_HISTORY);
         self.last_active = chrono::Utc::now().timestamp();
+    }
+
+    /// Add an engram to the session, capping at MAX_ENGRAMS
+    pub fn add_engram(&mut self, engram: crate::session::engram::Engram) {
+        self.engrams.push_front(engram);
+        if self.engrams.len() > crate::session::engram::MAX_ENGRAMS {
+            self.engrams.pop_back();
+        }
+    }
+
+    /// Add a tool call entry to the rolling log
+    pub fn add_tool_call(&mut self, entry: crate::session::engram::ToolCallEntry) {
+        self.tool_call_log.push_front(entry);
+        if self.tool_call_log.len() > crate::session::engram::MAX_TOOL_CALL_LOG {
+            self.tool_call_log.pop_back();
+        }
     }
 
     /// Get the effective context window size (env > field > default)
