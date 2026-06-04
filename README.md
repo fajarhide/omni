@@ -120,24 +120,30 @@ OMNI is built in Rust for zero-overhead execution and ruthless efficiency. Here 
 
 ## Features Explained
 
-### 🧠 Core Distillation Engine
+### Core Distillation Engine
 - **No More AI Confusion**: Omni acts like a smart sieve. If a test fails, it shows the AI *only* the specific error line and stack trace, blocking noisy dependency logs and loading spinners.
 - **90% Token Reduction**: By eliminating useless terminal noise, you drastically cut your agentic API bills instantly.
 - **Adaptive Compression**: OMNI tracks when agents retrieve omitted output. If a command family is frequently retrieved, OMNI automatically softens compression next time — self-tuning without configuration.
 - **Smart High-Speed Bypass**: To ensure zero latency for small tasks, OMNI automatically bypasses distillation for outputs under a 2000-token threshold.
 
-### 🛡️ Context Safety & Factual Guards
+### Context Safety & Factual Guards
 - **Zero Information Loss**: Worried Omni filtered something important? Don't be. Omni saves the raw output locally (`RewindStore`). The AI can automatically request it using `omni_retrieve`.
 - **Factual Anti-Hallucination Guards**: OMNI emits warnings only when it has hard facts. If output is heavily compressed or a file has massive dependencies, OMNI injects a system warning to keep your AI grounded in reality.
 - **Omission Visibility**: OMNI explicitly labels removed content (e.g., `[OMNI: omitted X lines of noise]`) in the output, giving your AI agent perfect situational awareness.
 
-### 🤝 Multi-Agent & Workspace Intelligence
+### Multi-Agent & Workspace Intelligence
 - **Multi-Agent Collaboration**: Fully aware of its environment via `omni_agents`. If you have Cursor running alongside Claude CLI, they seamlessly share the same filtered memory streams and active errors without clashing.
 - **Session Intelligence**: OMNI remembers what you are doing. It knows which files you are actively editing and stops feeding the AI redundant context. Fixes are preserved permanently via `omni_knowledge`.
 - **Structured ReadFile + Grep**: Instead of raw file dumps, OMNI returns structured outlines (imports, public API) and grouped grep summaries (priority lines first).
 - **Lightweight Dependency Graph**: OMNI builds a fast local file relationship graph at hook time (no daemon). If your AI reads a heavily-imported file, OMNI warns it of the impact map.
 
-### 📊 Monitoring & Debugging
+### Context Fidelity & Session Recovery
+- **Engrams (Automatic Subtask Digests)**: OMNI automatically detects when a subtask is completed (e.g., resolving a compiler error, committing code, or fixing a broken test). It creates a highly compressed snapshot (an "Engram") without wasting tokens on LLM calls, so your agent never suffers from "context amnesia" during long sessions.
+- **Smart Context Compaction**: When your context window gets full, OMNI doesn't blindly trim tokens. It uses a priority-aware algorithm to pack the most important data first (Pinned Files > Active Errors > Engrams > Tool Activity > Hot Files), saving massive overhead.
+- **Session Handoffs**: Switching from Claude Code to Cursor? Use the `omni_handoff` tool to instantly export the current session's memory (hot files, recent commands, active errors) into a portable markdown summary that your new agent can instantly absorb.
+
+### Monitoring & Debugging
+- **Session Health Dashboard**: Run `omni session --health` for a beautiful visual dashboard of your context pressure, active engrams, rolling tool activity, and token savings.
 - **Distill Monitor**: Track token savings over time. Use `omni_budget` and `omni_history` right inside your LLM, or run `omni stats` locally to visualize money saved.
 - **Visual Impact (`omni diff`)**: Run `omni diff` to see the bulky raw output compared side-by-side to Omni's sleek, filtered version.
 - **Debug Passthrough**: Need the raw output? Set `OMNI_PASSTHROUGH=1` to completely bypass the engine and see every character of the original output.

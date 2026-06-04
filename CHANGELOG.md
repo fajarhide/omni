@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.5.9-rc1] - 2026-06-04
+
+### Added
+- **Engram (Automatic Subtask Digest)**: Rule-based state snapshots capturing subtask progress (e.g., error resolved, commits, test passes) to prevent context amnesia during long sessions.
+- **Session Health Dashboard**: Introduced `omni session --health` to visualize context pressure, token savings, engrams, tool activity, and hot files.
+- **Smart PreCompact v2**: Intelligent, priority-aware context packing (Errors > Engrams > Tool Summary > Hot Files) with SHA-256 delta detection to skip redundant injections.
+- **Session Handoff & Portability**: Added `omni_handoff` MCP tool to export session state as portable markdown, enabling seamless context transfer between terminal sessions.
+- **Rolling Tool Call Summary**: Aggregates the last 50 tool calls with success/error rates, exposed via the `omni_session("summary")` tool for agent reference when context pressure is high.
+- **Periodic Context Re-injection**: Automatically re-injects critical pinned files (like `AGENTS.md`) into the agent's context when pressure is elevated and after a set interval.
+
 ## [0.5.8] - 2026-06-03
 
 ### Added
