@@ -120,24 +120,30 @@ OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Be
 
 ## Penjelasan Fitur
 
-### 🧠 Core Distillation Engine (Mesin Distilasi Inti)
+### Core Distillation Engine (Mesin Distilasi Inti)
 - **Tidak Ada Lagi Kebingungan AI**: Omni bertindak seperti saringan pintar. Jika tes gagal, ia hanya menunjukkan baris kesalahan dan stack trace, memblokir log dependensi yang bising.
 - **Pengurangan Token 90%**: Dengan menghilangkan noise terminal, Anda memotong tagihan API agen secara drastis.
 - **Kompresi Adaptif**: OMNI melacak kapan agen mengambil output yang dihilangkan dan secara otomatis melunakkan kompresi pada waktu berikutnya — menyetel sendiri secara otomatis.
 - **Smart High-Speed Bypass**: Untuk menjamin latensi nol pada tugas kecil, OMNI secara otomatis melewati distilasi untuk output di bawah ambang 2000-token.
 
-### 🛡️ Context Safety & Factual Guards (Keamanan Konteks)
+### Context Safety & Factual Guards (Keamanan Konteks)
 - **Nol Kehilangan Informasi**: Output mentah disimpan secara lokal (`RewindStore`). AI dapat memintanya secara otomatis menggunakan `omni_retrieve`.
 - **Penjaga Anti-Halusinasi Faktual**: OMNI menyuntikkan peringatan sistem (seperti file dengan dependensi masif) untuk menjaga AI Anda tetap berpijak pada fakta.
 - **Visibilitas Penghilangan**: OMNI melabeli konten yang dihapus secara eksplisit (mis. `[OMNI: omitted X lines of noise]`), memberi agen kesadaran situasional.
 
-### 🤝 Multi-Agent & Workspace Intelligence (Kecerdasan Ruang Kerja)
+### Multi-Agent & Workspace Intelligence (Kecerdasan Ruang Kerja)
 - **Kolaborasi Multi-Agen**: Jika Anda menjalankan Cursor bersama Claude CLI, mereka berbagi aliran memori terfilter yang sama tanpa bentrok.
 - **Kecerdasan Sesi**: OMNI mengingat file yang sedang Anda edit dan berhenti memberikan konteks berulang.
 - **Structured ReadFile + Grep**: Alih-alih dump file mentah, OMNI mengembalikan kerangka terstruktur (impor, API) dan ringkasan grep yang dikelompokkan.
 - **Grafik Dependensi Ringan**: OMNI membangun grafik relasi file lokal yang cepat. Jika AI membaca file penting, OMNI memperingatkan tentang peta dampaknya.
 
-### 📊 Monitoring & Debugging (Pemantauan)
+### Context Safety & Factual Guards (Keamanan Konteks)
+- **Engrams (Ringkasan Subtugas Otomatis)**: OMNI secara otomatis mendeteksi saat sebuah subtugas selesai (mis., menyelesaikan kesalahan kompilator, melakukan commit kode, atau memperbaiki tes yang gagal). OMNI membuat cuplikan yang sangat terkompresi ("Engram") tanpa membuang token pada panggilan LLM, sehingga agen Anda tidak akan pernah mengalami "amnesia konteks" selama sesi yang panjang.
+- **Pemadatan Konteks Cerdas (Smart Context Compaction)**: Ketika jendela konteks Anda penuh, OMNI tidak memangkas token secara membabi buta. OMNI menggunakan algoritma sadar prioritas untuk mengemas data terpenting terlebih dahulu (File yang Disematkan > Kesalahan Aktif > Engram > Aktivitas Alat > File Panas), menghemat overhead besar-besaran.
+- **Serah Terima Sesi (Session Handoffs)**: Beralih dari Claude Code ke Cursor? Gunakan alat `omni_handoff` untuk mengekspor memori sesi saat ini secara instan (file panas, perintah terbaru, kesalahan aktif) ke dalam ringkasan markdown portabel yang dapat langsung diserap oleh agen baru Anda.
+
+### Monitoring & Debugging (Pemantauan)
+- **Dasbor Kesehatan Sesi (Session Health Dashboard)**: Jalankan `omni session --health` untuk melihat dasbor visual yang indah tentang tekanan konteks Anda, engram aktif, aktivitas alat bergulir, dan penghematan token.
 - **Monitor Distilasi**: Lacak penghematan token menggunakan `omni_budget` di dalam LLM, atau jalankan `omni stats` secara lokal.
 - **Dampak Visual (`omni diff`)**: Jalankan `omni diff` untuk membandingkan output mentah dengan versi Omni yang ramping secara berdampingan.
 - **Debug Passthrough**: Setel `OMNI_PASSTHROUGH=1` untuk melewati mesin sepenuhnya dan melihat output asli.
