@@ -456,7 +456,16 @@ impl OmniServer {
                 }
                 "Session state cleared.".to_string()
             }
-            _ => "Unknown action. Use status, context, or clear.".to_string(),
+            "summary" => {
+                let s = self.session.lock().unwrap();
+                let tool_summary = crate::session::engram::format_tool_summary(&s.tool_call_log);
+                if tool_summary.is_empty() {
+                    "No tool calls recorded yet.".to_string()
+                } else {
+                    tool_summary
+                }
+            }
+            _ => "Unknown action. Use status, context, summary, or clear.".to_string(),
         }
     }
     #[tool(
@@ -810,6 +819,92 @@ impl OmniServer {
             _ => "Actions: list | set | forget\nExample: omni_knowledge(\"set\", \"noise_cmd\", \"npm install always produces 200 dep warnings\")".to_string(),
         }
     }
+
+    #[tool(
+        name = "omni_handoff",
+        description = "Export current session state as portable markdown for pasting into a new session or terminal (no network needed)"
+    )]
+    pub async fn omni_handoff(&self) -> String {
+        let session = match self.session.lock() {
+            Ok(s) => s.clone(),
+            Err(_) => return "Error: session lock failed".to_string(),
+        };
+
+        let task = session
+            .inferred_task
+            .as_deref()
+            .unwrap_or("general development");
+        let domain = session.inferred_domain.as_deref().unwrap_or("unknown");
+        let agent_id = std::env::var("OMNI_AGENT_ID")
+            .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
+
+        let mut out = String::from("# OMNI Session Handoff\n\n");
+        out.push_str(&format!("**Session:** {}\n", session.session_id));
+        out.push_str(&format!("**Agent:** {}\n", agent_id));
+        out.push_str(&format!("**Task:** {}\n", task));
+        out.push_str(&format!("**Domain:** {}\n", domain));
+        out.push_str(&format!("**Commands:** {}\n", session.command_count));
+        out.push_str(&format!(
+            "**Tokens Saved:** ~{}\n\n",
+            session.estimated_tokens_saved()
+        ));
+
+        // Active Errors
+        out.push_str("## Active Errors\n");
+        if session.active_errors.is_empty() {
+            out.push_str("None\n");
+        } else {
+            for err in &session.active_errors {
+                let clean = err.replace('\n', " ");
+                out.push_str(&format!("- {}\n", &clean[..clean.len().min(120)]));
+            }
+        }
+
+        // Engrams
+        out.push_str("\n## Subtask Progress\n");
+        if session.engrams.is_empty() {
+            out.push_str("No engrams recorded.\n");
+        } else {
+            for engram in &session.engrams {
+                out.push_str(&engram.compact());
+                out.push('\n');
+            }
+        }
+
+        // Hot Files
+        out.push_str("\n## Hot Files\n");
+        let mut hot_vec: Vec<(&String, &u32)> = session.hot_files.iter().collect();
+        hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
+        if hot_vec.is_empty() {
+            out.push_str("None\n");
+        } else {
+            for (path, count) in hot_vec.iter().take(10) {
+                out.push_str(&format!("- {} ({}x)\n", path, count));
+            }
+        }
+
+        // Tool Call Summary
+        let tool_summary = crate::session::engram::format_tool_summary(&session.tool_call_log);
+        if !tool_summary.is_empty() {
+            out.push('\n');
+            out.push_str(&tool_summary);
+        }
+
+        // Recent Commands
+        out.push_str("\n## Recent Commands\n");
+        for cmd in session.last_commands.iter().take(10) {
+            out.push_str(&format!("- `{}`\n", &cmd[..cmd.len().min(80)]));
+        }
+
+        // Context Pressure
+        out.push_str(&format!(
+            "\n## Context Pressure: {}\n",
+            session.context_pressure
+        ));
+
+        out.push_str("\n---\n*Paste this into a new session to continue where you left off.*\n");
+        out
+    }
 }
 
 fn compute_project_hash_str(project_path: &str) -> String {
@@ -966,5 +1061,100 @@ mod tests {
             }))
             .await;
         assert!(out.contains("Failed") || out.contains("Trusted"));
+    }
+
+    // ── Phase 2 MCP Tests ──
+
+    #[tokio::test]
+    async fn test_omni_handoff_exports_markdown() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+        let mut state = SessionState::new();
+        state.inferred_task = Some("fix auth bug".to_string());
+        state.add_hot_file("src/auth.rs");
+        state.add_command("cargo test");
+        let session = Arc::new(Mutex::new(state));
+
+        let server = OmniServer { store, session };
+        let out = server.omni_handoff().await;
+        assert!(
+            out.contains("OMNI Session Handoff"),
+            "should be markdown format"
+        );
+        assert!(out.contains("fix auth bug"), "should contain task");
+        assert!(out.contains("src/auth.rs"), "should contain hot files");
+        assert!(out.contains("cargo test"), "should contain recent commands");
+        assert!(
+            out.contains("Paste this into a new session"),
+            "should have handoff instructions"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_omni_handoff_includes_engrams() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+        let mut state = SessionState::new();
+        state.add_engram(crate::session::engram::Engram {
+            label: "Fixed clippy warning".to_string(),
+            trigger: crate::session::engram::EngramTrigger::ErrorResolved,
+            timestamp: chrono::Utc::now().timestamp(),
+            files: vec!["src/main.rs".to_string()],
+            detail: None,
+        });
+        let session = Arc::new(Mutex::new(state));
+
+        let server = OmniServer { store, session };
+        let out = server.omni_handoff().await;
+        assert!(
+            out.contains("Fixed clippy warning"),
+            "should contain engram label"
+        );
+        assert!(
+            out.contains("Subtask Progress"),
+            "should have engram section"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_omni_session_summary_action() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+        let mut state = SessionState::new();
+        state.add_tool_call(crate::session::engram::ToolCallEntry {
+            tool_family: "git".to_string(),
+            command: "git status".to_string(),
+            succeeded: true,
+            files: vec![],
+            timestamp: 1000,
+        });
+        let session = Arc::new(Mutex::new(state));
+
+        let server = OmniServer { store, session };
+        let out = server
+            .omni_session(Parameters(OmniSessionParams {
+                action: "summary".to_string(),
+            }))
+            .await;
+        assert!(out.contains("git"), "should contain tool family");
+        assert!(out.contains("Tool Activity"), "should have tool header");
+    }
+
+    #[tokio::test]
+    async fn test_omni_session_summary_empty() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        let server = OmniServer { store, session };
+        let out = server
+            .omni_session(Parameters(OmniSessionParams {
+                action: "summary".to_string(),
+            }))
+            .await;
+        assert!(
+            out.contains("No tool calls recorded"),
+            "expected empty message, got: {out}"
+        );
     }
 }

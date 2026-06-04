@@ -95,6 +95,40 @@ impl SessionTracker {
                 }
             }
 
+            // Phase 2: Rolling Tool Call Log
+            let all_files: Vec<String> = paths.iter().chain(cmd_paths.iter()).cloned().collect();
+            let succeeded =
+                errors.is_empty() && result_clone.route != crate::pipeline::Route::Error;
+            session_locked.add_tool_call(crate::session::engram::ToolCallEntry {
+                tool_family: tool_family.clone(),
+                command: cmd.chars().take(80).collect(),
+                succeeded,
+                files: all_files.iter().take(3).cloned().collect(),
+                timestamp: chrono::Utc::now().timestamp(),
+            });
+
+            // Phase 2: Engram Detection
+            // Check if errors were resolved (had errors before, now none for this tool family)
+            let had_errors_before = !session_locked.active_errors.is_empty() || !errors.is_empty();
+            let has_errors_now = !errors.is_empty();
+            let resolved_error = if !has_errors_now {
+                session_locked.active_errors.first().cloned()
+            } else {
+                None
+            };
+
+            if let Some(engram) = crate::session::engram::detect_engram(
+                &cmd,
+                had_errors_before && !has_errors_now,
+                has_errors_now,
+                &tool_family,
+                resolved_error.as_deref(),
+                &all_files,
+            ) {
+                store.index_event(&session_locked.session_id, "Engram", &engram.compact());
+                session_locked.add_engram(engram);
+            }
+
             if let Some(task) = infer_task(&session_locked) {
                 session_locked.inferred_task = Some(task);
             }

@@ -454,6 +454,30 @@ fn build_additional_context(
         msgs.push(warning);
     }
 
+    // Phase 2: Periodic Pinned File Re-injection
+    // When context pressure is elevated, re-inject critical files periodically
+    if let Some(lock) = session
+        && let Ok(mut s) = lock.lock()
+        && crate::session::engram::should_reinject_pinned(
+            &s.context_pressure,
+            s.command_count,
+            s.pinned_reinject_at,
+        )
+    {
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        let pinned_content = crate::hooks::session_start::read_pinned_files(&cwd);
+        if !pinned_content.is_empty() {
+            msgs.push(format!(
+                "[OMNI: Re-injecting critical files due to {} pressure]\n{}",
+                s.context_pressure, pinned_content
+            ));
+            s.pinned_reinject_at = s.command_count;
+            s.pinned_refresh_count += 1;
+        }
+    }
+
     // F-10: Inject for significant single-call savings (>= 500 tokens)
     if saved_this_call >= 500 {
         msgs.push(format!(

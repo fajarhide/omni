@@ -52,6 +52,27 @@ pub fn process_payload(
 
     let summary_str = build_summary(&state, &store);
 
+    // Phase 2: Delta detection — skip re-emission if content unchanged
+    let new_hash = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(summary_str.as_bytes());
+        hex::encode(&hasher.finalize()[..8])
+    };
+    if let Some(ref last_hash) = state.last_compact_hash
+        && *last_hash == new_hash
+    {
+        // No meaningful change since last compact — emit minimal snapshot
+        let out = HookOutput {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "PreCompact".to_string(),
+                system_prompt_addition: "⚡ OMNI: Context unchanged since last compaction. Continuing with prior snapshot.".to_string(),
+            },
+        };
+        return serde_json::to_string(&out).ok();
+    }
+    state.last_compact_hash = Some(new_hash);
+
     // Index checkpoint event to FTS5
     let reason_str = parsed
         .compaction_reason
@@ -87,6 +108,17 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         70
     };
 
+    // ── Smart PreCompact v2: Priority-Aware Context Packing ──
+    // Budget allocation (total ~6000 tokens):
+    //   - Header + Task:    ~200 tokens (always)
+    //   - Pinned Files:     ~500 tokens (always if available)
+    //   - Active Errors:    ~400 tokens (always if present)
+    //   - Engrams:          ~600 tokens (subtask progress)
+    //   - Tool Summary:     ~300 tokens (rolling activity)
+    //   - Hot Files:        ~300 tokens (file access context)
+    //   - ROI + Events:     remainder (~600-800 tokens)
+    //   - Footer:           ~100 tokens
+
     let mut out = format!(
         "⚡ OMNI Context Snapshot — preserved before compaction\n\
         CRITICAL: This is injected context. Do NOT re-read files listed here — \n\
@@ -94,33 +126,17 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         \n\
         ## Active Task\n\
         {} — working in {}\n\
-        Confidence: {}%\n\
-        \n\
-        ## Hot Files (accessed this session, most recent first)\n",
+        Confidence: {}%\n",
         task, domain, confidence
     );
 
-    let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
-    hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
-    let top_files: Vec<String> = hot_vec
-        .iter()
-        .take(5)
-        .map(|(path, count)| format!("{} | recent | {}x", path, count)) // "recent" is mock relative time
-        .collect();
-
-    if top_files.is_empty() {
-        out.push_str("none\n");
-    } else {
-        out.push_str(&top_files.join("\n"));
-        out.push('\n');
-    }
-
+    // ── Bucket 1: Active Errors (high priority) ──
     out.push_str("\n## Unresolved Errors (still active)\n");
     let errs: Vec<String> = state
         .active_errors
         .iter()
         .take(3)
-        .map(|e| e.replace('\n', " ").chars().take(80).collect::<String>()) // "occurrence_count" etc could be better but sticking to limits
+        .map(|e| e.replace('\n', " ").chars().take(80).collect::<String>())
         .collect();
 
     if errs.is_empty() {
@@ -131,6 +147,40 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         }
     }
 
+    // ── Bucket 2: Engrams (subtask memory) ──
+    if !state.engrams.is_empty() {
+        out.push_str("\n## Subtask Progress (Engrams)\n");
+        for engram in state.engrams.iter().take(5) {
+            out.push_str(&engram.compact());
+            out.push('\n');
+        }
+    }
+
+    // ── Bucket 3: Tool Call Summary ──
+    let tool_summary = crate::session::engram::format_tool_summary(&state.tool_call_log);
+    if !tool_summary.is_empty() {
+        out.push('\n');
+        out.push_str(&tool_summary);
+    }
+
+    // ── Bucket 4: Hot Files ──
+    out.push_str("\n## Hot Files (accessed this session, most recent first)\n");
+    let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
+    hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let top_files: Vec<String> = hot_vec
+        .iter()
+        .take(5)
+        .map(|(path, count)| format!("{} | recent | {}x", path, count))
+        .collect();
+
+    if top_files.is_empty() {
+        out.push_str("none\n");
+    } else {
+        out.push_str(&top_files.join("\n"));
+        out.push('\n');
+    }
+
+    // ── Bucket 5: Session ROI & Events ──
     let tokens_saved = state.estimated_tokens_saved();
 
     let (top_cmd, top_pct) = match state.top_command() {
@@ -146,7 +196,7 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         \n\
         ## Recent Significant Events\n",
         tokens_saved,
-        state.command_count, // Display total commands distilled
+        state.command_count,
         top_cmd.chars().take(50).collect::<String>(),
         top_pct
     ));
@@ -169,7 +219,7 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         }
     }
 
-    // Feature B: Inject critical pinned files before truncating
+    // ── Bucket 6: Pinned Files (critical instructions) ──
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
@@ -181,8 +231,7 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         to verify information already present here.\n",
     );
 
-    // Feature D: Intelligent PreCompact v2 (Token-based Budgeting)
-    // We aim for a strict 6000 token limit to keep context lightweight
+    // ── Token Budget Enforcement ──
     let current_tokens = crate::util::token_estimate::count_tokens(&out, "cl100k_base");
     if current_tokens > 6000 {
         // Approximate character length for 6000 tokens
@@ -332,5 +381,134 @@ mod tests {
         let session = Arc::new(Mutex::new(SessionState::new()));
         let out = process_payload("INVALID JSON", store, session);
         assert!(out.is_none());
+    }
+
+    // ── Phase 2 Integration Tests ──
+
+    #[test]
+    fn compact_summary_includes_engrams() {
+        let (store, _dir) = get_store();
+        let mut state = SessionState::new();
+        state.add_engram(crate::session::engram::Engram {
+            label: "Fixed cargo test error".to_string(),
+            trigger: crate::session::engram::EngramTrigger::ErrorResolved,
+            timestamp: chrono::Utc::now().timestamp(),
+            files: vec!["src/main.rs".to_string()],
+            detail: None,
+        });
+        let session = Arc::new(Mutex::new(state));
+
+        let input = json!({
+            "hookEventName": "PreCompact",
+            "sessionId": "engram-test"
+        });
+
+        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
+        assert!(
+            out_str.contains("Subtask Progress"),
+            "expected engram section, got: {}",
+            out_str
+        );
+        assert!(
+            out_str.contains("Fixed cargo test error"),
+            "expected engram label, got: {}",
+            out_str
+        );
+    }
+
+    #[test]
+    fn compact_summary_includes_tool_call_summary() {
+        let (store, _dir) = get_store();
+        let mut state = SessionState::new();
+        for i in 0..5 {
+            state.add_tool_call(crate::session::engram::ToolCallEntry {
+                tool_family: "cargo".to_string(),
+                command: format!("cargo test {}", i),
+                succeeded: true,
+                files: vec!["src/lib.rs".to_string()],
+                timestamp: 1000 + i as i64,
+            });
+        }
+        let session = Arc::new(Mutex::new(state));
+
+        let input = json!({
+            "hookEventName": "PreCompact",
+            "sessionId": "tool-summary-test"
+        });
+
+        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
+        assert!(
+            out_str.contains("Tool Activity"),
+            "expected tool summary section, got: {}",
+            out_str
+        );
+        assert!(
+            out_str.contains("cargo"),
+            "expected cargo family, got: {}",
+            out_str
+        );
+    }
+
+    #[test]
+    fn delta_detection_skips_unchanged_compact() {
+        let (store, _dir) = get_store();
+        let state = SessionState::new();
+        let session = Arc::new(Mutex::new(state));
+
+        let input = json!({
+            "hookEventName": "PreCompact",
+            "sessionId": "delta-test"
+        });
+
+        // First compact: full snapshot
+        let out1 =
+            process_payload(&input.to_string(), store.clone(), session.clone()).expect("first");
+        assert!(
+            out1.contains("OMNI Context Snapshot"),
+            "first compact should be full"
+        );
+
+        // Second compact with same state: should detect unchanged
+        let out2 =
+            process_payload(&input.to_string(), store.clone(), session.clone()).expect("second");
+        assert!(
+            out2.contains("unchanged"),
+            "second compact should detect no change, got: {}",
+            out2
+        );
+    }
+
+    #[test]
+    fn delta_detection_emits_on_state_change() {
+        let (store, _dir) = get_store();
+        let state = SessionState::new();
+        let session = Arc::new(Mutex::new(state));
+
+        let input = json!({
+            "hookEventName": "PreCompact",
+            "sessionId": "delta-change-test"
+        });
+
+        // First compact: full snapshot
+        let _ = process_payload(&input.to_string(), store.clone(), session.clone());
+
+        // Modify state
+        {
+            let mut s = session.lock().unwrap();
+            s.add_error("new error appeared");
+            s.add_hot_file("src/new_file.rs");
+        }
+
+        // Third compact: state changed, should emit full snapshot again
+        let out3 =
+            process_payload(&input.to_string(), store.clone(), session.clone()).expect("third");
+        assert!(
+            out3.contains("OMNI Context Snapshot"),
+            "changed state should produce full snapshot"
+        );
+        assert!(
+            out3.contains("new error appeared"),
+            "should contain new error"
+        );
     }
 }
