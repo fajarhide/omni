@@ -112,3 +112,22 @@ pub fn run_handoff(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::HandoffJson;
+
+    #[test]
+    fn test_handoff_json_schema_validation() {
+        let json_struct = HandoffJson {
+            version: "1".to_string(),
+            session_id: "test-session".to_string(),
+            markdown_export: "# Markdown Data".to_string(),
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"1\""));
+        assert!(json_str.contains("\"session_id\":\"test-session\""));
+        assert!(json_str.contains("\"markdown_export\":\"# Markdown Data\""));
+    }
+}

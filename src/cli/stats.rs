@@ -1144,4 +1144,34 @@ mod tests {
         assert_eq!(format_number(1000), "1,000");
         assert_eq!(format_number(1247000), "1,247,000");
     }
+
+    #[test]
+    fn test_stats_json_schema_validation() {
+        let json_struct = StatsJson {
+            version: "1".to_string(),
+            generated_at: 1234567890,
+            periods: vec![StatsPeriod {
+                label: "All Time".to_string(),
+                commands: 10,
+                input_tokens: 10000,
+                output_tokens: 1000,
+                savings_pct: 90.0,
+                usd_saved: 1.5,
+                measurement_method: "test".to_string(),
+            }],
+            commands: vec![],
+            agents: vec![],
+            rewind: RewindStat {
+                archived: 100,
+                retrieved: 5,
+            },
+            avg_latency_ms: 15.5,
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"1\""));
+        assert!(json_str.contains("\"generated_at\":1234567890"));
+        assert!(json_str.contains("\"savings_pct\":90.0"));
+        assert!(json_str.contains("\"avg_latency_ms\":15.5"));
+    }
 }

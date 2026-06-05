@@ -30,6 +30,27 @@ pub fn run_version(args: &[String]) {
         };
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     } else {
-        println!("omni {}", version_str);
+        println!("OMNI v{}", version_str);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VersionJson;
+
+    #[test]
+    fn test_version_json_schema_validation() {
+        let json_struct = VersionJson {
+            version: "0.5.9".to_string(),
+            build_date: "2026-06-05".to_string(),
+            git_hash: "abc1234".to_string(),
+            features: vec!["hermes".to_string(), "mcp".to_string()],
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"0.5.9\""));
+        assert!(json_str.contains("\"build_date\":\"2026-06-05\""));
+        assert!(json_str.contains("\"git_hash\":\"abc1234\""));
+        assert!(json_str.contains("\"features\":[\"hermes\",\"mcp\"]"));
     }
 }

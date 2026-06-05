@@ -830,4 +830,46 @@ mod tests {
         assert!(ctx.contains("fix auth bug"));
         assert!(ctx.contains("src/auth/mod.rs"));
     }
+
+    #[test]
+    fn test_session_json_schema_validation() {
+        let mut state = SessionState::new();
+        state.session_id = "test-session".to_string();
+        state.inferred_task = Some("compile code".to_string());
+        state.add_hot_file("src/main.rs");
+        state.add_error("E0308: mismatched types");
+
+        let json_struct = super::SessionJson {
+            version: "1".to_string(),
+            session_id: state.session_id.clone(),
+            agent_id: "test-agent".to_string(),
+            project_path: "/test/project".to_string(),
+            task: state.inferred_task.clone(),
+            domain: state.inferred_domain.clone(),
+            estimated_tokens: state.estimated_current_tokens,
+            command_count: state.command_count,
+            session_age_seconds: 120,
+            active_errors: state.active_errors.clone(),
+            hot_files: state
+                .hot_files
+                .iter()
+                .map(|(k, v)| super::HotFileJson {
+                    path: k.clone(),
+                    count: *v,
+                })
+                .collect(),
+            recent_commands: state.last_commands.clone(),
+            tokens_saved: state.estimated_tokens_saved(),
+            context_pressure: state.context_pressure.to_string(),
+            should_warn: false,
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"1\""));
+        assert!(json_str.contains("\"session_id\":\"test-session\""));
+        assert!(json_str.contains("\"agent_id\":\"test-agent\""));
+        assert!(json_str.contains("\"context_pressure\":\"Normal\""));
+        assert!(json_str.contains("\"should_warn\":false"));
+        assert!(json_str.contains("\"active_errors\":[\"E0308: mismatched types\"]"));
+    }
 }

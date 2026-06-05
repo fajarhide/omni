@@ -328,8 +328,8 @@ fn test_cli_version() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("omni"),
-        "Version output should contain 'omni'"
+        stdout.contains("OMNI"),
+        "Version output should contain 'OMNI'"
     );
 }
 
