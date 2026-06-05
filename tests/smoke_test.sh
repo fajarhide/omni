@@ -213,6 +213,57 @@ else
 fi
 TOTAL=$((TOTAL + 1))
 
+# ─── 11. JSON Contracts (Hermes Integration) ─────────────
+echo "▸ Scenario 11: JSON Contracts"
+
+# Test version --json
+VERSION_JSON=$("$OMNI" version --json 2>&1 || true)
+if echo "$VERSION_JSON" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then
+    echo "  ✓ version --json is valid JSON"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ version --json is NOT valid JSON"
+    FAIL=$((FAIL + 1))
+fi
+TOTAL=$((TOTAL + 1))
+check "version json has git_hash" "$VERSION_JSON" "git_hash"
+
+# Test stats --json
+STATS_JSON=$("$OMNI" stats --json 2>&1 || true)
+if echo "$STATS_JSON" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then
+    echo "  ✓ stats --json is valid JSON"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ stats --json is NOT valid JSON"
+    FAIL=$((FAIL + 1))
+fi
+TOTAL=$((TOTAL + 1))
+check "stats json has avg_latency_ms" "$STATS_JSON" "avg_latency_ms"
+
+# Test session --json
+SESSION_JSON=$("$OMNI" session --json 2>&1 || true)
+if echo "$SESSION_JSON" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then
+    echo "  ✓ session --json is valid JSON"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ session --json is NOT valid JSON"
+    FAIL=$((FAIL + 1))
+fi
+TOTAL=$((TOTAL + 1))
+check "session json has context_pressure" "$SESSION_JSON" "context_pressure"
+
+# Test handoff --json
+HANDOFF_JSON=$("$OMNI" handoff --json 2>&1 || true)
+if echo "$HANDOFF_JSON" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then
+    echo "  ✓ handoff --json is valid JSON"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ handoff --json is NOT valid JSON"
+    FAIL=$((FAIL + 1))
+fi
+TOTAL=$((TOTAL + 1))
+check "handoff json has markdown_export" "$HANDOFF_JSON" "markdown_export"
+
 # ─── Results ─────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════"

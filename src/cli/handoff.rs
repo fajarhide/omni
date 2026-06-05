@@ -57,7 +57,10 @@ pub fn run_handoff(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     } else {
         for err in &state.active_errors {
             let clean = err.replace('\n', " ");
-            md.push_str(&format!("- {}\n", &clean[..clean.len().min(120)]));
+            md.push_str(&format!(
+                "- {}\n",
+                clean.chars().take(120).collect::<String>()
+            ));
         }
     }
 
@@ -90,7 +93,10 @@ pub fn run_handoff(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
 
     md.push_str("\n## Recent Commands\n");
     for cmd in state.last_commands.iter().take(10) {
-        md.push_str(&format!("- `{}`\n", &cmd[..cmd.len().min(80)]));
+        md.push_str(&format!(
+            "- `{}`\n",
+            cmd.chars().take(80).collect::<String>()
+        ));
     }
 
     md.push_str(&format!(
@@ -111,4 +117,23 @@ pub fn run_handoff(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HandoffJson;
+
+    #[test]
+    fn test_handoff_json_schema_validation() {
+        let json_struct = HandoffJson {
+            version: "1".to_string(),
+            session_id: "test-session".to_string(),
+            markdown_export: "# Markdown Data".to_string(),
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"1\""));
+        assert!(json_str.contains("\"session_id\":\"test-session\""));
+        assert!(json_str.contains("\"markdown_export\":\"# Markdown Data\""));
+    }
 }
