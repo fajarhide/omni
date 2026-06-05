@@ -199,6 +199,37 @@ def register(ctx):
     }
 }
 
+/// Hermes-optimized agent config defaults.
+///
+/// Hermes agent uses pipe mode with `OMNI_CMD` env var — no PreToolUse hook.
+/// Sessions tend to be longer and Hermes benefits from more aggressive
+/// compression since it manages its own context summarization.
+pub fn hermes_default_config() -> crate::guard::config::AgentConfig {
+    crate::guard::config::AgentConfig {
+        mode: Some(crate::guard::config::DistillationMode::Efficient),
+        enable_readfile_distillation: Some(true),
+        enable_grep_distillation: Some(true),
+        enable_webfetch_distillation: Some(true),
+        pinned_files: Some(vec![
+            "AGENTS.md".to_string(),
+            ".omni/CONTEXT.md".to_string(),
+        ]),
+    }
+}
+
+/// Command patterns commonly issued by Hermes agent tool calls
+pub fn hermes_command_patterns() -> Vec<&'static str> {
+    vec![
+        "terminal", "hermes", "shell", "python", "node", "npm", "pip",
+    ]
+}
+
+/// Check if a given agent_id looks like Hermes
+pub fn is_hermes_agent(agent_id: &str) -> bool {
+    let id = agent_id.to_lowercase();
+    id == "hermes" || id.starts_with("hermes-") || id.contains("hermes")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{config_mentions_omni_mcp, config_mentions_omni_plugin};
@@ -256,5 +287,15 @@ plugins:
 
         assert_eq!(config_mentions_omni_plugin(config), None);
         assert!(!config_mentions_omni_mcp(config));
+    }
+
+    #[test]
+    fn detects_hermes_agent_id() {
+        assert!(super::is_hermes_agent("hermes"));
+        assert!(super::is_hermes_agent("HERMES"));
+        assert!(super::is_hermes_agent("hermes-cli"));
+        assert!(super::is_hermes_agent("my-hermes-agent"));
+        assert!(!super::is_hermes_agent("claude"));
+        assert!(!super::is_hermes_agent("cursor"));
     }
 }

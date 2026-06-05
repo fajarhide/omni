@@ -227,7 +227,7 @@ fn main() {
 
             match cmd {
                 "version" | "-v" | "--version" => {
-                    println!("omni {}", env!("CARGO_PKG_VERSION"));
+                    cli::version::run_version(&args);
                 }
 
                 "help" | "-h" | "--help" => {
@@ -265,7 +265,7 @@ fn main() {
                     }
                 },
 
-                "session" => match Store::open() {
+                "session" | "sessions" => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::session::run_session(&args, store_arc) {
@@ -275,6 +275,34 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for session: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "engram" | "engrams" => match Store::open() {
+                    Ok(store) => {
+                        let store_arc = Arc::new(store);
+                        if let Err(e) = cli::engram::run_engram(&args, store_arc) {
+                            eprintln!("[omni] Engram error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for engrams: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+
+                "handoff" => match Store::open() {
+                    Ok(store) => {
+                        let store_arc = Arc::new(store);
+                        if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
+                            eprintln!("[omni] Handoff error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for handoff: {}", e);
                         std::process::exit(1);
                     }
                 },

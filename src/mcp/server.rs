@@ -272,28 +272,57 @@ impl OmniServer {
         description = "Show the top recurring issues and error patterns across the entire project"
     )]
     pub async fn omni_insight(&self) -> String {
+        let mut report = String::new();
+
+        // Proactive: Context Pressure Notification (Item 10)
+        if let Ok(s) = self.session.lock() {
+            if let Some(warning) = s.pressure_warning() {
+                report.push_str(&warning);
+                report.push_str("\n\n");
+            }
+
+            // Surface active errors for quick awareness
+            if !s.active_errors.is_empty() {
+                report.push_str(&format!(
+                    "⚠ Active errors ({}): {}\n\n",
+                    s.active_errors.len(),
+                    s.active_errors
+                        .first()
+                        .map(|e| e[..e.len().min(80)].to_string())
+                        .unwrap_or_default()
+                ));
+            }
+        }
+
         let patterns = self.store.get_top_insights(5);
-        if patterns.is_empty() {
+        if patterns.is_empty() && report.is_empty() {
             return "No recurring issues detected yet.".to_string();
         }
 
-        let mut report = format!("Top {} recurring issues:\n\n", patterns.len());
-        for (i, p) in patterns.iter().enumerate() {
-            report.push_str(&format!(
-                "[{}] Tool: {} | Seen {}x | Status: {}\n",
-                i + 1,
-                p.tool_family,
-                p.occurrence_count,
-                if p.was_resolved { "RESOLVED" } else { "ACTIVE" }
-            ));
-            let mut pattern_preview = p.pattern_text.replace('\n', " ");
-            if pattern_preview.len() > 100 {
-                pattern_preview.truncate(97);
-                pattern_preview.push_str("...");
+        if !patterns.is_empty() {
+            report.push_str(&format!("Top {} recurring issues:\n\n", patterns.len()));
+            for (i, p) in patterns.iter().enumerate() {
+                report.push_str(&format!(
+                    "[{}] Tool: {} | Seen {}x | Status: {}\n",
+                    i + 1,
+                    p.tool_family,
+                    p.occurrence_count,
+                    if p.was_resolved { "RESOLVED" } else { "ACTIVE" }
+                ));
+                let mut pattern_preview = p.pattern_text.replace('\n', " ");
+                if pattern_preview.len() > 100 {
+                    pattern_preview.truncate(97);
+                    pattern_preview.push_str("...");
+                }
+                report.push_str(&format!("  Pattern: {}\n\n", pattern_preview));
             }
-            report.push_str(&format!("  Pattern: {}\n\n", pattern_preview));
         }
-        report
+
+        if report.is_empty() {
+            "No recurring issues detected yet.".to_string()
+        } else {
+            report
+        }
     }
 
     #[tool(

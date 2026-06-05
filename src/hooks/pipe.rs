@@ -625,6 +625,25 @@ fn emit_output<W: Write, E: Write>(
         return Ok(());
     }
 
+    if std::env::var("OMNI_OUTPUT_JSON").is_ok() {
+        let tokens_saved = if result.input_text.len() > result.best_output().len() {
+            (result.input_text.len() - result.best_output().len()) / 4
+        } else {
+            0
+        };
+        let json_meta = serde_json::json!({
+            "route": result.route.to_string(),
+            "hash": result.rewind_hash,
+            "tokens_saved": tokens_saved
+        });
+        writeln!(
+            error,
+            "{}",
+            serde_json::to_string(&json_meta).unwrap_or_default()
+        )?;
+        return Ok(());
+    }
+
     let elapsed = result.start_time.elapsed().as_millis();
     let reduction = if !result.input_text.is_empty() {
         100.0 * (1.0 - result.best_output().len() as f64 / result.input_text.len() as f64)
