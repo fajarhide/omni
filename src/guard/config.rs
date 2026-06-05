@@ -111,12 +111,20 @@ pub struct OmniConfig {
 
 impl OmniConfig {
     pub fn for_agent(&self, agent_id: &str) -> AgentConfig {
-        self.agents
-            .as_ref()
-            .and_then(|a| a.get(agent_id))
-            .cloned()
-            .or_else(|| self.global.clone())
-            .unwrap_or_default()
+        // Priority: explicit per-agent config > Hermes defaults > global > generic defaults
+        if let Some(agent_cfg) = self.agents.as_ref().and_then(|a| a.get(agent_id)) {
+            return agent_cfg.clone();
+        }
+
+        // Hermes-optimized defaults when no explicit config exists
+        if crate::agents::hermes::is_hermes_agent(agent_id) {
+            return self
+                .global
+                .clone()
+                .unwrap_or_else(crate::agents::hermes::hermes_default_config);
+        }
+
+        self.global.clone().unwrap_or_default()
     }
 }
 

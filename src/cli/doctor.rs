@@ -67,6 +67,146 @@ fn format_time_ago(ts: u64) -> String {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct DoctorJson {
+    pub version: String,
+    pub healthy: bool,
+    pub checks: Vec<DoctorCheck>,
+    pub fix_available: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct DoctorCheck {
+    pub name: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+fn run_json(args: &[String]) -> anyhow::Result<()> {
+    let fix_mode = args.iter().any(|a| a == "--fix");
+    let mut checks = Vec::new();
+    let mut all_ok = true;
+    let mut fix_available = false;
+
+    // 1. Binary
+    checks.push(DoctorCheck {
+        name: "binary".to_string(),
+        ok: true,
+        message: format!("omni v{}", env!("CARGO_PKG_VERSION")),
+    });
+
+    // 2. Config Dir
+    let conf_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".omni");
+    if conf_dir.exists() {
+        let test_file = conf_dir.join(".write_test");
+        if fs::write(&test_file, "ok").is_ok() {
+            let _ = fs::remove_file(&test_file);
+            checks.push(DoctorCheck {
+                name: "config".to_string(),
+                ok: true,
+                message: "config valid".to_string(),
+            });
+        } else {
+            checks.push(DoctorCheck {
+                name: "config".to_string(),
+                ok: false,
+                message: "Cannot write to ~/.omni/. Sandbox issue?".to_string(),
+            });
+            all_ok = false;
+        }
+    } else {
+        if fix_mode && fs::create_dir_all(&conf_dir).is_ok() {
+            checks.push(DoctorCheck {
+                name: "config".to_string(),
+                ok: true,
+                message: "config directory created".to_string(),
+            });
+        } else {
+            checks.push(DoctorCheck {
+                name: "config".to_string(),
+                ok: false,
+                message: "missing ~/.omni/".to_string(),
+            });
+            all_ok = false;
+            fix_available = true;
+        }
+    }
+
+    // 3. Database
+    match Store::open() {
+        Ok(store) => {
+            let (sessions, _) = store.stats().unwrap_or_default();
+            checks.push(DoctorCheck {
+                name: "sqlite".to_string(),
+                ok: true,
+                message: format!("database healthy, {} events", sessions),
+            });
+
+            if !store.check_fts5() {
+                checks.push(DoctorCheck {
+                    name: "sqlite_fts5".to_string(),
+                    ok: false,
+                    message: "FTS5 missing".to_string(),
+                });
+                all_ok = false;
+            }
+            if !store.test_write() {
+                checks.push(DoctorCheck {
+                    name: "sqlite_write".to_string(),
+                    ok: false,
+                    message: "database read-only".to_string(),
+                });
+                all_ok = false;
+            }
+        }
+        Err(_) => {
+            checks.push(DoctorCheck {
+                name: "sqlite".to_string(),
+                ok: false,
+                message: "database inaccessible".to_string(),
+            });
+            all_ok = false;
+        }
+    }
+
+    // 4. Agents
+    let integrations = crate::agents::all_integrations();
+    let mut any_agent_ok = false;
+    let mut warnings = Vec::new();
+    for agent in integrations {
+        if agent.doctor_check(fix_mode, &mut warnings) {
+            any_agent_ok = true;
+        }
+    }
+    if any_agent_ok {
+        checks.push(DoctorCheck {
+            name: "hooks".to_string(),
+            ok: true,
+            message: "hooks installed".to_string(),
+        });
+    } else {
+        checks.push(DoctorCheck {
+            name: "hooks".to_string(),
+            ok: false,
+            message: "no agents configured".to_string(),
+        });
+        all_ok = false;
+        fix_available = true;
+    }
+
+    let output = DoctorJson {
+        version: "1".to_string(),
+        healthy: all_ok,
+        checks,
+        fix_available,
+    };
+
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 pub fn run(args: &[String]) -> anyhow::Result<()> {
     if args
         .iter()
@@ -74,6 +214,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     {
         print_help();
         return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--json") {
+        return run_json(args);
     }
 
     let mut i = 1; // Assuming args[0] is "doctor"
