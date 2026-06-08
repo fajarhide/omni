@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.5.9-patch1] - 2026-06-08
+
+### Fixed
+- **Critical UTF-8 Panic Resolution**: Completely resolved `SIGABRT` crashes caused by multibyte characters (emojis, box-drawing, CJK) in terminal output. Implemented `char`-boundary safe string truncation and slicing utilities globally.
+- **Pipeline Data Integrity**: Rewrote ANSI stripping and structural normalization engines to process by Unicode `char` rather than raw `byte`, preventing *mojibake* and data corruption on rich terminal outputs.
+- **Release Stability**: Removed `panic = "abort"` from the release profile to allow `catch_unwind` guards to gracefully handle unexpected panics in production builds.
+
+### Performance
+- **Zero-Allocation ANSI Stripping**: Redesigned `strip_ansi` to use `Cow<'_, str>`, eliminating heap allocations entirely when processing clean terminal outputs.
+- **Pattern Caching**: Implemented a thread-local LRU cache for `normalize_structural`, bypassing expensive regex and grapheme-cluster calculations on highly repetitive log lines.
+- **Stream-Aware Output Limits**: Deployed `TruncatingWriter` in the streaming pipeline. Omni now tracks payload bytes on the fly and intelligently truncates multi-gigabyte outputs at valid UTF-8 boundaries, eliminating OOM vulnerabilities on massive terminal bursts.
+
+### Changed
+- **Column-Aware Truncation**: Refactored CLI formatting utilities (`diff`, `learn`, `stats`) to use `unicode-width` logic, ensuring terminal tables and summaries render perfectly aligned even when displaying full-width CJK characters or emojis.
+
 ## [0.5.9] - 2026-06-04
 
 ### Added

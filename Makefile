@@ -30,6 +30,10 @@ security:
 		echo "WARNING: LD_PRELOAD referenced outside guard/env.rs"; \
 		FAIL=1; \
 	fi; \
+	if grep -rn ' as char' src/ --include='*.rs'; then \
+		echo "WARNING: 'as char' found. This is unsafe for UTF-8 bytes. Use char::from() or iterators instead."; \
+		FAIL=1; \
+	fi; \
 	UNWRAP_COUNT=$$(grep -rn '\.unwrap()' src/hooks/ --include='*.rs' | grep -v '#\[test\]' | grep -v 'mod tests' | grep -v '// safe:' | wc -l | tr -d ' '); \
 	if [ "$$UNWRAP_COUNT" -gt 5 ]; then \
 		echo "WARNING: $$UNWRAP_COUNT unwrap() calls in src/hooks/ (max 5 allowed)"; \

@@ -1,3 +1,7 @@
+// Safety: All string indexing uses positions from find()/rfind() on ASCII
+// delimiters (':', '(', '/', ' ') which always return valid char boundaries.
+#![allow(clippy::string_slice)]
+
 use crate::distillers::Distiller;
 use crate::pipeline::{OutputSegment, SignalTier};
 use std::collections::BTreeMap;
@@ -299,11 +303,7 @@ fn distill_tsc(input: &str) -> String {
     for (file, issues) in sorted.iter().take(5) {
         let count = issues.len();
         let issues_str = issues.join(", ");
-        let truncated = if issues_str.len() > 60 {
-            format!("{}...", &issues_str[..57])
-        } else {
-            issues_str
-        };
+        let truncated = crate::util::text::display_truncate_with_ellipsis(&issues_str, 57);
         out.push_str(&format!("\n  {}: {} errors [{}]", file, count, truncated));
     }
 

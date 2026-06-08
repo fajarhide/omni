@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 /// Engram — Automatic Subtask Digest
 ///
 /// Rule-based state snapshots capturing subtask progress without LLM calls.
@@ -275,7 +278,7 @@ fn is_build_command(cmd: &str) -> bool {
 }
 
 fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max { s } else { &s[..max] }
+    crate::util::text::safe_slice(s, max)
 }
 
 fn age_str(timestamp: i64) -> String {

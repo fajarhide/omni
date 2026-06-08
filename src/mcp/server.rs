@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
 use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};

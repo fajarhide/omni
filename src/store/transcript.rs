@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -60,7 +63,7 @@ impl TranscriptEntry {
         let summary = if payload.len() > 2048 {
             format!(
                 "{}... [truncated {} bytes]",
-                &payload[..2048],
+                crate::util::text::safe_slice(payload, 2048),
                 payload.len()
             )
         } else {

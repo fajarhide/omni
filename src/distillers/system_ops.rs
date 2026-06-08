@@ -1,3 +1,7 @@
+// Safety: All string indexing uses positions from find()/rfind() on ASCII
+// delimiters (':', '=', '.', '_') which always return valid char boundaries.
+#![allow(clippy::string_slice)]
+
 use crate::distillers::Distiller;
 use crate::pipeline::{OutputSegment, SignalTier};
 use std::collections::BTreeMap;

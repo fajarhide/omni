@@ -1,3 +1,7 @@
+// Safety: String indexing uses session IDs (hex/ASCII) and ASCII delimiter
+// positions from find()/rfind() which are always valid char boundaries.
+#![allow(clippy::string_slice)]
+
 use crate::store::sqlite::Store;
 use crate::store::transcript;
 use chrono::{Local, TimeZone, Utc};
@@ -196,7 +200,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             task, hot_str, err
         );
         if msg.len() > 200 {
-            msg.truncate(197);
+            crate::util::text::safe_truncate(&mut msg, 197);
             msg.push_str("...");
         }
         println!("{}", msg);

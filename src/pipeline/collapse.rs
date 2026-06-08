@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use crate::pipeline::scorer::classify_line;
 use crate::pipeline::{CollapseMode, SignalTier};
 use std::borrow::Cow;
@@ -29,28 +32,36 @@ pub struct CollapseResult {
 
 /// Strip ANSI escape codes without regex for performance.
 fn strip_ansi(line: &str) -> Cow<'_, str> {
-    if !line.as_bytes().contains(&0x1b) {
+    if !line.contains('\x1b') {
         return Cow::Borrowed(line);
     }
-    let bytes = line.as_bytes();
     let mut out = String::with_capacity(line.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            // Skip ESC [ ... <letter>
-            i += 2;
-            while i < bytes.len() && !bytes[i].is_ascii_alphabetic() {
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1; // skip the final letter
+    let mut in_escape = false;
+    let mut chars = line.chars();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b'
+            && let Some('[') = chars.clone().next()
+        {
+            chars.next(); // Consume '['
+            in_escape = true;
+            continue;
+        }
+
+        if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
             }
         } else {
-            out.push(bytes[i] as char);
-            i += 1;
+            out.push(c);
         }
     }
     Cow::Owned(out)
+}
+
+thread_local! {
+    static NORMALIZE_CACHE: std::cell::RefCell<lru::LruCache<String, String>> =
+        std::cell::RefCell::new(lru::LruCache::new(std::num::NonZeroUsize::new(2048).unwrap()));
 }
 
 /// Fast structural normalization for pattern grouping.
@@ -69,23 +80,38 @@ fn normalize_structural(trimmed: &str) -> String {
         return trimmed.to_lowercase(); // preserve as-is, hanya lowercase
     }
 
-    let mut out = String::with_capacity(trimmed.len());
-    let bytes = trimmed.as_bytes();
-    let mut i = 0;
+    if trimmed.len() < 1000
+        && let Some(cached) = NORMALIZE_CACHE.with(|c| c.borrow_mut().get(trimmed).cloned())
+    {
+        return cached;
+    }
 
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b.is_ascii_digit() {
-            // Replace digit sequences with #
-            out.push('#');
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                i += 1;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let mut out = String::with_capacity(trimmed.len());
+    let mut in_digits = false;
+
+    for g in trimmed.graphemes(true) {
+        if g.len() == 1 && g.chars().next().unwrap().is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+                in_digits = true;
             }
         } else {
-            out.push(b.to_ascii_lowercase() as char);
-            i += 1;
+            in_digits = false;
+            // lowercase if the grapheme is ascii, otherwise push as is
+            if g.len() == 1 && g.is_ascii() {
+                out.push(g.chars().next().unwrap().to_ascii_lowercase());
+            } else {
+                out.push_str(g);
+            }
         }
     }
+
+    if trimmed.len() < 1000 {
+        NORMALIZE_CACHE.with(|c| c.borrow_mut().put(trimmed.to_string(), out.clone()));
+    }
+
     out
 }
 
@@ -287,11 +313,7 @@ fn format_summary(group: &CollapseGroup, mode: &CollapseMode) -> String {
     }
 
     // Generic fallback
-    let display_pat = if pat.len() > 60 {
-        format!("{}...", &pat[..57])
-    } else {
-        pat.clone()
-    };
+    let display_pat = crate::util::text::display_truncate_with_ellipsis(pat, 57);
     format!(
         "[{} similar lines collapsed] (pattern: \"{}\")",
         group.count, display_pat

@@ -306,7 +306,7 @@ impl SessionState {
         }
         // Boost if mentioning active error
         for err in &self.active_errors {
-            let err_short = &err[..err.len().min(30)];
+            let err_short = crate::util::text::safe_slice(err, 30);
             if text.contains(err_short) {
                 boost += 0.25;
             }
@@ -320,7 +320,7 @@ impl SessionState {
 
     pub fn add_error(&mut self, error: &str) {
         self.active_errors
-            .insert(0, error[..error.len().min(200)].to_string());
+            .insert(0, crate::util::text::safe_slice(error, 200).to_string());
         self.active_errors.truncate(MAX_ACTIVE_ERRORS);
     }
 

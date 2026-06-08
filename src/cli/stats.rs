@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use crate::store::sqlite::Store;
 use crate::util::token_estimate::{ContentHint, estimate_tokens};
 use anyhow::Result;

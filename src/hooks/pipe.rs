@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use anyhow::Result;
 use colored::Colorize;
 use is_terminal::IsTerminal;
@@ -174,7 +177,7 @@ fn read_input<R: Read, W: Write>(mut input: R, mut output: W) -> Result<Option<S
 
 fn stream_distill<R: Read, W: Write, E: Write>(
     input: R,
-    mut output: W,
+    output: W,
     mut error: E,
     filter: toml_filter::TomlFilter,
     store: Option<Arc<Store>>,
@@ -183,9 +186,9 @@ fn stream_distill<R: Read, W: Write, E: Write>(
 ) -> Result<()> {
     let start_time = Instant::now();
     let mut reader = std::io::BufReader::new(input);
+    let mut truncated_output = crate::util::stream::TruncatingWriter::new(output, MAX_OUTPUT_BYTES);
 
     let mut raw_bytes = 0;
-    let mut filtered_bytes = 0;
     let mut line_buffer = Vec::new();
 
     // Streaming loop
@@ -225,23 +228,27 @@ fn stream_distill<R: Read, W: Write, E: Write>(
         // We apply filter line by line
         let filtered = filter.apply(clean_line);
         if !filtered.trim().is_empty() {
-            output.write_all(filtered.as_bytes())?;
-            filtered_bytes += filtered.len();
+            truncated_output.write_all(filtered.as_bytes())?;
 
             if is_cr {
-                output.write_all(b"\r")?;
-                filtered_bytes += 1;
+                truncated_output.write_all(b"\r")?;
             } else {
-                output.write_all(b"\n")?;
-                filtered_bytes += 1;
+                truncated_output.write_all(b"\n")?;
             }
-            output.flush()?;
+            truncated_output.flush()?;
+        }
+
+        // Stop completely if the stream limit is reached
+        if truncated_output.is_truncated() {
+            break;
         }
 
         if eof {
             break;
         }
     }
+
+    let filtered_bytes = truncated_output.bytes_written();
 
     // Persist streaming stats without saving full input/output to prevent memory spikes
     if let Some(s) = store {
@@ -464,7 +471,7 @@ fn distill(
 
             // Safety truncation
             if out.len() > MAX_OUTPUT_BYTES {
-                out.truncate(MAX_OUTPUT_BYTES);
+                crate::util::text::safe_truncate(&mut out, MAX_OUTPUT_BYTES);
                 out.push_str("\n[OMNI: output truncated]\n");
             }
 

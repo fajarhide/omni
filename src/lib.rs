@@ -1,5 +1,7 @@
 // OMNI Library — re-exports for integration tests and external usage.
 
+#![deny(clippy::string_slice)]
+
 pub mod agents;
 pub mod analytics;
 pub mod cli;

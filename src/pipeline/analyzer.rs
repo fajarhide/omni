@@ -45,13 +45,12 @@ pub fn analyze_trace(raw_input: &str, distilled_output: &str, _command: &str) ->
     // F-09: Check if critical signals exist in distilled output
     // Use a 40-char fingerprint prefix to handle formatting changes
     for crit in raw_critical {
-        let check_len = crit.len().min(40); // first 40 chars as fingerprint
-        let fingerprint = &crit[..check_len];
+        let fingerprint = crate::util::text::safe_slice(crit, 40);
         if !distilled_output.contains(fingerprint) {
             dropped_critical_lines += 1;
             feedback_notes.push(format!(
                 "Critical signal may be dropped: '{}'...",
-                &crit[..crit.len().min(60)]
+                crate::util::text::safe_slice(crit, 60)
             ));
         }
     }

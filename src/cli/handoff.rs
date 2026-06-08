@@ -57,7 +57,10 @@ pub fn run_handoff(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     } else {
         for err in &state.active_errors {
             let clean = err.replace('\n', " ");
-            md.push_str(&format!("- {}\n", &clean[..clean.len().min(120)]));
+            md.push_str(&format!(
+                "- {}\n",
+                clean.chars().take(120).collect::<String>()
+            ));
         }
     }
 
@@ -90,7 +93,10 @@ pub fn run_handoff(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
 
     md.push_str("\n## Recent Commands\n");
     for cmd in state.last_commands.iter().take(10) {
-        md.push_str(&format!("- `{}`\n", &cmd[..cmd.len().min(80)]));
+        md.push_str(&format!(
+            "- `{}`\n",
+            cmd.chars().take(80).collect::<String>()
+        ));
     }
 
     md.push_str(&format!(
