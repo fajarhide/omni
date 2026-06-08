@@ -750,7 +750,7 @@ mod tests {
             .map(|i| {
                 // Generate completely distinct strings with varying lengths and chars
                 let chars: String =
-                    std::iter::repeat_n((b'a' + (i % 26) as u8) as char, 40 + (i as usize * 3))
+                    std::iter::repeat_n(char::from(b'a' + (i % 26) as u8), 40 + (i as usize * 3))
                         .collect();
                 format!("unqiue_prefix_{} {}\n", i, chars)
             })

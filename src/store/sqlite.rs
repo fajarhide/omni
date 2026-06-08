@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};

@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use anyhow::Result;
 use colored::Colorize;
 use is_terminal::IsTerminal;

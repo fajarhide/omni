@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 /// Engram — Automatic Subtask Digest
 ///
 /// Rule-based state snapshots capturing subtask progress without LLM calls.

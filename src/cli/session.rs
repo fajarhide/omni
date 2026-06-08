@@ -1,3 +1,7 @@
+// Safety: String indexing uses session IDs (hex/ASCII) and ASCII delimiter
+// positions from find()/rfind() which are always valid char boundaries.
+#![allow(clippy::string_slice)]
+
 use crate::store::sqlite::Store;
 use crate::store::transcript;
 use chrono::{Local, TimeZone, Utc};

@@ -1,3 +1,7 @@
+#![allow(clippy::string_slice)]
+// Safety: All functions in this module verify char boundaries via
+// `is_char_boundary()` or `char_indices()` before indexing.
+
 pub fn safe_truncate(s: &mut String, max_bytes: usize) {
     if s.len() <= max_bytes {
         return;
@@ -17,6 +21,31 @@ pub fn safe_truncate_with_ellipsis(s: &str, max_bytes: usize) -> String {
     while boundary > 0 && !s.is_char_boundary(boundary) {
         boundary -= 1;
     }
+    let mut truncated = s[..boundary].to_string();
+    truncated.push_str("...");
+    truncated
+}
+
+use unicode_width::UnicodeWidthStr;
+
+/// Truncate based on display width (columns), not bytes.
+pub fn display_truncate_with_ellipsis(s: &str, max_cols: usize) -> String {
+    if s.width() <= max_cols {
+        return s.to_string();
+    }
+
+    let mut current_width = 0;
+    let mut boundary = 0;
+
+    for (i, c) in s.char_indices() {
+        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if current_width + cw > max_cols {
+            break;
+        }
+        current_width += cw;
+        boundary = i + c.len_utf8();
+    }
+
     let mut truncated = s[..boundary].to_string();
     truncated.push_str("...");
     truncated

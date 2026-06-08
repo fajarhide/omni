@@ -110,7 +110,7 @@ fn truncate_lines(s: &str, max_lines: usize) -> Vec<String> {
     let mut result = Vec::new();
 
     for &line in lines.iter().take(max_lines) {
-        let truncated = crate::util::text::safe_truncate_with_ellipsis(line, 57);
+        let truncated = crate::util::text::display_truncate_with_ellipsis(line, 57);
         result.push(truncated);
     }
 

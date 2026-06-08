@@ -1,3 +1,6 @@
+// Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
+#![allow(clippy::string_slice)]
+
 use crate::pipeline::scorer::classify_line;
 use crate::pipeline::{CollapseMode, SignalTier};
 use std::borrow::Cow;
@@ -72,22 +75,25 @@ fn normalize_structural(trimmed: &str) -> String {
         return trimmed.to_lowercase(); // preserve as-is, hanya lowercase
     }
 
-    let mut out = String::with_capacity(trimmed.len());
-    let mut chars = trimmed.chars().peekable();
+    use unicode_segmentation::UnicodeSegmentation;
 
-    while let Some(c) = chars.next() {
-        if c.is_ascii_digit() {
-            // Replace digit sequences with #
-            out.push('#');
-            while let Some(&next_c) = chars.peek() {
-                if next_c.is_ascii_digit() {
-                    chars.next();
-                } else {
-                    break;
-                }
+    let mut out = String::with_capacity(trimmed.len());
+    let mut in_digits = false;
+
+    for g in trimmed.graphemes(true) {
+        if g.len() == 1 && g.chars().next().unwrap().is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+                in_digits = true;
             }
         } else {
-            out.push(c.to_ascii_lowercase());
+            in_digits = false;
+            // lowercase if the grapheme is ascii, otherwise push as is
+            if g.len() == 1 && g.is_ascii() {
+                out.push(g.chars().next().unwrap().to_ascii_lowercase());
+            } else {
+                out.push_str(g);
+            }
         }
     }
     out
@@ -291,7 +297,7 @@ fn format_summary(group: &CollapseGroup, mode: &CollapseMode) -> String {
     }
 
     // Generic fallback
-    let display_pat = crate::util::text::safe_truncate_with_ellipsis(pat, 57);
+    let display_pat = crate::util::text::display_truncate_with_ellipsis(pat, 57);
     format!(
         "[{} similar lines collapsed] (pattern: \"{}\")",
         group.count, display_pat
