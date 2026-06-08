@@ -59,6 +59,11 @@ fn strip_ansi(line: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+thread_local! {
+    static NORMALIZE_CACHE: std::cell::RefCell<lru::LruCache<String, String>> =
+        std::cell::RefCell::new(lru::LruCache::new(std::num::NonZeroUsize::new(2048).unwrap()));
+}
+
 /// Fast structural normalization for pattern grouping.
 /// Produces a "skeleton" of the line:
 /// - Replace contiguous digits with "#"
@@ -73,6 +78,12 @@ fn normalize_structural(trimmed: &str) -> String {
 
     if is_git_hash_line(trimmed) {
         return trimmed.to_lowercase(); // preserve as-is, hanya lowercase
+    }
+
+    if trimmed.len() < 1000
+        && let Some(cached) = NORMALIZE_CACHE.with(|c| c.borrow_mut().get(trimmed).cloned())
+    {
+        return cached;
     }
 
     use unicode_segmentation::UnicodeSegmentation;
@@ -96,6 +107,11 @@ fn normalize_structural(trimmed: &str) -> String {
             }
         }
     }
+
+    if trimmed.len() < 1000 {
+        NORMALIZE_CACHE.with(|c| c.borrow_mut().put(trimmed.to_string(), out.clone()));
+    }
+
     out
 }
 

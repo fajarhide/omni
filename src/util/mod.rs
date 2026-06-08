@@ -1,5 +1,6 @@
 pub mod command_family;
 pub mod omni_str;
+pub mod stream;
 pub mod text;
 
 #[allow(unused_imports)]
