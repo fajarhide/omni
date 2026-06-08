@@ -855,6 +855,50 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
 // ─── JSON Mode: Machine-Readable ────────────────────────
 
+#[derive(serde::Serialize)]
+pub struct StatsJson {
+    pub version: String,
+    pub generated_at: i64,
+    pub periods: Vec<StatsPeriod>,
+    pub commands: Vec<CommandStat>,
+    pub agents: Vec<AgentStat>,
+    pub rewind: RewindStat,
+    pub avg_latency_ms: f64,
+}
+
+#[derive(serde::Serialize)]
+pub struct StatsPeriod {
+    pub label: String,
+    pub commands: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub savings_pct: f64,
+    pub usd_saved: f64,
+    pub measurement_method: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct CommandStat {
+    pub command: String,
+    pub count: u64,
+    pub savings_pct: f64,
+    pub tokens_saved: u64,
+}
+
+#[derive(serde::Serialize)]
+pub struct AgentStat {
+    pub agent: String,
+    pub agent_id: String,
+    pub count: u64,
+    pub savings_pct: f64,
+}
+
+#[derive(serde::Serialize)]
+pub struct RewindStat {
+    pub archived: u64,
+    pub retrieved: u64,
+}
+
 fn run_json(store: &Store) -> Result<()> {
     let periods = store.multi_period_stats()?;
     let top_commands = get_top_commands(store, 0, 100);
@@ -867,7 +911,7 @@ fn run_json(store: &Store) -> Result<()> {
         0.0
     };
 
-    let periods_json: Vec<serde_json::Value> = periods
+    let periods_json: Vec<StatsPeriod> = periods
         .iter()
         .map(
             |(label, count, input, output, raw_tokens, filtered_tokens)| {
@@ -882,32 +926,34 @@ fn run_json(store: &Store) -> Result<()> {
                 let tokens_saved = raw_tokens.saturating_sub(*filtered_tokens);
                 let usd_saved =
                     (tokens_saved as f64 / 1_000_000.0) * crate::guard::config::get_input_cost();
-                serde_json::json!({
-                    "label": label.to_lowercase().replace(' ', "_"),
-                    "commands": count,
-                    "input_tokens": raw_tokens,
-                    "output_tokens": filtered_tokens,
-                    "savings_pct": savings_pct,
-                    "usd_saved": (usd_saved * 100.0).round() / 100.0,
-                    "measurement_method": if *raw_tokens > 0 { "actual" } else { "estimated" },
-                })
+                StatsPeriod {
+                    label: label.to_lowercase().replace(' ', "_"),
+                    commands: *count,
+                    input_tokens: *raw_tokens,
+                    output_tokens: *filtered_tokens,
+                    savings_pct,
+                    usd_saved: (usd_saved * 100.0).round() / 100.0,
+                    measurement_method: if *raw_tokens > 0 {
+                        "actual".to_string()
+                    } else {
+                        "estimated".to_string()
+                    },
+                }
             },
         )
         .collect();
 
-    let commands_json: Vec<serde_json::Value> = top_commands
+    let commands_json: Vec<CommandStat> = top_commands
         .iter()
-        .map(|(cmd, count, pct, tokens_saved)| {
-            serde_json::json!({
-                "command": cmd,
-                "count": count,
-                "savings_pct": pct,
-                "tokens_saved": tokens_saved,
-            })
+        .map(|(cmd, count, pct, tokens_saved)| CommandStat {
+            command: cmd.clone(),
+            count: *count,
+            savings_pct: *pct,
+            tokens_saved: *tokens_saved,
         })
         .collect();
 
-    let agent_json: Vec<serde_json::Value> = store
+    let agent_json: Vec<AgentStat> = store
         .get_agent_breakdown(0)
         .unwrap_or_default()
         .iter()
@@ -917,25 +963,27 @@ fn run_json(store: &Store) -> Result<()> {
             } else {
                 0.0
             };
-            serde_json::json!({
-                "agent": agent_display_name(agent_id),
-                "agent_id": agent_id,
-                "count": count,
-                "savings_pct": savings,
-            })
+            AgentStat {
+                agent: agent_display_name(agent_id).to_string(),
+                agent_id: agent_id.clone(),
+                count: *count,
+                savings_pct: savings,
+            }
         })
         .collect();
 
-    let output = serde_json::json!({
-        "periods": periods_json,
-        "commands": commands_json,
-        "agents": agent_json,
-        "rewind": {
-            "archived": rewind_stored,
-            "retrieved": rewind_retrieved,
+    let output = StatsJson {
+        version: "1".to_string(),
+        generated_at: chrono::Utc::now().timestamp(),
+        periods: periods_json,
+        commands: commands_json,
+        agents: agent_json,
+        rewind: RewindStat {
+            archived: rewind_stored,
+            retrieved: rewind_retrieved,
         },
-        "avg_latency_ms": (avg_latency * 10.0).round() / 10.0,
-    });
+        avg_latency_ms: (avg_latency * 10.0).round() / 10.0,
+    };
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
@@ -1095,5 +1143,35 @@ mod tests {
         assert_eq!(format_number(999), "999");
         assert_eq!(format_number(1000), "1,000");
         assert_eq!(format_number(1247000), "1,247,000");
+    }
+
+    #[test]
+    fn test_stats_json_schema_validation() {
+        let json_struct = StatsJson {
+            version: "1".to_string(),
+            generated_at: 1234567890,
+            periods: vec![StatsPeriod {
+                label: "All Time".to_string(),
+                commands: 10,
+                input_tokens: 10000,
+                output_tokens: 1000,
+                savings_pct: 90.0,
+                usd_saved: 1.5,
+                measurement_method: "test".to_string(),
+            }],
+            commands: vec![],
+            agents: vec![],
+            rewind: RewindStat {
+                archived: 100,
+                retrieved: 5,
+            },
+            avg_latency_ms: 15.5,
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"1\""));
+        assert!(json_str.contains("\"generated_at\":1234567890"));
+        assert!(json_str.contains("\"savings_pct\":90.0"));
+        assert!(json_str.contains("\"avg_latency_ms\":15.5"));
     }
 }

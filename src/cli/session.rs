@@ -69,6 +69,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     let is_resume = args.iter().any(|a| a == "--resume");
     let is_transcript = args.iter().any(|a| a == "--transcript");
     let is_health = args.iter().any(|a| a == "--health");
+    let is_json = args.iter().any(|a| a == "--json");
 
     // If no flags, show help
     if !is_history
@@ -79,6 +80,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         && !is_resume
         && !is_transcript
         && !is_health
+        && !is_json
     {
         print_help();
         return Ok(());
@@ -136,6 +138,10 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     let mut state = match store.find_latest_session() {
         Some(s) => s,
         None => {
+            if is_json {
+                println!("{{}}");
+                return Ok(());
+            }
             if is_inject {
                 return Ok(());
             }
@@ -143,6 +149,10 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             return Ok(());
         }
     };
+
+    if is_json {
+        return run_json(&state);
+    }
 
     if is_clear {
         let _ = store.delete_session(&state.session_id);
@@ -651,6 +661,75 @@ fn run_health(store: &Store) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ─── JSON Mode: Machine-Readable ────────────────────────
+
+fn run_json(state: &crate::pipeline::SessionState) -> anyhow::Result<()> {
+    let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
+    hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let hot_files: Vec<HotFileJson> = hot_vec
+        .into_iter()
+        .take(5)
+        .map(|(p, c)| HotFileJson {
+            path: p.clone(),
+            count: *c,
+        })
+        .collect();
+
+    let agent_id = std::env::var("OMNI_AGENT_ID")
+        .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
+    let project_path = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let session_age_seconds = Utc::now().timestamp() - state.started_at;
+
+    let output = SessionJson {
+        version: "1".to_string(),
+        session_id: state.session_id.clone(),
+        agent_id,
+        project_path,
+        task: state.inferred_task.clone(),
+        domain: state.inferred_domain.clone(),
+        estimated_tokens: state.estimated_current_tokens,
+        context_pressure: state.context_pressure.to_string(),
+        should_warn: state.should_emit_pressure_warning(),
+        tokens_saved: state.estimated_tokens_saved(),
+        command_count: state.command_count,
+        active_errors: state.active_errors.clone(),
+        hot_files,
+        recent_commands: state.last_commands.to_vec(),
+        session_age_seconds,
+    };
+
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+pub struct SessionJson {
+    pub version: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub project_path: String,
+    pub task: Option<String>,
+    pub domain: Option<String>,
+    pub estimated_tokens: u64,
+    pub context_pressure: String,
+    pub should_warn: bool,
+    pub tokens_saved: u64,
+    pub command_count: u32,
+    pub active_errors: Vec<String>,
+    pub hot_files: Vec<HotFileJson>,
+    pub recent_commands: Vec<String>,
+    pub session_age_seconds: i64,
+}
+
+#[derive(serde::Serialize)]
+pub struct HotFileJson {
+    pub path: String,
+    pub count: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,5 +829,47 @@ mod tests {
         assert!(ctx.len() <= 200);
         assert!(ctx.contains("fix auth bug"));
         assert!(ctx.contains("src/auth/mod.rs"));
+    }
+
+    #[test]
+    fn test_session_json_schema_validation() {
+        let mut state = SessionState::new();
+        state.session_id = "test-session".to_string();
+        state.inferred_task = Some("compile code".to_string());
+        state.add_hot_file("src/main.rs");
+        state.add_error("E0308: mismatched types");
+
+        let json_struct = super::SessionJson {
+            version: "1".to_string(),
+            session_id: state.session_id.clone(),
+            agent_id: "test-agent".to_string(),
+            project_path: "/test/project".to_string(),
+            task: state.inferred_task.clone(),
+            domain: state.inferred_domain.clone(),
+            estimated_tokens: state.estimated_current_tokens,
+            command_count: state.command_count,
+            session_age_seconds: 120,
+            active_errors: state.active_errors.clone(),
+            hot_files: state
+                .hot_files
+                .iter()
+                .map(|(k, v)| super::HotFileJson {
+                    path: k.clone(),
+                    count: *v,
+                })
+                .collect(),
+            recent_commands: state.last_commands.clone(),
+            tokens_saved: state.estimated_tokens_saved(),
+            context_pressure: state.context_pressure.to_string(),
+            should_warn: false,
+        };
+
+        let json_str = serde_json::to_string(&json_struct).unwrap();
+        assert!(json_str.contains("\"version\":\"1\""));
+        assert!(json_str.contains("\"session_id\":\"test-session\""));
+        assert!(json_str.contains("\"agent_id\":\"test-agent\""));
+        assert!(json_str.contains("\"context_pressure\":\"Normal\""));
+        assert!(json_str.contains("\"should_warn\":false"));
+        assert!(json_str.contains("\"active_errors\":[\"E0308: mismatched types\"]"));
     }
 }
