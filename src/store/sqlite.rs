@@ -1164,7 +1164,7 @@ impl Store {
             Err(_) => return,
         };
         let now = chrono::Utc::now().timestamp();
-        let prefix = &command_prefix[..command_prefix.len().min(40)];
+        let prefix = crate::util::text::safe_slice(command_prefix, 40);
         let _ = conn.execute(
             "INSERT INTO retrieve_events (command_prefix, hash, ts, agent_id)
              VALUES (?1, ?2, ?3, ?4)",
@@ -1180,7 +1180,7 @@ impl Store {
             Err(_) => return 0.0,
         };
         let cutoff = chrono::Utc::now().timestamp() - window_days * 86400;
-        let prefix = &command_prefix[..command_prefix.len().min(40)];
+        let prefix = crate::util::text::safe_slice(command_prefix, 40);
         let retrieves: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM retrieve_events WHERE command_prefix = ?1 AND ts > ?2",

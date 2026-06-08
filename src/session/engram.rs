@@ -275,7 +275,7 @@ fn is_build_command(cmd: &str) -> bool {
 }
 
 fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max { s } else { &s[..max] }
+    crate::util::text::safe_slice(s, max)
 }
 
 fn age_str(timestamp: i64) -> String {

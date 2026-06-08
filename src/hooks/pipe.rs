@@ -464,7 +464,7 @@ fn distill(
 
             // Safety truncation
             if out.len() > MAX_OUTPUT_BYTES {
-                out.truncate(MAX_OUTPUT_BYTES);
+                crate::util::text::safe_truncate(&mut out, MAX_OUTPUT_BYTES);
                 out.push_str("\n[OMNI: output truncated]\n");
             }
 

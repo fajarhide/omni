@@ -250,7 +250,7 @@ fn extract_errors(text: &str) -> Vec<String> {
 fn truncate_error(err: &str) -> String {
     let mut clean = err.replace('\n', " ");
     if clean.len() > 200 {
-        clean.truncate(197);
+        crate::util::text::safe_truncate(&mut clean, 197);
         clean.push_str("...");
     }
     clean

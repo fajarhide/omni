@@ -191,10 +191,13 @@ pub fn auto_learn_project_patterns(
 
     // Learn: persistent error patterns (errors that keep recurring)
     for err in state.active_errors.iter().take(3) {
-        let short = &err[..err.len().min(80)];
+        let short = crate::util::text::safe_slice(err, 80);
         store.upsert_project_knowledge(
             &proj_hash,
-            &format!("recurring_error_{}", &short[..short.len().min(20)]),
+            &format!(
+                "recurring_error_{}",
+                crate::util::text::safe_slice(short, 20)
+            ),
             short,
             0.6,
         );

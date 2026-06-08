@@ -61,7 +61,7 @@ pub fn process_payload(
         .lines()
         .find(|l| !l.trim().is_empty())
         .unwrap_or(error_msg);
-    let short_error = &short_error[..short_error.len().min(200)];
+    let short_error = crate::util::text::safe_slice(short_error, 200);
 
     // Update session state with error
     if let Ok(mut state) = session.lock() {
@@ -73,7 +73,7 @@ pub fn process_payload(
     // Index failure to FTS5 for searchability
     let index_msg = format!(
         "ToolFailure [{}]: {}",
-        &command[..command.len().min(50)],
+        crate::util::text::safe_slice(command, 50),
         short_error
     );
     if let Ok(state) = session.lock() {

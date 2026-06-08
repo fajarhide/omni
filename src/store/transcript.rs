@@ -60,7 +60,7 @@ impl TranscriptEntry {
         let summary = if payload.len() > 2048 {
             format!(
                 "{}... [truncated {} bytes]",
-                &payload[..2048],
+                crate::util::text::safe_slice(payload, 2048),
                 payload.len()
             )
         } else {

@@ -242,11 +242,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     for (i, c) in candidates.iter().enumerate() {
         let action = format!("{:?}", c.suggested_action).to_lowercase();
-        let mut preview = c.trigger_prefix.clone();
-        if preview.len() > 42 {
-            preview.truncate(39);
-            preview.push_str("...");
-        }
+        let preview = crate::util::text::safe_truncate_with_ellipsis(&c.trigger_prefix, 39);
 
         println!(
             "    {:02}. {: <10} {: <45} {: <8}",

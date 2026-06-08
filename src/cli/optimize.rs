@@ -78,7 +78,7 @@ pub fn run_optimize(args: &[String]) -> anyhow::Result<()> {
 
     // Safety truncation
     if raw.len() > 10000 {
-        raw.truncate(10000);
+        crate::util::text::safe_truncate(&mut raw, 10000);
         raw.push_str("\n...[truncated due to LLM context limits]");
     }
 

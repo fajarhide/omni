@@ -299,11 +299,7 @@ fn distill_tsc(input: &str) -> String {
     for (file, issues) in sorted.iter().take(5) {
         let count = issues.len();
         let issues_str = issues.join(", ");
-        let truncated = if issues_str.len() > 60 {
-            format!("{}...", &issues_str[..57])
-        } else {
-            issues_str
-        };
+        let truncated = crate::util::text::safe_truncate_with_ellipsis(&issues_str, 57);
         out.push_str(&format!("\n  {}: {} errors [{}]", file, count, truncated));
     }
 

@@ -200,6 +200,19 @@ else
 fi
 TOTAL=$((TOTAL + 1))
 
+# ─── 12. Multibyte Output ───────────────────────
+echo "▸ Scenario 12: Multibyte Output"
+output=$("$OMNI" exec bash -c 'printf "│━┌└⠋⠙✗⚠▶ %0.s─" {1..120}' 2>&1)
+exit_code=$?
+if [ $exit_code -eq 134 ]; then
+    echo "  ✗ omni panicked with SIGABRT on multibyte output"
+    FAIL=$((FAIL + 1))
+else
+    echo "  ✓ multibyte stdout handled safely (exit $exit_code)"
+    PASS=$((PASS + 1))
+fi
+TOTAL=$((TOTAL + 1))
+
 # ─── Results ─────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════"

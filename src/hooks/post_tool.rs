@@ -396,7 +396,7 @@ pub fn process_payload(
     // Safety Truncation
     let max_chars = 50_000;
     if final_out.len() > max_chars {
-        final_out.truncate(max_chars);
+        crate::util::text::safe_truncate(&mut final_out, max_chars);
         final_out.push_str("\n[OMNI: output truncated]");
     }
 

@@ -29,25 +29,28 @@ pub struct CollapseResult {
 
 /// Strip ANSI escape codes without regex for performance.
 fn strip_ansi(line: &str) -> Cow<'_, str> {
-    if !line.as_bytes().contains(&0x1b) {
+    if !line.contains('\x1b') {
         return Cow::Borrowed(line);
     }
-    let bytes = line.as_bytes();
     let mut out = String::with_capacity(line.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            // Skip ESC [ ... <letter>
-            i += 2;
-            while i < bytes.len() && !bytes[i].is_ascii_alphabetic() {
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1; // skip the final letter
+    let mut in_escape = false;
+    let mut chars = line.chars();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b'
+            && let Some('[') = chars.clone().next()
+        {
+            chars.next(); // Consume '['
+            in_escape = true;
+            continue;
+        }
+
+        if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
             }
         } else {
-            out.push(bytes[i] as char);
-            i += 1;
+            out.push(c);
         }
     }
     Cow::Owned(out)
@@ -70,20 +73,21 @@ fn normalize_structural(trimmed: &str) -> String {
     }
 
     let mut out = String::with_capacity(trimmed.len());
-    let bytes = trimmed.as_bytes();
-    let mut i = 0;
+    let mut chars = trimmed.chars().peekable();
 
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b.is_ascii_digit() {
+    while let Some(c) = chars.next() {
+        if c.is_ascii_digit() {
             // Replace digit sequences with #
             out.push('#');
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                i += 1;
+            while let Some(&next_c) = chars.peek() {
+                if next_c.is_ascii_digit() {
+                    chars.next();
+                } else {
+                    break;
+                }
             }
         } else {
-            out.push(b.to_ascii_lowercase() as char);
-            i += 1;
+            out.push(c.to_ascii_lowercase());
         }
     }
     out
@@ -287,11 +291,7 @@ fn format_summary(group: &CollapseGroup, mode: &CollapseMode) -> String {
     }
 
     // Generic fallback
-    let display_pat = if pat.len() > 60 {
-        format!("{}...", &pat[..57])
-    } else {
-        pat.clone()
-    };
+    let display_pat = crate::util::text::safe_truncate_with_ellipsis(pat, 57);
     format!(
         "[{} similar lines collapsed] (pattern: \"{}\")",
         group.count, display_pat

@@ -104,11 +104,7 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
         store.sync_agent_session(&agent_id, &state.session_id, &proj_hash, &state_json);
 
         let summary = build_summary_with_context(&state, now, &store, &cwd_for_ctx);
-        let mut summary_truncated = summary.trim().to_string();
-        if summary_truncated.len() > 800 {
-            summary_truncated.truncate(797);
-            summary_truncated.push_str("...");
-        }
+        let summary_truncated = crate::util::text::safe_truncate_with_ellipsis(summary.trim(), 797);
 
         store.index_event(
             &state.session_id,
@@ -242,13 +238,9 @@ pub fn process_before_agent_start_payload(
     };
 
     let summary = build_summary_with_context(&state, now, &store, &cwd_for_ctx);
-    let mut summary_truncated = summary.trim().to_string();
+    let summary_truncated = crate::util::text::safe_truncate_with_ellipsis(summary.trim(), 797);
     if summary_truncated.is_empty() {
         return None;
-    }
-    if summary_truncated.len() > 800 {
-        summary_truncated.truncate(797);
-        summary_truncated.push_str("...");
     }
 
     let out = HookOutput {
@@ -408,11 +400,7 @@ pub fn read_pinned_files(cwd: &str) -> String {
         {
             let trimmed = content.trim();
             if !trimmed.is_empty() {
-                let mut capped_content = trimmed.to_string();
-                if capped_content.len() > 400 {
-                    capped_content.truncate(397);
-                    capped_content.push_str("...");
-                }
+                let capped_content = crate::util::text::safe_truncate_with_ellipsis(trimmed, 397);
                 out.push_str(&format!("\n[Pinned: {}]\n{}\n", pinned, capped_content));
                 files_added += 1;
             }
