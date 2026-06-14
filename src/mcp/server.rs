@@ -86,6 +86,15 @@ pub struct OmniKnowledgeParams {
     pub value: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct OmniSetLoopContextParams {
+    pub loop_id: Option<String>,
+    pub iteration: Option<u32>,
+    pub budget_tokens: Option<u64>,
+    pub goal: Option<String>,
+    pub subagent: Option<bool>,
+}
+
 // Automatically bind tool signatures
 #[tool_router(server_handler)]
 impl OmniServer {
@@ -936,6 +945,85 @@ impl OmniServer {
 
         out.push_str("\n---\n*Paste this into a new session to continue where you left off.*\n");
         out
+    }
+
+    #[tool(
+        name = "omni_set_loop_context",
+        description = "Update the loop context dynamically. Call this from the loop orchestrator."
+    )]
+    pub async fn omni_set_loop_context(
+        &self,
+        params: Parameters<OmniSetLoopContextParams>,
+    ) -> String {
+        let mut session = self.session.lock().unwrap();
+        if let Some(id) = params.0.loop_id {
+            session.loop_context.mode = crate::pipeline::LoopMode::OuterLoop;
+            session.loop_context.loop_id = Some(id);
+        }
+        if let Some(iter) = params.0.iteration
+            && iter != session.loop_context.iteration
+        {
+            session.loop_context.iteration = iter;
+            session.loop_context.budget_used = 0; // Reset
+        }
+        if let Some(budget) = params.0.budget_tokens {
+            session.loop_context.budget_tokens = Some(budget);
+        }
+        if let Some(goal) = params.0.goal {
+            session.loop_context.goal = Some(goal);
+        }
+        if let Some(subagent) = params.0.subagent {
+            if subagent {
+                session.loop_context.mode = crate::pipeline::LoopMode::SubAgent;
+            } else if session.loop_context.mode == crate::pipeline::LoopMode::SubAgent {
+                session.loop_context.mode = crate::pipeline::LoopMode::Interactive;
+            }
+        }
+        session.recalculate_pressure();
+        self.store.upsert_session(&session);
+        "Loop context updated successfully.".to_string()
+    }
+
+    #[tool(
+        name = "omni_budget_status",
+        description = "Get current token budget status for this loop iteration. Call before expensive operations."
+    )]
+    pub async fn omni_budget_status(&self) -> String {
+        let session = self.session.lock().unwrap();
+        let loop_id = session
+            .loop_context
+            .loop_id
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        let iter = session.loop_context.iteration;
+        let budget_used = session.loop_context.budget_used;
+
+        let budget_tokens = session.loop_context.budget_tokens.unwrap_or(0);
+        let budget_remaining = budget_tokens.saturating_sub(budget_used);
+
+        let budget_pct = if budget_tokens > 0 {
+            (budget_used as f64 / budget_tokens as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let recommendation = if budget_tokens == 0 || budget_pct < 60.0 {
+            "PROCEED"
+        } else if budget_pct < 80.0 {
+            "CAUTION"
+        } else {
+            "STOP"
+        };
+
+        serde_json::json!({
+            "loop_id": if loop_id == "none" { serde_json::Value::Null } else { serde_json::Value::String(loop_id) },
+            "iteration": iter,
+            "budget_tokens": budget_tokens,
+            "budget_used": budget_used,
+            "budget_remaining": budget_remaining,
+            "budget_pct": budget_pct,
+            "recommendation": recommendation
+        }).to_string()
     }
 }
 

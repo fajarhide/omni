@@ -60,6 +60,54 @@ pub enum SignalTier {
     Critical,  // Error, exception, FAILED — selalu include
 }
 
+// Loop Context Mode
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub enum LoopMode {
+    #[default]
+    Interactive, // Normal session
+    OuterLoop, // Berjalan di dalam outer loop (scheduled/automated)
+    SubAgent,  // Berjalan sebagai sub-agent (checker, verifier)
+    Benchmark, // Running benchmark/eval loop
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LoopContext {
+    pub mode: LoopMode,
+    pub loop_id: Option<String>,    // UUID dari outer loop runner
+    pub iteration: u32,             // Iterasi loop ke-berapa
+    pub budget_tokens: Option<u64>, // Token budget per iteration
+    pub budget_used: u64,           // Token yang sudah digunakan
+    pub goal: Option<String>,       // Goal string dari outer loop
+    pub verifier_required: bool,    // Apakah output perlu di-verify oleh checker agent
+}
+
+impl LoopContext {
+    pub fn update_from_env(&mut self) {
+        if let Ok(val) = std::env::var("OMNI_LOOP_ID") {
+            self.mode = LoopMode::OuterLoop;
+            self.loop_id = Some(val);
+        }
+        if let Ok(val) = std::env::var("OMNI_LOOP_ITERATION")
+            && let Ok(new_iter) = val.parse::<u32>()
+            && new_iter != self.iteration
+        {
+            self.iteration = new_iter;
+            self.budget_used = 0; // Reset budget per iteration
+        }
+        if let Ok(val) = std::env::var("OMNI_LOOP_BUDGET") {
+            self.budget_tokens = val.parse().ok().or(self.budget_tokens);
+        }
+        if let Ok(val) = std::env::var("OMNI_LOOP_GOAL") {
+            self.goal = Some(val);
+        }
+        if let Ok(val) = std::env::var("OMNI_SUBAGENT")
+            && val == "1"
+        {
+            self.mode = LoopMode::SubAgent;
+        }
+    }
+}
+
 // Context window pressure level
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ContextPressure {
@@ -251,6 +299,10 @@ pub struct SessionState {
     // Phase 2: Hash of last compact snapshot for delta detection
     #[serde(default)]
     pub last_compact_hash: Option<String>,
+
+    // Loop Context (Phase 3 / L1-01)
+    #[serde(default)]
+    pub loop_context: LoopContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,13 +318,15 @@ impl SessionState {
     pub fn new() -> Self {
         let id = format!("{}", chrono::Utc::now().timestamp_millis());
         let now = chrono::Utc::now().timestamp();
-        Self {
+        let mut state = Self {
             session_id: id,
             started_at: now,
             last_active: now,
             last_significant_distillations: VecDeque::with_capacity(MAX_DISTILLATION_HISTORY),
             ..Default::default()
-        }
+        };
+        state.loop_context.update_from_env();
+        state
     }
 
     pub fn actual_tokens_saved(&self) -> u64 {
@@ -358,7 +412,7 @@ impl SessionState {
 
     /// Compute pressure thresholds from env or defaults
     fn pressure_thresholds(&self) -> (f64, f64) {
-        let warn = std::env::var("OMNI_PRESSURE_WARN")
+        let mut warn = std::env::var("OMNI_PRESSURE_WARN")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_PRESSURE_WARNING_THRESHOLD);
@@ -366,6 +420,14 @@ impl SessionState {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_PRESSURE_CRITICAL_THRESHOLD);
+
+        // Reduce warning threshold if running in OuterLoop mode
+        if self.loop_context.mode == LoopMode::OuterLoop
+            && (warn - DEFAULT_PRESSURE_WARNING_THRESHOLD).abs() < f64::EPSILON
+        {
+            warn = 0.50;
+        }
+
         (warn, crit)
     }
 

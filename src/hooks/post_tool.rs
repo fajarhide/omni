@@ -34,7 +34,39 @@ pub fn process_payload(
         return None;
     }
 
-    let content = normalized.content;
+    // L1-03: Streaming Distillation Support (Buffer warning & chunked processing)
+    // Prevent OMNI from blocking memory if output is extremely large (> 2MB)
+    let content = if normalized.content.len() > 2_000_000 {
+        let lines: Vec<&str> = normalized.content.lines().collect();
+        let total_lines = lines.len();
+        let head_lines = 5000;
+        let tail_lines = 1000;
+
+        if total_lines > head_lines + tail_lines {
+            let head = lines
+                .iter()
+                .take(head_lines)
+                .copied()
+                .collect::<Vec<&str>>()
+                .join("\n");
+            let tail = lines
+                .iter()
+                .skip(total_lines.saturating_sub(tail_lines))
+                .copied()
+                .collect::<Vec<&str>>()
+                .join("\n");
+            format!(
+                "{}\n\n... [OMNI: ⚠️ {} lines omitted due to extreme length (>2MB)] ...\n\n{}",
+                head,
+                total_lines - (head_lines + tail_lines),
+                tail
+            )
+        } else {
+            normalized.content
+        }
+    } else {
+        normalized.content
+    };
 
     let config = crate::guard::config::load_config();
     let agent_config = config.for_agent(&normalized.agent_id);
@@ -385,6 +417,10 @@ pub fn process_payload(
                 state.current_turn.turn_number = state.command_count;
                 state.current_turn.timestamp = chrono::Utc::now().timestamp();
                 state.current_turn.tool_output_tokens += result.filtered_tokens as u64;
+
+                // L1-02: Increment loop iteration budget
+                state.loop_context.budget_used += result.filtered_tokens as u64;
+
                 s.record_context_turn(&state.current_turn);
             }
 
@@ -445,6 +481,23 @@ fn build_additional_context(
         if s.should_emit_pressure_warning() {
             pressure_msg = s.pressure_warning();
             s.last_pressure_warning_at = Some(command_count);
+        }
+
+        // L1-01 / L1-02: Budget Warning Check
+        if let Some(budget) = s.loop_context.budget_tokens
+            && budget > 0
+            && s.loop_context.budget_used > (budget as f64 * 0.8) as u64
+        {
+            let budget_warn = format!(
+                "⚠️ OMNI Loop Budget: >80% used this iteration ({} / {} tokens). Consider concluding soon.",
+                s.loop_context.budget_used, budget
+            );
+            if let Some(pm) = pressure_msg.as_mut() {
+                pm.push('\n');
+                pm.push_str(&budget_warn);
+            } else {
+                pressure_msg = Some(budget_warn);
+            }
         }
     }
 

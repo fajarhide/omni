@@ -50,6 +50,27 @@ pub fn process_payload(
         Err(_) => return None,
     };
 
+    // L1-04: Add LoopCheckpoint engram if in a loop
+    if state.loop_context.mode != crate::pipeline::LoopMode::Interactive {
+        let label = format!(
+            "Loop #{} checkpoint: {} [iter tokens: {}]",
+            state.loop_context.iteration,
+            crate::util::text::safe_slice(state.loop_context.goal.as_deref().unwrap_or("none"), 30),
+            state.loop_context.budget_used
+        );
+        let mut hot_vec: Vec<(&String, &u32)> = state.hot_files.iter().collect();
+        hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
+        let top_files: Vec<String> = hot_vec.iter().take(3).map(|(k, _)| (*k).clone()).collect();
+
+        state.add_engram(crate::session::engram::Engram {
+            label,
+            trigger: crate::session::engram::EngramTrigger::LoopCheckpoint,
+            timestamp: chrono::Utc::now().timestamp(),
+            files: top_files,
+            detail: None,
+        });
+    }
+
     let summary_str = build_summary(&state, &store);
 
     // Phase 2: Delta detection — skip re-emission if content unchanged
@@ -129,6 +150,35 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
         Confidence: {}%\n",
         task, domain, confidence
     );
+
+    // ── Bucket 0: Loop Checkpoint (L1-04) ──
+    if state.loop_context.mode != crate::pipeline::LoopMode::Interactive {
+        let budget_str = if let Some(budget) = state.loop_context.budget_tokens {
+            let pct = if budget > 0 {
+                (state.loop_context.budget_used as f64 / budget as f64) * 100.0
+            } else {
+                0.0
+            };
+            format!(
+                "{:.0}% used this iteration ({} / {})",
+                pct, state.loop_context.budget_used, budget
+            )
+        } else {
+            "No limit".to_string()
+        };
+
+        out.push_str(&format!(
+            "\n## OMNI Loop Checkpoint\n\
+            - **Loop ID:** {}\n\
+            - **Iteration:** {}\n\
+            - **Goal:** {}\n\
+            - **Token budget:** {}\n",
+            state.loop_context.loop_id.as_deref().unwrap_or("none"),
+            state.loop_context.iteration,
+            state.loop_context.goal.as_deref().unwrap_or("none"),
+            budget_str
+        ));
+    }
 
     // ── Bucket 1: Active Errors (high priority) ──
     out.push_str("\n## Unresolved Errors (still active)\n");

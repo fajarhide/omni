@@ -200,8 +200,8 @@ else
 fi
 TOTAL=$((TOTAL + 1))
 
-# ─── 12. Multibyte Output ───────────────────────
-echo "▸ Scenario 12: Multibyte Output"
+# ─── 11. Multibyte Output ───────────────────────
+echo "▸ Scenario 11: Multibyte Output"
 output=$("$OMNI" exec bash -c 'printf "│━┌└⠋⠙✗⚠▶ %0.s─" {1..120}' 2>&1)
 exit_code=$?
 if [ $exit_code -eq 134 ]; then
@@ -213,8 +213,8 @@ else
 fi
 TOTAL=$((TOTAL + 1))
 
-# ─── 11. JSON Contracts (Hermes Integration) ─────────────
-echo "▸ Scenario 11: JSON Contracts"
+# ─── 12. JSON Contracts (Hermes Integration) ─────────────
+echo "▸ Scenario 12: JSON Contracts"
 
 # Test version --json
 VERSION_JSON=$("$OMNI" version --json 2>&1 || true)
