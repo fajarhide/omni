@@ -1,4 +1,5 @@
 pub mod antigravity;
+pub mod checker;
 pub mod claude;
 pub mod cline;
 pub mod codex;

@@ -14,4 +14,5 @@ pub mod rewrite;
 pub mod session;
 pub mod stats;
 pub mod update;
+pub mod verify;
 pub mod version;

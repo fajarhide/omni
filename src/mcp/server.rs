@@ -95,6 +95,27 @@ pub struct OmniSetLoopContextParams {
     pub subagent: Option<bool>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct OmniVerifyParams {
+    pub session_id: String,
+    pub criteria: String,
+    pub last_n_calls: usize,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OmniLoopMemoryParams {
+    /// Action: get, set, list, or forget
+    pub action: String,
+    /// Loop goal string (used as namespace via SHA-256)
+    pub goal: String,
+    /// Memory key
+    pub key: Option<String>,
+    /// Memory value (required for set)
+    pub value: Option<String>,
+    /// Confidence score 0.0–1.0 (default 0.7)
+    pub confidence: Option<f64>,
+}
+
 // Automatically bind tool signatures
 #[tool_router(server_handler)]
 impl OmniServer {
@@ -117,6 +138,101 @@ impl OmniServer {
             content
         } else {
             format!("Not found: {}", hash)
+        }
+    }
+
+    #[tool(
+        name = "omni_verify",
+        description = "As a checker sub-agent, retrieve and evaluate the maker agent's recent work. Returns structured pass/fail with specific issues."
+    )]
+    pub async fn omni_verify(&self, params: Parameters<OmniVerifyParams>) -> String {
+        let checker_ctx = crate::agents::checker::CheckerContext::new(
+            &params.0.session_id,
+            &params.0.criteria,
+            self.store.clone(),
+        );
+        checker_ctx.get_verification_payload(params.0.last_n_calls)
+    }
+
+    #[tool(
+        name = "omni_loop_memory",
+        description = "Read/write persistent loop memory that survives session restarts. Use to remember patterns across loop iterations. Actions: get, set, list, forget."
+    )]
+    pub async fn omni_loop_memory(&self, params: Parameters<OmniLoopMemoryParams>) -> String {
+        use sha2::{Digest, Sha256};
+        let goal_hash = {
+            let mut hasher = Sha256::new();
+            hasher.update(params.0.goal.as_bytes());
+            hex::encode(hasher.finalize())[..16].to_string()
+        };
+
+        match params.0.action.as_str() {
+            "set" => {
+                let key = match &params.0.key {
+                    Some(k) => k.as_str(),
+                    None => return "Error: 'key' is required for set action.".to_string(),
+                };
+                let value = match &params.0.value {
+                    Some(v) => v.as_str(),
+                    None => return "Error: 'value' is required for set action.".to_string(),
+                };
+                let confidence = params.0.confidence.unwrap_or(0.7);
+                self.store
+                    .loop_memory_set(&goal_hash, key, value, confidence);
+                format!(
+                    "Stored loop memory: [{}] {} = {} (confidence: {:.0}%)",
+                    goal_hash,
+                    key,
+                    value,
+                    confidence * 100.0
+                )
+            }
+            "get" => {
+                let key = match &params.0.key {
+                    Some(k) => k.as_str(),
+                    None => return "Error: 'key' is required for get action.".to_string(),
+                };
+                match self.store.loop_memory_get(&goal_hash, key) {
+                    Some((value, confidence, confirmed)) => {
+                        format!(
+                            "{} (confidence: {:.0}%, confirmed: {}x)",
+                            value,
+                            confidence * 100.0,
+                            confirmed
+                        )
+                    }
+                    None => format!(
+                        "No memory found for key '{}' under goal '{}'.",
+                        key, params.0.goal
+                    ),
+                }
+            }
+            "list" => {
+                let entries = self.store.loop_memory_list(&goal_hash);
+                if entries.is_empty() {
+                    return format!("No loop memory entries for goal: '{}'.", params.0.goal);
+                }
+                let mut out = format!("## Loop Memory for '{}'\n\n", params.0.goal);
+                for (key, value, confidence, confirmed) in &entries {
+                    out.push_str(&format!(
+                        "- **{}**: {} _(confidence: {:.0}%, {}x confirmed)_\n",
+                        key,
+                        value,
+                        confidence * 100.0,
+                        confirmed
+                    ));
+                }
+                out
+            }
+            "forget" => {
+                let key = match &params.0.key {
+                    Some(k) => k.as_str(),
+                    None => return "Error: 'key' is required for forget action.".to_string(),
+                };
+                self.store.loop_memory_forget(&goal_hash, key);
+                format!("Forgot loop memory: [{}] {}", goal_hash, key)
+            }
+            other => format!("Unknown action '{}'. Use: get, set, list, forget.", other),
         }
     }
 
