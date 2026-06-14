@@ -19,6 +19,38 @@ fn omni_config_path() -> PathBuf {
     omni_home_dir().join("config.toml")
 }
 
+pub fn validate_startup() -> Option<String> {
+    let mut warnings = Vec::new();
+
+    let config_path = hermes_home_dir().join("config.yaml");
+    if let Ok(config_str) = fs::read_to_string(&config_path) {
+        if !config_str.contains("mcp_servers:") || !config_str.contains("omni:") {
+            warnings.push("OMNI MCP server is not registered in ~/.hermes/config.yaml. Tools will be missing. Run `omni init --hermes` to fix.");
+        }
+        if !config_str.contains("compression:") || !config_str.contains("enabled: true") {
+            warnings.push("Hermes compression is not enabled. Context Pressure warnings will be ignored. Run `omni init --hermes` to fix.");
+        }
+    } else {
+        warnings.push("Could not find ~/.hermes/config.yaml. Is Hermes installed?");
+    }
+
+    let plugin_file = plugin_dir().join("plugin.py");
+    if !plugin_file.exists() {
+        warnings.push(
+            "OMNI Hermes plugin file (`plugin.py`) is missing. Pre/Post hooks will not execute.",
+        );
+    }
+
+    if warnings.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "\n  [OMNI Hermes Integration Validation Failed]\n- {}\n",
+            warnings.join("\n- ")
+        ))
+    }
+}
+
 fn hermes_home_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
