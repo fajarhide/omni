@@ -15,9 +15,10 @@
 
 <br/>
 
-> **OMNI** adalah **Semantic Signal Engine** berkinerja tinggi dan **Sistem Operasi Konteks** yang secara cerdas mencegat, menganalisis, dan menyaring output terminal sebelum mencapai Agen AI Anda. Ini bertindak sebagai lapisan optimasi sinyal yang transparan di antara shell dan AI, memastikan setiap token yang dikirim bernilai tinggi, relevan, dan bebas noise. Dengan mencegah AI Anda kebingungan oleh output yang bising, Anda mendapatkan jawaban akurat lebih cepat sekaligus menghemat biaya token secara masif.
+> **OMNI** adalah **Sistem Operasi Konteks (Context OS) untuk Agen AI Otonom**. 
+> OMNI bertindak sebagai filter semantik berkinerja tinggi antara terminal Anda dan LLM. Dengan secara cerdas menyaring log yang bising, menyimpan *state*, dan mengelola anggaran token, OMNI memastikan agen Anda tetap fokus, mengurangi halusinasi, dan mengeksekusi *loop* dengan sempurna—semuanya sambil **memangkas biaya API Anda hingga 90%**.
 > 
-> *Sepenuhnya transparan. Anda selalu memegang kendali.*
+> *Berhenti membayar untuk kebisingan terminal. Mulai membangun dengan sinyal murni.*
 ---
 
 ## Daftar Isi
@@ -38,28 +39,25 @@
 
 ---
 
-## Masalah: Konteks Membengkak, Token Mahal & Output Bising
+## Masalah: Token Mahal, Halusinasi & Loop Tanpa Akhir
 
-Ketika Anda menggunakan agen AI otonom (seperti Claude Code atau Cursor) di terminal Anda, mereka membaca *semuanya*. Perintah sederhana seperti `git diff`, `npm install`, atau `cargo test` dapat dengan mudah membuang 10.000 hingga 25.000 token dari kebisingan terminal yang tidak berguna ke dalam konteks AI Anda.
+Ketika Anda menggunakan agen AI otonom (seperti Claude Code, Cursor, atau Aider) di terminal, mereka membaca *semuanya*. Perintah sederhana seperti `npm install` atau `cargo test` dapat dengan mudah membuang 10.000 hingga 25.000 token dari kebisingan terminal yang tidak berguna ke dalam jendela konteks AI Anda.
 
-Hal ini menyebabkan masalah besar:
-1. **Sangat mahal**: Anda membayar dengan uang sungguhan untuk setiap token dari output sampah tersebut.
-2. **Membuat AI menjadi "bodoh"**: Kesalahan kritis terkubur di bawah megabyte log peringatan dan loading bar, membingungkan AI dan mencairkan penalarannya.
-3. **Penguncian Model**: Kerangka kerja agen canggih memaksa Anda menggunakan model unggulan mereka yang paling mahal hanya agar memiliki jendela konteks yang cukup besar untuk menangani semua kebisingan tersebut.
-4. **Eksekusi Rawan Token**: Agen tidak menyadari biaya token dan output, yang mengarah pada konsumsi yang tidak perlu.
-5. **Konteks Membengkak**: Volume output terminal mengacaukan konteks AI, mengurangi fokus dan akurasi.
+Hal ini menyebabkan kegagalan fatal:
+1. **Anggaran Terbakar**: Anda membayar uang sungguhan untuk setiap token dari output sampah tersebut.
+2. **"Amnesia" Agen & Halusinasi**: Kesalahan inti terkubur di bawah megabyte *loading bar* dan peringatan dependensi. AI menjadi bingung, kehilangan tujuan awal, dan berhalusinasi memperbaiki masalah yang salah.
+3. **Penguncian Model**: Anda dipaksa menggunakan model *flagship* termahal hanya untuk mendapatkan jendela konteks yang cukup besar untuk menangani pembengkakan tersebut.
+4. **Loop yang Rapuh**: Loop otonom gagal karena agen tidak menyadari batas token dan tekanan konteks.
 
-## Solusi: Omni
+## Solusi: OMNI Context OS
 
-Saya membangun Omni karena saya ingin menjalankan agen AI secara efisien dan murah setiap hari dalam alur kerja saya sendiri.
+OMNI adalah *middleware* transparan pamungkas untuk Agentic AI. 
 
-**Omni bertindak sebagai filter sempurna antara terminal Anda dan AI Anda.**
+Ia mencegat perintah terminal secara dinamis, membuang kebisingannya, dan menyuapkan ringkasan semantik yang sangat padat kepada AI Anda. **Hasilnya?** Anda dapat menjalankan agen Anda pada model yang lebih terjangkau, memberinya *nol kebisingan*, dan melihatnya menyelesaikan tugas *coding* kompleks secara instan.
 
-**Hasilnya?** Anda dapat menjalankan agen AI Anda pada kerangka kerja yang sangat canggih dan memberinya *nol kebisingan*. Karena AI hanya diberi konteks yang sangat terfokus dan langsung pada intinya, bahkan model yang terjangkau atau biasa pun akan berkinerja setara dengan model unggulan yang mahal, karena mereka tidak pernah terganggu oleh data sampah.
+Baik Anda menjalankan pemanggilan alat MCP sederhana atau mengorkestrasi *loop* multi-agen Maker-Checker yang masif, OMNI menyediakan memori persisten, pelacakan anggaran, dan batasan faktual yang dibutuhkan AI Anda untuk berhasil.
 
-Gairah utama saya bukanlah untuk memonetisasi ini—melainkan untuk membangun perangkat sumber terbuka pamungkas untuk era Agentic AI. Dengan menghemat biaya token secara agresif, saya dapat mengembangkan perangkat lunak secara tangguh dan hemat biaya hari ini, dan Anda juga bisa.
-
-Konteks itu mahal dan bising, dan Omni hadir untuk memperbaikinya. Dengan mengoptimalkan konteks, Omni membuat agen AI lebih efisien, hemat biaya, dan mudah digunakan. Ini dilakukan dengan mengurangi jumlah konteks yang dikirim ke agen AI, yang pada gilirannya mengurangi jumlah waktu pemrosesan dan memori yang diperlukan untuk menghasilkan respons.
+Konteks itu mahal dan bising. OMNI memperbaikinya.
 
 ---
 

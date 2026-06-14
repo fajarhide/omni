@@ -15,9 +15,10 @@
 
 <br/>
 
-> **OMNI** là một **Động cơ Tín hiệu Ngữ nghĩa** hiệu suất cao và **Hệ điều hành Context** giúp chặn, phân tích và chưng cất đầu ra của thiết bị đầu cuối một cách thông minh trước khi chúng đến AI Agent của bạn. Nó hoạt động như một lớp tối ưu hóa tín hiệu minh bạch nằm giữa shell và AI, đảm bảo mọi token được gửi đến mô hình đều có giá trị cao, phù hợp và không có tiếng ồn. Bằng cách ngăn chặn AI của bạn bị nhầm lẫn bởi các đầu ra ồn ào, bạn sẽ nhận được câu trả lời chính xác nhanh hơn đồng thời tiết kiệm một lượng lớn chi phí token.
+> **OMNI** là **Hệ Điều Hành Ngữ Cảnh (Context OS) dành cho Tác Nhân AI Tự Trị**.
+> Nó hoạt động như một bộ lọc ngữ nghĩa hiệu suất cao giữa thiết bị đầu cuối (terminal) của bạn và LLM. Bằng cách chưng cất thông minh các nhật ký ồn ào, lưu trữ trạng thái và quản lý ngân sách mã thông báo (token), OMNI đảm bảo các tác nhân của bạn luôn tập trung, ít ảo giác hơn và thực thi các vòng lặp một cách hoàn hảo—tất cả trong khi **cắt giảm chi phí API của bạn lên đến 90%**.
 > 
-> *Hoàn toàn minh bạch. Bạn luôn nắm quyền kiểm soát.*
+> *Ngừng trả tiền cho sự ồn ào của thiết bị đầu cuối. Bắt đầu xây dựng bằng tín hiệu thuần túy.*
 ---
 
 ## Mục lục
@@ -38,28 +39,25 @@
 
 ---
 
-## Vấn đề: Phình to ngữ cảnh, Token Đắt đỏ & Đầu ra Ồn ào
+## Vấn đề: Mã thông báo đắt đỏ, Ảo giác & Vòng lặp vô hạn
 
-Khi bạn sử dụng các tác nhân AI tự trị (như Claude Code hoặc Cursor) trong thiết bị đầu cuối của mình, chúng đọc *mọi thứ*. Một lệnh `git diff`, `npm install` hoặc `cargo test` đơn giản có thể dễ dàng xả 10.000 đến 25.000 token của tiếng ồn thiết bị đầu cuối vô ích vào ngữ cảnh AI của bạn.
+Khi bạn chạy các tác nhân AI tự trị (như Claude Code, Cursor hoặc Aider) trong thiết bị đầu cuối của mình, chúng đọc *mọi thứ*. Một lệnh `npm install` hoặc `cargo test` đơn giản có thể dễ dàng đổ 10.000 đến 25.000 mã thông báo (token) chứa toàn tiếng ồn vô ích vào cửa sổ ngữ cảnh AI của bạn.
 
-Điều này gây ra ba vấn đề lớn:
-1. **Rất đắt**: Bạn phải trả tiền thật cho mỗi token của đầu ra rác đó.
-2. **Làm cho AI "ngu ngốc"**: Các lỗi nghiêm trọng bị vùi lấp dưới hàng megabyte nhật ký cảnh báo và thanh tải, làm bối rối AI và làm loãng khả năng suy luận của nó.
-3. **Khóa Mô hình**: Các khung tác nhân nâng cao buộc bạn phải sử dụng các mô hình hàng đầu đắt tiền nhất của họ chỉ để có một cửa sổ ngữ cảnh đủ lớn để xử lý tất cả tiếng ồn đó.
-4. **Thực thi Không nhận thức được Token**: Các tác nhân thiếu nhận thức về chi phí token và đầu ra, dẫn đến tiêu thụ không cần thiết.
-5. **Phình to Ngữ cảnh**: Khối lượng đầu ra của thiết bị đầu cuối làm lộn xộn ngữ cảnh của AI, giảm sự tập trung và độ chính xác.
+Điều này gây ra những thất bại nghiêm trọng:
+1. **Đốt sạch ngân sách**: Bạn trả tiền thật cho từng mã thông báo của đầu ra rác.
+2. **Tác nhân "Mất trí nhớ" & Ảo giác**: Các lỗi cốt lõi bị chôn vùi dưới hàng megabyte thanh tải (loading bar) và cảnh báo phụ thuộc. AI trở nên bối rối, đánh mất mục tiêu ban đầu và tạo ra các bản sửa lỗi ảo giác cho những vấn đề không chính xác.
+3. **Bị khóa vào Mô hình đắt tiền (Model Lock-in)**: Bạn buộc phải sử dụng các mô hình hàng đầu đắt tiền nhất chỉ để có một cửa sổ ngữ cảnh đủ lớn nhằm xử lý sự cồng kềnh đó.
+4. **Vòng lặp mong manh**: Các vòng lặp tự trị bị phá vỡ vì các tác nhân thiếu nhận thức về giới hạn mã thông báo và áp lực ngữ cảnh.
 
-## Giải pháp: Omni
+## Giải pháp: OMNI Context OS
 
-Tôi xây dựng Omni vì tôi muốn chạy các tác nhân AI một cách hiệu quả và rẻ tiền mỗi ngày trong quy trình làm việc của riêng tôi.
+OMNI là phần mềm trung gian minh bạch tối thượng dành cho Agentic AI.
 
-**Omni hoạt động như một bộ lọc hoàn hảo giữa thiết bị đầu cuối và AI của bạn.**
+Nó chặn các lệnh từ thiết bị đầu cuối ngay lập tức, loại bỏ tiếng ồn và cung cấp cho AI của bạn một bản tóm tắt ngữ nghĩa cô đọng cao. **Kết quả?** Bạn có thể chạy tác nhân của mình trên các mô hình giá cả phải chăng, cung cấp cho nó *không có tiếng ồn*, và chứng kiến nó giải quyết các tác vụ mã hóa phức tạp ngay lập tức.
 
-**Kết quả?** Bạn có thể chạy tác nhân AI của mình trên một khung cực kỳ tiên tiến và cung cấp cho nó *không có tiếng ồn*. Bởi vì AI chỉ được cung cấp ngữ cảnh tập trung cao, đi thẳng vào vấn đề, ngay cả các mô hình giá cả phải chăng hoặc thông thường cũng sẽ hoạt động ngang bằng với các mô hình hàng đầu đắt tiền, vì chúng không bao giờ bị phân tâm bởi dữ liệu rác.
+Cho dù bạn đang chạy một lệnh gọi công cụ MCP nhanh hay điều phối một vòng lặp Maker-Checker đa tác nhân khổng lồ, OMNI cung cấp bộ nhớ liên tục, theo dõi ngân sách và các hàng rào thực tế mà AI của bạn cần để thành công.
 
-Niềm đam mê cuối cùng của tôi không phải là kiếm tiền từ việc này—mà là xây dựng bộ công cụ mã nguồn mở tối thượng cho kỷ nguyên Agentic AI. Bằng cách tích cực tiết kiệm chi phí token, tôi có thể phát triển phần mềm một cách mạnh mẽ và tiết kiệm chi phí ngay hôm nay, và bạn cũng vậy.
-
-Ngữ cảnh rất đắt và ồn ào, và Omni ở đây để khắc phục điều đó. Bằng cách tối ưu hóa ngữ cảnh, Omni làm cho các tác nhân AI hiệu quả hơn, tiết kiệm chi phí hơn và dễ sử dụng hơn. Điều này được thực hiện bằng cách giảm lượng ngữ cảnh được gửi đến tác nhân AI, từ đó làm giảm lượng thời gian xử lý và bộ nhớ cần thiết để tạo ra phản hồi.
+Ngữ cảnh rất đắt đỏ và ồn ào. OMNI sẽ sửa chữa điều đó.
 
 ---
 

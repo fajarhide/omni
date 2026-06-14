@@ -15,9 +15,10 @@
 
 <br/>
 
-> **OMNI** is a high-performance **Semantic Signal Engine** and **Context Operating System** that intelligently intercepts, analyzes, and distills terminal outputs before they reach your AI Agent. It acts as a transparent signal optimization layer that sits between the shell and the AI, ensuring every token sent to the model is high-value, relevant, and noise-free. By preventing your AI from getting confused by noisy output, you get accurate answers faster while saving massive amounts of token costs.
+> **OMNI** is the **Context Operating System for Autonomous AI Agents**. 
+> It acts as a high-performance semantic filter between your terminal and your LLM. By intelligently distilling noisy logs, caching states, and managing token budgets, OMNI ensures your agents stay focused, hallucinate less, and execute loops flawlessly—all while **cutting your API costs by up to 90%**.
 > 
-> *Fully transparent. You're always in control.*
+> *Stop paying for terminal noise. Start building with pure signal.*
 ---
 
 ## Table of Contents
@@ -38,28 +39,25 @@
 
 ---
 
-## The Problem: Context Bloat, Expensive Tokens & Noisy Outputs
+## The Problem: Expensive Tokens, Hallucinations & Infinite Loops
 
-When you use autonomous AI agents (like Claude Code or Cursor) in your terminal, they read *everything*. A simple `git diff`, `npm install`, or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context. 
+When you run autonomous AI agents (like Claude Code, Cursor, or Aider) in your terminal, they read *everything*. A simple `npm install` or `cargo test` command can easily dump 10,000 to 25,000 tokens of useless terminal noise into your AI's context window. 
 
-This causes three huge problems:
-1. **It's extremely expensive**: You pay real money for every single token of that junk output.
-2. **It makes the AI "dumb"**: Critical errors get buried under megabytes of warning logs and loading bars, confusing the AI and diluting its reasoning.
-3. **Model Lock-in**: Advanced agent frameworks force you to use their most expensive flagship models just to have a context window big enough to handle all that noise.
-4. **Token-Aware Execution**: Agents lack awareness of token costs and outputs, leading to unnecessary consumption.
-5. **Context Bloat**: The volume of terminal output clutters the AI's context, reducing focus and accuracy.
+This causes critical failures:
+1. **Burned Budgets**: You pay real money for every single token of junk output.
+2. **Agent "Amnesia" & Hallucinations**: Core errors get buried under megabytes of loading bars and dependency warnings. The AI gets confused, loses the original goal, and hallucinates fixes for the wrong problems.
+3. **Model Lock-in**: You are forced to use the most expensive flagship models just to have a context window big enough to handle the bloat.
+4. **Fragile Loops**: Autonomous loops break because agents lack awareness of token limits and context pressure.
 
-## The Solution: Omni
+## The Solution: OMNI Context OS
 
-I built Omni because I wanted to run AI agents efficiently and cheaply every single day in my own workflow. 
+OMNI is the ultimate transparent middleware for Agentic AI. 
 
-**Omni acts as the perfect filter between your terminal and your AI.** 
+It intercepts terminal commands on the fly, strips away the noise, and feeds your AI a highly condensed, semantic summary. **The result?** You can run your agent on affordable models, feed it *zero noise*, and watch it solve complex coding tasks instantly.
 
-**The result?** You can run your AI agent on a super-advanced framework and feed it *zero noise*. Because the AI is only fed highly focused, straight-to-the-point context, even affordable or ordinary models will perform on-par with expensive flagship models, since they are never distracted by junk data.
+Whether you are running a quick MCP tool call or orchestrating a massive multi-agent Maker-Checker loop, OMNI provides the persistent memory, budget tracking, and factual guardrails your AI needs to succeed.
 
-My ultimate passion isn't to monetize this—it's to build the ultimate open-source toolbelt for the Agentic AI era. By aggressively saving token costs, I can develop software robustly and cost-effectively today, and you can too. 
-
-Context is expensive and noisy, and Omni is here to fix that. By optimizing context, Omni makes AI agents more efficient, cost-effective, and easier to use. This is done by reducing the amount of context that is sent to the AI agent, which in turn reduces the amount of processing time and memory required to generate a response.
+Context is expensive and noisy. OMNI fixes it.
 
 ---
 
