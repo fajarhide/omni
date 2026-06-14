@@ -148,7 +148,8 @@ def register(ctx):
                 "hermes plugins enable omni-signal-engine".bright_black()
             ));
             warnings.push(
-                "Hermes config not found; enable the OMNI plugin once Hermes is initialized.".to_string(),
+                "Hermes config not found; enable the OMNI plugin once Hermes is initialized."
+                    .to_string(),
             );
         }
 
@@ -163,7 +164,7 @@ def register(ctx):
                 );
             } else {
                 let mcp_block = "\nmcp_servers:\n  omni:\n    command: \"{}\"\n    args: [\"--mcp\"]\n    env:\n      OMNI_AGENT_ID: \"hermes\"\n\n";
-                let mcp_block = format!("{}", mcp_block.replace("{}", exe_path));
+                let mcp_block = mcp_block.replace("{}", exe_path);
 
                 let mut updated = String::new();
                 let mut inserted = false;
@@ -205,12 +206,13 @@ def register(ctx):
                         .to_string(),
                     );
                 } else if !requires_manual_plugin_step {
+                    #[allow(clippy::collapsible_if)]
                     if let Ok(current) = fs::read_to_string(&config_path) {
                         let compression_block = "\ncompression:\n  enabled: true\n  threshold: 0.50\n  target_ratio: 0.20\n\n";
 
                         let mut updated = current;
                         if !updated.contains("compression:") {
-                            updated.push_str(&compression_block);
+                            updated.push_str(compression_block);
                             actions.push(
                                 format!(
                                     "{} Enabled Hermes compression in ~/.hermes/config.yaml",
@@ -224,43 +226,50 @@ def register(ctx):
                 }
             }
         } else {
-            warnings
-                .push("Could not read ~/.hermes/config.yaml to register the OMNI MCP server.".to_string());
+            warnings.push(
+                "Could not read ~/.hermes/config.yaml to register the OMNI MCP server.".to_string(),
+            );
         }
 
         let omni_config_path = omni_config_path();
         fs::create_dir_all(omni_home_dir())?;
         let default_config = crate::agents::hermes::hermes_default_config();
-        let file_already_exists = fs::metadata(&omni_config_path)
-            .ok()
-            .map(|meta| meta.is_file())
-            .unwrap_or(false);
 
-        if !file_already_exists {
-            let mut config_lines = Vec::new();
-            config_lines.push("[global]".to_string());
-            config_lines
-                .push(format!("mode = \"{}\"", format!("{:?}", default_config.mode.unwrap_or_default()).to_lowercase()));
-            if let Some(readfile) = default_config.enable_readfile_distillation {
-                config_lines.push(format!("enable_readfile_distillation = {}", readfile));
+        let mut config_lines = Vec::new();
+        config_lines.push("\n[agents.hermes]".to_string());
+        config_lines.push(format!(
+            "mode = \"{}\"",
+            format!("{:?}", default_config.mode.unwrap_or_default()).to_lowercase()
+        ));
+        if let Some(readfile) = default_config.enable_readfile_distillation {
+            config_lines.push(format!("enable_readfile_distillation = {}", readfile));
+        }
+        if let Some(grep) = default_config.enable_grep_distillation {
+            config_lines.push(format!("enable_grep_distillation = {}", grep));
+        }
+        if let Some(webfetch) = default_config.enable_webfetch_distillation {
+            config_lines.push(format!("enable_webfetch_distillation = {}", webfetch));
+        }
+        if let Some(pinned) = &default_config
+            .pinned_files
+            .as_ref()
+            .filter(|p| !p.is_empty())
+        {
+            config_lines.push("pinned_files = [".to_string());
+            for path in *pinned {
+                config_lines.push(format!("  \"{}\",", path));
             }
-            if let Some(grep) = default_config.enable_grep_distillation {
-                config_lines.push(format!("enable_grep_distillation = {}", grep));
-            }
-            if let Some(webfetch) = default_config.enable_webfetch_distillation {
-                config_lines.push(format!("enable_webfetch_distillation = {}", webfetch));
-            }
-            if let Some(pinned) = &default_config.pinned_files {
-                if !pinned.is_empty() {
-                    config_lines.push("pinned_files = [".to_string());
-                    for path in pinned {
-                        config_lines.push(format!("  \"{}\",", path));
-                    }
-                    config_lines.push("]".to_string());
-                }
-            }
+            config_lines.push("]".to_string());
+        }
 
-            fs::write(&omni_config_path, format!("{}\n", config_lines.join("\n")))?;
+        let existing = fs::read_to_string(&omni_config_path).unwrap_or_default();
+        if !existing.contains("[agents.hermes]") {
+            let mut updated = existing;
+            if !updated.is_empty() && !updated.ends_with('\n') {
+                updated.push('\n');
+            }
+            updated.push_str(&format!("{}\n", config_lines.join("\n")));
+            fs::write(&omni_config_path, updated)?;
             actions.push(
                 format!(
                     "{} Wrote Hermes OMNI defaults to {}",
@@ -272,7 +281,7 @@ def register(ctx):
         } else {
             actions.push(
                 format!(
-                    "{} Existing OMNI config preserved at {}",
+                    "{} Hermes OMNI config already exists at {}",
                     "✓".green(),
                     omni_config_path.display().to_string().bright_black()
                 )

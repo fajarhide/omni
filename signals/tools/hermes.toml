@@ -1,0 +1,28 @@
+[schema]
+id = "hermes-gateway"
+name = "Hermes Agent Gateway"
+description = "Filters out Hermes wrapper noise, headers, and trailers around tool executions."
+
+[[rules]]
+id = "hermes_tool_header"
+type = "regex"
+pattern = "^\\[Hermes\\] (Executing tool|Running command|Tool execution).*$"
+action = "drop"
+
+[[rules]]
+id = "hermes_gateway_noise"
+type = "regex"
+pattern = "^\\[Hermes Gateway\\] (Forwarding response|Processing|Handling request).*$"
+action = "drop"
+
+[[rules]]
+id = "hermes_tool_trailer"
+type = "regex"
+pattern = "^\\[Hermes\\] (Tool execution completed|Finished|Success).*$"
+action = "drop"
+
+[[rules]]
+id = "hermes_divider"
+type = "regex"
+pattern = "^-{10,}.*$"
+action = "drop"
