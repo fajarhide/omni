@@ -40,9 +40,8 @@ pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Resu
         Ok(res) => res,
         Err(_) => {
             // Transcript: mark failed on panic so crash is recorded
-            if let Ok(guard) = session_clone.lock()
-                && let Some(mut transcript) = Transcript::load(&guard.session_id)
-            {
+            let guard = session_clone.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(mut transcript) = Transcript::load(&guard.session_id) {
                 let _ = transcript.mark_last_failed("process panicked during hook dispatch");
             }
             Ok(())
@@ -63,7 +62,8 @@ pub fn process_payload(
     let event_name = peeker.hook_event_name.as_deref().unwrap_or("PostToolUse");
 
     // Transcript: persist hook payload BEFORE dispatching
-    if let Ok(guard) = session.lock() {
+    {
+        let guard = session.lock().unwrap_or_else(|p| p.into_inner());
         let cwd = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| ".".to_string());
@@ -101,9 +101,8 @@ pub fn process_payload(
     };
 
     // Transcript: mark completed + snapshot state after dispatch
-    if let Ok(guard) = session.lock()
-        && let Some(mut transcript) = Transcript::load(&guard.session_id)
-    {
+    let guard = session.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(mut transcript) = Transcript::load(&guard.session_id) {
         let output_str = result.as_deref().unwrap_or("(no output)");
         let _ = transcript.mark_last_completed(output_str);
         let _ = transcript.snapshot_state(&guard);
@@ -132,7 +131,8 @@ fn handle_file_changed(input_str: &str, session: Arc<Mutex<SessionState>>) {
     if path.is_empty() {
         return;
     }
-    if let Ok(mut state) = session.lock() {
+    {
+        let mut state = session.lock().unwrap_or_else(|p| p.into_inner());
         state.add_hot_file(&path);
     }
 }

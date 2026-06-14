@@ -64,7 +64,8 @@ pub fn process_payload(
     let short_error = crate::util::text::safe_slice(short_error, 200);
 
     // Update session state with error
-    if let Ok(mut state) = session.lock() {
+    {
+        let mut state = session.lock().unwrap_or_else(|p| p.into_inner());
         state.add_error(short_error);
         state.add_command(command);
         store.upsert_session(&state);
@@ -76,7 +77,8 @@ pub fn process_payload(
         crate::util::text::safe_slice(command, 50),
         short_error
     );
-    if let Ok(state) = session.lock() {
+    {
+        let state = session.lock().unwrap_or_else(|p| p.into_inner());
         store.index_event(&state.session_id, "PostToolUseFailure", &index_msg);
     }
 
@@ -111,7 +113,7 @@ mod tests {
         let out = process_payload(&input.to_string(), store, session.clone());
         assert!(out.is_none());
 
-        let state = session.lock().unwrap();
+        let state = session.lock().unwrap_or_else(|p| p.into_inner());
         assert!(!state.active_errors.is_empty());
         assert!(state.active_errors[0].contains("E0308"));
     }

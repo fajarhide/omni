@@ -25,10 +25,7 @@ pub fn process_payload(
         return None;
     }
 
-    let state = match session.lock() {
-        Ok(s) => s.clone(),
-        Err(e) => e.into_inner().clone(),
-    };
+    let state = session.lock().unwrap_or_else(|p| p.into_inner()).clone();
 
     if !parsed.session_id.is_empty() && parsed.session_id != state.session_id {
         // Validation failure: prevents archiving a session under the wrong ID

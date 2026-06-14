@@ -137,10 +137,16 @@ OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Be
 - **Structured ReadFile + Grep**: Alih-alih dump file mentah, OMNI mengembalikan kerangka terstruktur (impor, API) dan ringkasan grep yang dikelompokkan.
 - **Grafik Dependensi Ringan**: OMNI membangun grafik relasi file lokal yang cepat. Jika AI membaca file penting, OMNI memperingatkan tentang peta dampaknya.
 
-### Context Safety & Factual Guards (Keamanan Konteks)
+### Keamanan Konteks & Pemulihan Sesi (Context Fidelity)
+- **Tekanan Konteks Proaktif**: OMNI bertindak sebagai "Lampu Lalu Lintas Token." Melalui alat MCP `omni_insight`, OMNI secara proaktif memperingatkan agen ketika jendela konteksnya mencapai ambang "Peringatan" atau "Kritis", memicu agen untuk mengompresi memorinya *sebelum* macet atau berhalusinasi.
 - **Engrams (Ringkasan Subtugas Otomatis)**: OMNI secara otomatis mendeteksi saat sebuah subtugas selesai (mis., menyelesaikan kesalahan kompilator, melakukan commit kode, atau memperbaiki tes yang gagal). OMNI membuat cuplikan yang sangat terkompresi ("Engram") tanpa membuang token pada panggilan LLM, sehingga agen Anda tidak akan pernah mengalami "amnesia konteks" selama sesi yang panjang.
 - **Pemadatan Konteks Cerdas (Smart Context Compaction)**: Ketika jendela konteks Anda penuh, OMNI tidak memangkas token secara membabi buta. OMNI menggunakan algoritma sadar prioritas untuk mengemas data terpenting terlebih dahulu (File yang Disematkan > Kesalahan Aktif > Engram > Aktivitas Alat > File Panas), menghemat overhead besar-besaran.
 - **Serah Terima Sesi (Session Handoffs)**: Beralih dari Claude Code ke Cursor? Gunakan alat `omni_handoff` untuk mengekspor memori sesi saat ini secara instan (file panas, perintah terbaru, kesalahan aktif) ke dalam ringkasan markdown portabel yang dapat langsung diserap oleh agen baru Anda.
+
+### Rekayasa Loop Otonom (Autonomous Loop Engineering)
+- **Sistem Operasi Konteks untuk Loop**: OMNI mengelola konteks untuk agen loop otonom yang iteratif. Melalui variabel lingkungan (`OMNI_LOOP_BUDGET`, `OMNI_LOOP_GOAL`), OMNI memberlakukan batas distilasi adaptif dan pelacakan persisten.
+- **Pola Verifikasi Maker-Checker**: Skalakan tugas Anda dengan rapi dengan memisahkan eksekusi (Agen Pembuat/Maker) dari validasi (Agen Pemeriksa/Checker), bertukar status konteks secara aman melalui penyimpanan sesi multi-agen OMNI.
+- **Batasan Berbasis Tujuan Prediktif**: Distilasi secara otomatis diskalakan berdasarkan tujuan tugas—jika tujuan berisi "debug", OMNI mempertahankan lebih banyak konteks kesalahan. Jika "refactor", OMNI mengompresi jejak kode secara agresif.
 
 ### Monitoring & Debugging (Pemantauan)
 - **Dasbor Kesehatan Sesi (Session Health Dashboard)**: Jalankan `omni session --health` untuk melihat dasbor visual yang indah tentang tekanan konteks Anda, engram aktif, aktivitas alat bergulir, dan penghematan token.
@@ -259,6 +265,7 @@ enable_readfile_distillation = false
 - [Integrasi Hermes Agent](https://github.com/wysie/hermes-omni-plugin) — Plugin Hermes Agent komunitas untuk distilasi OMNI native.
 
 **Untuk Developer & System Integrator:**
+- [Panduan Rekayasa Loop (LOOP_ENGINEERING.md)](../docs/LOOP_ENGINEERING.md) — Cara mengintegrasikan tekanan konteks OMNI dengan skrip agen otonom (Pola Maker-Checker, loop shell).
 - [Panduan Pengembangan](../docs/DEVELOPMENT.md) — Cara membangun dan berkontribusi pada basis kode OMNI.
 - [Arsitektur Pengujian](../docs/TESTING.md) — Jaminan kualitas dan keamanan konteks.
 - [Keberlanjutan Sesi](../docs/SESSION.md) — Penyelaman mendalam ke dalam memori kerja OMNI.

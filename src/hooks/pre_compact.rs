@@ -45,10 +45,7 @@ pub fn process_payload(
         return None;
     }
 
-    let mut state = match session.lock() {
-        Ok(s) => s,
-        Err(_) => return None,
-    };
+    let mut state = session.lock().unwrap_or_else(|p| p.into_inner());
 
     // L1-04: Add LoopCheckpoint engram if in a loop
     if state.loop_context.mode != crate::pipeline::LoopMode::Interactive {
@@ -544,7 +541,7 @@ mod tests {
 
         // Modify state
         {
-            let mut s = session.lock().unwrap();
+            let mut s = session.lock().unwrap_or_else(|p| p.into_inner());
             s.add_error("new error appeared");
             s.add_hot_file("src/new_file.rs");
         }

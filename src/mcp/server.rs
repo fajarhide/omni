@@ -330,7 +330,11 @@ impl OmniServer {
     )]
     pub async fn omni_density(&self, params: Parameters<OmniDensityParams>) -> String {
         let text = params.0.text;
-        let current_session = self.session.lock().unwrap().clone();
+        let current_session = self
+            .session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
 
         // Use generic Line segmentation for density analysis
         let segments = score_segments(
@@ -570,7 +574,7 @@ impl OmniServer {
 
         match action.as_str() {
             "status" => {
-                let s = self.session.lock().unwrap();
+                let s = self.session.lock().unwrap_or_else(|p| p.into_inner());
                 let task = s.inferred_task.as_deref().unwrap_or("none");
                 let domain = s.inferred_domain.as_deref().unwrap_or("none");
 
@@ -599,7 +603,7 @@ impl OmniServer {
                 )
             }
             "context" => {
-                let s = self.session.lock().unwrap();
+                let s = self.session.lock().unwrap_or_else(|p| p.into_inner());
                 let task = s.inferred_task.as_deref().unwrap_or("none");
 
                 let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
@@ -633,13 +637,13 @@ impl OmniServer {
             }
             "clear" => {
                 {
-                    let mut s = self.session.lock().unwrap();
+                    let mut s = self.session.lock().unwrap_or_else(|p| p.into_inner());
                     *s = SessionState::new();
                 }
                 "Session state cleared.".to_string()
             }
             "summary" => {
-                let s = self.session.lock().unwrap();
+                let s = self.session.lock().unwrap_or_else(|p| p.into_inner());
                 let tool_summary = crate::session::engram::format_tool_summary(&s.tool_call_log);
                 if tool_summary.is_empty() {
                     "No tool calls recorded yet.".to_string()
@@ -659,7 +663,12 @@ impl OmniServer {
         if query.trim().is_empty() {
             return "Please provide a query".to_string();
         }
-        let session_id = self.session.lock().unwrap().session_id.clone();
+        let session_id = self
+            .session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .session_id
+            .clone();
         let results = self.store.search_session_events(&session_id, &query, 10);
         if results.is_empty() {
             format!("No events matched the search query '{}'", query)
@@ -1096,7 +1105,7 @@ impl OmniServer {
         &self,
         params: Parameters<OmniSetLoopContextParams>,
     ) -> String {
-        let mut session = self.session.lock().unwrap();
+        let mut session = self.session.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(id) = params.0.loop_id {
             session.loop_context.mode = crate::pipeline::LoopMode::OuterLoop;
             session.loop_context.loop_id = Some(id);
@@ -1130,7 +1139,7 @@ impl OmniServer {
         description = "Get current token budget status for this loop iteration. Call before expensive operations."
     )]
     pub async fn omni_budget_status(&self) -> String {
-        let session = self.session.lock().unwrap();
+        let session = self.session.lock().unwrap_or_else(|p| p.into_inner());
         let loop_id = session
             .loop_context
             .loop_id

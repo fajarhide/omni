@@ -1,16 +1,24 @@
 # OMNI Roadmap
 
-## Current: v0.5.6-rc1 (Efficiency Layer)
+## Current: v0.6.0 (Intelligence Layer)
 
 **Status: In Progress** 🏗️
 
-Focusing on architectural refinement and automatic context capture.
+Focusing on architectural refinement, multi-agent support, and autonomous loop orchestration.
 
-### What's New
-- **Command-First Architecture**: Removal of legacy Classifier/Composer for a simplified Registry/Scorer model.
-- **Automatic Pipe Capture**: PGID-based sibling detection for manual pipelines.
-- **Configurable Pricing**: Custom cost-per-token tracking in `config.toml`.
-- **OnceLock Caching**: Dramatic reduction in disk I/O for filter lookups.
+---
+
+## v0.5.9 (Autonomous Loop Engineering)
+
+**Status: Complete** ✅
+
+Introduced native support for iterative, autonomous agent loops and multi-agent coordination.
+
+### What Was Delivered
+- **Loop Orchestration**: `OMNI_LOOP_BUDGET` and `OMNI_LOOP_GOAL` environment variables.
+- **Context Pressure**: Predictive token exhaustion warnings (Normal -> Warning -> Critical).
+- **Maker-Checker Support**: Secure execution verification across distinct agent sessions using `omni_verify`.
+- **Handoff Export**: Portable JSON and markdown state summaries for transitioning across IDEs and scripts.
 
 ---
 

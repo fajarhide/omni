@@ -83,10 +83,41 @@ pub struct LoopContext {
 
 impl LoopContext {
     pub fn update_from_env(&mut self) {
+        let mut new_loop_id = None;
+        let mut new_goal = None;
+        let mut new_budget = self.budget_tokens;
+
         if let Ok(val) = std::env::var("OMNI_LOOP_ID") {
-            self.mode = LoopMode::OuterLoop;
-            self.loop_id = Some(val);
+            new_loop_id = Some(val);
         }
+        if let Ok(val) = std::env::var("OMNI_LOOP_GOAL") {
+            new_goal = Some(val);
+        }
+        if let Ok(val) = std::env::var("OMNI_LOOP_BUDGET") {
+            new_budget = val.parse().ok().or(self.budget_tokens);
+        }
+
+        // Validate security constraints
+        if let Err(e) = crate::guard::env::validate_loop_context(
+            new_loop_id.as_deref(),
+            new_goal.as_deref(),
+            new_budget,
+        ) {
+            eprintln!(
+                "[omni:security] Loop context validation failed: {:?}. Ignoring inputs.",
+                e
+            );
+        } else {
+            if let Some(id) = new_loop_id {
+                self.mode = LoopMode::OuterLoop;
+                self.loop_id = Some(id);
+            }
+            if let Some(goal) = new_goal {
+                self.goal = Some(goal);
+            }
+            self.budget_tokens = new_budget;
+        }
+
         if let Ok(val) = std::env::var("OMNI_LOOP_ITERATION")
             && let Ok(new_iter) = val.parse::<u32>()
             && new_iter != self.iteration
@@ -94,12 +125,7 @@ impl LoopContext {
             self.iteration = new_iter;
             self.budget_used = 0; // Reset budget per iteration
         }
-        if let Ok(val) = std::env::var("OMNI_LOOP_BUDGET") {
-            self.budget_tokens = val.parse().ok().or(self.budget_tokens);
-        }
-        if let Ok(val) = std::env::var("OMNI_LOOP_GOAL") {
-            self.goal = Some(val);
-        }
+
         if let Ok(val) = std::env::var("OMNI_SUBAGENT")
             && val == "1"
         {
