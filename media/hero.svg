@@ -7,6 +7,11 @@
       <stop offset="100%" stop-color="#0b0814" />
     </radialGradient>
     
+    <!-- Grid Pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.03" />
+    </pattern>
+
     <!-- Icon Gradient -->
     <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#9333ea" />
@@ -22,6 +27,8 @@
 
   <!-- Background -->
   <rect width="900" height="340" fill="url(#bgGlow)" />
+  <!-- Grid -->
+  <rect width="900" height="340" fill="url(#grid)" />
   
   <!-- Outer Glow for Icon -->
   <rect x="70" y="70" width="200" height="200" rx="48" fill="url(#iconBg)" opacity="0.6" filter="url(#glow)"/>
@@ -52,29 +59,33 @@
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
     <!-- Top tag -->
     <circle cx="316" cy="101" r="3" fill="#a78bfa" />
-    <text x="328" y="105" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="2">CONTEXT OS • SEMANTIC SIGNAL ENGINE</text>
+    <text x="328" y="105" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="2">CONTEXT OS • AUTONOMOUS LOOP ENGINE</text>
     
     <!-- Main Title -->
     <text x="312" y="165" fill="#ffffff" font-size="72" font-weight="800" letter-spacing="-2">OMNI</text>
     
     <!-- Description -->
-    <text x="316" y="208" fill="#cbd5e1" font-size="18" font-weight="400">Run AI agents with <tspan fill="#ffffff" font-weight="600">zero noise</tspan>. OMNI intercepts, analyzes, and</text>
-    <text x="316" y="234" fill="#cbd5e1" font-size="18" font-weight="400">distills terminal outputs. <tspan fill="#ffffff" font-weight="600">Cut your token consumption by up</tspan></text>
-    <text x="316" y="260" fill="#ffffff" font-size="18" font-weight="600">to 90% <tspan fill="#cbd5e1" font-weight="400">while preserving every critical diagnostic detail.</tspan></text>
+    <text x="316" y="208" fill="#cbd5e1" font-size="18" font-weight="400">The ultimate <tspan fill="#ffffff" font-weight="600">Context Operating System</tspan> for autonomous AI agents.</text>
+    <text x="316" y="234" fill="#cbd5e1" font-size="18" font-weight="400">OMNI manages token budgets, distills terminal noise, and coordinates</text>
+    <text x="316" y="260" fill="#ffffff" font-size="18" font-weight="600">multi-agent loops. <tspan fill="#cbd5e1" font-weight="400">Cut token consumption by 90%.</tspan></text>
     
     <!-- Badges -->
     <g transform="translate(316, 290)">
       <!-- Badge 1 -->
-      <rect x="0" y="0" width="165" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
+      <rect x="0" y="0" width="145" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
       <text x="14" y="19" fill="#e2e8f0" font-size="12" font-weight="600">⚡ 90% Token Savings</text>
       
       <!-- Badge 2 -->
-      <rect x="175" y="0" width="130" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
-      <text x="189" y="19" fill="#e2e8f0" font-size="12" font-weight="600">🦀 Written in Rust</text>
+      <rect x="155" y="0" width="150" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
+      <text x="169" y="19" fill="#e2e8f0" font-size="12" font-weight="600">🔄 Autonomous Loops</text>
       
       <!-- Badge 3 -->
-      <rect x="315" y="0" width="130" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
-      <text x="329" y="19" fill="#e2e8f0" font-size="12" font-weight="600">✓ MCP Compatible</text>
+      <rect x="315" y="0" width="105" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
+      <text x="329" y="19" fill="#e2e8f0" font-size="12" font-weight="600">✓ MCP Native</text>
+
+      <!-- Badge 4 -->
+      <rect x="430" y="0" width="115" height="28" rx="14" fill="#1e1b4b" stroke="#4c1d95" stroke-width="1.5" />
+      <text x="444" y="19" fill="#e2e8f0" font-size="12" font-weight="600">🦀 Rust Powered</text>
     </g>
   </g>
 </svg>
