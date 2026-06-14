@@ -262,7 +262,7 @@ else
     FAIL=$((FAIL + 1))
 fi
 TOTAL=$((TOTAL + 1))
-check "handoff json has markdown_export" "$HANDOFF_JSON" "markdown_export"
+check "handoff json has schema_version" "$HANDOFF_JSON" "schema_version"
 
 # ─── Results ─────────────────────────────────────────────
 echo ""

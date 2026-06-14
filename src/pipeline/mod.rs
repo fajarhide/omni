@@ -52,7 +52,7 @@ pub enum CollapseMode {
 }
 
 // 2. Signal tier — how important this segment is
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SignalTier {
     Noise,     // Progress, compiling boring deps — drop
     Context,   // Supporting lines — include if space allows
@@ -303,6 +303,59 @@ pub struct SessionState {
     // Loop Context (Phase 3 / L1-01)
     #[serde(default)]
     pub loop_context: LoopContext,
+
+    // L3-01: Adaptive Compression Threshold per Loop Goal
+    #[serde(default)]
+    pub scoring_modifier: Option<GoalScoringModifier>,
+
+    // L3-02: Predictive Context Pressure Warning
+    #[serde(default)]
+    pub token_consumption_rate: TokenConsumptionRate,
+}
+
+// ─── L3-01: Adaptive Compression ─────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GoalScoringModifier {
+    pub goal_keywords: Vec<String>,
+    pub tool_family_multipliers: std::collections::HashMap<String, f32>,
+    pub signal_tier_overrides: std::collections::HashMap<String, SignalTier>,
+}
+
+// ─── L3-02: Predictive Context Pressure ──────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TokenConsumptionRate {
+    pub samples: VecDeque<(u32, u64)>, // (command_count, tokens_at_time)
+    pub avg_tokens_per_command: f64,
+}
+
+impl TokenConsumptionRate {
+    pub fn update(&mut self, command_count: u32, current_tokens: u64) {
+        self.samples.push_back((command_count, current_tokens));
+        if self.samples.len() > 10 {
+            self.samples.pop_front();
+        }
+
+        if self.samples.len() >= 2 {
+            let first = self.samples.front().unwrap();
+            let last = self.samples.back().unwrap();
+            let cmd_diff = last.0.saturating_sub(first.0);
+            if cmd_diff > 0 {
+                let token_diff = last.1.saturating_sub(first.1);
+                self.avg_tokens_per_command = token_diff as f64 / cmd_diff as f64;
+            }
+        }
+    }
+
+    pub fn predicted_full_at_command(&self, current_tokens: u64, window: u64) -> Option<u32> {
+        if self.avg_tokens_per_command <= 0.0 {
+            return None;
+        }
+        let remaining = window.saturating_sub(current_tokens) as f64;
+        let commands_left = (remaining / self.avg_tokens_per_command) as u32;
+        Some(commands_left)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
