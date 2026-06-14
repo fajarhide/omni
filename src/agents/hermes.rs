@@ -298,4 +298,28 @@ plugins:
         assert!(!super::is_hermes_agent("claude"));
         assert!(!super::is_hermes_agent("cursor"));
     }
+
+    #[test]
+    fn hermes_default_config_enables_efficient_mode_and_pins_files() {
+        let config = super::hermes_default_config();
+        assert_eq!(
+            config.mode,
+            Some(crate::guard::config::DistillationMode::Efficient)
+        );
+        assert_eq!(config.enable_readfile_distillation, Some(true));
+        assert_eq!(config.enable_grep_distillation, Some(true));
+        assert_eq!(config.enable_webfetch_distillation, Some(true));
+        let pinned = config.pinned_files.unwrap_or_default();
+        assert!(pinned.contains(&"AGENTS.md".to_string()));
+        assert!(pinned.contains(&".omni/CONTEXT.md".to_string()));
+    }
+
+    #[test]
+    fn hermes_command_patterns_includes_common_hermes_tools() {
+        let pats = super::hermes_command_patterns();
+        assert!(pats.contains(&"terminal"));
+        assert!(pats.contains(&"python"));
+        assert!(pats.contains(&"npm"));
+        assert!(pats.contains(&"hermes"));
+    }
 }
