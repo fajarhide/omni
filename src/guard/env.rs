@@ -81,6 +81,46 @@ pub fn is_passthrough() -> bool {
     })
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ValidationError {
+    InvalidLoopId,
+    GoalTooLong,
+    GoalContainsShellMetachars,
+    BudgetTooLarge,
+}
+
+pub fn validate_loop_context(
+    loop_id: Option<&str>,
+    goal: Option<&str>,
+    budget_tokens: Option<u64>,
+) -> Result<(), ValidationError> {
+    // loop_id: only alphanumeric and dash, max 64 chars
+    if let Some(id) = loop_id
+        && (!id.chars().all(|c| c.is_alphanumeric() || c == '-') || id.len() > 64)
+    {
+        return Err(ValidationError::InvalidLoopId);
+    }
+
+    // goal: max 500 chars, no shell metacharacters
+    if let Some(goal) = goal {
+        if goal.len() > 500 {
+            return Err(ValidationError::GoalTooLong);
+        }
+        // Block shell injection
+        let blocked = ['`', '$', ';', '|', '&', '>', '<', '(', ')'];
+        if goal.chars().any(|c| blocked.contains(&c)) {
+            return Err(ValidationError::GoalContainsShellMetachars);
+        }
+    }
+
+    // budget: max 10M tokens (sanity check)
+    if budget_tokens.unwrap_or(0) > 10_000_000 {
+        return Err(ValidationError::BudgetTooLarge);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +185,46 @@ mod tests {
         unsafe {
             std::env::remove_var("OMNI_PASSTHROUGH");
         }
+    }
+
+    #[test]
+    fn test_loop_id_injection_rejected() {
+        assert_eq!(
+            validate_loop_context(Some("abc-123;rm-rf"), None, None),
+            Err(ValidationError::InvalidLoopId)
+        );
+        assert_eq!(
+            validate_loop_context(Some("a".repeat(65).as_str()), None, None),
+            Err(ValidationError::InvalidLoopId)
+        );
+        assert_eq!(
+            validate_loop_context(Some("valid-id-123"), None, None),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_goal_shell_metachar_sanitized() {
+        assert_eq!(
+            validate_loop_context(None, Some("fix this; echo 'pwned'"), None),
+            Err(ValidationError::GoalContainsShellMetachars)
+        );
+        assert_eq!(
+            validate_loop_context(None, Some("fix the auth (bug)"), None),
+            Err(ValidationError::GoalContainsShellMetachars)
+        );
+        assert_eq!(
+            validate_loop_context(None, Some("fix the auth issue"), None),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_budget_overflow_clamped() {
+        assert_eq!(
+            validate_loop_context(None, None, Some(10_000_001)),
+            Err(ValidationError::BudgetTooLarge)
+        );
+        assert_eq!(validate_loop_context(None, None, Some(10_000_000)), Ok(()));
     }
 }

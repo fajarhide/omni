@@ -395,6 +395,33 @@ impl Store {
                 id           TEXT PRIMARY KEY,
                 applied_at   INTEGER NOT NULL
             );
+
+            -- 13. Maker-Checker Verification Results (L2-01)
+            CREATE TABLE IF NOT EXISTS verification_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                checker_agent TEXT NOT NULL,
+                maker_session TEXT NOT NULL,
+                criteria TEXT NOT NULL,
+                passed INTEGER NOT NULL,
+                issues TEXT,
+                timestamp INTEGER NOT NULL
+            );
+
+            -- 14. Loop Memory — cross-session persistent knowledge (L2-02)
+            CREATE TABLE IF NOT EXISTS loop_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                loop_goal_hash TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                times_confirmed INTEGER DEFAULT 1,
+                first_seen INTEGER NOT NULL,
+                last_seen INTEGER NOT NULL,
+                ttl_days INTEGER DEFAULT 30,
+                UNIQUE(loop_goal_hash, key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_lm_goal ON loop_memory(loop_goal_hash);
             "#,
         )?;
 
@@ -1024,6 +1051,77 @@ impl Store {
             .collect();
 
         Ok(rows)
+    }
+
+    // ─── Loop Memory (L2-02) ────────────────────────────────
+
+    /// Set or update a loop memory entry. On conflict, bumps times_confirmed and updates value.
+    pub fn loop_memory_set(&self, goal_hash: &str, key: &str, value: &str, confidence: f64) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let now = chrono::Utc::now().timestamp();
+        let _ = conn.execute(
+            "INSERT INTO loop_memory (loop_goal_hash, key, value, confidence, times_confirmed, first_seen, last_seen)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)
+             ON CONFLICT(loop_goal_hash, key) DO UPDATE SET
+                value = excluded.value,
+                confidence = excluded.confidence,
+                times_confirmed = times_confirmed + 1,
+                last_seen = excluded.last_seen",
+            params![goal_hash, key, value, confidence, now],
+        );
+    }
+
+    /// Get a single loop memory entry.
+    pub fn loop_memory_get(&self, goal_hash: &str, key: &str) -> Option<(String, f64, i64)> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
+        conn.query_row(
+            "SELECT value, confidence, times_confirmed FROM loop_memory WHERE loop_goal_hash = ?1 AND key = ?2",
+            params![goal_hash, key],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, i64>(2)?)),
+        ).optional().unwrap_or(None)
+    }
+
+    /// List all loop memory entries for a given goal hash.
+    pub fn loop_memory_list(&self, goal_hash: &str) -> Vec<(String, String, f64, i64)> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT key, value, confidence, times_confirmed FROM loop_memory WHERE loop_goal_hash = ?1 ORDER BY last_seen DESC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        match stmt.query_map(params![goal_hash], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    /// Delete a loop memory entry.
+    pub fn loop_memory_forget(&self, goal_hash: &str, key: &str) {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "DELETE FROM loop_memory WHERE loop_goal_hash = ?1 AND key = ?2",
+            params![goal_hash, key],
+        );
     }
 
     pub fn cleanup_old(&self, days: u32) {

@@ -44,6 +44,8 @@ pub enum EngramTrigger {
     TestPassAfterFailure,
     /// Build succeeded after prior build failure
     BuildSucceeded,
+    /// Triggered when pre_compact fires inside a loop context (L1-04)
+    LoopCheckpoint,
 }
 
 impl std::fmt::Display for EngramTrigger {
@@ -53,6 +55,7 @@ impl std::fmt::Display for EngramTrigger {
             EngramTrigger::Commit => write!(f, "commit"),
             EngramTrigger::TestPassAfterFailure => write!(f, "test_pass"),
             EngramTrigger::BuildSucceeded => write!(f, "build_ok"),
+            EngramTrigger::LoopCheckpoint => write!(f, "loop_checkpoint"),
         }
     }
 }

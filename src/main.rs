@@ -110,6 +110,10 @@ fn print_help() {
         "  {: <12} Run self-optimizing loop on traces",
         "optimize".cyan()
     );
+    println!(
+        "  {: <12} Native Maker-Checker verification",
+        "verify".cyan()
+    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -369,6 +373,23 @@ fn main() {
                     if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
                         eprintln!("[omni] Exec error: {}", e);
                         std::process::exit(1);
+                    }
+                }
+
+                "verify" => {
+                    use clap::Parser;
+                    let verify_args = cli::verify::VerifyArgs::parse_from(&args);
+                    match Store::open() {
+                        Ok(store) => {
+                            if let Err(e) = cli::verify::run(&verify_args, Arc::new(store)) {
+                                eprintln!("[omni] Verify error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[omni] Cannot open database for verify: {}", e);
+                            std::process::exit(1);
+                        }
                     }
                 }
 

@@ -112,12 +112,24 @@ pub fn score_line_with_context(
     tier: SignalTier,
     session: Option<&SessionState>,
 ) -> f32 {
-    let base = match tier {
+    let mut base = match tier {
         SignalTier::Critical => 0.9,
         SignalTier::Important => 0.7,
         SignalTier::Context => 0.4,
         SignalTier::Noise => 0.05,
     };
+
+    // L3-01: Apply Goal-based Scoring Modifiers
+    if let Some(s) = session
+        && let Some(ref modifier) = s.scoring_modifier
+    {
+        // Apply tool multipliers if we know the tool (we don't here, handled in SemanticBlock)
+        // But we can check if line matches goal keywords to boost Context
+        let lower = line.to_lowercase();
+        if modifier.goal_keywords.iter().any(|k| lower.contains(k)) && tier == SignalTier::Context {
+            base += 0.2; // Boost context that mentions goal keywords
+        }
+    }
 
     let context_boost = session.map(|s| s.context_boost(line)).unwrap_or(0.0);
 
@@ -269,6 +281,36 @@ pub fn score_segments(
     }
 
     apply_positional_boost(&mut segments);
+
+    // L3-01: Apply Goal-based Scoring Modifiers (tool_family_multipliers and signal_tier_overrides)
+    if let Some(s) = session
+        && let Some(ref modifier) = s.scoring_modifier
+    {
+        let multiplier = tool_family
+            .and_then(|t| modifier.tool_family_multipliers.get(t))
+            .copied()
+            .unwrap_or(1.0);
+
+        for seg in segments.iter_mut() {
+            // Apply tier overrides based on content keywords
+            for (keyword, new_tier) in &modifier.signal_tier_overrides {
+                if seg.content.to_lowercase().contains(&keyword.to_lowercase()) {
+                    seg.tier = new_tier.clone();
+                    // Adjust base score to match new tier
+                    seg.base_score = match seg.tier {
+                        SignalTier::Critical => 0.9,
+                        SignalTier::Important => 0.7,
+                        SignalTier::Context => 0.4,
+                        SignalTier::Noise => 0.05,
+                    };
+                    break;
+                }
+            }
+
+            // Apply multiplier to final score calculation bounds
+            seg.base_score = (seg.base_score * multiplier).clamp(0.0, 1.0);
+        }
+    }
 
     segments
 }

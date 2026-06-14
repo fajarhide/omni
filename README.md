@@ -144,6 +144,11 @@ OMNI is built in Rust for zero-overhead execution and ruthless efficiency. Here 
 - **Smart Context Compaction**: When your context window gets full, OMNI doesn't blindly trim tokens. It uses a priority-aware algorithm to pack the most important data first (Pinned Files > Active Errors > Engrams > Tool Activity > Hot Files), saving massive overhead.
 - **Session Handoffs**: Switching from Claude Code to Cursor or Hermes? Use the `omni_handoff` tool to instantly export the current session's memory (hot files, recent commands, active errors) into a portable summary that your new agent can instantly absorb.
 
+### Autonomous Loop Engineering
+- **Context Operating System for Loops**: OMNI manages context for iterative autonomous agent loops. Via environment variables (`OMNI_LOOP_BUDGET`, `OMNI_LOOP_GOAL`), OMNI enforces adaptive distillation limits and persistent tracking.
+- **Maker-Checker Verification Pattern**: Scale your tasks cleanly by separating execution (Maker agent) from validation (Checker agent), securely exchanging context states through OMNI's multi-agent session store.
+- **Predictive Goal-Driven Constraints**: Distillation automatically scales based on the task goal—if the goal contains "debug", OMNI retains more error context. If it is "refactor", OMNI compresses code traces aggressively.
+
 ### Monitoring & Debugging
 - **Session Health Dashboard**: Run `omni session --health` for a beautiful visual dashboard of your context pressure, active engrams, rolling tool activity, and token savings.
 - **Distill Monitor**: Track token savings over time. Use `omni_budget` and `omni_history` right inside your LLM, or run `omni stats` locally to visualize money saved.
@@ -261,6 +266,7 @@ enable_readfile_distillation = false
 - [Hermes Agent Integration](https://github.com/wysie/hermes-omni-plugin) — Community Hermes Agent plugin for native OMNI distillation. Install: `uv pip install --python ~/.hermes/hermes-agent/venv/bin/python git+https://github.com/wysie/hermes-omni-plugin.git`
 
 **For Developers & System Integrators:**
+- [Loop Engineering Guide (LOOP_ENGINEERING.md)](docs/LOOP_ENGINEERING.md) — How to integrate OMNI's context pressure with autonomous agent scripts (e.g., Maker-Checker pattern, shell loops).
 - [Development Guide](docs/DEVELOPMENT.md) — How to build and contribute to the OMNI codebase.
 - [Testing Architecture](docs/TESTING.md) — Quality assurance and context safety.
 - [Session Continuity](docs/SESSION.md) — Deep dive into OMNI's working memory.
