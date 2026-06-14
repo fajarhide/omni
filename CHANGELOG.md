@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.6.0-rc1] - 2026-06-08
+## [0.6.0] - 2026-06-14
+
+### Added
+- **Autonomous Loop Engineering**: Native support for iterative, autonomous agent loops (`OMNI_LOOP_BUDGET`, `OMNI_LOOP_GOAL`) with predictive goal-driven constraints.
+- **Maker-Checker Verification Pattern**: Introduced `omni_verify` MCP tool to separate execution and validation securely across distinct agent sessions.
+- **Test Suite Modernization**: Renamed all generic sprint-based test files to context-aware descriptive names (`session_state_tests.rs`, `security_validation_tests.rs`, etc.) and achieved 100% test coverage across 941 tests.
+- **Production Hardening**: Added robust input sanitization, loop context injection prevention, and performance benchmark tests (latency thresholds adapted for CI resilience).
+- **Consolidated Documentation**: Unified scattered templates into a cohesive `docs/LOOP_ENGINEERING.md` master guide and updated all global `i18n` READMEs to reflect new multi-agent loop orchestration capabilities.
 
 ### Fixed
 - **Critical UTF-8 Panic Resolution**: Completely resolved `SIGABRT` crashes caused by multibyte characters (emojis, box-drawing, CJK) in terminal output. Implemented `char`-boundary safe string truncation and slicing utilities globally.
