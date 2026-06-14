@@ -5,9 +5,18 @@ use std::path::{Path, PathBuf};
 
 pub struct HermesIntegration;
 
-/// Returns the Hermes plugin directory.
 fn plugin_dir() -> PathBuf {
     hermes_home_dir().join("plugins").join("omni-signal-engine")
+}
+
+fn omni_home_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".omni")
+}
+
+fn omni_config_path() -> PathBuf {
+    omni_home_dir().join("config.toml")
 }
 
 fn hermes_home_dir() -> PathBuf {
@@ -49,6 +58,18 @@ fn configured_omni_mcp(config_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn configured_compression(config: &str) -> bool {
+    let has_compression = config.contains("compression:");
+    let has_enabled = config.contains("enabled: true") || config.contains("enabled:true");
+    has_compression && has_enabled
+}
+
+fn configured_compression_in_config(config_path: &Path) -> bool {
+    fs::read_to_string(config_path)
+        .map(|config| configured_compression(&config))
+        .unwrap_or(false)
+}
+
 impl AgentIntegration for HermesIntegration {
     fn id(&self) -> &'static str {
         "hermes"
@@ -59,10 +80,11 @@ impl AgentIntegration for HermesIntegration {
     }
 
     fn install(&self, exe_path: &str) -> anyhow::Result<()> {
+        let mut actions = Vec::new();
+        let mut warnings = Vec::new();
+
         let dest = plugin_dir();
         fs::create_dir_all(&dest)?;
-
-        println!("  {} Generating Hermes plugin files...", "↓".cyan());
 
         let plugin_yaml_content = r#"name: omni-signal-engine
 version: "1.0"
@@ -70,7 +92,7 @@ description: OMNI Signal Engine integration for Hermes Agent hooks
 "#;
 
         let init_py_content = format!(
-            r#"\"\"\"OMNI integration for Hermes Agent\"\"\"
+            r#""""""OMNI integration for Hermes Agent""""""
 import subprocess
 import os
 
@@ -108,28 +130,166 @@ def register(ctx):
 
         fs::write(dest.join("plugin.yaml"), plugin_yaml_content)?;
         fs::write(dest.join("__init__.py"), init_py_content)?;
-
-        println!(
-            "  {} Installed Hermes plugin to ~/.hermes/plugins/omni-signal-engine/",
+        actions.push(format!(
+            "{} Installed Hermes plugin to ~/.hermes/plugins/omni-signal-engine/",
             "✓".green()
-        );
+        ));
 
-        println!(
-            "  {} Run {} to enable the plugin",
-            "→".cyan(),
-            "hermes plugins enable omni-signal-engine".bright_black()
-        );
+        let config_path = hermes_config_path();
+        let requires_manual_plugin_step = !fs::metadata(&config_path)
+            .ok()
+            .map(|meta| meta.is_file())
+            .unwrap_or(false);
 
-        println!(
-            "\n  {} To add the OMNI MCP Server, append this to your ~/.hermes/config.yaml:",
-            "ℹ".blue()
-        );
-        println!("{}", "  mcp_servers:".bright_black());
-        println!("{}", "    omni:".bright_black());
-        println!("      command: \"{}\"", exe_path.bright_black());
-        println!("{}", "      args: [\"--mcp\"]".bright_black());
-        println!("{}", "      env:".bright_black());
-        println!("{}", "        OMNI_AGENT_ID: \"hermes\"".bright_black());
+        if requires_manual_plugin_step {
+            actions.push(format!(
+                "{} Run {} to enable the OMNI plugin",
+                "→".cyan(),
+                "hermes plugins enable omni-signal-engine".bright_black()
+            ));
+            warnings.push(
+                "Hermes config not found; enable the OMNI plugin once Hermes is initialized.".to_string(),
+            );
+        }
+
+        if let Ok(config) = fs::read_to_string(&config_path) {
+            if configured_omni_mcp(&config_path) {
+                actions.push(
+                    format!(
+                        "{} OMNI MCP server is already registered in ~/.hermes/config.yaml",
+                        "✓".green()
+                    )
+                    .to_string(),
+                );
+            } else {
+                let mcp_block = "\nmcp_servers:\n  omni:\n    command: \"{}\"\n    args: [\"--mcp\"]\n    env:\n      OMNI_AGENT_ID: \"hermes\"\n\n";
+                let mcp_block = format!("{}", mcp_block.replace("{}", exe_path));
+
+                let mut updated = String::new();
+                let mut inserted = false;
+                for line in config.lines() {
+                    updated.push_str(line);
+                    updated.push('\n');
+                    if !inserted && line.trim_start().starts_with("plugins:") {
+                        updated.push_str(&mcp_block);
+                        inserted = true;
+                        actions.push(
+                            format!(
+                                "{} Registered OMNI MCP server inside ~/.hermes/config.yaml",
+                                "✓".green()
+                            )
+                            .to_string(),
+                        );
+                    }
+                }
+
+                if !inserted {
+                    updated.push_str(&mcp_block);
+                    actions.push(
+                        format!(
+                            "{} Registered OMNI MCP server at the end of ~/.hermes/config.yaml",
+                            "✓".green()
+                        )
+                        .to_string(),
+                    );
+                }
+
+                fs::write(&config_path, updated)?;
+
+                if configured_compression_in_config(&config_path) {
+                    actions.push(
+                        format!(
+                            "{} Hermes compression is already enabled in ~/.hermes/config.yaml",
+                            "✓".green()
+                        )
+                        .to_string(),
+                    );
+                } else if !requires_manual_plugin_step {
+                    if let Ok(current) = fs::read_to_string(&config_path) {
+                        let compression_block = "\ncompression:\n  enabled: true\n  threshold: 0.50\n  target_ratio: 0.20\n\n";
+
+                        let mut updated = current;
+                        if !updated.contains("compression:") {
+                            updated.push_str(&compression_block);
+                            actions.push(
+                                format!(
+                                    "{} Enabled Hermes compression in ~/.hermes/config.yaml",
+                                    "✓".bright_green()
+                                )
+                                .to_string(),
+                            );
+                            fs::write(&config_path, updated)?;
+                        }
+                    }
+                }
+            }
+        } else {
+            warnings
+                .push("Could not read ~/.hermes/config.yaml to register the OMNI MCP server.".to_string());
+        }
+
+        let omni_config_path = omni_config_path();
+        fs::create_dir_all(omni_home_dir())?;
+        let default_config = crate::agents::hermes::hermes_default_config();
+        let file_already_exists = fs::metadata(&omni_config_path)
+            .ok()
+            .map(|meta| meta.is_file())
+            .unwrap_or(false);
+
+        if !file_already_exists {
+            let mut config_lines = Vec::new();
+            config_lines.push("[global]".to_string());
+            config_lines
+                .push(format!("mode = \"{}\"", format!("{:?}", default_config.mode.unwrap_or_default()).to_lowercase()));
+            if let Some(readfile) = default_config.enable_readfile_distillation {
+                config_lines.push(format!("enable_readfile_distillation = {}", readfile));
+            }
+            if let Some(grep) = default_config.enable_grep_distillation {
+                config_lines.push(format!("enable_grep_distillation = {}", grep));
+            }
+            if let Some(webfetch) = default_config.enable_webfetch_distillation {
+                config_lines.push(format!("enable_webfetch_distillation = {}", webfetch));
+            }
+            if let Some(pinned) = &default_config.pinned_files {
+                if !pinned.is_empty() {
+                    config_lines.push("pinned_files = [".to_string());
+                    for path in pinned {
+                        config_lines.push(format!("  \"{}\",", path));
+                    }
+                    config_lines.push("]".to_string());
+                }
+            }
+
+            fs::write(&omni_config_path, format!("{}\n", config_lines.join("\n")))?;
+            actions.push(
+                format!(
+                    "{} Wrote Hermes OMNI defaults to {}",
+                    "✓".green(),
+                    omni_config_path.display().to_string().bright_black()
+                )
+                .to_string(),
+            );
+        } else {
+            actions.push(
+                format!(
+                    "{} Existing OMNI config preserved at {}",
+                    "✓".green(),
+                    omni_config_path.display().to_string().bright_black()
+                )
+                .to_string(),
+            );
+        }
+
+        for message in &actions {
+            println!("  {}", message);
+        }
+
+        if !warnings.is_empty() {
+            println!("\n  {}", "Warnings:".yellow());
+            for warning in &warnings {
+                println!("   - {}", warning);
+            }
+        }
 
         Ok(())
     }
@@ -236,7 +396,7 @@ mod tests {
 
     #[test]
     fn detects_packaged_hermes_omni_plugin_in_config() {
-        let config = r#"
+        let config = r#""
 plugins:
   enabled:
     - disk-cleanup

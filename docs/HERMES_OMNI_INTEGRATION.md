@@ -40,28 +40,30 @@ export HERMES_PY="$HERMES_VENV/bin/python"
 
 ## 3. Installation (idempotent)
 
+`omni init --hermes` now performs a fully automated setup. It will:
+- install the `omni-signal-engine` plugin scaffold in `~/.hermes/plugins/omni-signal-engine/`,
+- register the OMNI MCP server in `~/.hermes/config.yaml` if it is not already present and enable Hermes `compression` when safe to do so,
+- write Hermes-optimized OMNI defaults to `~/.omni/config.toml` (`mode = "efficient"`, pinned files, etc.) **without overwriting an existing OMNI config**.
+
 ```bash
-# A. Generate Hermes plugin scaffolding
+# Single command setup
 omni init --hermes
 
-# B. Enable the plugin
+# Enable the plugin (required once)
 hermes plugins enable omni-signal-engine
 
-# C. Enable Hermes plugin entry point
-"$HERMES_PY" -m pip install hermes-omni-plugin
-
-# D. Register MCP server (27 tools)
-hermes mcp add omni \
-  --command /opt/homebrew/bin/omni \
-  --args --mcp \
-  --env OMNI_AGENT_ID=hermes
-# When prompted "Enable all 27 tools?" answer: Y
+# Restart Hermes to load the plugin and MCP server
+hermes gateway restart
 ```
 
-> The official README also lists a community install command:
-> `pip install git+https://github.com/wysie/hermes-omni-plugin.git`.  
-> That package and the `omni init --hermes` scaffold are functionally
-> equivalent; pick one path, not both, to avoid duplicate entry points.
+Finally, install the Hermes entry point into the Hermes venv so the plugin resolves:
+
+```bash
+"$HERMES_PY" -m pip install hermes-omni-plugin
+```
+
+> Use either `hermes-omni-plugin` or the `omni init --hermes` scaffold, not both at once,
+> to avoid duplicate plugin registrations.
 
 ---
 
