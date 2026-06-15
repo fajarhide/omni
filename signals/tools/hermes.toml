@@ -1,28 +1,58 @@
-[schema]
-id = "hermes-gateway"
-name = "Hermes Agent Gateway"
-description = "Filters out Hermes wrapper noise, headers, and trailers around tool executions."
+schema_version = 1
 
-[[rules]]
-id = "hermes_tool_header"
-type = "regex"
-pattern = "^\\[Hermes\\] (Executing tool|Running command|Tool execution).*$"
-action = "drop"
+[filters.hermes]
+description = "Strip Hermes-specific wrapper noise: tool-call headers/trailers, multi-tool separators, and gateway boilerplate"
+match_command = "^(terminal|read_file|web_search|browser_navigate|browser_screenshot|execute_code|delegate_task).*"
+strip_ansi = true
+transform_rules = [
+    { pattern = "(?m)^\\s*term:\\s*(.*)$", replacement = "$1" },
+    { pattern = "(?m)^>\\s*(.*)$", replacement = "$1" }
+]
+strip_lines_matching = [
+    "^(Hermes Agent|Hermes Gateway|Hermes CLI) .*$",
+    "^\\-{10,}$",
+    "^Tool Result .*$"
+]
+priority = 150
 
-[[rules]]
-id = "hermes_gateway_noise"
-type = "regex"
-pattern = "^\\[Hermes Gateway\\] (Forwarding response|Processing|Handling request).*$"
-action = "drop"
+[[tests.hermes]]
+name = "boilerplate header trailer and divider"
+input = """Hermes Agent • Session 7a3c • terminal
+------------------
+term: npm run build
+------------------
+vite build ok
+------------------
+Hermes Gateway • forwarding done
+"""
+expected = "npm run build\nvite build ok"
 
-[[rules]]
-id = "hermes_tool_trailer"
-type = "regex"
-pattern = "^\\[Hermes\\] (Tool execution completed|Finished|Success).*$"
-action = "drop"
+[[tests.hermes]]
+name = "parallel tool call noisy example"
+input = """Tool Result • id 01
+> running cargo test
+...
+running 30 tests
+----
+Tool Result • id 02
+> running npm run lint
+...
+✔ lint passed
+"""
+expected = """running cargo test
+...
+running 30 tests
+----
+running npm run lint
+...
+✔ lint passed"""
 
-[[rules]]
-id = "hermes_divider"
-type = "regex"
-pattern = "^-{10,}.*$"
-action = "drop"
+[[tests.hermes]]
+name = "preserve failure signal"
+input = """------------------
+term: cargo test
+------------------
+test result: FAILED. 2 passed; 1 failed; 0 ignored
+"""
+expected = """cargo test
+test result: FAILED. 2 passed; 1 failed; 0 ignored"""
