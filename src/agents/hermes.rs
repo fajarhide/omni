@@ -228,7 +228,19 @@ def register(ctx):
     def on_post_tool_call(tool_name, params, result):
         global _STEP_COUNTER
         _STEP_COUNTER += 1
-        _run_omni("--post-hook")
+        res = _run_omni("--post-hook")
+        
+        # Explicit feedback loop: OMNI pressure -> Hermes compaction
+        if res and res.stdout:
+            out = res.stdout.decode('utf-8', errors='ignore')
+            if "[omni:context pressure: CRITICAL]" in out or "[omni:context pressure: WARNING]" in out:
+                try:
+                    if hasattr(ctx, 'request_compaction'):
+                        ctx.request_compaction("OMNI context pressure threshold reached")
+                    elif hasattr(ctx, 'compact'):
+                        ctx.compact()
+                except Exception:
+                    pass
 
     def on_pre_tool_call(tool_name, params):
         _run_omni("--pre-hook")
@@ -311,32 +323,32 @@ def register(ctx):
                 }
 
                 fs::write(&config_path, updated)?;
+            }
 
-                if configured_compression_in_config(&config_path) {
-                    actions.push(
-                        format!(
-                            "{} Hermes compression is already enabled in ~/.hermes/config.yaml",
-                            "✓".green()
-                        )
-                        .to_string(),
-                    );
-                } else if !requires_manual_plugin_step {
-                    #[allow(clippy::collapsible_if)]
-                    if let Ok(current) = fs::read_to_string(&config_path) {
-                        let compression_block = "\ncompression:\n  enabled: true\n  threshold: 0.50\n  target_ratio: 0.20\n\n";
+            if configured_compression_in_config(&config_path) {
+                actions.push(
+                    format!(
+                        "{} Hermes compression is already enabled in ~/.hermes/config.yaml",
+                        "✓".green()
+                    )
+                    .to_string(),
+                );
+            } else if !requires_manual_plugin_step {
+                #[allow(clippy::collapsible_if)]
+                if let Ok(current) = fs::read_to_string(&config_path) {
+                    let compression_block = "\ncompression:\n  enabled: true\n  threshold: 0.50\n  target_ratio: 0.20\n\n";
 
-                        let mut updated = current;
-                        if !updated.contains("compression:") {
-                            updated.push_str(compression_block);
-                            actions.push(
-                                format!(
-                                    "{} Enabled Hermes compression in ~/.hermes/config.yaml",
-                                    "✓".bright_green()
-                                )
-                                .to_string(),
-                            );
-                            fs::write(&config_path, updated)?;
-                        }
+                    let mut updated = current;
+                    if !updated.contains("compression:") {
+                        updated.push_str(compression_block);
+                        actions.push(
+                            format!(
+                                "{} Enabled Hermes compression in ~/.hermes/config.yaml",
+                                "✓".bright_green()
+                            )
+                            .to_string(),
+                        );
+                        fs::write(&config_path, updated)?;
                     }
                 }
             }

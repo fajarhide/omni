@@ -226,6 +226,26 @@ Output is TOML filter proposals for `~/.omni/signals/`. Review and copy into
 `~/.omni/signals/` rather than editing built-in signals. This is where
 project-specific commands (internal CLIs, bespoke deploy scripts) get tuned.
 
+### 6h. Advanced Tools Usage (Level 4 Autonomous Loops)
+
+With the Hermes integration complete, OMNI MCP tools can be utilized natively by Hermes during autonomous multi-step execution loops (e.g., Maker-Checker workflows).
+
+1. **`mcp_omni_loop_memory`**
+   Hermes can track long-running state variables using `mcp_omni_loop_memory` so they survive session compactions.
+   - *Example:* Use it to track the original user prompt or high-level goals during deeply nested debugging.
+
+2. **`mcp_omni_knowledge`**
+   Cross-session information storage for codebase architectural decisions.
+   - *Example:* When Hermes learns the structure of a microservice, it can invoke `mcp_omni_knowledge` to record it. In subsequent sessions, Hermes can retrieve it before exploring the code again.
+
+3. **`mcp_omni_retrieve`**
+   Fetch the raw (unfiltered) output of a heavily distilled terminal command.
+   - *Example:* If OMNI condensed a 50MB log file down to 20 lines, but Hermes needs the exact stack trace located in the omitted chunk, Hermes can call `mcp_omni_retrieve` passing the hash provided by OMNI's notice.
+
+4. **`mcp_omni_learn`**
+   Trigger OMNI to dynamically detect repetitive noise patterns and suggest custom TOML filters on-the-fly.
+   - *Example:* If a custom project script spews unique baggage, Hermes can ask OMNI to analyze the text and propose a `strip_lines_matching` rule.
+
 ---
 
 ## 7. Common pitfalls and how to avoid them
