@@ -1,0 +1,58 @@
+schema_version = 1
+
+[filters.hermes]
+description = "Strip Hermes-specific wrapper noise: tool-call headers/trailers, multi-tool separators, and gateway boilerplate"
+match_command = "^(terminal|read_file|web_search|browser_navigate|browser_screenshot|execute_code|delegate_task).*"
+strip_ansi = true
+transform_rules = [
+    { pattern = "(?m)^\\s*term:\\s*(.*)$", replacement = "$1" },
+    { pattern = "(?m)^>\\s*(.*)$", replacement = "$1" }
+]
+strip_lines_matching = [
+    "^(Hermes Agent|Hermes Gateway|Hermes CLI) .*$",
+    "^\\-{10,}$",
+    "^Tool Result .*$"
+]
+priority = 150
+
+[[tests.hermes]]
+name = "boilerplate header trailer and divider"
+input = """Hermes Agent • Session 7a3c • terminal
+------------------
+term: npm run build
+------------------
+vite build ok
+------------------
+Hermes Gateway • forwarding done
+"""
+expected = "npm run build\nvite build ok"
+
+[[tests.hermes]]
+name = "parallel tool call noisy example"
+input = """Tool Result • id 01
+> running cargo test
+...
+running 30 tests
+----
+Tool Result • id 02
+> running npm run lint
+...
+✔ lint passed
+"""
+expected = """running cargo test
+...
+running 30 tests
+----
+running npm run lint
+...
+✔ lint passed"""
+
+[[tests.hermes]]
+name = "preserve failure signal"
+input = """------------------
+term: cargo test
+------------------
+test result: FAILED. 2 passed; 1 failed; 0 ignored
+"""
+expected = """cargo test
+test result: FAILED. 2 passed; 1 failed; 0 ignored"""

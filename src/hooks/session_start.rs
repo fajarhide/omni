@@ -178,12 +178,21 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
         return serde_json::to_string(&out).ok();
     }
 
-    // Fresh session: only return output if we have watchPaths to register
-    if !watch_paths.is_empty() {
+    let mut system_prompt_addition = String::new();
+    let agent_id = multiagent::detect_agent_id();
+    #[allow(clippy::collapsible_if)]
+    if agent_id == "hermes" {
+        if let Some(err_msg) = crate::agents::hermes::validate_startup() {
+            system_prompt_addition.push_str(&err_msg);
+        }
+    }
+
+    // Fresh session: return output if we have watchPaths or a system prompt to register
+    if !watch_paths.is_empty() || !system_prompt_addition.is_empty() {
         let out = HookOutput {
             hook_specific_output: HookSpecificOutput {
                 hook_event_name: "SessionStart".to_string(),
-                system_prompt_addition: String::new(),
+                system_prompt_addition,
                 watch_paths,
             },
         };
