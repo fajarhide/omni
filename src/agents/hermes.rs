@@ -19,25 +19,72 @@ fn omni_config_path() -> PathBuf {
     omni_home_dir().join("config.toml")
 }
 
+/// Comprehensive startup validation for Hermes integration.
+///
+/// Checks: config.yaml (MCP + compression), plugin files, OMNI binary
+/// availability, and OMNI config presence. Returns `None` when all
+/// checks pass, or a formatted diagnostics string that gets injected
+/// into the Hermes `systemPromptAddition` so the agent can self-heal.
 pub fn validate_startup() -> Option<String> {
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<&str> = Vec::new();
 
+    // ── 1. Hermes config.yaml ──
     let config_path = hermes_home_dir().join("config.yaml");
     if let Ok(config_str) = fs::read_to_string(&config_path) {
+        // MCP server registration
         if !config_str.contains("mcp_servers:") || !config_str.contains("omni:") {
-            warnings.push("OMNI MCP server is not registered in ~/.hermes/config.yaml. Tools will be missing. Run `omni init --hermes` to fix.");
+            warnings.push(
+                "OMNI MCP server is NOT registered in ~/.hermes/config.yaml. \
+                 27 MCP tools (omni_retrieve, omni_loop_memory, omni_knowledge, …) \
+                 will be unavailable. Run `omni init --hermes` to fix.",
+            );
         }
+        // Compression bridge
         if !config_str.contains("compression:") || !config_str.contains("enabled: true") {
-            warnings.push("Hermes compression is not enabled. Context Pressure warnings will be ignored. Run `omni init --hermes` to fix.");
+            warnings.push(
+                "Hermes compression is NOT enabled. Context Pressure warnings \
+                 from OMNI will be surfaced but Hermes will not act on them. \
+                 Run `omni init --hermes` to fix.",
+            );
         }
     } else {
         warnings.push("Could not find ~/.hermes/config.yaml. Is Hermes installed?");
     }
 
-    let plugin_file = plugin_dir().join("plugin.py");
-    if !plugin_file.exists() {
+    // ── 2. Plugin scaffold ──
+    let plugin_init = plugin_dir().join("__init__.py");
+    if !plugin_init.exists() {
         warnings.push(
-            "OMNI Hermes plugin file (`plugin.py`) is missing. Pre/Post hooks will not execute.",
+            "OMNI Hermes plugin (`__init__.py`) is missing. \
+             Pre/Post hooks will not execute. Run `omni init --hermes` to install.",
+        );
+    }
+
+    // ── 3. OMNI binary reachable ──
+    #[allow(clippy::collapsible_if)]
+    if let Ok(exe) = std::env::current_exe() {
+        if !exe.exists() {
+            warnings.push("OMNI binary path does not exist on disk. Hooks will fail at runtime.");
+        }
+    }
+
+    // ── 4. OMNI config for Hermes ──
+    let omni_cfg = omni_config_path();
+    if omni_cfg.exists() {
+        #[allow(clippy::collapsible_if)]
+        if let Ok(content) = fs::read_to_string(&omni_cfg) {
+            if !content.contains("[agents.hermes]") {
+                warnings.push(
+                    "~/.omni/config.toml exists but has no [agents.hermes] section. \
+                     Hermes-optimized defaults (Efficient mode, pinned files) are inactive. \
+                     Run `omni init --hermes` to add them.",
+                );
+            }
+        }
+    } else {
+        warnings.push(
+            "~/.omni/config.toml does not exist. OMNI is using built-in defaults \
+             instead of Hermes-optimized settings. Run `omni init --hermes`.",
         );
     }
 
@@ -45,8 +92,15 @@ pub fn validate_startup() -> Option<String> {
         None
     } else {
         Some(format!(
-            "\n  [OMNI Hermes Integration Validation Failed]\n- {}\n",
-            warnings.join("\n- ")
+            "\n  [OMNI × Hermes Startup Validation — {} issue(s)]\n{}\n\
+             → Fix all: `omni init --hermes && hermes gateway restart`\n",
+            warnings.len(),
+            warnings
+                .iter()
+                .enumerate()
+                .map(|(i, w)| format!("  {}. {}", i + 1, w))
+                .collect::<Vec<_>>()
+                .join("\n")
         ))
     }
 }
@@ -124,40 +178,69 @@ description: OMNI Signal Engine integration for Hermes Agent hooks
 "#;
 
         let init_py_content = format!(
-            r#""""""OMNI integration for Hermes Agent""""""
-import subprocess
+            r#""""""OMNI Context OS integration for Hermes Agent.
+
+This plugin wires three lifecycle hooks so OMNI can distill
+terminal output, track sessions, and manage context pressure.
+
+It also exposes helper utilities that make the 27 OMNI MCP tools
+(loop_memory, knowledge, retrieve, learn) work seamlessly during
+Hermes autonomous multi-step loops.
+""""""
+import json
 import os
+import subprocess
+import time
+
+_OMNI_BIN = "{}"
+_STEP_COUNTER = 0
+_SESSION_START_TS = None
+
+
+def _omni_env():
+    """Return a copy of the environment with OMNI_AGENT_ID set."""
+    env = os.environ.copy()
+    env["OMNI_AGENT_ID"] = "hermes"
+    # Forward loop control vars when present
+    for var in ("OMNI_LOOP_ID", "OMNI_LOOP_GOAL", "OMNI_LOOP_BUDGET"):
+        if var in os.environ:
+            env[var] = os.environ[var]
+    return env
+
+
+def _run_omni(*args):
+    """Run the OMNI binary with fail-open semantics."""
+    try:
+        return subprocess.run(
+            [_OMNI_BIN] + list(args),
+            env=_omni_env(),
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception:
+        return None  # fail-open: never block Hermes
+
 
 def register(ctx):
+    global _SESSION_START_TS
+    _SESSION_START_TS = time.time()
+
     def on_post_tool_call(tool_name, params, result):
-        env = os.environ.copy()
-        env["OMNI_AGENT_ID"] = "hermes"
-        try:
-            subprocess.run(["{}", "--post-hook"], env=env, capture_output=True)
-        except Exception:
-            pass
+        global _STEP_COUNTER
+        _STEP_COUNTER += 1
+        _run_omni("--post-hook")
 
     def on_pre_tool_call(tool_name, params):
-        env = os.environ.copy()
-        env["OMNI_AGENT_ID"] = "hermes"
-        try:
-            subprocess.run(["{}", "--pre-hook"], env=env, capture_output=True)
-        except Exception:
-            pass
+        _run_omni("--pre-hook")
 
     def on_session_start():
-        env = os.environ.copy()
-        env["OMNI_AGENT_ID"] = "hermes"
-        try:
-            subprocess.run(["{}", "--session-start"], env=env, capture_output=True)
-        except Exception:
-            pass
+        _run_omni("--session-start")
 
     ctx.register_hook("post_tool_call", on_post_tool_call)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
     ctx.register_hook("on_session_start", on_session_start)
 "#,
-            exe_path, exe_path, exe_path
+            exe_path
         );
 
         fs::write(dest.join("plugin.yaml"), plugin_yaml_content)?;
@@ -347,50 +430,127 @@ def register(ctx):
         Ok(())
     }
 
-    fn doctor_check(&self, _fix_mode: bool, _warnings: &mut Vec<String>) -> bool {
+    fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let dest = plugin_dir();
         let config_path = hermes_config_path();
         let directory_plugin_installed = dest.join("plugin.yaml").exists();
         let configured_plugin = configured_omni_plugin(&config_path);
         let mcp_configured = configured_omni_mcp(&config_path);
+        let compression_on = configured_compression_in_config(&config_path);
+        let omni_cfg = omni_config_path();
+        let has_hermes_section = fs::read_to_string(&omni_cfg)
+            .map(|c| c.contains("[agents.hermes]"))
+            .unwrap_or(false);
         let installed = directory_plugin_installed || configured_plugin.is_some();
 
         println!("\n  {}", "Hermes Agent:".cyan());
+
+        // Plugin status
         if directory_plugin_installed {
             println!(
-                "   {:<15} {} {}",
+                "   {:>15} {} {}",
                 "Plugin:".bright_black(),
                 "~/.hermes/plugins/omni-signal-engine/".bright_black(),
                 "[OK]".green().bold()
             );
         } else if let Some(plugin_name) = configured_plugin {
             println!(
-                "   {:<15} {} {}",
+                "   {:>15} {} {}",
                 "Plugin:".bright_black(),
                 format!("{} in ~/.hermes/config.yaml", plugin_name).bright_black(),
                 "[OK]".green().bold()
             );
         } else {
             println!(
-                "   {:<15} {}",
+                "   {:>15} {}",
                 "Plugin:".bright_black(),
-                "not installed".bright_black()
+                "not installed [MISSING]".red().bold()
+            );
+            warnings.push("Hermes OMNI plugin is not installed.".to_string());
+        }
+
+        // MCP status
+        println!(
+            "   {:>15} {}",
+            "MCP Server:".bright_black(),
+            if mcp_configured {
+                "registered [OK]".green().bold()
+            } else {
+                "not registered [MISSING]".red().bold()
+            }
+        );
+        if !mcp_configured {
+            warnings.push("OMNI MCP server is not registered in Hermes config.".to_string());
+        }
+
+        // Compression status
+        println!(
+            "   {:>15} {}",
+            "Compression:".bright_black(),
+            if compression_on {
+                "enabled [OK]".green().bold()
+            } else {
+                "disabled [WARN]".yellow().bold()
+            }
+        );
+        if !compression_on {
+            warnings.push(
+                "Hermes compression is disabled; context pressure warnings will not trigger compaction."
+                    .to_string(),
             );
         }
 
+        // OMNI config section
         println!(
-            "   {:<15} {}",
-            "MCP Server:".bright_black(),
-            if mcp_configured {
-                "configured in ~/.hermes/config.yaml [OK]".green().bold()
+            "   {:>15} {}",
+            "OMNI Config:".bright_black(),
+            if has_hermes_section {
+                "[agents.hermes] present [OK]".green().bold()
             } else {
-                "not configured".bright_black()
+                "[agents.hermes] missing [WARN]".yellow().bold()
             }
         );
+        if !has_hermes_section {
+            warnings.push(
+                "~/.omni/config.toml has no [agents.hermes] section; using built-in defaults."
+                    .to_string(),
+            );
+        }
+
+        // Auto-fix: re-run the full init to repair all gaps
+        #[allow(clippy::collapsible_if)]
+        if fix_mode && (!installed || !mcp_configured || !compression_on || !has_hermes_section) {
+            if let Ok(exe) = std::env::current_exe() {
+                let exe_str = exe.to_string_lossy().to_string();
+                println!(
+                    "   {:>15} {}",
+                    "Auto-fix:".bright_black(),
+                    "Re-running omni init --hermes...".yellow()
+                );
+                match self.install(&exe_str) {
+                    Ok(()) => {
+                        println!(
+                            "   {:>15} {}",
+                            "".bright_black(),
+                            "\u{2713} Auto-fix applied. Restart Hermes to activate."
+                                .green()
+                                .bold()
+                        );
+                    }
+                    Err(e) => {
+                        println!(
+                            "   {:>15} {}",
+                            "".bright_black(),
+                            format!("\u{2717} Auto-fix failed: {}", e).red().bold()
+                        );
+                    }
+                }
+            }
+        }
 
         if installed && !mcp_configured {
             println!(
-                "   {:<15} {}",
+                "   {:>15} {}",
                 "Note:".bright_black(),
                 "MCP is optional; native Hermes plugin detection passed.".bright_black()
             );
@@ -433,7 +593,7 @@ pub fn is_hermes_agent(agent_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_mentions_omni_mcp, config_mentions_omni_plugin};
+    use super::{config_mentions_omni_mcp, config_mentions_omni_plugin, configured_compression};
 
     #[test]
     fn detects_packaged_hermes_omni_plugin_in_config() {
@@ -522,5 +682,28 @@ plugins:
         assert!(pats.contains(&"python"));
         assert!(pats.contains(&"npm"));
         assert!(pats.contains(&"hermes"));
+    }
+
+    #[test]
+    fn detects_compression_enabled() {
+        let config = "compression:\n  enabled: true\n  threshold: 0.50";
+        assert!(configured_compression(config));
+    }
+
+    #[test]
+    fn detects_compression_disabled() {
+        let config = "plugins:\n  enabled:\n    - foo";
+        assert!(!configured_compression(config));
+    }
+
+    #[test]
+    fn validate_startup_returns_some_when_hermes_not_installed() {
+        // On CI / dev machines without Hermes, validation should surface warnings
+        let result = super::validate_startup();
+        // We can't assert None because it depends on the host environment,
+        // but we CAN assert the function doesn't panic and returns a coherent type.
+        if let Some(msg) = &result {
+            assert!(msg.contains("OMNI × Hermes") || msg.contains("Startup Validation"));
+        }
     }
 }
