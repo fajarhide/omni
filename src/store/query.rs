@@ -97,7 +97,7 @@ impl Store {
             OmniQLQuery::ErrorsInLastCommands(n) => {
                 let mut entries: Vec<(i64, String, String)> = Vec::new();
                 {
-                    let conn = self.conn.lock().unwrap();
+                    let conn = self.pool.get()?;
                     let mut stmt = conn.prepare(
                         "SELECT ts, command, rewind_hash FROM distillations \
                          WHERE rewind_hash != '' ORDER BY ts DESC LIMIT ?1",
@@ -148,7 +148,7 @@ impl Store {
             OmniQLQuery::WarningsFromTool(tool) => {
                 let mut entries: Vec<(i64, String, String)> = Vec::new();
                 {
-                    let conn = self.conn.lock().unwrap();
+                    let conn = self.pool.get()?;
                     let mut stmt = conn.prepare(
                         "SELECT ts, command, rewind_hash FROM distillations \
                          WHERE rewind_hash != '' AND (command LIKE ?1 OR filter_name LIKE ?1) \
@@ -200,7 +200,7 @@ impl Store {
             OmniQLQuery::ContextForFile(file_path) => {
                 let mut matches: Vec<(String, String, i64)> = Vec::new();
                 {
-                    let conn = self.conn.lock().unwrap();
+                    let conn = self.pool.get()?;
                     let mut stmt = conn.prepare(
                         "SELECT hash, content, ts FROM rewind_store \
                          WHERE content LIKE ?1 ORDER BY ts DESC LIMIT 20",
@@ -254,7 +254,7 @@ impl Store {
 
                 let mut entries: Vec<(i64, String, String, i64, i64)> = Vec::new();
                 {
-                    let conn = self.conn.lock().unwrap();
+                    let conn = self.pool.get()?;
                     let mut stmt = conn.prepare(
                         "SELECT ts, command, route, input_bytes, output_bytes FROM distillations \
                          WHERE ts >= ?1 ORDER BY ts ASC",

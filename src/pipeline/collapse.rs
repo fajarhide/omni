@@ -5,6 +5,7 @@ use crate::pipeline::scorer::classify_line;
 use crate::pipeline::{CollapseMode, SignalTier};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::sync::{LazyLock, Mutex};
 
 // ─── Data Structures ────────────────────────────────────
 
@@ -59,10 +60,12 @@ fn strip_ansi(line: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-thread_local! {
-    static NORMALIZE_CACHE: std::cell::RefCell<lru::LruCache<String, String>> =
-        std::cell::RefCell::new(lru::LruCache::new(std::num::NonZeroUsize::new(2048).unwrap()));
-}
+/// Shared normalize cache — works correctly across tokio's multi-thread runtime.
+static NORMALIZE_CACHE: LazyLock<Mutex<lru::LruCache<String, String>>> = LazyLock::new(|| {
+    Mutex::new(lru::LruCache::new(
+        std::num::NonZeroUsize::new(2048).unwrap(),
+    ))
+});
 
 /// Fast structural normalization for pattern grouping.
 /// Produces a "skeleton" of the line:
@@ -81,7 +84,8 @@ fn normalize_structural(trimmed: &str) -> String {
     }
 
     if trimmed.len() < 1000
-        && let Some(cached) = NORMALIZE_CACHE.with(|c| c.borrow_mut().get(trimmed).cloned())
+        && let Ok(mut cache) = NORMALIZE_CACHE.lock()
+        && let Some(cached) = cache.get(trimmed).cloned()
     {
         return cached;
     }
@@ -108,8 +112,10 @@ fn normalize_structural(trimmed: &str) -> String {
         }
     }
 
-    if trimmed.len() < 1000 {
-        NORMALIZE_CACHE.with(|c| c.borrow_mut().put(trimmed.to_string(), out.clone()));
+    if trimmed.len() < 1000
+        && let Ok(mut cache) = NORMALIZE_CACHE.lock()
+    {
+        cache.put(trimmed.to_string(), out.clone());
     }
 
     out

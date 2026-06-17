@@ -767,7 +767,7 @@ fn run_coverage() -> anyhow::Result<()> {
     println!("\n {} Filter Coverage Analysis\n", "📊".cyan());
 
     let store = Store::open()?;
-    let conn = store.conn.lock().unwrap();
+    let conn = store.pool.get()?;
 
     // Find most frequent commands that are passing through unfiltered
     let mut stmt = conn.prepare(

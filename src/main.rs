@@ -106,14 +106,6 @@ fn print_help() {
         "query".cyan()
     );
     println!("  {: <12} View recurring error patterns", "patterns".cyan());
-    println!(
-        "  {: <12} Run self-optimizing loop on traces",
-        "optimize".cyan()
-    );
-    println!(
-        "  {: <12} Native Maker-Checker verification",
-        "verify".cyan()
-    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -159,6 +151,13 @@ fn print_help() {
 // ─── Main ───────────────────────────────────────────────
 
 fn main() {
+    // Initialize observability
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr) // Write to stderr to avoid polluting stdout
+        .try_init()
+        .ok(); // Ignore if already initialized (e.g. in tests)
+
     let args: Vec<String> = env::args().collect();
     let mode = detect_mode(&args);
 
@@ -318,13 +317,6 @@ fn main() {
                     }
                 }
 
-                "optimize" => {
-                    if let Err(e) = cli::optimize::run_optimize(&args) {
-                        eprintln!("[omni] Optimize error: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-
                 "rewind" => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::rewind::run_rewind(&args, &store) {
@@ -373,23 +365,6 @@ fn main() {
                     if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
                         eprintln!("[omni] Exec error: {}", e);
                         std::process::exit(1);
-                    }
-                }
-
-                "verify" => {
-                    use clap::Parser;
-                    let verify_args = cli::verify::VerifyArgs::parse_from(&args);
-                    match Store::open() {
-                        Ok(store) => {
-                            if let Err(e) = cli::verify::run(&verify_args, Arc::new(store)) {
-                                eprintln!("[omni] Verify error: {}", e);
-                                std::process::exit(1);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[omni] Cannot open database for verify: {}", e);
-                            std::process::exit(1);
-                        }
                     }
                 }
 

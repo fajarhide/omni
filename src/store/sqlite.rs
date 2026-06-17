@@ -2,16 +2,33 @@
 #![allow(clippy::string_slice)]
 
 use anyhow::{Context, Result};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
-use std::sync::Mutex;
 
 use crate::paths;
 use crate::pipeline::DistillResult;
 use crate::pipeline::SessionState;
 
+/// Customizes each pooled connection with required PRAGMA settings.
+/// WAL mode is database-level and persists, but synchronous and foreign_keys are per-connection.
+#[derive(Debug)]
+struct PragmaCustomizer;
+
+impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer {
+    fn on_acquire(&self, conn: &mut Connection) -> Result<(), rusqlite::Error> {
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA foreign_keys = ON;",
+        )?;
+        Ok(())
+    }
+}
+
 pub struct Store {
-    pub(crate) conn: Mutex<Connection>,
+    pub(crate) pool: Pool<SqliteConnectionManager>,
 }
 
 impl Store {
@@ -33,25 +50,20 @@ impl Store {
             std::fs::create_dir_all(parent).context("Failed to create .omni directory")?;
         }
 
-        let conn = Connection::open(path).context("Failed to open SQLite database")?;
+        let manager = SqliteConnectionManager::file(path);
+        let pool = Pool::builder()
+            .max_size(4)
+            .connection_customizer(Box::new(PragmaCustomizer))
+            .build(manager)
+            .context("Failed to create SQLite connection pool")?;
 
-        // Optimizations
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA foreign_keys = ON;",
-        )?;
-
-        let store = Self {
-            conn: Mutex::new(conn),
-        };
-
+        let store = Self { pool };
         store.init_schema()?;
         Ok(store)
     }
 
     pub fn stats(&self) -> Result<(usize, usize)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let sessions: usize = conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
             .unwrap_or(0);
@@ -62,7 +74,7 @@ impl Store {
     }
 
     pub fn latest_activity_timestamps(&self) -> Result<(Option<u64>, Option<u64>)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let s_ts: Option<i64> = conn
             .query_row(
                 "SELECT last_active FROM sessions ORDER BY last_active DESC LIMIT 1",
@@ -83,7 +95,10 @@ impl Store {
     }
 
     pub fn check_fts5(&self) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         let query =
             "SELECT 1 FROM pragma_compile_options WHERE compile_options LIKE 'ENABLE_FTS5%'";
         conn.query_row(query, [], |row| row.get::<_, i64>(0))
@@ -92,7 +107,7 @@ impl Store {
 
     /// Aggregate distillation stats since a given timestamp
     pub fn aggregate_stats(&self, since: i64) -> Result<(u64, u64, u64, u64, i64, u64, u64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         // returns (count, total_input, total_output, sum_latency, max_latency, raw_tokens, filtered_tokens)
         let r = conn.query_row(
             "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0), COALESCE(SUM(latency_ms),0), COALESCE(MAX(latency_ms),0), COALESCE(SUM(raw_tokens),0), COALESCE(SUM(filtered_tokens),0) FROM distillations WHERE ts >= ?1",
@@ -113,7 +128,7 @@ impl Store {
     /// Per-filter breakdown: (filter_name, count, avg_reduction_pct)
     #[allow(clippy::type_complexity)]
     pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT CASE WHEN command != '' THEN command ELSE '[unknown command]' END as grp_name, COUNT(*),
                     COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0),
@@ -138,7 +153,7 @@ impl Store {
 
     /// Route distribution: (route, count)
     pub fn route_distribution(&self, since: i64) -> Result<Vec<(String, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT route, COUNT(*) FROM distillations WHERE ts >= ?1 GROUP BY route ORDER BY COUNT(*) DESC"
         )?;
@@ -153,7 +168,7 @@ impl Store {
 
     /// RewindStore metrics: (total_stored, total_retrieved)
     pub fn rewind_metrics(&self) -> Result<(u64, u64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let total: u64 = conn
             .query_row("SELECT COUNT(*) FROM rewind_store", [], |row| row.get(0))
             .unwrap_or(0);
@@ -171,7 +186,7 @@ impl Store {
         &self,
         limit: usize,
     ) -> Result<Vec<crate::cli::rewind::RewindEntry>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT hash, ts, original_len, retrieved FROM rewind_store ORDER BY ts DESC LIMIT ?1",
         )?;
@@ -193,7 +208,7 @@ impl Store {
 
     /// Hot files for session insight
     pub fn hot_files_global(&self, since: i64) -> Result<Vec<(String, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT file_path, SUM(access_count) as cnt FROM file_access WHERE last_access >= ?1 GROUP BY file_path ORDER BY cnt DESC LIMIT 5"
         )?;
@@ -208,7 +223,7 @@ impl Store {
 
     /// Collapse aggregate: (event_count, total_original_lines, total_collapsed_lines)
     pub fn collapse_aggregate(&self, since: i64) -> Result<(u64, u64, u64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let r = conn.query_row(
             "SELECT COUNT(*), COALESCE(SUM(collapse_original),0), COALESCE(SUM(collapse_to),0) FROM distillations WHERE ts >= ?1 AND collapse_original > 0",
             params![since],
@@ -218,7 +233,7 @@ impl Store {
     }
 
     fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         conn.execute_batch(
             r#"
             -- 1. Sessions
@@ -564,7 +579,7 @@ impl Store {
         project_path: &str,
         agent_id: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -616,7 +631,7 @@ impl Store {
         raw_input: &str,
         distilled_output: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -643,7 +658,7 @@ impl Store {
     }
 
     pub fn record_unhandled_tool(&self, tool_name: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -656,7 +671,7 @@ impl Store {
     }
 
     pub fn record_passthrough(&self, command: &str, bytes: usize) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -679,7 +694,7 @@ impl Store {
             .unwrap_or(0);
         let rewind_key = format!("{}_{}", ts_ns, short_hash);
 
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return rewind_key,
         };
@@ -697,7 +712,7 @@ impl Store {
     }
 
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -723,7 +738,7 @@ impl Store {
 
     /// Get recent distillation rows for omni_history MCP tool
     pub fn get_recent_distillations(&self, session_id: &str, limit: usize) -> Vec<DistillationRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -750,13 +765,13 @@ impl Store {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionState>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt =
             conn.prepare("SELECT state_json FROM sessions ORDER BY last_active DESC LIMIT ?1")?;
         let rows = stmt.query_map(params![limit as i64], |row| {
@@ -776,7 +791,7 @@ impl Store {
     }
 
     pub fn upsert_session(&self, state: &SessionState) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -797,7 +812,7 @@ impl Store {
     }
 
     pub fn find_latest_session(&self) -> Option<SessionState> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -819,7 +834,7 @@ impl Store {
     }
 
     pub fn record_context_turn(&self, turn: &crate::analytics::context_composition::ContextTurn) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -853,7 +868,7 @@ impl Store {
     }
 
     pub fn index_event(&self, session_id: &str, event_type: &str, content: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -871,7 +886,7 @@ impl Store {
         query: &str,
         limit: usize,
     ) -> Vec<String> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -903,7 +918,7 @@ impl Store {
         since: i64,
         limit: usize,
     ) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT
                 command,
@@ -938,7 +953,7 @@ impl Store {
 
     /// Agent breakdown: (agent_id, count, input_bytes, output_bytes)
     pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT
                 COALESCE(agent_id, 'unknown') as agent,
@@ -973,7 +988,7 @@ impl Store {
         since: i64,
         limit: usize,
     ) -> Result<Vec<(String, String, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT
                 CASE WHEN command != '' THEN command ELSE '[unknown command]' END as command_name,
@@ -1024,7 +1039,7 @@ impl Store {
     }
 
     pub fn get_project_stats(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT 
                 project_path, 
@@ -1057,7 +1072,7 @@ impl Store {
 
     /// Set or update a loop memory entry. On conflict, bumps times_confirmed and updates value.
     pub fn loop_memory_set(&self, goal_hash: &str, key: &str, value: &str, confidence: f64) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1076,7 +1091,7 @@ impl Store {
 
     /// Get a single loop memory entry.
     pub fn loop_memory_get(&self, goal_hash: &str, key: &str) -> Option<(String, f64, i64)> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -1089,7 +1104,7 @@ impl Store {
 
     /// List all loop memory entries for a given goal hash.
     pub fn loop_memory_list(&self, goal_hash: &str) -> Vec<(String, String, f64, i64)> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1114,7 +1129,7 @@ impl Store {
 
     /// Delete a loop memory entry.
     pub fn loop_memory_forget(&self, goal_hash: &str, key: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1125,7 +1140,7 @@ impl Store {
     }
 
     pub fn cleanup_old(&self, days: u32) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1155,7 +1170,7 @@ impl Store {
     }
 
     pub fn get_recent_traces(&self, limit: usize) -> Result<Vec<(String, String, String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT session_id, command, raw_input, distilled_output FROM execution_traces ORDER BY ts DESC LIMIT ?1",
         )?;
@@ -1175,7 +1190,7 @@ impl Store {
 
     /// Test that the database is actually writable (catches sandbox restrictions)
     pub fn test_write(&self) -> bool {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return false,
         };
@@ -1202,7 +1217,7 @@ impl Store {
         exit_reason: &str,
         project_path: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1227,7 +1242,7 @@ impl Store {
     }
 
     pub fn get_recent_session_summaries(&self, limit: usize) -> Vec<SessionSummaryRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1260,7 +1275,7 @@ impl Store {
     // ──  Retrieve Events (adaptive threshold) ──────────────────
 
     pub fn record_retrieve_event(&self, command_prefix: &str, hash: &str, agent_id: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1276,7 +1291,7 @@ impl Store {
     /// Returns retrieve_rate for a command prefix (0.0 – 1.0)
     /// High rate = OMNI too aggressive for this command type
     pub fn get_retrieve_rate(&self, command_prefix: &str, window_days: i64) -> f64 {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return 0.0,
         };
@@ -1301,7 +1316,7 @@ impl Store {
     }
 
     pub fn find_command_for_hash(&self, hash: &str) -> Option<String> {
-        let conn = self.conn.lock().ok()?;
+        let conn = self.pool.get().ok()?;
         conn.query_row(
             "SELECT command FROM distillations WHERE rewind_hash = ? LIMIT 1",
             params![hash],
@@ -1319,7 +1334,7 @@ impl Store {
         value: &str,
         confidence: f32,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1337,7 +1352,7 @@ impl Store {
     }
 
     pub fn get_project_knowledge(&self, project_hash: &str) -> Vec<(String, String, f32)> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1371,7 +1386,7 @@ impl Store {
         project_hash: &str,
         state_json: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1393,7 +1408,7 @@ impl Store {
         project_hash: &str,
         exclude_agent: &str,
     ) -> Vec<AgentSessionRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1426,7 +1441,7 @@ impl Store {
     pub fn upsert_pattern(&self, pattern_text: &str, tool_family: &str) {
         let hash = Self::pattern_hash(pattern_text);
         let now = chrono::Utc::now().timestamp();
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1444,7 +1459,7 @@ impl Store {
     /// Mark a pattern as resolved (command succeeded after failure)
     pub fn resolve_pattern(&self, tool_family: &str, resolution_hint: &str) {
         let now = chrono::Utc::now().timestamp();
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1462,7 +1477,7 @@ impl Store {
 
     /// Get recurring patterns for a tool family (sorted by occurrence count)
     pub fn get_patterns(&self, tool_family: Option<&str>, limit: usize) -> Vec<PatternMemoryRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1526,7 +1541,7 @@ impl Store {
 
     /// Get top recurring issues across all tools
     pub fn get_top_insights(&self, limit: usize) -> Vec<PatternMemoryRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1631,7 +1646,7 @@ mod tests {
 
         let store = Store::open_path(&db_path).unwrap();
 
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table'")
             .unwrap();
@@ -1684,7 +1699,7 @@ mod tests {
         assert_eq!(retrieved, Some(content.to_string()));
 
         // Retrieved counts updated
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         let count: i32 = conn
             .query_row(
                 "SELECT retrieved FROM rewind_store WHERE hash = ?1",
@@ -1735,13 +1750,13 @@ mod tests {
         let (store, _dir) = get_temp_store();
         let old_ts = chrono::Utc::now().timestamp() - (5 * 86400); // 5 days ago
 
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         conn.execute("INSERT INTO distillations (session_id, ts, filter_name, input_bytes, output_bytes, route, latency_ms) VALUES ('sess_1', ?1, 'f', 1, 1, 'K', 1)", [old_ts]).unwrap();
         drop(conn);
 
         store.cleanup_old(2); // keep last 2 days
 
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         let count: i32 = conn
             .query_row("SELECT COUNT(*) FROM distillations", [], |row| row.get(0))
             .unwrap();
