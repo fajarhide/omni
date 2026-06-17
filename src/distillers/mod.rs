@@ -162,6 +162,7 @@ fn should_passthrough_config_output(command: &str, input: &str) -> bool {
 }
 
 /// Distill output based on command
+#[tracing::instrument(skip_all)]
 pub fn distill_with_command(
     segments: &[crate::pipeline::OutputSegment],
     input: &str,

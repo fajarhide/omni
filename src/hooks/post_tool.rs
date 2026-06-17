@@ -23,6 +23,7 @@ struct HookSpecificOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     additional_context: Option<String>,
 }
+#[tracing::instrument(skip_all)]
 pub fn process_payload(
     input_str: &str,
     store: Option<Arc<Store>>,
