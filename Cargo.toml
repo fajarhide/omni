@@ -76,6 +76,8 @@ schemars = "1.2.1"
 unicode-width = "0.2.2"
 unicode-segmentation = "1.13.3"
 lru = "0.18.0"
+dialoguer = "0.11"
+console = "0.15"
 
 [dev-dependencies]
 insta = "1"  # snapshot testing

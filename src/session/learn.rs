@@ -261,8 +261,25 @@ pub fn queue_for_learn(input: &str, command: &str) {
             "sample": input_clone,
         });
 
+        let mut should_auto_apply = false;
         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
             let _ = writeln!(file, "{}", entry);
+
+            // Check line count for auto-apply
+            if let Ok(content) = fs::read_to_string(&path)
+                && content.lines().count() >= 50
+            {
+                should_auto_apply = true;
+            }
+        }
+
+        if should_auto_apply {
+            let _ = crate::cli::learn::run_learn(&[
+                "omni".to_string(),
+                "learn".to_string(),
+                "--apply".to_string(),
+                "--from-queue".to_string(),
+            ]);
         }
     });
 }

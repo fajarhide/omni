@@ -27,11 +27,37 @@ impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer
     }
 }
 
-pub struct Store {
+pub struct SqliteBackend {
     pub(crate) pool: Pool<SqliteConnectionManager>,
 }
 
+pub struct Store {
+    pub backend: SqliteBackend,
+}
+
+impl std::ops::Deref for Store {
+    type Target = SqliteBackend;
+
+    fn deref(&self) -> &Self::Target {
+        &self.backend
+    }
+}
+
 impl Store {
+    pub fn open() -> Result<Self> {
+        Ok(Self {
+            backend: SqliteBackend::open()?,
+        })
+    }
+
+    pub fn open_path(path: &std::path::Path) -> Result<Self> {
+        Ok(Self {
+            backend: SqliteBackend::open_path(path)?,
+        })
+    }
+}
+
+impl SqliteBackend {
     /// Creates dir ~/.omni/ if none exists, Open/create DB, Run schema migrations
     pub fn open() -> Result<Self> {
         let db_path = if let Ok(custom_path) = std::env::var("OMNI_DB_PATH") {

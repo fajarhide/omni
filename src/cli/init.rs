@@ -122,54 +122,91 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
 
     if no_flags {
         println!(
-            "\n{} {} — Choose an AI Agent to configure:\n",
+            "\n{} {} — Setup OMNI for your preferred AI Agent\n",
             "omni".bold().cyan(),
             "init".bold().yellow()
         );
-        println!("  [{}]  Claude Code (Anthropic)", "1".cyan());
-        println!("  [{}]  Cursor AI", "2".cyan());
-        println!("  [{}]  Zed Editor", "3".cyan());
-        println!("  [{}]  Cline", "4".cyan());
-        println!("  [{}]  Roo Code", "5".cyan());
-        println!("  [{}]  GitHub Copilot CLI", "6".cyan());
-        println!("  [{}]  Gemini CLI", "7".cyan());
-        println!("  [{}]  OpenCode", "8".cyan());
-        println!("  [{}]  Codex CLI", "9".cyan());
-        println!("  [{}] OpenClaw", "10".cyan());
-        println!("  [{}] Antigravity IDE", "11".cyan());
-        println!("  [{}] Hermes Agent", "12".cyan());
-        println!("  [{}] VS Code (MCP)", "13".cyan());
-        println!("  [{}]  Pi Agent", "14".cyan());
-        println!("  [{}]  Quit\n", "q".yellow());
 
-        use std::io::Write;
-        print!("Select an option [1-14, q]: ");
-        std::io::stdout().flush()?;
+        let items = vec![
+            "Claude Code (Anthropic)",
+            "Cursor AI",
+            "Zed Editor",
+            "Cline",
+            "Roo Code",
+            "GitHub Copilot CLI",
+            "Gemini CLI",
+            "OpenCode",
+            "Codex CLI",
+            "OpenClaw",
+            "Antigravity IDE",
+            "Hermes Agent",
+            "VS Code (MCP)",
+            "Pi Agent",
+            "Quit",
+        ];
 
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        match input.trim() {
-            "1" => {
+        let selection = dialoguer::Select::new()
+            .with_prompt("Select an AI Agent to configure")
+            .items(&items)
+            .default(0)
+            .interact()?;
+
+        match selection {
+            0 => {
                 is_claude = true;
                 is_hook = true;
                 is_mcp = true;
             }
-            "2" => is_cursor = true,
-            "3" => is_zed = true,
-            "4" => is_cline = true,
-            "5" => is_roo = true,
-            "6" => is_copilot = true,
-            "7" => is_gemini = true,
-            "8" => is_opencode = true,
-            "9" => is_codex = true,
-            "10" => is_openclaw = true,
-            "11" => is_antigravity = true,
-            "12" => is_hermes = true,
-            "13" => is_vscode = true,
-            "14" => is_pi = true,
+            1 => is_cursor = true,
+            2 => is_zed = true,
+            3 => is_cline = true,
+            4 => is_roo = true,
+            5 => is_copilot = true,
+            6 => is_gemini = true,
+            7 => is_opencode = true,
+            8 => is_codex = true,
+            9 => is_openclaw = true,
+            10 => is_antigravity = true,
+            11 => is_hermes = true,
+            12 => is_vscode = true,
+            13 => is_pi = true,
             _ => return Ok(()),
         }
-        println!();
+
+        println!(
+            "\n{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
+        println!(" {} OMNI Before & After Preview", "⚡".yellow());
+        println!(
+            "{}",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
+        println!("{}", "Without OMNI:".red());
+        println!("  npm WARN deprecated ... (300 lines of warnings)");
+        println!("  git log (2000 lines of history)");
+        println!("{}", "\nWith OMNI:".green());
+        println!("  npm WARN deprecated ... [OMNI: ⚠️ 300 repetitive lines dropped]");
+        println!("  git log [OMNI: ⚠️ truncated to latest 50 lines]");
+        println!(
+            "{}\n",
+            "─────────────────────────────────────────"
+                .bright_black()
+                .bold()
+        );
+
+        let proceed = dialoguer::Confirm::new()
+            .with_prompt("Proceed with installation?")
+            .default(true)
+            .interact()?;
+
+        if !proceed {
+            return Ok(());
+        }
     }
 
     let target_ids = if is_all {
