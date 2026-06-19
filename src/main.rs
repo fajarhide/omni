@@ -65,39 +65,98 @@ struct OmniArgs {
 #[derive(Subcommand, Debug)]
 enum OmniCommand {
     /// Setup OMNI Hooks and MCP server
-    Init,
+    #[command(trailing_var_arg = true)]
+    Init {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// View token savings analytics
-    Stats,
+    #[command(trailing_var_arg = true)]
+    Stats {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Manage session state
-    #[command(alias = "sessions")]
-    Session,
+    #[command(alias = "sessions", trailing_var_arg = true)]
+    Session {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Engram
-    #[command(alias = "engrams")]
-    Engram,
+    #[command(alias = "engrams", trailing_var_arg = true)]
+    Engram {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Handoff
-    Handoff,
+    #[command(trailing_var_arg = true)]
+    Handoff {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Auto-generate filters from history
-    Learn,
+    #[command(trailing_var_arg = true)]
+    Learn {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// View and manage archived content
-    Rewind,
+    #[command(trailing_var_arg = true)]
+    Rewind {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Query distillation history (OmniQL)
-    Query,
+    #[command(trailing_var_arg = true)]
+    Query {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// View recurring error patterns
-    Patterns,
-    /// Exec
-    Exec,
+    #[command(trailing_var_arg = true)]
+    Patterns {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Execute a command with OMNI distillation
+    #[command(trailing_var_arg = true)]
+    Exec {
+        /// Command and arguments to execute
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        cmd_args: Vec<String>,
+    },
     /// Rewrite
-    Rewrite,
+    #[command(trailing_var_arg = true)]
+    Rewrite {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Diagnose installation health
-    Doctor,
+    #[command(trailing_var_arg = true)]
+    Doctor {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Clean uninstall (for backups config)
     Reset,
     /// Compare last original input vs distilled
-    Diff,
+    #[command(trailing_var_arg = true)]
+    Diff {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Upgrade OMNI to latest
-    Update,
+    #[command(trailing_var_arg = true)]
+    Update {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// View version and environment info
-    Version,
+    #[command(trailing_var_arg = true)]
+    Version {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
 
     // Fallback for passing unknown args to subcommands
     #[command(external_subcommand)]
@@ -309,19 +368,19 @@ fn main() {
             let cmd = parsed.command;
 
             match cmd {
-                Some(OmniCommand::Version) => {
+                Some(OmniCommand::Version { .. }) => {
                     cli::version::run_version(&args);
                 }
                 None => {
                     print_help();
                 }
-                Some(OmniCommand::Diff) => {
+                Some(OmniCommand::Diff { .. }) => {
                     if let Err(e) = cli::diff::run_diff(&args) {
                         eprintln!("[omni] Diff error: {}", e);
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Init) => {
+                Some(OmniCommand::Init { .. }) => {
                     let _ = cli::init::run_init(&args);
                 }
                 Some(OmniCommand::Reset) => {
@@ -330,7 +389,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Stats) => match Store::open() {
+                Some(OmniCommand::Stats { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::stats::run(&args, &store) {
                             eprintln!("[omni] Stats error: {}", e);
@@ -342,7 +401,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Session) => match Store::open() {
+                Some(OmniCommand::Session { .. }) => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::session::run_session(&args, store_arc) {
@@ -355,7 +414,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Engram) => match Store::open() {
+                Some(OmniCommand::Engram { .. }) => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::engram::run_engram(&args, store_arc) {
@@ -368,7 +427,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Handoff) => match Store::open() {
+                Some(OmniCommand::Handoff { .. }) => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
@@ -381,13 +440,13 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Learn) => {
+                Some(OmniCommand::Learn { .. }) => {
                     if let Err(e) = cli::learn::run_learn(&args) {
                         eprintln!("[omni] Auto-Learn error: {}", e);
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Rewind) => match Store::open() {
+                Some(OmniCommand::Rewind { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::rewind::run_rewind(&args, &store) {
                             eprintln!("[omni] Rewind error: {}", e);
@@ -399,7 +458,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Query) => match Store::open() {
+                Some(OmniCommand::Query { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::query::run_query(&args, &store) {
                             eprintln!("[omni] Query error: {}", e);
@@ -411,7 +470,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Patterns) => match Store::open() {
+                Some(OmniCommand::Patterns { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::patterns::run_patterns(&args, &store) {
                             eprintln!("[omni] Patterns error: {}", e);
@@ -423,7 +482,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Exec) => {
+                Some(OmniCommand::Exec { .. }) => {
                     let store_arc = Store::open().map(Arc::new).ok();
                     let session_arc = store_arc.as_ref().map(|s| {
                         let session = s.find_latest_session().unwrap_or_else(SessionState::new);
@@ -434,18 +493,18 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Rewrite) => {
+                Some(OmniCommand::Rewrite { .. }) => {
                     if let Err(_e) = cli::rewrite::run_rewrite(&args) {
                         std::process::exit(1); // Standard silent fail for rewrite hook
                     }
                 }
-                Some(OmniCommand::Doctor) => {
+                Some(OmniCommand::Doctor { .. }) => {
                     if let Err(e) = cli::doctor::run(&args) {
                         eprintln!("[omni] Doctor error: {}", e);
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Update) => {
+                Some(OmniCommand::Update { .. }) => {
                     if let Err(e) = cli::update::run(&args) {
                         eprintln!("[omni] Update error: {}", e);
                         std::process::exit(1);
