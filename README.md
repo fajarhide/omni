@@ -40,79 +40,93 @@ OMNI fixes both.
 
 ## The Difference
 
+**Problem 1: Your terminal drowns out the signal**
+
 ### `npm install`
-**Without Omni:** 10,000 lines of "Downloading...", "Extracting...", and warnings. AI reads everything.  
-**With Omni:** Package conflict. Node 20 required.
+**Without OMNI:** 10,000 lines of "Downloading...", "Extracting...", and warnings. AI reads everything.  
+**With OMNI:** Package conflict. Node 20 required.
 
 ### `terraform apply`
-**Without Omni:** 4,500 lines of unchanged execution plans.  
-**With Omni:** The 3 resources that failed IAM permissions.
+**Without OMNI:** 4,500 lines of unchanged execution plans.  
+**With OMNI:** The 3 resources that failed IAM permissions.
 
 ### `docker build`
-**Without Omni:** Endless cache hits, layer hashes, and download progress bars.  
-**With Omni:** Missing dependency `libpq-dev` at layer 12.
+**Without OMNI:** Endless cache hits, layer hashes, and download progress bars.  
+**With OMNI:** Missing dependency `libpq-dev` at layer 12.
 
 ### `pytest`
-**Without Omni:** 500 passing tests and verbose setup logs.  
-**With Omni:** Only the 2 failed assertions and their stack traces.
-
-### `git diff`
-**Without Omni:** Formatting tweaks, generated lockfiles, and whitespace changes.  
-**With Omni:** Only the core business logic changes.
-
-### `kubectl logs`
-**Without Omni:** Thousands of successful health checks and normal traffic logs.  
-**With Omni:** The crash loop and panic stack trace.
+**Without OMNI:** 500 passing tests and verbose setup logs.  
+**With OMNI:** Only the 2 failed assertions and their stack traces.
 
 ### `cargo build`
-**Without Omni:** 300 lines of compiling dependencies and warnings.  
-**With Omni:** The exact line where the borrow checker failed.
+**Without OMNI:** 300 lines of compiling dependencies and warnings.  
+**With OMNI:** The exact line where the borrow checker failed.
+
+### `kubectl logs`
+**Without OMNI:** Thousands of successful health checks and normal traffic logs.  
+**With OMNI:** The crash loop and panic stack trace.
+
+### `git diff`
+**Without OMNI:** Formatting tweaks, generated lockfiles, and whitespace changes.  
+**With OMNI:** Only the core business logic changes.
 
 ### `go test`
-**Without Omni:** Pages of standard output from passing packages.  
-**With Omni:** The single nil pointer dereference.
+**Without OMNI:** Pages of standard output from passing packages.  
+**With OMNI:** The single nil pointer dereference.
 
 ### `mvn package`
-**Without Omni:** Megabytes of "Downloading from maven central".  
-**With Omni:** Compilation error in `UserService.java`.
+**Without OMNI:** Megabytes of "Downloading from maven central".  
+**With OMNI:** Compilation error in `UserService.java`.
 
 ### `pip install`
-**Without Omni:** Resolution logs and wheel building outputs.  
-**With Omni:** Dependency conflict with `numpy`.
+**Without OMNI:** Resolution logs and wheel building outputs.  
+**With OMNI:** Dependency conflict with `numpy`.
 
 ### `webpack / vite`
-**Without Omni:** 2,000 chunk asset lists and build times.  
-**With Omni:** Missing module resolution in `App.tsx`.
-
-### `git merge`
-**Without Omni:** 50 files listed with fast-forward stats.  
-**With Omni:** The exact files with unresolved merge conflicts.
+**Without OMNI:** 2,000 chunk asset lists and build times.  
+**With OMNI:** Missing module resolution in `App.tsx`.
 
 ### `helm install`
-**Without Omni:** Entire rendered YAML output of all templates.  
-**With Omni:** Pod scheduling failure due to missing secret.
+**Without OMNI:** Entire rendered YAML output of all templates.  
+**With OMNI:** Pod scheduling failure due to missing secret.
 
 ### `ansible-playbook`
-**Without Omni:** "ok" and "skipped" statuses for 50 servers.  
-**With Omni:** The single "failed" task on `web-03`.
+**Without OMNI:** "ok" and "skipped" statuses for 50 servers.  
+**With OMNI:** The single "failed" task on `web-03`.
 
 ### GitHub Actions (CI/CD)
-**Without Omni:** Complete workflow logs including environment setup.  
-**With Omni:** Only the specific step that exited with code 1.
+**Without OMNI:** Complete workflow logs including environment setup.  
+**With OMNI:** Only the specific step that exited with code 1.
+
+**Problem 2: Your agent forgets everything overnight**
+
+### Starting a new session
+**Without OMNI:** "Please re-explain the project structure, the auth module is broken, and we use Postgres not MySQL."  
+**With OMNI:** The agent already knows. It picks up where you left off.
+
+### Fixing the same bug twice
+**Without OMNI:** Agent hits the same framework gotcha it already solved yesterday because it has no memory.  
+**With OMNI:** The fix is already stored. `omni recall` surfaces the exact solution in under 10ms.
+
+### Multi-IDE workflows (Cursor → Claude Code)
+**Without OMNI:** New IDE, new agent, zero context. You're starting from scratch.  
+**With OMNI:** Session summary is injected automatically. New agent is immediately up to speed.
 
 ---
 
-## Why this matters
+## Why This Matters
 
 The code you *don't* send to the AI is just as important as the code you do.
 
-When you feed an AI megabytes of terminal noise, it suffers from context bloat. It gets distracted, hallucinates fixes for the wrong warnings, and burns through your API budget.
+When you feed an AI megabytes of terminal noise, it suffers from context bloat—hallucinating fixes for the wrong warnings and burning your API budget on irrelevant output.
 
-OMNI sits invisibly between your terminal and your AI. It intercepts the raw output, drops the noise, and hands your agent the pure signal.
+When you restart an agent and it has no memory, you lose hours re-establishing context that should have been preserved automatically.
 
-* You save money.
-* The AI responds instantly.
-* The hallucinations disappear.
+OMNI solves both, invisibly:
+
+* **Less noise** → lower cost, faster responses, zero hallucination triggers.
+* **Persistent memory** → no more re-explaining your project, no more repeating fixes.
+* **One install** → works silently with every agent you already use.
 
 ---
 

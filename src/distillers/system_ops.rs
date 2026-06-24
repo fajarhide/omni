@@ -293,59 +293,74 @@ fn distill_ls_output(input: &str) -> String {
 
 fn distill_find_output(input: &str) -> String {
     let mut by_ext: BTreeMap<String, u32> = BTreeMap::new();
+    let mut by_dir: BTreeMap<String, u32> = BTreeMap::new();
     let mut total = 0u32;
-    let mut samples: Vec<String> = Vec::new();
+    let mut dirs = 0u32;
+    let mut files = 0u32;
 
     for line in input.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || trimmed == "." {
             continue;
         }
         total += 1;
 
+        // Classify dir vs file
+        if !trimmed.contains('.') || trimmed.ends_with('/') {
+            dirs += 1;
+        } else {
+            files += 1;
+        }
+
         // Extract extension
         let ext = if let Some(dot_pos) = trimmed.rfind('.') {
-            let ext = &trimmed[dot_pos..];
-            // Only track if it looks like a real extension (no slashes, reasonable length)
-            if ext.len() <= 10 && !ext.contains('/') {
-                ext.to_string()
+            let after_dot = &trimmed[dot_pos..];
+            if after_dot.len() <= 10 && !after_dot.contains('/') {
+                after_dot.to_string()
             } else {
                 "(no ext)".to_string()
             }
         } else {
             "(no ext)".to_string()
         };
-
         *by_ext.entry(ext).or_insert(0) += 1;
 
-        // Collect first 3 samples
-        if samples.len() < 3 {
-            samples.push(trimmed.to_string());
-        }
+        // Track top-level directory
+        let dir_key = trimmed
+            .trim_start_matches("./")
+            .split('/')
+            .next()
+            .unwrap_or(".")
+            .to_string();
+        *by_dir.entry(dir_key).or_insert(0) += 1;
     }
 
-    let mut out = format!("find: {} results", total);
-
-    // Sort by count descending, show top extensions
-    let mut sorted: Vec<(String, u32)> = by_ext.into_iter().collect();
-    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
-
-    let ext_strs: Vec<String> = sorted
+    // Sort extensions by count descending
+    let mut sorted_ext: Vec<(String, u32)> = by_ext.into_iter().collect();
+    sorted_ext.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let ext_strs: Vec<String> = sorted_ext
         .iter()
-        .take(6)
-        .map(|(ext, n)| format!("{}: {}", ext, n))
+        .take(8)
+        .map(|(ext, n)| format!("{}={}", ext, n))
         .collect();
+
+    // Sort dirs by count descending
+    let mut sorted_dirs: Vec<(String, u32)> = by_dir.into_iter().collect();
+    sorted_dirs.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let dir_strs: Vec<String> = sorted_dirs
+        .iter()
+        .take(8)
+        .map(|(dir, n)| format!("{}/={}", dir, n))
+        .collect();
+
+    let mut out = format!("find: total={} files={} dirs={}", total, files, dirs);
     if !ext_strs.is_empty() {
-        out.push_str(&format!("\n  {}", ext_strs.join(", ")));
+        out.push_str(&format!("\n  ext: {}", ext_strs.join(" ")));
     }
-
-    if !samples.is_empty() {
-        out.push_str("\n  samples:");
-        for s in &samples {
-            out.push_str(&format!("\n    {}", s));
-        }
+    if !dir_strs.is_empty() {
+        out.push_str(&format!("\n  dirs: {}", dir_strs.join(" ")));
     }
-
+    out.push('\n');
     out
 }
 
