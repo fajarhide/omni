@@ -1,14 +1,10 @@
 <div align="center">
-  <img src="media/hero.svg" alt="OMNI" width="800" />
+  <img src="media/logo.svg" alt="OMNI Logo" width="180" />
 
-
-
-  ---
-  <p align="center">
+<h1>OMNI</h1>
+<p align="center">
     <em>Your AI isn't bad. It's drowning.</em>
-  </p>
-  
-  **Up to 85% less tokens &middot; ~40% faster &middot; ~60% cheaper &middot; Zero hallucination triggers**<br>
+</p>
 
   [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
 
@@ -20,6 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </div>
 
+  **Up to 85% less tokens &middot; ~40% faster &middot; ~60% cheaper &middot; Zero hallucination triggers**<br>
 
 Every AI coding assistant has the same problem.
 
@@ -216,6 +213,11 @@ If the AI *really* needs the dropped noise, OMNI's local SQLite **RewindStore** 
 ---
 
 ## Architecture
+
+
+<div align="center">
+  <img src="media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
+</div>
 
 Built in Rust for imperceptible latency.
 

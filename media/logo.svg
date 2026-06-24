@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b" />
+      <stop offset="100%" stop-color="#18181b" />
+    </linearGradient>
+
+    <!-- Signal Gradient -->
+    <linearGradient id="signal" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0ea5e9" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- Glow Filters -->
+    <filter id="glow-heavy" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    
+    <filter id="glow-light" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.02" />
+    </pattern>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="500" height="500" rx="80" fill="url(#bg)" stroke="#27272a" stroke-width="2"/>
+  <rect width="500" height="500" rx="80" fill="url(#grid)" />
+
+  <!-- ==========================================
+       LEFT SIDE: THE NOISE
+       ========================================== -->
+  <g stroke-linecap="round" opacity="0.8">
+    <line x1="30" y1="130" x2="160" y2="130" stroke="#ef4444" stroke-width="6" stroke-dasharray="15 10 30 15 20"/>
+    <line x1="20" y1="170" x2="125" y2="170" stroke="#f59e0b" stroke-width="5" stroke-dasharray="25 15 10 20"/>
+    <line x1="50" y1="210" x2="105" y2="210" stroke="#71717a" stroke-width="8" stroke-dasharray="10 20 30"/>
+    <line x1="20" y1="250" x2="95" y2="250" stroke="#3b82f6" stroke-width="6" stroke-dasharray="15 10 30 10"/>
+    <line x1="40" y1="290" x2="105" y2="290" stroke="#8b5cf6" stroke-width="8" stroke-dasharray="15 20 10 15"/>
+    <line x1="20" y1="330" x2="125" y2="330" stroke="#ec4899" stroke-width="5" stroke-dasharray="40 10 20"/>
+    <line x1="50" y1="370" x2="160" y2="370" stroke="#0ea5e9" stroke-width="6" stroke-dasharray="20 10 30 10"/>
+  </g>
+
+  <!-- ==========================================
+       CENTER: THE DISTILLATION LENS
+       ========================================== -->
+  <g transform="translate(250, 250)">
+    <!-- Outer mechanical bounds -->
+    <circle cx="0" cy="0" r="140" fill="none" stroke="#27272a" stroke-width="4"/>
+    <circle cx="0" cy="0" r="115" fill="none" stroke="#3f3f46" stroke-width="4" stroke-dasharray="10 15"/>
+    
+    <!-- Glowing compression arcs -->
+    <path d="M -90 -90 A 127 127 0 0 1 127 0" fill="none" stroke="url(#signal)" stroke-width="12" stroke-linecap="round" filter="url(#glow-heavy)"/>
+    <path d="M -90 90 A 127 127 0 0 0 127 0" fill="none" stroke="url(#signal)" stroke-width="12" stroke-linecap="round" filter="url(#glow-light)"/>
+    
+    <!-- Core Singularity -->
+    <circle cx="40" cy="0" r="24" fill="#ffffff" filter="url(#glow-heavy)"/>
+    <circle cx="40" cy="0" r="10" fill="#ffffff"/>
+    
+    <!-- Internal laser beam connecting noise to singularity -->
+    <line x1="-70" y1="0" x2="25" y2="0" stroke="#0ea5e9" stroke-width="5" opacity="0.8"/>
+  </g>
+
+  <!-- ==========================================
+       RIGHT SIDE: THE PURE SIGNAL
+       ========================================== -->
+  <g transform="translate(390, 250)">
+    <!-- Heavy glow layer -->
+    <line x1="0" y1="0" x2="80" y2="0" stroke="url(#signal)" stroke-width="16" stroke-linecap="round" filter="url(#glow-heavy)"/>
+    <!-- Core white-hot laser line -->
+    <line x1="0" y1="0" x2="80" y2="0" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.95"/>
+  </g>
+</svg>
