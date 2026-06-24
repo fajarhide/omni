@@ -268,5 +268,6 @@ This is a passion project built for the era of Agentic AI. Whether you're here t
     </picture>
   </a>
 </p>
-
+<center>
 Build with ❤️ by [Fajar Hidayat](https://github.com/fajarhide)
+</center>
