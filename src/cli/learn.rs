@@ -312,8 +312,14 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bold()
         );
     } else if apply {
-        let path = crate::paths::learned_filters_path();
-        let _ = crate::paths::ensure_omni_home();
+        let path = if std::path::Path::new(".omni").exists() {
+            std::path::PathBuf::from(".omni/filters.toml")
+        } else if std::path::Path::new(".omni.toml").exists() {
+            std::path::PathBuf::from(".omni.toml")
+        } else {
+            let _ = crate::paths::ensure_omni_home();
+            crate::paths::learned_filters_path()
+        };
         let added = apply_to_config(&candidates, &filter_name, &path, command_hint)?;
         if added > 0 {
             println!(

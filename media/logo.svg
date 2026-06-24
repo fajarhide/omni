@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b" />
+      <stop offset="100%" stop-color="#18181b" />
+    </linearGradient>
+
+    <!-- Signal Gradient -->
+    <linearGradient id="signal" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0ea5e9" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <!-- Glow Filters -->
+    <filter id="glow-heavy" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    
+    <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.02" />
+    </pattern>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="500" height="500" rx="80" fill="url(#bg)" stroke="#27272a" stroke-width="2"/>
+  <rect width="500" height="500" rx="80" fill="url(#grid)" />
+
+  <!-- ==========================================
+       EXTERNAL NOISE (Chaotic Equalizer Bars)
+       ========================================== -->
+  <g stroke-linecap="round" stroke-width="8" opacity="0.85" filter="url(#glow-red)">
+    <!-- Left Side Noise -->
+    <line x1="40" y1="240" x2="40" y2="290" stroke="#f43f5e"/>
+    <line x1="56" y1="190" x2="56" y2="340" stroke="#ef4444"/>
+    <line x1="72" y1="220" x2="72" y2="310" stroke="#f59e0b"/>
+    <line x1="88" y1="170" x2="88" y2="360" stroke="#ef4444"/>
+    <line x1="104" y1="230" x2="104" y2="300" stroke="#f43f5e"/>
+    
+    <!-- Right Side Noise -->
+    <line x1="396" y1="230" x2="396" y2="300" stroke="#f43f5e"/>
+    <line x1="412" y1="170" x2="412" y2="360" stroke="#ef4444"/>
+    <line x1="428" y1="220" x2="428" y2="310" stroke="#f59e0b"/>
+    <line x1="444" y1="190" x2="444" y2="340" stroke="#ef4444"/>
+    <line x1="460" y1="240" x2="460" y2="290" stroke="#f43f5e"/>
+  </g>
+
+  <!-- ==========================================
+       THE HEADPHONES (Omni Shield)
+       ========================================== -->
+  <!-- Outer Band -->
+  <path d="M 150 280 A 110 110 0 1 1 350 280" fill="none" stroke="#18181b" stroke-width="32" stroke-linecap="round"/>
+  <!-- Metallic Rim -->
+  <path d="M 150 280 A 110 110 0 1 1 350 280" fill="none" stroke="#3f3f46" stroke-width="24" stroke-linecap="round"/>
+  <!-- Inner Band Accent -->
+  <path d="M 150 280 A 110 110 0 1 1 350 280" fill="none" stroke="#27272a" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- EAR CUPS -->
+  <!-- Left Cup -->
+  <g transform="translate(150, 265)">
+    <!-- Main Shell -->
+    <rect x="-22" y="-45" width="44" height="90" rx="22" fill="#18181b" stroke="#52525b" stroke-width="6"/>
+    <!-- Outer accent line -->
+    <line x1="-12" y1="-25" x2="-12" y2="25" stroke="#3f3f46" stroke-width="4" stroke-linecap="round"/>
+    <!-- Ear cushion (facing inside) -->
+    <rect x="22" y="-35" width="12" height="70" rx="6" fill="#27272a"/>
+  </g>
+  
+  <!-- Right Cup -->
+  <g transform="translate(350, 265)">
+    <!-- Main Shell -->
+    <rect x="-22" y="-45" width="44" height="90" rx="22" fill="#18181b" stroke="#52525b" stroke-width="6"/>
+    <!-- Outer accent line -->
+    <line x1="12" y1="-25" x2="12" y2="25" stroke="#3f3f46" stroke-width="4" stroke-linecap="round"/>
+    <!-- Ear cushion (facing inside) -->
+    <rect x="-34" y="-35" width="12" height="70" rx="6" fill="#27272a"/>
+  </g>
+
+  <!-- ==========================================
+       THE PURE SIGNAL (AI Inside)
+       ========================================== -->
+  <g transform="translate(245, 265)">
+    <!-- Heavy glow layer -->
+    <path d="M -30 -16 L -10 0 L -30 16" fill="none" stroke="url(#signal)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow-heavy)"/>
+    <line x1="6" y1="16" x2="35" y2="16" stroke="url(#signal)" stroke-width="10" stroke-linecap="round" filter="url(#glow-heavy)"/>
+    
+    <!-- Core white-hot terminal prompt -->
+    <path d="M -30 -16 L -10 0 L -30 16" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="6" y1="16" x2="35" y2="16" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

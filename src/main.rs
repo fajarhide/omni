@@ -29,25 +29,150 @@ enum Mode {
     SessionStart,
     PreCompact,
     PreHook,
-    Pipe,
     Cli,
 }
 
-fn detect_mode(args: &[String]) -> Mode {
-    if args.len() > 1 {
-        match args[1].as_str() {
-            "--hook" | "--post-hook" => return Mode::PostHook,
-            "--mcp" => return Mode::Mcp,
-            "--session-start" | "--before-agent-start" => return Mode::SessionStart,
-            "--pre-compact" => return Mode::PreCompact,
-            "--pre-hook" => return Mode::PreHook,
-            _ => {}
-        }
-    }
-    if args.len() == 1 && !io::stdin().is_terminal() {
-        return Mode::Pipe;
-    }
-    Mode::Cli
+use clap::{Parser, Subcommand};
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "omni",
+    version = env!("CARGO_PKG_VERSION"),
+    about = "Less noise. More signal. Right signal.",
+    long_about = None,
+    disable_help_subcommand = true,
+)]
+struct OmniArgs {
+    #[arg(long, hide = true)]
+    hook: bool,
+    #[arg(long, hide = true)]
+    post_hook: bool,
+    #[arg(long, hide = true)]
+    mcp: bool,
+    #[arg(long = "session-start", hide = true)]
+    session_start: bool,
+    #[arg(long = "before-agent-start", hide = true)]
+    before_agent_start: bool,
+    #[arg(long = "pre-compact", hide = true)]
+    pre_compact: bool,
+    #[arg(long = "pre-hook", hide = true)]
+    pre_hook: bool,
+
+    #[command(subcommand)]
+    command: Option<OmniCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum OmniCommand {
+    /// Setup OMNI Hooks and MCP server
+    #[command(trailing_var_arg = true)]
+    Init {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// View token savings analytics
+    #[command(trailing_var_arg = true)]
+    Stats {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Manage session state
+    #[command(alias = "sessions", trailing_var_arg = true)]
+    Session {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Engram
+    #[command(alias = "engrams", trailing_var_arg = true)]
+    Engram {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Handoff
+    #[command(trailing_var_arg = true)]
+    Handoff {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Auto-generate filters from history
+    #[command(trailing_var_arg = true)]
+    Learn {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// View and manage archived content
+    #[command(trailing_var_arg = true)]
+    Rewind {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Query distillation history (OmniQL)
+    #[command(trailing_var_arg = true)]
+    Query {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// View recurring error patterns
+    #[command(trailing_var_arg = true)]
+    Patterns {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Store important knowledge to persistent memory
+    #[command(trailing_var_arg = true)]
+    Remember {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Set or view the project goal (North Star context pinning)
+    #[command(trailing_var_arg = true)]
+    Goal {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Execute a command with OMNI distillation
+    #[command(trailing_var_arg = true)]
+    Exec {
+        /// Command and arguments to execute
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        cmd_args: Vec<String>,
+    },
+    /// Rewrite
+    #[command(trailing_var_arg = true)]
+    Rewrite {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Diagnose installation health
+    #[command(trailing_var_arg = true)]
+    Doctor {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Clean uninstall (for backups config)
+    Reset,
+    /// Compare last original input vs distilled
+    #[command(trailing_var_arg = true)]
+    Diff {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// Upgrade OMNI to latest
+    #[command(trailing_var_arg = true)]
+    Update {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+    /// View version and environment info
+    #[command(trailing_var_arg = true)]
+    Version {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
+
+    // Fallback for passing unknown args to subcommands
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 fn detect_pipe_command() -> Option<String> {
@@ -106,14 +231,6 @@ fn print_help() {
         "query".cyan()
     );
     println!("  {: <12} View recurring error patterns", "patterns".cyan());
-    println!(
-        "  {: <12} Run self-optimizing loop on traces",
-        "optimize".cyan()
-    );
-    println!(
-        "  {: <12} Native Maker-Checker verification",
-        "verify".cyan()
-    );
 
     println!("\n{}", "UTILITIES:".bold().bright_white());
     println!("  {: <12} Diagnose installation health", "doctor".cyan());
@@ -159,8 +276,54 @@ fn print_help() {
 // ─── Main ───────────────────────────────────────────────
 
 fn main() {
+    // Initialize observability
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr) // Write to stderr to avoid polluting stdout
+        .try_init()
+        .ok(); // Ignore if already initialized (e.g. in tests)
+
     let args: Vec<String> = env::args().collect();
-    let mode = detect_mode(&args);
+
+    // Fast-path pipe mode
+    if args.len() == 1 && !io::stdin().is_terminal() {
+        let store_arc = Store::open().map(Arc::new).ok();
+        let session_arc = store_arc.as_ref().map(|s| {
+            let session = s.find_latest_session().unwrap_or_else(SessionState::new);
+            Arc::new(Mutex::new(session))
+        });
+        let cmd_name = detect_pipe_command();
+        if let Err(e) = hooks::pipe::run(store_arc, session_arc, cmd_name.as_deref()) {
+            eprintln!("[omni] Pipe engine error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // Parse CLI arguments with clap
+    let parsed = match OmniArgs::try_parse() {
+        Ok(p) => p,
+        Err(e) => {
+            // Because we use allow_external_subcommands, this error only happens
+            // for invalid global flags.
+            e.print().expect("failed to print error");
+            std::process::exit(1);
+        }
+    };
+
+    let mode = if parsed.hook || parsed.post_hook {
+        Mode::PostHook
+    } else if parsed.mcp {
+        Mode::Mcp
+    } else if parsed.session_start || parsed.before_agent_start {
+        Mode::SessionStart
+    } else if parsed.pre_compact {
+        Mode::PreCompact
+    } else if parsed.pre_hook {
+        Mode::PreHook
+    } else {
+        Mode::Cli
+    };
 
     match mode {
         Mode::PostHook => {
@@ -213,50 +376,32 @@ fn main() {
             }
         }
 
-        Mode::Pipe => {
-            let store_arc = Store::open().map(Arc::new).ok();
-            let session_arc = store_arc.as_ref().map(|s| {
-                let session = s.find_latest_session().unwrap_or_else(SessionState::new);
-                Arc::new(Mutex::new(session))
-            });
-            let cmd_name = detect_pipe_command();
-            if let Err(e) = hooks::pipe::run(store_arc, session_arc, cmd_name.as_deref()) {
-                eprintln!("[omni] Pipe engine error: {}", e);
-                std::process::exit(1);
-            }
-        }
-
         Mode::Cli => {
-            let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+            let cmd = parsed.command;
 
             match cmd {
-                "version" | "-v" | "--version" => {
+                Some(OmniCommand::Version { .. }) => {
                     cli::version::run_version(&args);
                 }
-
-                "help" | "-h" | "--help" => {
+                None => {
                     print_help();
                 }
-
-                "diff" => {
+                Some(OmniCommand::Diff { .. }) => {
                     if let Err(e) = cli::diff::run_diff(&args) {
                         eprintln!("[omni] Diff error: {}", e);
                         std::process::exit(1);
                     }
                 }
-
-                "init" => {
+                Some(OmniCommand::Init { .. }) => {
                     let _ = cli::init::run_init(&args);
                 }
-
-                "reset" => {
+                Some(OmniCommand::Reset) => {
                     if let Err(e) = cli::reset::handle_reset() {
                         eprintln!("[omni] Reset error: {}", e);
                         std::process::exit(1);
                     }
                 }
-
-                "stats" => match Store::open() {
+                Some(OmniCommand::Stats { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::stats::run(&args, &store) {
                             eprintln!("[omni] Stats error: {}", e);
@@ -268,8 +413,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "session" | "sessions" => match Store::open() {
+                Some(OmniCommand::Session { .. }) => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::session::run_session(&args, store_arc) {
@@ -282,8 +426,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "engram" | "engrams" => match Store::open() {
+                Some(OmniCommand::Engram { .. }) => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::engram::run_engram(&args, store_arc) {
@@ -296,8 +439,20 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "handoff" => match Store::open() {
+                Some(OmniCommand::Remember { extra }) => match Store::open() {
+                    Ok(store) => {
+                        let store_arc = Arc::new(store);
+                        if let Err(e) = cli::remember::run(&extra, store_arc) {
+                            eprintln!("[omni] Remember error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for remember: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+                Some(OmniCommand::Handoff { .. }) => match Store::open() {
                     Ok(store) => {
                         let store_arc = Arc::new(store);
                         if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
@@ -310,22 +465,25 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "learn" => {
+                Some(OmniCommand::Goal { extra }) => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::goal::run(&extra, &store) {
+                            eprintln!("[omni] Goal error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for goal: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+                Some(OmniCommand::Learn { .. }) => {
                     if let Err(e) = cli::learn::run_learn(&args) {
                         eprintln!("[omni] Auto-Learn error: {}", e);
                         std::process::exit(1);
                     }
                 }
-
-                "optimize" => {
-                    if let Err(e) = cli::optimize::run_optimize(&args) {
-                        eprintln!("[omni] Optimize error: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-
-                "rewind" => match Store::open() {
+                Some(OmniCommand::Rewind { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::rewind::run_rewind(&args, &store) {
                             eprintln!("[omni] Rewind error: {}", e);
@@ -337,8 +495,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "query" => match Store::open() {
+                Some(OmniCommand::Query { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::query::run_query(&args, &store) {
                             eprintln!("[omni] Query error: {}", e);
@@ -350,8 +507,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "patterns" => match Store::open() {
+                Some(OmniCommand::Patterns { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::patterns::run_patterns(&args, &store) {
                             eprintln!("[omni] Patterns error: {}", e);
@@ -363,8 +519,7 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-
-                "exec" => {
+                Some(OmniCommand::Exec { .. }) => {
                     let store_arc = Store::open().map(Arc::new).ok();
                     let session_arc = store_arc.as_ref().map(|s| {
                         let session = s.find_latest_session().unwrap_or_else(SessionState::new);
@@ -375,94 +530,175 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-
-                "verify" => {
-                    use clap::Parser;
-                    let verify_args = cli::verify::VerifyArgs::parse_from(&args);
-                    match Store::open() {
-                        Ok(store) => {
-                            if let Err(e) = cli::verify::run(&verify_args, Arc::new(store)) {
-                                eprintln!("[omni] Verify error: {}", e);
-                                std::process::exit(1);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[omni] Cannot open database for verify: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                }
-
-                "rewrite" => {
+                Some(OmniCommand::Rewrite { .. }) => {
                     if let Err(_e) = cli::rewrite::run_rewrite(&args) {
                         std::process::exit(1); // Standard silent fail for rewrite hook
                     }
                 }
-
-                "doctor" => {
+                Some(OmniCommand::Doctor { .. }) => {
                     if let Err(e) = cli::doctor::run(&args) {
                         eprintln!("[omni] Doctor error: {}", e);
                         std::process::exit(1);
                     }
                 }
-
-                "update" => {
+                Some(OmniCommand::Update { .. }) => {
                     if let Err(e) = cli::update::run(&args) {
                         eprintln!("[omni] Update error: {}", e);
                         std::process::exit(1);
                     }
                 }
-
-                unknown => {
-                    eprintln!(
-                        "omni: unknown command '{}'\nRun 'omni help' for usage.",
-                        unknown
-                    );
-                    std::process::exit(1);
+                Some(OmniCommand::External(_ext_args)) => {
+                    let cmd_name = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+                    match cmd_name {
+                        "version" | "-v" | "--version" => cli::version::run_version(&args),
+                        "help" | "-h" | "--help" => print_help(),
+                        "diff" => {
+                            if let Err(e) = cli::diff::run_diff(&args) {
+                                eprintln!("[omni] Diff error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        "init" => {
+                            let _ = cli::init::run_init(&args);
+                        }
+                        "reset" => {
+                            if let Err(e) = cli::reset::handle_reset() {
+                                eprintln!("[omni] Reset error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        "stats" => match Store::open() {
+                            Ok(store) => {
+                                if let Err(e) = cli::stats::run(&args, &store) {
+                                    eprintln!("[omni] Stats error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for stats: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "session" | "sessions" => match Store::open() {
+                            Ok(store) => {
+                                let store_arc = Arc::new(store);
+                                if let Err(e) = cli::session::run_session(&args, store_arc) {
+                                    eprintln!("[omni] Session error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for session: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "engram" | "engrams" => match Store::open() {
+                            Ok(store) => {
+                                let store_arc = Arc::new(store);
+                                if let Err(e) = cli::engram::run_engram(&args, store_arc) {
+                                    eprintln!("[omni] Engram error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for engrams: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "handoff" => match Store::open() {
+                            Ok(store) => {
+                                let store_arc = Arc::new(store);
+                                if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
+                                    eprintln!("[omni] Handoff error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for handoff: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "learn" => {
+                            if let Err(e) = cli::learn::run_learn(&args) {
+                                eprintln!("[omni] Auto-Learn error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        "rewind" => match Store::open() {
+                            Ok(store) => {
+                                if let Err(e) = cli::rewind::run_rewind(&args, &store) {
+                                    eprintln!("[omni] Rewind error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for rewind: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "query" => match Store::open() {
+                            Ok(store) => {
+                                if let Err(e) = cli::query::run_query(&args, &store) {
+                                    eprintln!("[omni] Query error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for query: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "patterns" => match Store::open() {
+                            Ok(store) => {
+                                if let Err(e) = cli::patterns::run_patterns(&args, &store) {
+                                    eprintln!("[omni] Patterns error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] Cannot open database for patterns: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "exec" => {
+                            let store_arc = Store::open().map(Arc::new).ok();
+                            let session_arc = store_arc.as_ref().map(|s| {
+                                let session =
+                                    s.find_latest_session().unwrap_or_else(SessionState::new);
+                                Arc::new(Mutex::new(session))
+                            });
+                            if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
+                                eprintln!("[omni] Exec error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        "rewrite" => {
+                            if let Err(_e) = cli::rewrite::run_rewrite(&args) {
+                                std::process::exit(1);
+                            }
+                        }
+                        "doctor" => {
+                            if let Err(e) = cli::doctor::run(&args) {
+                                eprintln!("[omni] Doctor error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        "update" => {
+                            if let Err(e) = cli::update::run(&args) {
+                                eprintln!("[omni] Update error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        unknown => {
+                            eprintln!(
+                                "omni: unknown command '{}'\nRun 'omni help' for usage.",
+                                unknown
+                            );
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args(flags: &[&str]) -> Vec<String> {
-        std::iter::once("omni")
-            .chain(flags.iter().copied())
-            .map(String::from)
-            .collect()
-    }
-
-    #[test]
-    fn detects_before_agent_start_mode() {
-        // Regression: --before-agent-start must route to SessionStart, not PostHook
-        assert_eq!(
-            detect_mode(&args(&["--before-agent-start"])),
-            Mode::SessionStart
-        );
-    }
-
-    #[test]
-    fn detects_session_start_mode() {
-        assert_eq!(detect_mode(&args(&["--session-start"])), Mode::SessionStart);
-    }
-
-    #[test]
-    fn detects_post_hook_aliases() {
-        assert_eq!(detect_mode(&args(&["--hook"])), Mode::PostHook);
-        assert_eq!(detect_mode(&args(&["--post-hook"])), Mode::PostHook);
-    }
-
-    #[test]
-    fn detects_pre_compact_mode() {
-        assert_eq!(detect_mode(&args(&["--pre-compact"])), Mode::PreCompact);
-    }
-
-    #[test]
-    fn treats_unknown_flag_as_cli() {
-        assert_eq!(detect_mode(&args(&["nonexistent-cmd-xyz"])), Mode::Cli);
     }
 }

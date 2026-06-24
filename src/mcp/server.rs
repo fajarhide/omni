@@ -41,7 +41,15 @@ pub struct OmniQueryParams {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OmniRecallParams {
-    pub tool: String,
+    pub query: String, // Upgraded recall parameter from tool to query
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OmniRememberParams {
+    pub content: String,
+    pub category: Option<String>,
+    pub tags: Option<String>,
+    pub project_scoped: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -384,41 +392,130 @@ impl OmniServer {
 
     #[tool(
         name = "omni_recall",
-        description = "Recall cross-session error patterns for a specific tool (e.g., cargo, npm) and what fixed them"
+        description = "Recall cross-session memories using semantic search across Engrams, Knowledge, and Distillation history"
     )]
     pub async fn omni_recall(&self, params: Parameters<OmniRecallParams>) -> String {
-        let tool = params.0.tool;
-        let patterns = self.store.get_patterns(Some(&tool), 5);
-        if patterns.is_empty() {
-            return format!("No recurring patterns found for tool: {}", tool);
+        let query = params.0.query;
+        let limit = 5;
+
+        let project_path = std::env::current_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let project_hash = compute_project_hash_str(&project_path);
+
+        let results = self
+            .store
+            .unified_recall(&query, Some(&project_hash), limit);
+        if results.is_empty() {
+            return format!("No memories found for query: {}", query);
         }
+
+        let command_ctx = {
+            let session = self.session.lock().unwrap_or_else(|p| p.into_inner());
+            session
+                .last_commands
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "mcp_recall".to_string())
+        };
 
         let mut report = format!(
-            "Found {} recurring patterns for {}:\n\n",
-            patterns.len(),
-            tool
+            "Found {} relevant memories for '{}':\n\n",
+            results.len(),
+            query
         );
-        for (i, p) in patterns.iter().enumerate() {
-            report.push_str(&format!(
-                "[{}] Seen {}x | Status: {}\n",
-                i + 1,
-                p.occurrence_count,
-                if p.was_resolved { "RESOLVED" } else { "ACTIVE" }
-            ));
+        for (i, hit) in results.iter().enumerate() {
+            // Log retrieval for INT-01 Adaptive Feedback Loop
+            self.store
+                .log_retrieval(&query, &hit.source, &hit.key, &project_hash, &command_ctx);
 
-            let lines: Vec<&str> = p.pattern_text.lines().collect();
-            for line in lines.iter().take(3) {
-                report.push_str(&format!("  {}\n", line));
-            }
-            if lines.len() > 3 {
-                report.push_str("  ...\n");
-            }
-            if p.was_resolved && !p.resolution_hint.is_empty() {
-                report.push_str(&format!("  Fix hint: {}\n", p.resolution_hint));
-            }
-            report.push('\n');
+            report.push_str(&format!(
+                "[{}] {} (Source: {}, Score: {:.2})\n{}\n\n",
+                i + 1,
+                hit.key,
+                hit.source,
+                hit.score,
+                hit.value
+            ));
         }
         report
+    }
+
+    #[tool(
+        name = "omni_adaptive_insights",
+        description = "Analyze retrieval patterns to surface actionable insights about distillation effectiveness. Returns JSON."
+    )]
+    pub async fn omni_adaptive_insights(&self) -> String {
+        let project_path = std::env::current_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let project_hash = compute_project_hash_str(&project_path);
+        let insights = crate::session::adaptive::analyze(&self.store, &project_hash);
+
+        serde_json::to_string_pretty(&insights).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    #[tool(
+        name = "omni_remember",
+        description = "Store important knowledge, decisions, or gotchas to OMNI's persistent memory"
+    )]
+    pub async fn omni_remember(&self, params: Parameters<OmniRememberParams>) -> String {
+        let content = params.0.content;
+        if content.trim().len() < 10 {
+            return "Memory entry too short. Please be more specific (min 10 chars).".to_string();
+        }
+
+        let category = params.0.category.unwrap_or_else(|| "fact".to_string());
+        let valid_categories = ["decision", "pattern", "gotcha", "fact"];
+        if !valid_categories.contains(&category.as_str()) {
+            return "Invalid category. Choose: decision, pattern, gotcha, fact.".to_string();
+        }
+
+        let project_scoped = params.0.project_scoped.unwrap_or(true);
+        let project_path = if project_scoped {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "global".to_string())
+        } else {
+            "global".to_string()
+        };
+
+        let project_hash = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(project_path.as_bytes());
+            let enc = hex::encode(h.finalize());
+            crate::util::text::safe_slice(&enc, 16).to_string()
+        };
+
+        let tags: Vec<String> = params
+            .0
+            .tags
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let prefix_len = 20.min(content.len());
+        let key = format!(
+            "[{}] {}",
+            category,
+            crate::util::text::safe_slice(&content, prefix_len)
+        );
+
+        self.store
+            .upsert_project_knowledge(&project_hash, &key, &content, 0.9);
+
+        let mut res = format!(
+            "✓ Stored memory as [{}]: {}\n  Scope: {}",
+            category, key, project_path
+        );
+        if !tags.is_empty() {
+            res.push_str(&format!("\n  Tags: {}", tags.join(", ")));
+        }
+        res
     }
 
     #[tool(
@@ -578,6 +675,17 @@ impl OmniServer {
                 let task = s.inferred_task.as_deref().unwrap_or("none");
                 let domain = s.inferred_domain.as_deref().unwrap_or("none");
 
+                let project_path = std::env::current_dir()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let project_hash = compute_project_hash_str(&project_path);
+
+                let goal_str = self
+                    .store
+                    .get_knowledge(&project_hash, "__omni_goal__")
+                    .map(|g| format!("Goal: {}\n", g))
+                    .unwrap_or_default();
+
                 let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
                 hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
                 let hot_str = if hot_vec.is_empty() {
@@ -598,13 +706,38 @@ impl OmniServer {
                     .unwrap_or_else(|| "none".to_string());
 
                 format!(
-                    "OMNI Session: {}\nCommands: {}\nTask: {}\nDomain: {}\nHot Files: {}\nLast Error: {}",
-                    s.session_id, s.command_count, task, domain, hot_str, err
+                    "OMNI Session: {}\n{}Commands: {}\nTask: {}\nDomain: {}\nHot Files: {}\nLast Error: {}",
+                    s.session_id, goal_str, s.command_count, task, domain, hot_str, err
                 )
             }
             "context" => {
                 let s = self.session.lock().unwrap_or_else(|p| p.into_inner());
                 let task = s.inferred_task.as_deref().unwrap_or("none");
+
+                let project_path = std::env::current_dir()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let project_hash = compute_project_hash_str(&project_path);
+
+                let goal_str = self
+                    .store
+                    .get_knowledge(&project_hash, "__omni_goal__")
+                    .map(|g| format!("[Goal] {} ", g))
+                    .unwrap_or_default();
+
+                // Inject INT-02 recent session summary if available
+                let last_session_str = self
+                    .store
+                    .get_recent_session_summaries(1)
+                    .into_iter()
+                    .next()
+                    .map(|sum| {
+                        format!(
+                            "[Prev Session] {} commands, saved {} tok. ",
+                            sum.total_commands, sum.tokens_saved
+                        )
+                    })
+                    .unwrap_or_default();
 
                 let mut hot_vec: Vec<(&String, &u32)> = s.hot_files.iter().collect();
                 hot_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
@@ -626,11 +759,11 @@ impl OmniServer {
                     .unwrap_or_else(|| "none".to_string());
 
                 let mut msg = format!(
-                    "[OMNI Context] Task: {}. Hot: {}. Error: {}",
-                    task, hot_str, err
+                    "{}{}[OMNI Context] Task: {}. Hot: {}. Error: {}",
+                    goal_str, last_session_str, task, hot_str, err
                 );
-                if msg.len() > 200 {
-                    msg.truncate(197);
+                if msg.len() > 400 {
+                    msg.truncate(397);
                     msg.push_str("...");
                 }
                 msg

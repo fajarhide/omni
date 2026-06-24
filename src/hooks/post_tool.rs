@@ -23,6 +23,7 @@ struct HookSpecificOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     additional_context: Option<String>,
 }
+#[tracing::instrument(skip_all)]
 pub fn process_payload(
     input_str: &str,
     store: Option<Arc<Store>>,
@@ -426,6 +427,46 @@ pub fn process_payload(
 
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
             tracker.track_command(&command, &content, &result);
+
+            // ── Implicit Engram Auto-Capture ────────────────
+            // Zero-config: OMNI silently persists milestone memories.
+            // No user action required — fires automatically on key events.
+            if let Ok(state) = sess.lock() {
+                let had_errors = state.active_errors.len() > 1; // proxy: had errors before this call
+                let has_errors_now = !state.active_errors.is_empty();
+                let resolved_error = state.active_errors.first().map(|s: &String| s.as_str());
+                // Extract any file-like tokens from the command as context
+                let files: Vec<String> = clean_command
+                    .split_whitespace()
+                    .filter(|t| t.contains('/') || (t.contains('.') && !t.starts_with('-')))
+                    .take(3)
+                    .map(|s| s.to_string())
+                    .collect();
+                let tool_family = crate::util::command_family::command_family(clean_command);
+
+                if let Some(engram) = crate::session::engram::detect_engram(
+                    clean_command,
+                    had_errors,
+                    has_errors_now,
+                    &tool_family,
+                    resolved_error,
+                    &files,
+                ) {
+                    let project_hash = {
+                        use sha2::{Digest, Sha256};
+                        let mut h = Sha256::new();
+                        h.update(project_path.as_bytes());
+                        let enc = hex::encode(h.finalize());
+                        crate::util::text::safe_slice(&enc, 16).to_string()
+                    };
+                    let category = crate::session::engram::classify_engram_category(&engram);
+                    if let Err(e) =
+                        s.persist_engram(&state.session_id, &engram, category, &project_hash)
+                    {
+                        tracing::warn!("omni: failed to persist engram: {e}");
+                    }
+                }
+            }
         }
     }
 

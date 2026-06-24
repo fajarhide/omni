@@ -2,19 +2,62 @@
 #![allow(clippy::string_slice)]
 
 use anyhow::{Context, Result};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
-use std::sync::Mutex;
 
 use crate::paths;
 use crate::pipeline::DistillResult;
 use crate::pipeline::SessionState;
 
+/// Customizes each pooled connection with required PRAGMA settings.
+/// WAL mode is database-level and persists, but synchronous and foreign_keys are per-connection.
+#[derive(Debug)]
+struct PragmaCustomizer;
+
+impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer {
+    fn on_acquire(&self, conn: &mut Connection) -> Result<(), rusqlite::Error> {
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA foreign_keys = ON;",
+        )?;
+        Ok(())
+    }
+}
+
+pub struct SqliteBackend {
+    pub(crate) pool: Pool<SqliteConnectionManager>,
+}
+
 pub struct Store {
-    pub(crate) conn: Mutex<Connection>,
+    pub backend: SqliteBackend,
+}
+
+impl std::ops::Deref for Store {
+    type Target = SqliteBackend;
+
+    fn deref(&self) -> &Self::Target {
+        &self.backend
+    }
 }
 
 impl Store {
+    pub fn open() -> Result<Self> {
+        Ok(Self {
+            backend: SqliteBackend::open()?,
+        })
+    }
+
+    pub fn open_path(path: &std::path::Path) -> Result<Self> {
+        Ok(Self {
+            backend: SqliteBackend::open_path(path)?,
+        })
+    }
+}
+
+impl SqliteBackend {
     /// Creates dir ~/.omni/ if none exists, Open/create DB, Run schema migrations
     pub fn open() -> Result<Self> {
         let db_path = if let Ok(custom_path) = std::env::var("OMNI_DB_PATH") {
@@ -33,25 +76,20 @@ impl Store {
             std::fs::create_dir_all(parent).context("Failed to create .omni directory")?;
         }
 
-        let conn = Connection::open(path).context("Failed to open SQLite database")?;
+        let manager = SqliteConnectionManager::file(path);
+        let pool = Pool::builder()
+            .max_size(4)
+            .connection_customizer(Box::new(PragmaCustomizer))
+            .build(manager)
+            .context("Failed to create SQLite connection pool")?;
 
-        // Optimizations
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA foreign_keys = ON;",
-        )?;
-
-        let store = Self {
-            conn: Mutex::new(conn),
-        };
-
+        let store = Self { pool };
         store.init_schema()?;
         Ok(store)
     }
 
     pub fn stats(&self) -> Result<(usize, usize)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let sessions: usize = conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
             .unwrap_or(0);
@@ -62,7 +100,7 @@ impl Store {
     }
 
     pub fn latest_activity_timestamps(&self) -> Result<(Option<u64>, Option<u64>)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let s_ts: Option<i64> = conn
             .query_row(
                 "SELECT last_active FROM sessions ORDER BY last_active DESC LIMIT 1",
@@ -83,7 +121,10 @@ impl Store {
     }
 
     pub fn check_fts5(&self) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
         let query =
             "SELECT 1 FROM pragma_compile_options WHERE compile_options LIKE 'ENABLE_FTS5%'";
         conn.query_row(query, [], |row| row.get::<_, i64>(0))
@@ -92,7 +133,7 @@ impl Store {
 
     /// Aggregate distillation stats since a given timestamp
     pub fn aggregate_stats(&self, since: i64) -> Result<(u64, u64, u64, u64, i64, u64, u64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         // returns (count, total_input, total_output, sum_latency, max_latency, raw_tokens, filtered_tokens)
         let r = conn.query_row(
             "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0), COALESCE(SUM(latency_ms),0), COALESCE(MAX(latency_ms),0), COALESCE(SUM(raw_tokens),0), COALESCE(SUM(filtered_tokens),0) FROM distillations WHERE ts >= ?1",
@@ -113,7 +154,7 @@ impl Store {
     /// Per-filter breakdown: (filter_name, count, avg_reduction_pct)
     #[allow(clippy::type_complexity)]
     pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT CASE WHEN command != '' THEN command ELSE '[unknown command]' END as grp_name, COUNT(*),
                     COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0),
@@ -138,7 +179,7 @@ impl Store {
 
     /// Route distribution: (route, count)
     pub fn route_distribution(&self, since: i64) -> Result<Vec<(String, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT route, COUNT(*) FROM distillations WHERE ts >= ?1 GROUP BY route ORDER BY COUNT(*) DESC"
         )?;
@@ -153,7 +194,7 @@ impl Store {
 
     /// RewindStore metrics: (total_stored, total_retrieved)
     pub fn rewind_metrics(&self) -> Result<(u64, u64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let total: u64 = conn
             .query_row("SELECT COUNT(*) FROM rewind_store", [], |row| row.get(0))
             .unwrap_or(0);
@@ -171,7 +212,7 @@ impl Store {
         &self,
         limit: usize,
     ) -> Result<Vec<crate::cli::rewind::RewindEntry>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT hash, ts, original_len, retrieved FROM rewind_store ORDER BY ts DESC LIMIT ?1",
         )?;
@@ -193,7 +234,7 @@ impl Store {
 
     /// Hot files for session insight
     pub fn hot_files_global(&self, since: i64) -> Result<Vec<(String, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT file_path, SUM(access_count) as cnt FROM file_access WHERE last_access >= ?1 GROUP BY file_path ORDER BY cnt DESC LIMIT 5"
         )?;
@@ -208,7 +249,7 @@ impl Store {
 
     /// Collapse aggregate: (event_count, total_original_lines, total_collapsed_lines)
     pub fn collapse_aggregate(&self, since: i64) -> Result<(u64, u64, u64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let r = conn.query_row(
             "SELECT COUNT(*), COALESCE(SUM(collapse_original),0), COALESCE(SUM(collapse_to),0) FROM distillations WHERE ts >= ?1 AND collapse_original > 0",
             params![since],
@@ -218,7 +259,7 @@ impl Store {
     }
 
     fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         conn.execute_batch(
             r#"
             -- 1. Sessions
@@ -421,7 +462,95 @@ impl Store {
                 ttl_days INTEGER DEFAULT 30,
                 UNIQUE(loop_goal_hash, key)
             );
-            CREATE INDEX IF NOT EXISTS idx_lm_goal ON loop_memory(loop_goal_hash);
+            -- 15a. Retrieval Feedback — adaptive scoring (INT-01)
+            CREATE TABLE IF NOT EXISTS retrieval_feedback (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                query        TEXT NOT NULL,
+                hit_source   TEXT NOT NULL,
+                hit_key      TEXT NOT NULL,
+                project_hash TEXT NOT NULL,
+                command_ctx  TEXT DEFAULT '',
+                ts           INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_rf_project ON retrieval_feedback(project_hash, ts);
+            CREATE INDEX IF NOT EXISTS idx_rf_cmd ON retrieval_feedback(command_ctx);
+
+            -- 15. Episodic Memory (Engrams)
+            CREATE TABLE IF NOT EXISTS engrams (
+                id           TEXT PRIMARY KEY,
+                session_id   TEXT NOT NULL,
+                trigger      TEXT NOT NULL,
+                label        TEXT NOT NULL,
+                detail       TEXT,
+                files        TEXT DEFAULT '[]',
+                category     TEXT DEFAULT 'progress',
+                tags         TEXT DEFAULT '[]',
+                project_hash TEXT NOT NULL,
+                ts           INTEGER NOT NULL,
+                last_accessed INTEGER NOT NULL,
+                hit_count    INTEGER DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_engrams_project ON engrams(project_hash);
+
+            -- 16. Semantic Search Virtual Tables (FTS5)
+            CREATE VIRTUAL TABLE IF NOT EXISTS engrams_fts USING fts5(
+                label,
+                detail,
+                files,
+                tags,
+                content='engrams',
+                content_rowid='rowid',
+                tokenize='porter unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS engrams_fts_insert
+                AFTER INSERT ON engrams BEGIN
+                    INSERT INTO engrams_fts(rowid, label, detail, files, tags)
+                    VALUES (new.rowid, new.label, new.detail, new.files, new.tags);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS engrams_fts_delete
+                AFTER DELETE ON engrams BEGIN
+                    INSERT INTO engrams_fts(engrams_fts, rowid, label, detail, files, tags)
+                    VALUES ('delete', old.rowid, old.label, old.detail, old.files, old.tags);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS engrams_fts_update
+                AFTER UPDATE ON engrams BEGIN
+                    INSERT INTO engrams_fts(engrams_fts, rowid, label, detail, files, tags)
+                    VALUES ('delete', old.rowid, old.label, old.detail, old.files, old.tags);
+                    INSERT INTO engrams_fts(rowid, label, detail, files, tags)
+                    VALUES (new.rowid, new.label, new.detail, new.files, new.tags);
+                END;
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+                key,
+                value,
+                content='project_knowledge',
+                content_rowid='rowid',
+                tokenize='porter unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS knowledge_fts_insert
+                AFTER INSERT ON project_knowledge BEGIN
+                    INSERT INTO knowledge_fts(rowid, key, value)
+                    VALUES (new.rowid, new.key, new.value);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS knowledge_fts_delete
+                AFTER DELETE ON project_knowledge BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, key, value)
+                    VALUES ('delete', old.rowid, old.key, old.value);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS knowledge_fts_update
+                AFTER UPDATE ON project_knowledge BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, key, value)
+                    VALUES ('delete', old.rowid, old.key, old.value);
+                    INSERT INTO knowledge_fts(rowid, key, value)
+                    VALUES (new.rowid, new.key, new.value);
+                END;
             "#,
         )?;
 
@@ -564,7 +693,7 @@ impl Store {
         project_path: &str,
         agent_id: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -616,7 +745,7 @@ impl Store {
         raw_input: &str,
         distilled_output: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -643,7 +772,7 @@ impl Store {
     }
 
     pub fn record_unhandled_tool(&self, tool_name: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -656,7 +785,7 @@ impl Store {
     }
 
     pub fn record_passthrough(&self, command: &str, bytes: usize) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -679,7 +808,7 @@ impl Store {
             .unwrap_or(0);
         let rewind_key = format!("{}_{}", ts_ns, short_hash);
 
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return rewind_key,
         };
@@ -697,7 +826,7 @@ impl Store {
     }
 
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -723,7 +852,7 @@ impl Store {
 
     /// Get recent distillation rows for omni_history MCP tool
     pub fn get_recent_distillations(&self, session_id: &str, limit: usize) -> Vec<DistillationRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -750,13 +879,13 @@ impl Store {
     }
 
     pub fn delete_session(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionState>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt =
             conn.prepare("SELECT state_json FROM sessions ORDER BY last_active DESC LIMIT ?1")?;
         let rows = stmt.query_map(params![limit as i64], |row| {
@@ -776,7 +905,7 @@ impl Store {
     }
 
     pub fn upsert_session(&self, state: &SessionState) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -797,7 +926,7 @@ impl Store {
     }
 
     pub fn find_latest_session(&self) -> Option<SessionState> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -819,7 +948,7 @@ impl Store {
     }
 
     pub fn record_context_turn(&self, turn: &crate::analytics::context_composition::ContextTurn) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -853,7 +982,7 @@ impl Store {
     }
 
     pub fn index_event(&self, session_id: &str, event_type: &str, content: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -871,7 +1000,7 @@ impl Store {
         query: &str,
         limit: usize,
     ) -> Vec<String> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -903,7 +1032,7 @@ impl Store {
         since: i64,
         limit: usize,
     ) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT
                 command,
@@ -938,7 +1067,7 @@ impl Store {
 
     /// Agent breakdown: (agent_id, count, input_bytes, output_bytes)
     pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT
                 COALESCE(agent_id, 'unknown') as agent,
@@ -973,7 +1102,7 @@ impl Store {
         since: i64,
         limit: usize,
     ) -> Result<Vec<(String, String, u64, u64, u64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT
                 CASE WHEN command != '' THEN command ELSE '[unknown command]' END as command_name,
@@ -1024,7 +1153,7 @@ impl Store {
     }
 
     pub fn get_project_stats(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT 
                 project_path, 
@@ -1057,7 +1186,7 @@ impl Store {
 
     /// Set or update a loop memory entry. On conflict, bumps times_confirmed and updates value.
     pub fn loop_memory_set(&self, goal_hash: &str, key: &str, value: &str, confidence: f64) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1076,7 +1205,7 @@ impl Store {
 
     /// Get a single loop memory entry.
     pub fn loop_memory_get(&self, goal_hash: &str, key: &str) -> Option<(String, f64, i64)> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -1089,7 +1218,7 @@ impl Store {
 
     /// List all loop memory entries for a given goal hash.
     pub fn loop_memory_list(&self, goal_hash: &str) -> Vec<(String, String, f64, i64)> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1114,7 +1243,7 @@ impl Store {
 
     /// Delete a loop memory entry.
     pub fn loop_memory_forget(&self, goal_hash: &str, key: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1125,7 +1254,7 @@ impl Store {
     }
 
     pub fn cleanup_old(&self, days: u32) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1155,7 +1284,7 @@ impl Store {
     }
 
     pub fn get_recent_traces(&self, limit: usize) -> Result<Vec<(String, String, String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(
             "SELECT session_id, command, raw_input, distilled_output FROM execution_traces ORDER BY ts DESC LIMIT ?1",
         )?;
@@ -1175,7 +1304,7 @@ impl Store {
 
     /// Test that the database is actually writable (catches sandbox restrictions)
     pub fn test_write(&self) -> bool {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return false,
         };
@@ -1202,7 +1331,7 @@ impl Store {
         exit_reason: &str,
         project_path: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1227,7 +1356,7 @@ impl Store {
     }
 
     pub fn get_recent_session_summaries(&self, limit: usize) -> Vec<SessionSummaryRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1260,7 +1389,7 @@ impl Store {
     // ──  Retrieve Events (adaptive threshold) ──────────────────
 
     pub fn record_retrieve_event(&self, command_prefix: &str, hash: &str, agent_id: &str) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1276,7 +1405,7 @@ impl Store {
     /// Returns retrieve_rate for a command prefix (0.0 – 1.0)
     /// High rate = OMNI too aggressive for this command type
     pub fn get_retrieve_rate(&self, command_prefix: &str, window_days: i64) -> f64 {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return 0.0,
         };
@@ -1301,7 +1430,7 @@ impl Store {
     }
 
     pub fn find_command_for_hash(&self, hash: &str) -> Option<String> {
-        let conn = self.conn.lock().ok()?;
+        let conn = self.pool.get().ok()?;
         conn.query_row(
             "SELECT command FROM distillations WHERE rewind_hash = ? LIMIT 1",
             params![hash],
@@ -1319,7 +1448,7 @@ impl Store {
         value: &str,
         confidence: f32,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1337,7 +1466,7 @@ impl Store {
     }
 
     pub fn get_project_knowledge(&self, project_hash: &str) -> Vec<(String, String, f32)> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1371,7 +1500,7 @@ impl Store {
         project_hash: &str,
         state_json: &str,
     ) {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1393,7 +1522,7 @@ impl Store {
         project_hash: &str,
         exclude_agent: &str,
     ) -> Vec<AgentSessionRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1426,7 +1555,7 @@ impl Store {
     pub fn upsert_pattern(&self, pattern_text: &str, tool_family: &str) {
         let hash = Self::pattern_hash(pattern_text);
         let now = chrono::Utc::now().timestamp();
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1444,7 +1573,7 @@ impl Store {
     /// Mark a pattern as resolved (command succeeded after failure)
     pub fn resolve_pattern(&self, tool_family: &str, resolution_hint: &str) {
         let now = chrono::Utc::now().timestamp();
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1462,7 +1591,7 @@ impl Store {
 
     /// Get recurring patterns for a tool family (sorted by occurrence count)
     pub fn get_patterns(&self, tool_family: Option<&str>, limit: usize) -> Vec<PatternMemoryRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1526,7 +1655,7 @@ impl Store {
 
     /// Get top recurring issues across all tools
     pub fn get_top_insights(&self, limit: usize) -> Vec<PatternMemoryRow> {
-        let conn = match self.conn.lock() {
+        let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -1613,6 +1742,352 @@ pub struct AgentSessionRow {
     pub state_json: String,
 }
 
+// ── Engram Persistence & FTS5 Search ────────────────────
+impl SqliteBackend {
+    pub fn persist_engram(
+        &self,
+        session_id: &str,
+        engram: &crate::session::engram::Engram,
+        category: &str,
+        project_hash: &str,
+    ) -> Result<()> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        let id = format!("{}-{}", engram.trigger, engram.timestamp);
+        let files_json = serde_json::to_string(&engram.files).unwrap_or_else(|_| "[]".into());
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT OR REPLACE INTO engrams
+             (id, session_id, trigger, label, detail, files, category, tags, project_hash, ts, last_accessed, hit_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', ?8, ?9, ?10, 0)",
+            rusqlite::params![
+                id, session_id, engram.trigger.to_string(), engram.label,
+                engram.detail, files_json, category, project_hash,
+                engram.timestamp, now
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn search_knowledge(
+        &self,
+        query: &str,
+        project_hash: Option<&str>,
+        limit: usize,
+    ) -> Vec<KnowledgeHit> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut out: Vec<KnowledgeHit> = vec![];
+        if let Some(ph) = project_hash {
+            let sql = "SELECT pk.key, pk.value, pk.confidence, pk.project_hash
+                 FROM knowledge_fts kf
+                 JOIN project_knowledge pk ON pk.rowid = kf.rowid
+                 WHERE knowledge_fts MATCH ?1 AND pk.project_hash = ?2
+                 ORDER BY rank LIMIT ?3";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) =
+                    stmt.query_map(rusqlite::params![query, ph, limit as i64], |row| {
+                        Ok(KnowledgeHit {
+                            key: row.get(0)?,
+                            value: row.get(1)?,
+                            confidence: row.get(2)?,
+                            project_hash: row.get(3)?,
+                        })
+                    })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<KnowledgeHit>>();
+            }
+        } else {
+            let sql = "SELECT pk.key, pk.value, pk.confidence, pk.project_hash
+                 FROM knowledge_fts kf
+                 JOIN project_knowledge pk ON pk.rowid = kf.rowid
+                 WHERE knowledge_fts MATCH ?1
+                 ORDER BY rank LIMIT ?2";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) = stmt.query_map(rusqlite::params![query, limit as i64], |row| {
+                    Ok(KnowledgeHit {
+                        key: row.get(0)?,
+                        value: row.get(1)?,
+                        confidence: row.get(2)?,
+                        project_hash: row.get(3)?,
+                    })
+                })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<KnowledgeHit>>();
+            }
+        }
+        out
+    }
+
+    pub fn search_engrams(
+        &self,
+        query: &str,
+        project_hash: Option<&str>,
+        limit: usize,
+    ) -> Vec<EngramHit> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut out: Vec<EngramHit> = vec![];
+        if let Some(ph) = project_hash {
+            let sql = "SELECT e.label, e.detail, e.category, e.files, e.ts, ef.rank
+                 FROM engrams_fts ef
+                 JOIN engrams e ON e.rowid = ef.rowid
+                 WHERE engrams_fts MATCH ?1 AND e.project_hash = ?2
+                 ORDER BY rank LIMIT ?3";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) =
+                    stmt.query_map(rusqlite::params![query, ph, limit as i64], |row| {
+                        let files_json: String = row.get(3)?;
+                        Ok(EngramHit {
+                            label: row.get(0)?,
+                            detail: row.get(1)?,
+                            category: row.get(2)?,
+                            files: serde_json::from_str(&files_json).unwrap_or_default(),
+                            ts: row.get(4)?,
+                            rank: row.get::<_, f64>(5).unwrap_or(0.0).abs(),
+                        })
+                    })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<EngramHit>>();
+            }
+        } else {
+            let sql = "SELECT e.label, e.detail, e.category, e.files, e.ts, ef.rank
+                 FROM engrams_fts ef
+                 JOIN engrams e ON e.rowid = ef.rowid
+                 WHERE engrams_fts MATCH ?1
+                 ORDER BY rank LIMIT ?2";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) = stmt.query_map(rusqlite::params![query, limit as i64], |row| {
+                    let files_json: String = row.get(3)?;
+                    Ok(EngramHit {
+                        label: row.get(0)?,
+                        detail: row.get(1)?,
+                        category: row.get(2)?,
+                        files: serde_json::from_str(&files_json).unwrap_or_default(),
+                        ts: row.get(4)?,
+                        rank: row.get::<_, f64>(5).unwrap_or(0.0).abs(),
+                    })
+                })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<EngramHit>>();
+            }
+        }
+        out
+    }
+
+    pub fn unified_recall(
+        &self,
+        query: &str,
+        project_hash: Option<&str>,
+        limit: usize,
+    ) -> Vec<RecallHit> {
+        let mut results = vec![];
+
+        let knowledge = self.search_knowledge(query, project_hash, limit);
+        for k in knowledge {
+            results.push(RecallHit {
+                key: format!("[Knowledge] {}", k.key),
+                value: k.value,
+                source: "knowledge".to_string(),
+                score: k.confidence as f64 * 10.0, // Scale confidence to match roughly with BM25 rank magnitude
+            });
+        }
+
+        let engrams = self.search_engrams(query, project_hash, limit);
+        for e in engrams {
+            results.push(RecallHit {
+                key: format!("[Engram: {}] {}", e.category, e.label),
+                value: e.detail.unwrap_or_default(),
+                source: "engram".to_string(),
+                score: e.rank,
+            });
+        }
+
+        // Sort by score descending (larger is better for our abs(rank) and scaled confidence)
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(limit);
+
+        results
+    }
+}
+
+// ── Adaptive Scoring & Knowledge Helpers (Sprint 3) ──────
+impl SqliteBackend {
+    /// Log every recall invocation for adaptive scoring feedback loop.
+    /// Called by omni_recall MCP tool after returning results.
+    pub fn log_retrieval(
+        &self,
+        query: &str,
+        hit_source: &str,
+        hit_key: &str,
+        project_hash: &str,
+        command_ctx: &str,
+    ) {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "INSERT INTO retrieval_feedback (query, hit_source, hit_key, project_hash, command_ctx, ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                query,
+                hit_source,
+                hit_key,
+                project_hash,
+                command_ctx,
+                chrono::Utc::now().timestamp()
+            ],
+        );
+    }
+
+    /// Retrieve a single knowledge value by exact key.
+    /// Used for `__omni_goal__` pinning and similar reserved keys (BIZ-03).
+    pub fn get_knowledge(&self, project_hash: &str, key: &str) -> Option<String> {
+        let conn = self.pool.get().ok()?;
+        conn.query_row(
+            "SELECT value FROM project_knowledge WHERE project_hash = ?1 AND key = ?2 LIMIT 1",
+            rusqlite::params![project_hash, key],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    /// Count engrams for a project (for stats display, BIZ-02).
+    pub fn count_engrams(&self, project_hash: &str) -> usize {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        conn.query_row(
+            "SELECT COUNT(*) FROM engrams WHERE project_hash = ?1",
+            rusqlite::params![project_hash],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    /// Count knowledge entries for a project (for stats display, BIZ-02).
+    pub fn count_knowledge_entries(&self, project_hash: &str) -> usize {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        conn.query_row(
+            "SELECT COUNT(*) FROM project_knowledge WHERE project_hash = ?1",
+            rusqlite::params![project_hash],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    /// Count recall calls within the last 24 hours for a project (BIZ-02).
+    pub fn count_recalls_today(&self, project_hash: &str) -> usize {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        let since = chrono::Utc::now().timestamp() - 86400;
+        conn.query_row(
+            "SELECT COUNT(*) FROM retrieval_feedback WHERE project_hash = ?1 AND ts > ?2",
+            rusqlite::params![project_hash, since],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    /// Analyze retrieval patterns to surface adaptive insights (INT-01).
+    /// Returns a Vec of (command_ctx, recall_count) for commands recalled >= threshold times
+    /// within the last 7 days. This is the raw signal for `omni_adaptive_insights`.
+    pub fn get_frequent_recall_commands(
+        &self,
+        project_hash: &str,
+        min_count: u32,
+        days: u32,
+    ) -> Vec<(String, u64)> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let since = chrono::Utc::now().timestamp() - (days as i64 * 86400);
+        let mut stmt = match conn.prepare(
+            "SELECT command_ctx, COUNT(*) as cnt
+             FROM retrieval_feedback
+             WHERE project_hash = ?1 AND command_ctx != '' AND ts > ?2
+             GROUP BY command_ctx
+             HAVING cnt >= ?3
+             ORDER BY cnt DESC
+             LIMIT 5",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(
+            rusqlite::params![project_hash, since, min_count as i64],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+        )
+        .map(|iter| iter.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+    }
+
+    /// Surface knowledge entries that have never been recalled (Underused signal, INT-01).
+    pub fn get_unreferenced_knowledge(&self, project_hash: &str) -> Vec<String> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT pk.key FROM project_knowledge pk
+             LEFT JOIN retrieval_feedback rf ON rf.hit_key = pk.key AND rf.project_hash = pk.project_hash
+             WHERE pk.project_hash = ?1 AND pk.key NOT LIKE '__omni_%' AND rf.id IS NULL
+             LIMIT 10",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(rusqlite::params![project_hash], |row| row.get(0))
+            .map(|iter| iter.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+    }
+}
+
+// ── Public Data Types ────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeHit {
+    pub key: String,
+    pub value: String,
+    pub confidence: f32,
+    pub project_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EngramHit {
+    pub label: String,
+    pub detail: Option<String>,
+    pub category: String,
+    pub files: Vec<String>,
+    pub ts: i64,
+    pub rank: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecallHit {
+    pub key: String,
+    pub value: String,
+    pub source: String,
+    pub score: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1631,7 +2106,7 @@ mod tests {
 
         let store = Store::open_path(&db_path).unwrap();
 
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table'")
             .unwrap();
@@ -1684,7 +2159,7 @@ mod tests {
         assert_eq!(retrieved, Some(content.to_string()));
 
         // Retrieved counts updated
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         let count: i32 = conn
             .query_row(
                 "SELECT retrieved FROM rewind_store WHERE hash = ?1",
@@ -1735,13 +2210,13 @@ mod tests {
         let (store, _dir) = get_temp_store();
         let old_ts = chrono::Utc::now().timestamp() - (5 * 86400); // 5 days ago
 
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         conn.execute("INSERT INTO distillations (session_id, ts, filter_name, input_bytes, output_bytes, route, latency_ms) VALUES ('sess_1', ?1, 'f', 1, 1, 'K', 1)", [old_ts]).unwrap();
         drop(conn);
 
         store.cleanup_old(2); // keep last 2 days
 
-        let conn = store.conn.lock().unwrap();
+        let conn = store.pool.get().unwrap();
         let count: i32 = conn
             .query_row("SELECT COUNT(*) FROM distillations", [], |row| row.get(0))
             .unwrap();

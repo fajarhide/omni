@@ -21,11 +21,11 @@ fn bench_distillation_latency() {
 fn bench_handoff_export_latency() {
     let dir = tempdir().unwrap();
     let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-
     let mut state = omni::pipeline::SessionState::new();
     state.session_id = "bench_session".to_string();
     store.upsert_session(&state);
 
+    // Only time the actual handoff operation
     let start = Instant::now();
     let _ = run_handoff(&["--json".to_string()], store);
     let elapsed = start.elapsed();
