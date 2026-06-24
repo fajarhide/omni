@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="media/logo.svg" alt="OMNI Logo" width="180" />
+  <img src="media/logo.png" alt="OMNI Logo" width="300" />
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Noise-canceling headphones and long-term memory for your AI agent. Stop paying Claude to read 10,000 lines of terminal noise, and stop repeating yourself every time you restart a session.</em>
+    <em>Noise-canceling context and long-term memory for your AI agent. Stop paying Claude to read 10,000 lines of terminal noise like a headphone for AI agent</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
