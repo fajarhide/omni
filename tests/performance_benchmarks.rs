@@ -19,8 +19,8 @@ fn bench_distillation_latency() {
 
 #[test]
 fn bench_handoff_export_latency() {
-    // Setup outside of timing
-    let store = Arc::new(Store::open_memory().unwrap()); // If available
+    let dir = tempdir().unwrap();
+    let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
     let mut state = omni::pipeline::SessionState::new();
     state.session_id = "bench_session".to_string();
     store.upsert_session(&state);
