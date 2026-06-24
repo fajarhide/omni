@@ -1,12 +1,13 @@
 <div align="center">
   <img src="media/hero.svg" alt="OMNI" width="800" />
-  <h1 align="center">Omni</h1>
 
+
+
+  ---
   <p align="center">
     <em>Your AI isn't bad. It's drowning.</em>
   </p>
-
-  ---
+  
   **Up to 85% less tokens &middot; ~40% faster &middot; ~60% cheaper &middot; Zero hallucination triggers**<br>
 
   [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
