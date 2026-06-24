@@ -462,6 +462,19 @@ impl SqliteBackend {
                 ttl_days INTEGER DEFAULT 30,
                 UNIQUE(loop_goal_hash, key)
             );
+            -- 15a. Retrieval Feedback — adaptive scoring (INT-01)
+            CREATE TABLE IF NOT EXISTS retrieval_feedback (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                query        TEXT NOT NULL,
+                hit_source   TEXT NOT NULL,
+                hit_key      TEXT NOT NULL,
+                project_hash TEXT NOT NULL,
+                command_ctx  TEXT DEFAULT '',
+                ts           INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_rf_project ON retrieval_feedback(project_hash, ts);
+            CREATE INDEX IF NOT EXISTS idx_rf_cmd ON retrieval_feedback(command_ctx);
+
             -- 15. Episodic Memory (Engrams)
             CREATE TABLE IF NOT EXISTS engrams (
                 id           TEXT PRIMARY KEY,
@@ -1865,10 +1878,15 @@ impl SqliteBackend {
         out
     }
 
-    pub fn unified_recall(&self, query: &str, limit: usize) -> Vec<RecallHit> {
+    pub fn unified_recall(
+        &self,
+        query: &str,
+        project_hash: Option<&str>,
+        limit: usize,
+    ) -> Vec<RecallHit> {
         let mut results = vec![];
 
-        let knowledge = self.search_knowledge(query, None, limit);
+        let knowledge = self.search_knowledge(query, project_hash, limit);
         for k in knowledge {
             results.push(RecallHit {
                 key: format!("[Knowledge] {}", k.key),
@@ -1878,7 +1896,7 @@ impl SqliteBackend {
             });
         }
 
-        let engrams = self.search_engrams(query, None, limit);
+        let engrams = self.search_engrams(query, project_hash, limit);
         for e in engrams {
             results.push(RecallHit {
                 key: format!("[Engram: {}] {}", e.category, e.label),
@@ -1897,6 +1915,148 @@ impl SqliteBackend {
         results.truncate(limit);
 
         results
+    }
+}
+
+// ── Adaptive Scoring & Knowledge Helpers (Sprint 3) ──────
+impl SqliteBackend {
+    /// Log every recall invocation for adaptive scoring feedback loop.
+    /// Called by omni_recall MCP tool after returning results.
+    pub fn log_retrieval(
+        &self,
+        query: &str,
+        hit_source: &str,
+        hit_key: &str,
+        project_hash: &str,
+        command_ctx: &str,
+    ) {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "INSERT INTO retrieval_feedback (query, hit_source, hit_key, project_hash, command_ctx, ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                query,
+                hit_source,
+                hit_key,
+                project_hash,
+                command_ctx,
+                chrono::Utc::now().timestamp()
+            ],
+        );
+    }
+
+    /// Retrieve a single knowledge value by exact key.
+    /// Used for `__omni_goal__` pinning and similar reserved keys (BIZ-03).
+    pub fn get_knowledge(&self, project_hash: &str, key: &str) -> Option<String> {
+        let conn = self.pool.get().ok()?;
+        conn.query_row(
+            "SELECT value FROM project_knowledge WHERE project_hash = ?1 AND key = ?2 LIMIT 1",
+            rusqlite::params![project_hash, key],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    /// Count engrams for a project (for stats display, BIZ-02).
+    pub fn count_engrams(&self, project_hash: &str) -> usize {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        conn.query_row(
+            "SELECT COUNT(*) FROM engrams WHERE project_hash = ?1",
+            rusqlite::params![project_hash],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    /// Count knowledge entries for a project (for stats display, BIZ-02).
+    pub fn count_knowledge_entries(&self, project_hash: &str) -> usize {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        conn.query_row(
+            "SELECT COUNT(*) FROM project_knowledge WHERE project_hash = ?1",
+            rusqlite::params![project_hash],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    /// Count recall calls within the last 24 hours for a project (BIZ-02).
+    pub fn count_recalls_today(&self, project_hash: &str) -> usize {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        let since = chrono::Utc::now().timestamp() - 86400;
+        conn.query_row(
+            "SELECT COUNT(*) FROM retrieval_feedback WHERE project_hash = ?1 AND ts > ?2",
+            rusqlite::params![project_hash, since],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
+    /// Analyze retrieval patterns to surface adaptive insights (INT-01).
+    /// Returns a Vec of (command_ctx, recall_count) for commands recalled >= threshold times
+    /// within the last 7 days. This is the raw signal for `omni_adaptive_insights`.
+    pub fn get_frequent_recall_commands(
+        &self,
+        project_hash: &str,
+        min_count: u32,
+        days: u32,
+    ) -> Vec<(String, u64)> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let since = chrono::Utc::now().timestamp() - (days as i64 * 86400);
+        let mut stmt = match conn.prepare(
+            "SELECT command_ctx, COUNT(*) as cnt
+             FROM retrieval_feedback
+             WHERE project_hash = ?1 AND command_ctx != '' AND ts > ?2
+             GROUP BY command_ctx
+             HAVING cnt >= ?3
+             ORDER BY cnt DESC
+             LIMIT 5",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(
+            rusqlite::params![project_hash, since, min_count as i64],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+        )
+        .map(|iter| iter.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+    }
+
+    /// Surface knowledge entries that have never been recalled (Underused signal, INT-01).
+    pub fn get_unreferenced_knowledge(&self, project_hash: &str) -> Vec<String> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT pk.key FROM project_knowledge pk
+             LEFT JOIN retrieval_feedback rf ON rf.hit_key = pk.key AND rf.project_hash = pk.project_hash
+             WHERE pk.project_hash = ?1 AND pk.key NOT LIKE '__omni_%' AND rf.id IS NULL
+             LIMIT 10",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(rusqlite::params![project_hash], |row| row.get(0))
+            .map(|iter| iter.filter_map(Result::ok).collect())
+            .unwrap_or_default()
     }
 }
 

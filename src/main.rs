@@ -124,6 +124,12 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
+    /// Set or view the project goal (North Star context pinning)
+    #[command(trailing_var_arg = true)]
+    Goal {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Execute a command with OMNI distillation
     #[command(trailing_var_arg = true)]
     Exec {
@@ -456,6 +462,18 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for handoff: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+                Some(OmniCommand::Goal { extra }) => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::goal::run(&extra, &store) {
+                            eprintln!("[omni] Goal error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for goal: {}", e);
                         std::process::exit(1);
                     }
                 },
