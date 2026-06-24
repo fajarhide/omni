@@ -14,10 +14,11 @@
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
   [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
-</br>
+</br></br>
 <b>
 Up to 85% less tokens &middot; ~40% faster &middot; ~60% cheaper &middot; Zero hallucination triggers </b>
 </div>
+---
 
 Every AI coding assistant has the same problem.
 
