@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.1] - 2026-06-24
+
+### Added
+- **Pain-First Positioning**: Completely refactored `README.md` to focus on the core narrative solving Terminal Noise and Context Amnesia ("Noise-canceling headphones for your AI agent").
+- **Brand Evolution**: Redesigned the primary `logo.svg` with a sleek, neon-style "Cute Brain" wearing headphones, visualizing the integration of Noise-Canceling and the Adaptive Memory OS.
+
+### Improved
+- **AI-Native Distillation**: Revamped the `SystemOpsDistiller` for the `find` command. It now strips out raw file path samples entirely and emits a highly compressed, AI-friendly key-value summary of directory distributions and extension counts, maximizing token reduction (up to 99.8% savings).
+- **Terminal UI Polish**: Fixed an alignment issue where the `[OMNI Active]` status tag would overlap with command outputs by ensuring trailing newlines in distilled payloads.
+
+### Fixed
+- **Clippy Strictness**: Resolved a `clippy::needless_splitn` warning in the directory classification logic, ensuring `make ci` continues to pass with zero warnings.
+- **Snapshot Integrity**: Synchronized all `insta` snapshot tests to align with the new, denser `find` output format.
+
 ## [0.6.0] - 2026-06-14
 
 ### Added
