@@ -5,8 +5,10 @@
 /// All analysis is rule-based and runs on-demand (not in background).
 use crate::store::sqlite::Store;
 
+use serde::Serialize;
+
 /// The type of insight OMNI has detected.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum InsightType {
     /// A command is recalled frequently → distillation may be too aggressive.
     OverFiltered,
@@ -15,8 +17,7 @@ pub enum InsightType {
 }
 
 /// A single adaptive insight produced by pattern analysis.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AdaptiveInsight {
     pub insight_type: InsightType,
     pub description: String,
@@ -70,6 +71,7 @@ pub fn analyze(store: &Store, project_hash: &str) -> Vec<AdaptiveInsight> {
 }
 
 /// Format a Vec of insights into a human-readable MCP response string.
+#[allow(dead_code)]
 pub fn format_insights(insights: &[AdaptiveInsight]) -> String {
     if insights.is_empty() {
         return "No adaptive insights available yet. Keep using OMNI — patterns will emerge over time.".to_string();

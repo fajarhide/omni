@@ -443,7 +443,7 @@ impl OmniServer {
 
     #[tool(
         name = "omni_adaptive_insights",
-        description = "Analyze retrieval patterns to surface actionable insights about distillation effectiveness (INT-01)"
+        description = "Analyze retrieval patterns to surface actionable insights about distillation effectiveness. Returns JSON."
     )]
     pub async fn omni_adaptive_insights(&self) -> String {
         let project_path = std::env::current_dir()
@@ -451,7 +451,8 @@ impl OmniServer {
             .unwrap_or_default();
         let project_hash = compute_project_hash_str(&project_path);
         let insights = crate::session::adaptive::analyze(&self.store, &project_hash);
-        crate::session::adaptive::format_insights(&insights)
+
+        serde_json::to_string_pretty(&insights).unwrap_or_else(|_| "[]".to_string())
     }
 
     #[tool(

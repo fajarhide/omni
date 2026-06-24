@@ -438,13 +438,7 @@ pub fn process_payload(
                 // Extract any file-like tokens from the command as context
                 let files: Vec<String> = clean_command
                     .split_whitespace()
-                    .filter(|t| {
-                        t.contains('/')
-                            || t.ends_with(".rs")
-                            || t.ends_with(".ts")
-                            || t.ends_with(".js")
-                            || t.ends_with(".py")
-                    })
+                    .filter(|t| t.contains('/') || (t.contains('.') && !t.starts_with('-')))
                     .take(3)
                     .map(|s| s.to_string())
                     .collect();

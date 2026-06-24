@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Noise-canceling headphones for your AI agent. Stop paying Claude to read 10,000 lines of terminal output just to find one error.</em>
+    <em>Noise-canceling headphones and long-term memory for your AI agent. Stop paying Claude to read 10,000 lines of terminal noise, and stop repeating yourself every time you restart a session.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -16,27 +16,25 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-Up to 85% less tokens &middot; ~40% faster &middot; ~60% cheaper &middot; Zero hallucination triggers </b>
+Up to 85% less tokens &middot; Cross-Session Memory &middot; ~40% faster &middot; Zero hallucination triggers </b>
 </div>
+
 ---
 
-Every AI coding assistant has the same problem.
+Every AI coding assistant has two massive problems.
 
-They read everything.
-
+**1. They read everything.**  
 Build logs.  
 Docker logs.  
 CI logs.  
 Progress bars.  
-Warnings.  
 ANSI colors.  
-Repeated output.  
+Thousands of tokens... to find one line. Claude isn't expensive. Your terminal is.
 
-Thousands of tokens... to find one line.
+**2. They forget everything.**  
+Every time you restart Cursor, or switch from Claude Code to Windsurf, your agent gets amnesia. You have to re-explain the project goal. You have to remind them of the same framework gotchas over and over again.
 
-Claude isn't expensive. Your terminal is. One failed `npm install` can waste more tokens than the code you're trying to write.
-
-OMNI fixes that.
+OMNI fixes both.
 
 ---
 
@@ -194,6 +192,22 @@ OMNI works seamlessly with the agentic tools you already use. It intercepts thei
 * Roo Code
 * OpenAI Codex
 * Antigravity CLI
+
+---
+
+## Adaptive Memory OS
+
+OMNI isn't just a terminal filter—it's a cure for AI amnesia.
+
+If you've ever worked with an AI agent for more than an hour, you know the pain of context loss. You restart the agent, and suddenly it forgets what you were working on. It forgets the project goal. It starts making the exact same mistakes it made yesterday because it forgot the repository's undocumented quirks.
+
+OMNI's Memory OS runs silently in the background to solve this:
+
+* **Stop Re-Explaining the Goal (`omni goal`)**: Set your North Star objective once. OMNI will relentlessly remind the agent of this exact priority on every single prompt, preventing it from drifting off-task.
+* **Never Lose Your Train of Thought (Session Continuity)**: If Cursor crashes or you switch to Claude Code, OMNI instantly injects a compressed summary of your last session. The new agent knows exactly which files were hot and what the last active error was, picking up right where you left off.
+* **Teach It Once (`omni remember`)**: Stop fixing the same hallucination. Agents can save project-specific rules, gotchas, and architecture decisions directly into OMNI's local SQLite backend. When they get stuck later, they automatically pull the exact answer back out via semantic search.
+
+Your agent gets smarter about your codebase every single day, and you never have to repeat yourself again.
 
 ---
 
