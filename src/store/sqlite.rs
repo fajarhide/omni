@@ -1864,6 +1864,40 @@ impl SqliteBackend {
         }
         out
     }
+
+    pub fn unified_recall(&self, query: &str, limit: usize) -> Vec<RecallHit> {
+        let mut results = vec![];
+
+        let knowledge = self.search_knowledge(query, None, limit);
+        for k in knowledge {
+            results.push(RecallHit {
+                key: format!("[Knowledge] {}", k.key),
+                value: k.value,
+                source: "knowledge".to_string(),
+                score: k.confidence as f64 * 10.0, // Scale confidence to match roughly with BM25 rank magnitude
+            });
+        }
+
+        let engrams = self.search_engrams(query, None, limit);
+        for e in engrams {
+            results.push(RecallHit {
+                key: format!("[Engram: {}] {}", e.category, e.label),
+                value: e.detail.unwrap_or_default(),
+                source: "engram".to_string(),
+                score: e.rank,
+            });
+        }
+
+        // Sort by score descending (larger is better for our abs(rank) and scaled confidence)
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(limit);
+
+        results
+    }
 }
 
 // ── Public Data Types ────────────────────────────────────
@@ -1884,6 +1918,14 @@ pub struct EngramHit {
     pub files: Vec<String>,
     pub ts: i64,
     pub rank: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecallHit {
+    pub key: String,
+    pub value: String,
+    pub source: String,
+    pub score: f64,
 }
 
 #[cfg(test)]

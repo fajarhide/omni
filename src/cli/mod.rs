@@ -8,6 +8,7 @@ pub mod learn;
 
 pub mod patterns;
 pub mod query;
+pub mod remember;
 pub mod reset;
 pub mod rewind;
 pub mod rewrite;

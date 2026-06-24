@@ -118,6 +118,12 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
+    /// Store important knowledge to persistent memory
+    #[command(trailing_var_arg = true)]
+    Remember {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// Execute a command with OMNI distillation
     #[command(trailing_var_arg = true)]
     Exec {
@@ -424,6 +430,19 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("[omni] Cannot open database for engrams: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+                Some(OmniCommand::Remember { extra }) => match Store::open() {
+                    Ok(store) => {
+                        let store_arc = Arc::new(store);
+                        if let Err(e) = cli::remember::run(&extra, store_arc) {
+                            eprintln!("[omni] Remember error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] Cannot open database for remember: {}", e);
                         std::process::exit(1);
                     }
                 },
