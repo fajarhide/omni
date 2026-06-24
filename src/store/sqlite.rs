@@ -462,7 +462,82 @@ impl SqliteBackend {
                 ttl_days INTEGER DEFAULT 30,
                 UNIQUE(loop_goal_hash, key)
             );
-            CREATE INDEX IF NOT EXISTS idx_lm_goal ON loop_memory(loop_goal_hash);
+            -- 15. Episodic Memory (Engrams)
+            CREATE TABLE IF NOT EXISTS engrams (
+                id           TEXT PRIMARY KEY,
+                session_id   TEXT NOT NULL,
+                trigger      TEXT NOT NULL,
+                label        TEXT NOT NULL,
+                detail       TEXT,
+                files        TEXT DEFAULT '[]',
+                category     TEXT DEFAULT 'progress',
+                tags         TEXT DEFAULT '[]',
+                project_hash TEXT NOT NULL,
+                ts           INTEGER NOT NULL,
+                last_accessed INTEGER NOT NULL,
+                hit_count    INTEGER DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_engrams_project ON engrams(project_hash);
+
+            -- 16. Semantic Search Virtual Tables (FTS5)
+            CREATE VIRTUAL TABLE IF NOT EXISTS engrams_fts USING fts5(
+                label,
+                detail,
+                files,
+                tags,
+                content='engrams',
+                content_rowid='rowid',
+                tokenize='porter unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS engrams_fts_insert
+                AFTER INSERT ON engrams BEGIN
+                    INSERT INTO engrams_fts(rowid, label, detail, files, tags)
+                    VALUES (new.rowid, new.label, new.detail, new.files, new.tags);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS engrams_fts_delete
+                AFTER DELETE ON engrams BEGIN
+                    INSERT INTO engrams_fts(engrams_fts, rowid, label, detail, files, tags)
+                    VALUES ('delete', old.rowid, old.label, old.detail, old.files, old.tags);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS engrams_fts_update
+                AFTER UPDATE ON engrams BEGIN
+                    INSERT INTO engrams_fts(engrams_fts, rowid, label, detail, files, tags)
+                    VALUES ('delete', old.rowid, old.label, old.detail, old.files, old.tags);
+                    INSERT INTO engrams_fts(rowid, label, detail, files, tags)
+                    VALUES (new.rowid, new.label, new.detail, new.files, new.tags);
+                END;
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+                key,
+                value,
+                content='project_knowledge',
+                content_rowid='rowid',
+                tokenize='porter unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS knowledge_fts_insert
+                AFTER INSERT ON project_knowledge BEGIN
+                    INSERT INTO knowledge_fts(rowid, key, value)
+                    VALUES (new.rowid, new.key, new.value);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS knowledge_fts_delete
+                AFTER DELETE ON project_knowledge BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, key, value)
+                    VALUES ('delete', old.rowid, old.key, old.value);
+                END;
+
+            CREATE TRIGGER IF NOT EXISTS knowledge_fts_update
+                AFTER UPDATE ON project_knowledge BEGIN
+                    INSERT INTO knowledge_fts(knowledge_fts, rowid, key, value)
+                    VALUES ('delete', old.rowid, old.key, old.value);
+                    INSERT INTO knowledge_fts(rowid, key, value)
+                    VALUES (new.rowid, new.key, new.value);
+                END;
             "#,
         )?;
 
@@ -1652,6 +1727,163 @@ pub struct AgentSessionRow {
     pub session_id: String,
     pub last_active: i64,
     pub state_json: String,
+}
+
+// ── Engram Persistence & FTS5 Search ────────────────────
+impl SqliteBackend {
+    pub fn persist_engram(
+        &self,
+        session_id: &str,
+        engram: &crate::session::engram::Engram,
+        category: &str,
+        project_hash: &str,
+    ) -> Result<()> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        let id = format!("{}-{}", engram.trigger, engram.timestamp);
+        let files_json = serde_json::to_string(&engram.files).unwrap_or_else(|_| "[]".into());
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT OR REPLACE INTO engrams
+             (id, session_id, trigger, label, detail, files, category, tags, project_hash, ts, last_accessed, hit_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', ?8, ?9, ?10, 0)",
+            rusqlite::params![
+                id, session_id, engram.trigger.to_string(), engram.label,
+                engram.detail, files_json, category, project_hash,
+                engram.timestamp, now
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn search_knowledge(
+        &self,
+        query: &str,
+        project_hash: Option<&str>,
+        limit: usize,
+    ) -> Vec<KnowledgeHit> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut out: Vec<KnowledgeHit> = vec![];
+        if let Some(ph) = project_hash {
+            let sql = "SELECT pk.key, pk.value, pk.confidence, pk.project_hash
+                 FROM knowledge_fts kf
+                 JOIN project_knowledge pk ON pk.rowid = kf.rowid
+                 WHERE knowledge_fts MATCH ?1 AND pk.project_hash = ?2
+                 ORDER BY rank LIMIT ?3";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) =
+                    stmt.query_map(rusqlite::params![query, ph, limit as i64], |row| {
+                        Ok(KnowledgeHit {
+                            key: row.get(0)?,
+                            value: row.get(1)?,
+                            confidence: row.get(2)?,
+                            project_hash: row.get(3)?,
+                        })
+                    })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<KnowledgeHit>>();
+            }
+        } else {
+            let sql = "SELECT pk.key, pk.value, pk.confidence, pk.project_hash
+                 FROM knowledge_fts kf
+                 JOIN project_knowledge pk ON pk.rowid = kf.rowid
+                 WHERE knowledge_fts MATCH ?1
+                 ORDER BY rank LIMIT ?2";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) = stmt.query_map(rusqlite::params![query, limit as i64], |row| {
+                    Ok(KnowledgeHit {
+                        key: row.get(0)?,
+                        value: row.get(1)?,
+                        confidence: row.get(2)?,
+                        project_hash: row.get(3)?,
+                    })
+                })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<KnowledgeHit>>();
+            }
+        }
+        out
+    }
+
+    pub fn search_engrams(
+        &self,
+        query: &str,
+        project_hash: Option<&str>,
+        limit: usize,
+    ) -> Vec<EngramHit> {
+        let conn = match self.pool.get() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut out: Vec<EngramHit> = vec![];
+        if let Some(ph) = project_hash {
+            let sql = "SELECT e.label, e.detail, e.category, e.files, e.ts, ef.rank
+                 FROM engrams_fts ef
+                 JOIN engrams e ON e.rowid = ef.rowid
+                 WHERE engrams_fts MATCH ?1 AND e.project_hash = ?2
+                 ORDER BY rank LIMIT ?3";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) =
+                    stmt.query_map(rusqlite::params![query, ph, limit as i64], |row| {
+                        let files_json: String = row.get(3)?;
+                        Ok(EngramHit {
+                            label: row.get(0)?,
+                            detail: row.get(1)?,
+                            category: row.get(2)?,
+                            files: serde_json::from_str(&files_json).unwrap_or_default(),
+                            ts: row.get(4)?,
+                            rank: row.get::<_, f64>(5).unwrap_or(0.0).abs(),
+                        })
+                    })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<EngramHit>>();
+            }
+        } else {
+            let sql = "SELECT e.label, e.detail, e.category, e.files, e.ts, ef.rank
+                 FROM engrams_fts ef
+                 JOIN engrams e ON e.rowid = ef.rowid
+                 WHERE engrams_fts MATCH ?1
+                 ORDER BY rank LIMIT ?2";
+            if let Ok(mut stmt) = conn.prepare(sql)
+                && let Ok(mapped) = stmt.query_map(rusqlite::params![query, limit as i64], |row| {
+                    let files_json: String = row.get(3)?;
+                    Ok(EngramHit {
+                        label: row.get(0)?,
+                        detail: row.get(1)?,
+                        category: row.get(2)?,
+                        files: serde_json::from_str(&files_json).unwrap_or_default(),
+                        ts: row.get(4)?,
+                        rank: row.get::<_, f64>(5).unwrap_or(0.0).abs(),
+                    })
+                })
+            {
+                out = mapped.filter_map(Result::ok).collect::<Vec<EngramHit>>();
+            }
+        }
+        out
+    }
+}
+
+// ── Public Data Types ────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct KnowledgeHit {
+    pub key: String,
+    pub value: String,
+    pub confidence: f32,
+    pub project_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EngramHit {
+    pub label: String,
+    pub detail: Option<String>,
+    pub category: String,
+    pub files: Vec<String>,
+    pub ts: i64,
+    pub rank: f64,
 }
 
 #[cfg(test)]
