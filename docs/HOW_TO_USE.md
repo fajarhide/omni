@@ -280,7 +280,6 @@ omni stats --month      # Last 30 days (explicit)
  Input bytes:          48.3 MB
  Output bytes:         5.1 MB
  Signal ratio:         89.4% reduction
- Est. cost savings:    $0.43 / session
 
  By Filter:
    cargo      ████████████  847 calls  91% reduction
@@ -298,15 +297,12 @@ omni stats --month      # Last 30 days (explicit)
 
 **Passthrough** means OMNI didn't have a filter for that tool yet. Those get queued for learning (see Section 6).
 
-### Custom Pricing Configuration
-By default, OMNI estimates savings at **$0.43 / 100K tokens**. You can customize this in `~/.omni/config.toml`:
-
-```toml
-[pricing]
-# Example: Claude 3.5 Sonnet pricing
-input_price_per_1m = 3.0
-output_price_per_1m = 15.0
-```
+### Why there is no cost estimate
+OMNI reports bytes and tokens, not dollars. To price a saved token you need to
+know whether it would have been billed as fresh input or as a prompt-cache read —
+roughly a tenth the price — and that depends on the agent's API traffic, which a
+tool hook never sees. Any dollar figure OMNI printed would be a guess wearing a
+currency symbol, so it prints what it actually measures instead.
 
 ---
 

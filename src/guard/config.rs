@@ -61,52 +61,10 @@ impl AgentConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelPricing {
-    pub input: f64,
-    pub _output: f64,
-    pub _cached: f64,
-    pub _reasoning: f64,
-    pub _cache_creation: f64,
-}
-
-/// Menggunakan estimasi harga rata-rata LLM modern
-/// dibandingkan mendefinisikan harganya satu per satu
-pub fn get_pricing_for_model(model: &str) -> ModelPricing {
-    let m = model.to_lowercase();
-    if m.contains("claude-3-7-sonnet") || m.contains("claude-3-5-sonnet") {
-        ModelPricing {
-            input: 3.0,
-            _output: 15.0,
-            _cached: 1.5,
-            _reasoning: 15.0,
-            _cache_creation: 3.0,
-        }
-    } else if m.contains("gpt-4o") {
-        ModelPricing {
-            input: 2.5,
-            _output: 10.0,
-            _cached: 1.25,
-            _reasoning: 10.0,
-            _cache_creation: 2.5,
-        }
-    } else {
-        // Gabungan rata-rata dari semua model unggulan (Claude + GPT-4o)
-        ModelPricing {
-            input: (3.0 + 3.0 + 2.5) / 3.0,
-            _output: (15.0 + 15.0 + 10.0) / 3.0,
-            _cached: (1.5 + 1.5 + 1.25) / 3.0,
-            _reasoning: (15.0 + 15.0 + 10.0) / 3.0,
-            _cache_creation: (3.0 + 3.0 + 2.5) / 3.0,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Default)]
 pub struct OmniConfig {
     pub global: Option<AgentConfig>,
     pub agents: Option<std::collections::HashMap<String, AgentConfig>>,
-    pub pricing: Option<PricingConfig>,
 }
 
 impl OmniConfig {
@@ -128,11 +86,6 @@ impl OmniConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct PricingConfig {
-    pub input_cost_per_million_tokens: Option<f64>,
-}
-
 pub fn load_config() -> OmniConfig {
     let path = paths::omni_home().join("config.toml");
 
@@ -146,14 +99,6 @@ pub fn load_config() -> OmniConfig {
     };
 
     toml::from_str(&content).unwrap_or_default()
-}
-
-pub fn get_input_cost() -> f64 {
-    let config = load_config();
-    config
-        .pricing
-        .and_then(|p| p.input_cost_per_million_tokens)
-        .unwrap_or_else(|| get_pricing_for_model("average").input)
 }
 
 #[cfg(test)]
