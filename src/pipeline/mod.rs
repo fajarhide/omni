@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod collapse;
+pub mod format;
 pub mod registry;
 pub mod scorer;
 pub mod semantic;

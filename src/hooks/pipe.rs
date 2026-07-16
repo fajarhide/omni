@@ -119,6 +119,25 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         return Ok(());
     }
 
+    // Phase 2.5: Format-safe gate. Structured payloads are machine-read downstream
+    // (`jq`, `json.load`, `kubectl apply`); collapse and the distillers would leave
+    // them unparseable. Emit the input verbatim, byte for byte.
+    if let Some(kind) = crate::pipeline::format::sniff(&input_text) {
+        output.write_all(input_text.as_bytes())?;
+        output.flush()?;
+        if let Some(s) = &store {
+            s.record_passthrough(
+                &format!(
+                    "{} [{}]",
+                    command_to_use.unwrap_or(""),
+                    crate::pipeline::format::passthrough_reason(kind)
+                ),
+                input_text.len(),
+            );
+        }
+        return Ok(());
+    }
+
     // Phase 3: Transcript Begin
     let project_path = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())

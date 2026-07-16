@@ -1,0 +1,102 @@
+[
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+    "location": "southeastasia",
+    "name": "vm-web-01",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-prod",
+    "tags": { "env": "prod", "team": "platform" },
+    "vmSize": "Standard_D2s_v3"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-web-02",
+    "location": "southeastasia",
+    "name": "vm-web-02",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-prod",
+    "tags": { "env": "prod", "team": "platform" },
+    "vmSize": "Standard_D2s_v3"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-web-03",
+    "location": "southeastasia",
+    "name": "vm-web-03",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-prod",
+    "tags": { "env": "prod", "team": "platform" },
+    "vmSize": "Standard_D2s_v3"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-api-01",
+    "location": "southeastasia",
+    "name": "vm-api-01",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-prod",
+    "tags": { "env": "prod", "team": "backend" },
+    "vmSize": "Standard_D4s_v3"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-api-02",
+    "location": "southeastasia",
+    "name": "vm-api-02",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-prod",
+    "tags": { "env": "prod", "team": "backend" },
+    "vmSize": "Standard_D4s_v3"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-api-03",
+    "location": "southeastasia",
+    "name": "vm-api-03",
+    "powerState": "VM deallocated",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-prod",
+    "tags": { "env": "prod", "team": "backend" },
+    "vmSize": "Standard_D4s_v3"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-staging/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+    "location": "southeastasia",
+    "name": "vm-web-01",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-staging",
+    "tags": { "env": "staging", "team": "platform" },
+    "vmSize": "Standard_B2s"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-staging/providers/Microsoft.Compute/virtualMachines/vm-api-01",
+    "location": "southeastasia",
+    "name": "vm-api-01",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-staging",
+    "tags": { "env": "staging", "team": "backend" },
+    "vmSize": "Standard_B2s"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-staging/providers/Microsoft.Compute/virtualMachines/vm-worker-01",
+    "location": "southeastasia",
+    "name": "vm-worker-01",
+    "powerState": "VM running",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-staging",
+    "tags": { "env": "staging", "team": "data" },
+    "vmSize": "Standard_B2s"
+  },
+  {
+    "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-dev/providers/Microsoft.Compute/virtualMachines/vm-sandbox-01",
+    "location": "southeastasia",
+    "name": "vm-sandbox-01",
+    "powerState": "VM deallocated",
+    "provisioningState": "Succeeded",
+    "resourceGroup": "rg-dev",
+    "tags": { "env": "dev", "team": "platform" },
+    "vmSize": "Standard_B1s"
+  }
+]

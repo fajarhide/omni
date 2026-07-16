@@ -221,3 +221,41 @@ fn test_omni_stats_shows_command_not_content_type() {
     );
     assert_eq!(*count, 1);
 }
+
+/// Structured payloads are the one case where 0% savings is the correct answer:
+/// they are parsed downstream, so the pipeline must hand them back untouched.
+#[test]
+fn structured_output_reports_zero_savings_and_preserves_bytes() {
+    use omni::hooks::pipe;
+
+    const STRUCTURED: &[(&str, &str)] = &[
+        ("tests/fixtures/az_vm_list.json", "az vm list -o json"),
+        (
+            "tests/fixtures/grafana_dashboard.json",
+            "git show HEAD:dashboard.json",
+        ),
+    ];
+
+    for (path, command) in STRUCTURED {
+        let raw = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+
+        let mut out = Vec::new();
+        pipe::run_inner(
+            raw.as_bytes(),
+            &mut out,
+            std::io::sink(),
+            None,
+            None,
+            Some(command),
+        )
+        .expect("pipe hook must not fail");
+        let out = String::from_utf8(out).expect("output must stay valid UTF-8");
+
+        let savings_pct = 100.0 * (1.0 - out.len() as f64 / raw.len() as f64);
+        assert_eq!(
+            savings_pct, 0.0,
+            "{path} must report 0% savings, got {savings_pct:.1}%"
+        );
+        assert_eq!(out, raw, "{path} must be byte-preserving");
+    }
+}
