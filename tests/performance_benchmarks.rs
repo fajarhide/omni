@@ -1,9 +1,26 @@
+//! Guards against pathological slowdowns — a hang, a deadlock, an accidental
+//! O(n²). Not benchmarks: these run under `cargo test` on shared CI runners,
+//! where wall-clock time measures the runner's load as much as our code.
+//!
+//! So every bound here is **catastrophic-only**: orders of magnitude above the
+//! design target named in each test. A tight bound cannot tell "the code got
+//! slower" from "the runner was busy" — `bench_handoff_export_latency` proved
+//! it, failing at 100ms on Windows and passing on a rerun of the same commit,
+//! reddening an unrelated PR.
+//!
+//! Real performance tracking lives in `benches/pipeline.rs` (criterion,
+//! `cargo bench`), which measures against a baseline instead of a magic number.
+
 use omni::cli::handoff::run_handoff;
 use omni::pipeline::scorer;
 use omni::store::sqlite::Store;
 use std::sync::Arc;
 use std::time::Instant;
 use tempfile::tempdir;
+
+/// Upper bound for every timing assertion here. Anything this slow is broken,
+/// not merely unlucky — these operations are all designed to run in ~milliseconds.
+const CATASTROPHIC_MS: u128 = 2000;
 
 #[test]
 fn bench_distillation_latency() {
@@ -13,8 +30,11 @@ fn bench_distillation_latency() {
     omni::distillers::distill_with_command(&segments, &input, "ls", None);
     let elapsed = start.elapsed();
 
-    // Latency should be < 2000ms (to account for unoptimized debug builds in CI)
-    assert!(elapsed.as_millis() < 2000, "Distillation latency too high");
+    // Design target: well under a second, even in an unoptimized debug build.
+    assert!(
+        elapsed.as_millis() < CATASTROPHIC_MS,
+        "Distillation latency too high: {elapsed:?}"
+    );
 }
 
 #[test]
@@ -30,8 +50,13 @@ fn bench_handoff_export_latency() {
     let _ = run_handoff(&["--json".to_string()], store);
     let elapsed = start.elapsed();
 
-    // Handoff should be < 50ms
-    assert!(elapsed.as_millis() < 100, "Handoff latency too high");
+    // Design target: < 50ms. Bounded catastrophically because this one does
+    // real SQLite and tempdir I/O, which is exactly what a loaded CI runner
+    // stalls on — the source of the original flake.
+    assert!(
+        elapsed.as_millis() < CATASTROPHIC_MS,
+        "Handoff latency too high: {elapsed:?}"
+    );
 }
 
 #[test]
@@ -45,8 +70,11 @@ fn bench_pressure_calculation_latency() {
     }
     let elapsed = start.elapsed();
 
-    // Pressure recalc < 100ms
-    assert!(elapsed.as_millis() < 100, "Pressure latency too high");
+    // Design target: 100 in-memory recalcs in < 1ms.
+    assert!(
+        elapsed.as_millis() < CATASTROPHIC_MS,
+        "Pressure latency too high: {elapsed:?}"
+    );
 }
 
 #[test]
@@ -60,5 +88,9 @@ fn bench_environment_sanitization_latency() {
     let _sanitized = omni::guard::env::sanitize_vars(malicious_env);
     let elapsed = start.elapsed();
 
-    assert!(elapsed.as_millis() < 50, "Security scan too slow");
+    // Design target: 1000 vars sanitized in a few ms.
+    assert!(
+        elapsed.as_millis() < CATASTROPHIC_MS,
+        "Security scan too slow: {elapsed:?}"
+    );
 }
