@@ -306,11 +306,19 @@ pub fn distill_with_command(
         return input.to_string();
     }
 
+    // `find` output IS the answer — the paths are the payload, not noise wrapped
+    // around one. SystemOpsDistiller summarises them to a count, dropping every
+    // path the caller asked for, so the agent must re-run `find` and we pay twice.
+    // Passthrough until the distiller factors the repeated directory prefix
+    // (~72% on a real tree) instead of deleting the paths.
+    if base == "find" {
+        return input.to_string();
+    }
+
     // System ops → SystemOpsDistiller
     if matches!(
         base.as_str(),
         "ls" | "tree"
-            | "find"
             | "grep"
             | "rg"
             | "ps"
