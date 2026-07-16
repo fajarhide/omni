@@ -1,5 +1,5 @@
 use crate::pipeline::toml_filter;
-use crate::pipeline::{DistillResult, Route, SessionState, collapse, scorer};
+use crate::pipeline::{DistillResult, Route, SessionState, collapse, format, scorer};
 use crate::store::sqlite::Store;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -32,6 +32,23 @@ pub fn process_payload(
     let normalized = crate::hooks::normalize::normalize(input_str)?;
 
     if crate::guard::env::is_passthrough() {
+        return None;
+    }
+
+    // Format-safe gate: structured payloads are parsed by whatever reads them next,
+    // so every lossy stage below — including the >2MB head/tail trim — would corrupt
+    // them. Emit nothing: the host keeps the original bytes at zero marker cost.
+    if let Some(kind) = format::sniff(&normalized.content) {
+        if let Some(ref s) = store {
+            s.record_passthrough(
+                &format!(
+                    "{} [{}]",
+                    normalized.command,
+                    format::passthrough_reason(kind)
+                ),
+                normalized.content.len(),
+            );
+        }
         return None;
     }
 
