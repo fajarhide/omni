@@ -151,7 +151,8 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
     let response = parsed.tool_response.as_ref()?;
     let content = if let Some(ref c) = response.content {
         extract_value_content(c)?
-    } else if let Some(ref stdout) = response.stdout {
+    } else {
+        let stdout = response.stdout.as_ref()?;
         if stdout.is_empty() {
             return None;
         }
@@ -163,8 +164,6 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
             s.push_str(stderr);
         }
         s
-    } else {
-        return None;
     };
 
     let command = parsed
@@ -226,11 +225,7 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
     let response = parsed.tool_response.as_ref()?;
 
     // Extract content from "result" field (string or object with nested fields)
-    let content = if let Some(ref r) = response.result {
-        extract_value_content(r)?
-    } else {
-        return None;
-    };
+    let content = extract_value_content(response.result.as_ref()?)?;
 
     if content.is_empty() {
         return None;
