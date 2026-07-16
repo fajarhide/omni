@@ -1,0 +1,18 @@
+# Pin the toolchain so CI is reproducible.
+#
+# .github/workflows/ci.yml uses `dtolnay/rust-toolchain@stable`, which tracks
+# whatever stable shipped most recently. That turned CI red on code nobody had
+# touched: rustc 1.97.0 landed 2026-07-07 with new clippy lints, and the next run
+# after main's last green build (2026-06-24) failed on pre-existing code.
+#
+# rustup reads this file in preference to the workflow's `rustup default stable`,
+# so CI needs no change — cargo picks this toolchain up automatically.
+#
+# Caveat: this only binds rustup-managed toolchains. A cargo installed from a
+# distro package or Homebrew ignores this file, and will keep drifting from CI.
+#
+# To bump: raise `channel`, run `make ci`, and fix any new lints in the same commit.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
