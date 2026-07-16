@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [0.6.2] - 2026-07-16
 
 ### Fixed
 - **Format-safe compression (data integrity)**: The pipeline had no format awareness, so collapse squashed the repeated lines of structured output into `[N similar lines collapsed]` and left the payload unparseable — breaking any downstream `jq` / `json.load` / `kubectl apply`. A JSON dashboard piped through the hook came out with 14 collapse markers and failed `jq` outright. A new format sniffer (`pipeline::format`) now gates both choke points (`hooks::post_tool`, `hooks::pipe`): JSON, NDJSON, YAML, TSV, and CSV pass through byte-for-byte at zero marker cost, while plain text still compresses as before.
