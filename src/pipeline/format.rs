@@ -163,7 +163,7 @@ fn sniff_yaml(trimmed: &str) -> Option<Structured> {
     // Otherwise every line must be YAML-shaped, and the document must show real
     // structure (nesting or a list). Free-text logs fail the first test: their
     // lines carry no `key:` at all.
-    if !lines.iter().all(|l| is_yaml_shaped(l)) {
+    if !all_lines_yaml_shaped(&lines) {
         return None;
     }
     let has_structure = lines
@@ -174,6 +174,42 @@ fn sniff_yaml(trimmed: &str) -> Option<Structured> {
     }
 
     Some(Structured::Yaml)
+}
+
+/// A block scalar (`config.hcl: |`) hands the rest of the block to whatever the
+/// value happens to be — Vault HCL, a shell script, a PEM certificate. Those
+/// lines carry no `key:` and are not YAML-shaped, but the `|` that introduced
+/// them is YAML's own signal that they are a value, so they are skipped rather
+/// than judged. Without this, one embedded ConfigMap sank a whole 608-line
+/// `kubectl kustomize` manifest: sniff said "not YAML", the format gate stood
+/// down, and the manifest went down the lossy path.
+fn all_lines_yaml_shaped(lines: &[&str]) -> bool {
+    let mut block_indent: Option<usize> = None;
+    for line in lines {
+        let indent = line.len() - line.trim_start().len();
+        // The body of a block scalar is everything indented deeper than the key
+        // that opened it; the first line back at that indent ends the block.
+        if block_indent.is_some_and(|open| indent > open) {
+            continue;
+        }
+        block_indent = None;
+        if !is_yaml_shaped(line) {
+            return false;
+        }
+        if opens_block_scalar(line) {
+            block_indent = Some(indent);
+        }
+    }
+    true
+}
+
+/// `key: |`, `key: >-`, `key: |2+` — an indicator and nothing else after it.
+/// A `|` inside a plain value (`cmd: sh -c "a | b"`) has trailing text, so it
+/// does not match.
+fn opens_block_scalar(line: &str) -> bool {
+    static BLOCK_SCALAR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*\S+\s*:\s*[|>][0-9]*[-+]?\s*$").expect("valid regex"));
+    BLOCK_SCALAR.is_match(line)
 }
 
 fn is_yaml_shaped(line: &str) -> bool {
@@ -331,6 +367,48 @@ mod tests {
         let filler = "x".repeat(MAX_PARSE_BYTES + 1);
         let payload = format!("{{{}}}", filler);
         assert_eq!(sniff(&payload), Some(Structured::Json));
+    }
+
+    /// `kubectl kustomize` output has no leading `---` on its first document, so
+    /// it is judged line by line — and a ConfigMap carrying Vault HCL made it
+    /// look like free text.
+    #[test]
+    fn detects_yaml_holding_a_block_scalar_of_foreign_config() {
+        let manifest = concat!(
+            "apiVersion: v1\n",
+            "kind: ConfigMap\n",
+            "metadata:\n",
+            "  name: vault-config\n",
+            "data:\n",
+            "  config.hcl: |\n",
+            "    ui = true\n",
+            "    listener \"tcp\" {\n",
+            "      tls_disable = 1\n",
+            "      address = \"[::]:8200\"\n",
+            "    }\n",
+        );
+        assert_eq!(sniff(manifest), Some(Structured::Yaml));
+    }
+
+    /// The skip must end with the block, or a block scalar anywhere near the top
+    /// would wave the rest of the document through.
+    #[test]
+    fn stops_skipping_once_the_block_scalar_body_dedents() {
+        let payload = concat!(
+            "data:\n",
+            "  script: |\n",
+            "    echo hello\n",
+            "this is not yaml at all, just prose\n",
+        );
+        assert_eq!(sniff(payload), None);
+    }
+
+    /// A pipe inside a plain value is a value, not a block-scalar indicator.
+    #[test]
+    fn treats_a_piped_command_value_as_an_ordinary_line() {
+        assert!(!opens_block_scalar("  cmd: sh -c \"a | b\""));
+        assert!(opens_block_scalar("  cmd: |"));
+        assert!(opens_block_scalar("  cmd: |2-"));
     }
 
     #[test]
