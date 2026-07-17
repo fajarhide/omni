@@ -98,19 +98,41 @@ OMNI dirancang untuk memecahkan frustrasi harian para pengembang Agentic AI. Ber
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Berikut adalah tolok ukur aktual yang diukur pada binary release:
+Angka jujurnya, diukur pada binary release terhadap **1.810 eksekusi perintah nyata** yang diputar ulang dari pemakaian seorang pengembang:
 
-| Command / Konteks | Ukuran Input | Ukuran Output | Penghematan Token | Dampak pada AI |
-|-------------------|--------------|---------------|-------------------|----------------|
-| `docker build` (multi-stage) | 9.2 KB | 49 bytes | **99.5%** | Menghilangkan kebisingan caching; AI langsung melihat error build yang sebenarnya. |
-| `cargo test` (large suite) | 16.5 KB | 4.3 KB | **78.0%** | Menghapus ratusan tes "ok"; AI hanya fokus pada kegagalan dan stack trace. |
-| `git status` (dirty) | 496 bytes | 113 bytes | **77.2%** | Menghapus file bersih dan petunjuk; hanya menyimpan file yang dimodifikasi/tidak terlacak. |
-| `kubectl get pods` | 840 bytes | 762 bytes | **10.0%** | Secara selektif memunculkan pod CrashLoopBackOff/Error, melewati pod yang sehat. |
-| `git diff` (multi-file) | 397 bytes | 220 bytes | **50.0%** | Mempertahankan hunk dengan perubahan, membuang baris konteks yang berlebihan. |
+* **58,9% lebih sedikit byte** yang sampai ke model (15,0 MB → 6,2 MB).
+* **63,6% dari panggilan itu tidak menghemat apa pun.** OMNI mengembalikan output apa adanya dan **tidak menambah satu byte pun**. Seluruh penghematan datang dari 36,4% sisanya, tempat noise-nya memang nyata.
+* **Output terstruktur tidak pernah disentuh.** JSON, YAML, NDJSON, dan CSV lewat byte-for-byte, karena payload yang rusak lebih mahal daripada kompresi yang terlewat.
 
-- **Latensi Pipeline**: **< 100ms** (end-to-end, termasuk startup binary)
-- **Penghematan Sepanjang Waktu**: **97.3%** pengurangan token di seluruh sesi pengembangan rata-rata.
-- **ROI**: **$35+ USD** dihemat per pengembang/bulan (diukur terhadap model unggulan).
+Butir kedua itulah angka yang jarang dicetak tools sejenis. Alat yang mengklaim menghemat 90% pada setiap perintah sedang memberi tahu Anda bahwa output yang Anda butuhkan ikut diringkas.
+
+Dari mana penghematannya berasal, pada 1.810 eksekusi yang sama:
+
+| Perintah | Panggilan | Input | Output | Hemat |
+|----------|-----------|-------|--------|-------|
+| `cargo` | 29 | 424 KB | 13 KB | **96,8%** |
+| `git` | 256 | 5,9 MB | 509 KB | **91,3%** |
+| `ls` | 52 | 71 KB | 29 KB | **59,5%** |
+| `kubectl` | 212 | 4,4 MB | 2,3 MB | **48,0%** |
+| `find` | 39 | 83 KB | 53 KB | **36,2%** |
+| `grep` | 184 | 534 KB | 385 KB | **27,8%** |
+| `cat` | 85 | 515 KB | 468 KB | **9,1%** |
+
+`git` dan `cargo` yang menanggung hasilnya; `cat` dan `grep` nyaris tanpa efek. OMNI berguna pada output tooling yang berisik dan berulang, dan menyingkir di tempat lain.
+
+Fixture tunggal dari `tests/fixtures/`, bila ingin direproduksi sendiri:
+
+| Command / Konteks | Input | Output | Hemat |
+|-------------------|-------|--------|-------|
+| `cargo build` (besar, sukses) | 3.220 B | 9 B | **99,7%** |
+| `cargo test` (490 lulus, 10 gagal) | 16,5 KB | 1.100 B | **93,3%** |
+| `pytest` (dengan kegagalan) | 730 B | 136 B | **81,4%** |
+| `git status` (dirty) | 496 B | 113 B | **77,2%** |
+| `git diff` (multi-file) | 397 B | 220 B | **44,6%** |
+| `docker build` (noise berat) | 9,2 KB | 5,8 KB | **37,2%** |
+| `kubectl get pods` (campuran) | 840 B | 762 B | **9,3%** |
+
+**Latensi adalah biaya nyata, bukan nol.** OMNI berjalan pada setiap perintah yang di-hook, dan harganya tumbuh mengikuti riwayat Anda: `git status` 496 byte butuh ~82 ms terhadap database bersih dan ~308 ms terhadap database 97 MB. `cargo test` 16,5 KB butuh ~276 ms. Perhitungkan itu.
 
 *Untuk melihat penghematan token aktual Anda sendiri, jalankan saja `omni stats` setelah beberapa hari penggunaan.*
 
@@ -156,7 +178,7 @@ OMNI dibangun dengan Rust untuk eksekusi tanpa overhead dan efisiensi tinggi. Be
 
 ## Di Balik Layar: Cara Kerja Omni
 
-OMNI lebih dari sekadar skrip regex; ia adalah **Semantic Signal Engine** berkinerja tinggi yang ditulis dengan Rust. Namun bagaimana cara kerjanya memotong 90% konsumsi token dalam waktu kurang dari 100ms?
+OMNI lebih dari sekadar skrip regex; ia adalah **Semantic Signal Engine** berkinerja tinggi yang ditulis dengan Rust. Namun bagaimana cara kerjanya memutuskan apa yang boleh dibuang — dan kapan sebaiknya tidak menyentuh apa pun?
 
 Inilah kisah tentang apa yang terjadi di dalam kode OMNI saat Agen AI Anda mengetik perintah seperti `cargo test`:
 

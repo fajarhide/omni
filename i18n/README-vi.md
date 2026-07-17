@@ -98,19 +98,41 @@ OMNI được thiết kế để giải quyết những sự bực bội hàng n
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-OMNI được xây dựng bằng Rust để thực thi không có độ trễ và hiệu quả tàn nhẫn. Dưới đây là các điểm chuẩn thực tế được đo lường trên tệp nhị phân phát hành:
+Con số trung thực, đo trên tệp nhị phân phát hành với **1.810 lần thực thi lệnh thật**, phát lại từ việc sử dụng thực tế của một nhà phát triển:
 
-| Lệnh / Ngữ cảnh | Kích thước Đầu vào | Kích thước Đầu ra | Token Tiết kiệm | Tác động lên AI |
-|-------------------|------------|-------------|---------------|--------------|
-| `docker build` (đa giai đoạn) | 9.2 KB | 49 bytes | **99.5%** | Loại bỏ nhiễu bộ nhớ đệm; AI ngay lập tức nhìn thấy lỗi xây dựng thực sự. |
-| `cargo test` (bộ lớn) | 16.5 KB | 4.3 KB | **78.0%** | Tước hàng trăm bài kiểm tra "ok"; AI chỉ tập trung vào các lỗi và dấu vết ngăn xếp. |
-| `git status` (bẩn) | 496 bytes | 113 bytes | **77.2%** | Xóa các tệp sạch và gợi ý; chỉ giữ các tệp đã sửa đổi/không bị theo dõi. |
-| `kubectl get pods` | 840 bytes | 762 bytes | **10.0%** | Hiển thị có chọn lọc các pod CrashLoopBackOff/Error, bỏ qua các pod khỏe mạnh. |
-| `git diff` (đa tệp) | 397 bytes | 220 bytes | **50.0%** | Bảo vệ các hunk có thay đổi, loại bỏ các dòng ngữ cảnh thừa. |
+* **Giảm 58,9% số byte** đến được mô hình (15,0 MB → 6,2 MB).
+* **63,6% trong số các lần gọi đó không tiết kiệm được gì cả.** OMNI trả lại đầu ra nguyên vẹn và **không thêm một byte nào**. Toàn bộ phần tiết kiệm đến từ 36,4% còn lại, nơi thực sự có nhiễu để cắt.
+* **Đầu ra có cấu trúc không bao giờ bị đụng tới.** JSON, YAML, NDJSON và CSV đi qua nguyên vẹn từng byte, vì một payload hỏng đắt hơn một lần bỏ lỡ nén.
 
-- **Độ trễ Đường ống**: **< 100ms** (đầu cuối, bao gồm khởi động nhị phân)
-- **Tiết kiệm Mọi lúc**: **97.3%** giảm token qua các phiên phát triển trung bình.
-- **ROI**: **$35+ USD** tiết kiệm được cho mỗi nhà phát triển/tháng (đo trên các mô hình hàng đầu).
+Gạch đầu dòng thứ hai mới là con số mà các công cụ cùng loại hiếm khi in ra. Một công cụ tuyên bố tiết kiệm 90% trên mọi lệnh đang nói với bạn rằng phần đầu ra bạn cần cũng đã bị tóm tắt mất.
+
+Phần tiết kiệm thực sự đến từ đâu, trên cùng 1.810 lần thực thi:
+
+| Lệnh | Lần gọi | Đầu vào | Đầu ra | Tiết kiệm |
+|------|---------|---------|--------|-----------|
+| `cargo` | 29 | 424 KB | 13 KB | **96,8%** |
+| `git` | 256 | 5,9 MB | 509 KB | **91,3%** |
+| `ls` | 52 | 71 KB | 29 KB | **59,5%** |
+| `kubectl` | 212 | 4,4 MB | 2,3 MB | **48,0%** |
+| `find` | 39 | 83 KB | 53 KB | **36,2%** |
+| `grep` | 184 | 534 KB | 385 KB | **27,8%** |
+| `cat` | 85 | 515 KB | 468 KB | **9,1%** |
+
+`git` và `cargo` gánh phần lớn kết quả; `cat` và `grep` gần như vô hiệu. OMNI phát huy giá trị trên đầu ra công cụ ồn ào và lặp lại, và tránh đường ở mọi nơi khác.
+
+Các fixture đơn lẻ trong `tests/fixtures/`, nếu bạn muốn tự tái lập:
+
+| Lệnh / Ngữ cảnh | Đầu vào | Đầu ra | Tiết kiệm |
+|-------------------|---------|--------|-----------|
+| `cargo build` (lớn, thành công) | 3.220 B | 9 B | **99,7%** |
+| `cargo test` (490 đạt, 10 lỗi) | 16,5 KB | 1.100 B | **93,3%** |
+| `pytest` (có lỗi) | 730 B | 136 B | **81,4%** |
+| `git status` (bẩn) | 496 B | 113 B | **77,2%** |
+| `git diff` (đa tệp) | 397 B | 220 B | **44,6%** |
+| `docker build` (nhiễu nặng) | 9,2 KB | 5,8 KB | **37,2%** |
+| `kubectl get pods` (hỗn hợp) | 840 B | 762 B | **9,3%** |
+
+**Độ trễ là chi phí thật, không phải bằng không.** OMNI chạy trên mọi lệnh được hook, và cái giá tăng theo lịch sử của bạn: `git status` 496 byte mất ~82 ms với cơ sở dữ liệu mới và ~308 ms với cơ sở dữ liệu 97 MB. `cargo test` 16,5 KB mất ~276 ms. Hãy tính đến điều đó.
 
 *Để xem khoản tiết kiệm token thực tế của riêng bạn, chỉ cần chạy `omni stats` sau vài ngày sử dụng.*
 
