@@ -1,173 +1,136 @@
-# OMNI — Performance & Capabilities Showcase
+# OMNI — Measured Performance
 
 ![OMNI Performance Dashboard](https://omni.weekndlabs.com/media/performance.png)
 
----
-
-## Key Performance Metrics
-
-### Hero Stats (for headlines)
-
-| Metric | Value | Context |
-|--------|-------|---------|
-| **Peak Noise Reduction** | **99.5%** | Docker build output: 9.2KB → 49 bytes |
-| **Pipeline Latency** | **< 100ms** | End-to-end on release binary |
-| **All-Time Token Savings** | **97.3%** | From real production usage (232 commands) |
-| **Estimated Cost Saved** | **$35+ USD** | From single developer usage |
-| **Test Coverage** | **398 tests** | Zero failures, zero ignored |
-| **Binary Size** | **8.4 MB** | Native Rust, zero runtime deps |
-
-### Savings by Command Type (for bar charts / infographics)
-
-| Command | Savings | Best For |
-|---------|---------|----------|
-| Docker Build (noise) | **99.5%** | Eliminates "Step X/Y", "Sending context", pulling layers |
-| Docker Build (layered) | **90%** | Strips CACHED/FROM/RUN noise, keeps only errors |
-| Test Output (pytest) | **78%** | Keeps only failed tests + stack traces |
-| Git Status | **77%** | Removes clean file listings, keeps only changes |
-| Kubernetes | **62%** | Strips healthy pod rows, surfaces errors |
-| Git Diff | **55%** | Preserves hunks with changes, drops context noise |
+Every number here was produced by the method below. Nothing is projected, rounded
+up, or quoted from a run nobody kept. Where a number is missing, it is because it
+has not been measured.
 
 ---
 
-## Publishable Use Cases
+## Method
 
-### Use Case 1: "The Expensive `npm install`"
+- **Corpus**: 1,810 command executions replayed from `execution_traces` — one
+  developer's real usage, not a synthetic benchmark. 15,015,504 bytes of raw tool
+  output.
+- **Binary**: release build.
+- **State**: a **fresh `HOME` per invocation**, so every trace sees an empty
+  database.
+- **Measured**: 2026-07-17.
 
-**Problem**: Agent runs `npm install` — 500 lines of resolved dependencies, audit warnings, and progress bars flood the context.
-
-**Without OMNI**:
-```
-added 847 packages, and audited 848 packages in 12s
-npm warn deprecated inflight@1.0.6: This module is not supported...
-npm warn deprecated glob@7.2.0: Glob versions prior to v9 are...
-npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4...
-... (500+ more lines of progress and deprecation warnings)
-```
-
-**With OMNI**:
-```
-npm install: 847 packages, 12s. 3 deprecation warnings (non-critical).
-```
-
-**Savings**: ~95% token reduction. AI focuses on actual errors, not noise.
+The fresh-state requirement is not a detail. OMNI feeds session history into its
+scorer, so against a warm database **the same binary on the same input does not
+produce the same output** — 21 of 30 traces differed run-to-run in one check (one
+gave 1,835 bytes, then 433). A benchmark that reuses a live `~/.omni/omni.db`
+measures its own history, not the code. Comparing two builds requires isolating
+state per invocation; a shared-database sweep reported 1,204 traces changed when
+only 50 had.
 
 ---
 
-### Use Case 2: "The Giant `cargo test`"
+## Headline
 
-**Problem**: Cargo test suite dumps 500+ "test X ... ok" lines. The 3 actual failures get buried.
+| Metric | Value |
+|--------|-------|
+| Bytes reaching the model | 15.0 MB → 6.2 MB |
+| **Net savings across the whole mix** | **58.9%** |
+| Calls where OMNI saved nothing (passthrough) | **63.6%** (1,151 of 1,810) |
+| Calls where OMNI *added* bytes | **0** |
+| Calls that actually shrank | 36.4% (659 of 1,810) |
 
-**Without OMNI**: 16,515 bytes of output. AI struggles to find the needle.
-
-**With OMNI**: Only failed test names + error messages + stack traces. AI immediately knows what to fix.
-
-**Savings**: 78%+ — AI response quality improves dramatically.
-
----
-
-### Use Case 3: "The Docker Build from Hell"
-
-**Problem**: Building a multi-stage Dockerfile produces thousands of lines of layer caching, dependency downloading, and compilation noise.
-
-**Without OMNI**: 9,207 bytes of "Sending build context", "Step 1/20", "Removing intermediate container"...
-
-**With OMNI**: 49 bytes — just the final status or error.
-
-**Savings**: **99.5%** — this is OMNI's signature benchmark.
+Two-thirds of the time OMNI hands the output straight back and adds zero bytes.
+All of the saving comes from the remaining third. This is the number to judge the
+tool by: a claim of "90% off every command" is a claim that output you needed was
+summarised away.
 
 ---
 
-### Use Case 4: "The Kubernetes Debug Loop"
+## Where the saving comes from
 
-**Problem**: `kubectl get pods` returns 50 pods. 47 are Running fine. Agent needs to find the 3 that are CrashLoopBackOff.
+Same 1,810 executions, grouped by command:
 
-**Without OMNI**: Full pod table with all 50 rows of STATUS, RESTARTS, AGE.
+| Command | Calls | Input | Output | Saved |
+|---------|-------|-------|--------|-------|
+| `npm` | 7 | 59 KB | 1 KB | **98.0%** |
+| `cargo` | 29 | 424 KB | 13 KB | **96.8%** |
+| `git` | 256 | 5.9 MB | 509 KB | **91.3%** |
+| `az` | 7 | 48 KB | 4 KB | **90.7%** |
+| `ls` | 52 | 71 KB | 29 KB | **59.5%** |
+| `kubectl` | 212 | 4.4 MB | 2.3 MB | **48.0%** |
+| `find` | 39 | 83 KB | 53 KB | **36.2%** |
+| `grep` | 184 | 534 KB | 385 KB | **27.8%** |
+| `sed` | 41 | 88 KB | 71 KB | **19.7%** |
+| `echo` | 132 | 391 KB | 326 KB | **16.7%** |
+| `cat` | 85 | 515 KB | 468 KB | **9.1%** |
+| `curl` | 8 | 53 KB | 49 KB | **7.7%** |
 
-**With OMNI**: Only the 3 problematic pods + their error status.
-
-**Savings**: 62% — but more importantly, **zero diagnostic confusion**.
-
----
-
-### Use Case 5: "The Git Diff Review"
-
-**Problem**: `git diff` shows 200+ lines across 10 files. Agent re-reads unchanged context lines.
-
-**Without OMNI**: Full unified diff with 3-line context padding per hunk.
-
-**With OMNI**: Only changed lines + minimal context. Hunks intelligently scored by relevance.
-
-**Savings**: 55% — AI reviews changes faster with higher accuracy.
-
----
-
-### Use Case 6: "Session Intelligence — The Redundant Read"
-
-**Problem**: Agent reads `src/main.rs` for the 4th time in one session. It already has the content in context.
-
-**Without OMNI**: Full file content dumped again → wastes 3,000+ tokens.
-
-**With OMNI**: 
-```
-OMNI Guard: Redundant read detected for src/main.rs. 
-It has been accessed 4x. The file is likely already in context.
-```
-
-**Savings**: 100% of wasted re-read tokens. AI stays focused.
+`git` alone supplies more than half the total saving. `cat`, `curl` and `echo`
+are close to no-ops — OMNI is not the reason to run them.
 
 ---
 
-## Feature Highlights
+## Single fixtures
 
-### For Developers Who Care About Costs
+Reproducible by hand from `tests/fixtures/`:
 
-> **"OMNI saved me $35 in one month of casual use. For teams running multiple agents, that's hundreds per month."**
+| Command | Fixture | Input | Output | Saved |
+|---------|---------|-------|--------|-------|
+| `cargo build` | `cargo_build_large.txt` | 3,220 B | 9 B | **99.7%** |
+| `pytest` | `pytest_pass.txt` | 501 B | 18 B | **96.4%** |
+| `cargo test` | `cargo_test_500.txt` | 16,515 B | 1,100 B | **93.3%** |
+| `docker build` | `docker_build_layered.txt` | 309 B | 31 B | **90.0%** |
+| `pytest` | `pytest_failures.txt` | 730 B | 136 B | **81.4%** |
+| `git status` | `git_status_dirty.txt` | 496 B | 113 B | **77.2%** |
+| `git log` | `git_log.txt` | 158 B | 39 B | **75.3%** |
+| `git diff` | `git_diff_multi_file.txt` | 397 B | 220 B | **44.6%** |
+| `docker build` | `heavy_noise.txt` | 9,207 B | 5,783 B | **37.2%** |
+| `kubectl get pods` | `kubectl_get_pods_mixed.txt` | 840 B | 762 B | **9.3%** |
+| `cargo build` | `cargo_build_errors.txt` | 317 B | 292 B | **7.9%** |
 
-- Real-time cost tracking via `omni stats`
-- Per-agent savings breakdown (Claude, Cursor, Antigravity, Aider)
-- Model-aware pricing (Claude Sonnet, GPT-4o pricing tables built-in)
+`cargo test` at 93.3% is where OMNI is most useful: it drops hundreds of `... ok`
+lines while quoting cargo's own tally (`test result: FAILED. 490 passed; 10
+failed`) rather than recounting it, so the failures survive intact.
 
-### For Developers Who Care About AI Quality
+---
 
-> **"My AI stopped hallucinating after I installed OMNI. It finally focuses on the actual error instead of getting confused by 500 lines of dependency logs."**
+## Latency — a real cost
 
-- Semantic signal scoring: Critical > Important > Context > Noise
-- Session-aware boosting: errors and hot files get priority
-- Anti-hallucination guards: factual warnings only, zero speculation
+OMNI runs on every hooked command, and the price grows with your database:
 
-### For Team Leads / Engineering Managers
+| Input | Database | End-to-end (incl. process start) |
+|-------|----------|----------------------------------|
+| 496 B (`git status`) | fresh | **~82 ms** |
+| 496 B (`git status`) | 97 MB (real) | **~308 ms** |
+| 16.5 KB (`cargo test`) | fresh | **~276 ms** |
 
-> **"We run 5 agents across 3 repos. OMNI keeps them coordinated and efficient."**
+The pipeline itself is fast; the tax is process start plus SQLite against an
+accumulating history. Budget for roughly a quarter-second per hooked command on a
+mature database.
 
-- Multi-agent awareness (`omni_agents`)
-- Cross-session knowledge persistence (`omni_knowledge`)
-- Per-agent tuning via `config.toml`
-- Works with Claude Code, Cursor, Antigravity, Aider, OpenCode, Codex, Hermes, Pi Agent
+---
 
+## Format safety
 
-## Real Production Stats
+Compression only ever touches human-facing free text. Anything a later step parses
+— JSON, NDJSON, YAML, TSV/CSV — passes through byte-for-byte, gated by
+`pipeline::format::sniff` ahead of collapse. A missed compression is cheap; a
+corrupted payload is not.
 
-This is a real output from `omni stats` :
+This is enforced, not aspirational. A `kubectl kustomize` manifest carrying an
+embedded Vault HCL block scalar used to defeat the sniffer and come back as
+`docker logs: 323 lines, no errors detected` — 13,463 bytes of Kubernetes config
+replaced by a sentence. Fixing the sniffer moved reported savings **down**, from
+65.3% to 58.9% across the corpus, because six of those points were destroyed
+manifests rather than removed noise.
 
-```
-─────────────────────────────────────────────────
- OMNI Signal Report
-─────────────────────────────────────────────────
-  Today:        21 commands │  42K → 24K  tokens │  41.8% saved │ ~$0.05 USD
-  This Week:    38 commands │  48K → 27K  tokens │  43.6% saved │ ~$0.06 USD
-  All Time:    232 commands │ 13.0M → 346K tokens │  97.3% saved │ ~$35.94 USD
+---
 
-  Top Commands:
-    find .             ████████████████████  100.0%  ( 3x)  (-12.6M tokens)
-    cat /Users/faja... ████████████████████   98.0%  ( 2x)  (-14K tokens)
-    docker build       ███████████░░░░░░░░░   56.4%  ( 4x)  (-11K tokens)
-    git diff           ██████████░░░░░░░░░░   49.2%  (50x)  (-4K tokens)
+## What is not measured
 
-  Agent Distribution:
-    Claude Code        ████████░░░░░░░░░░░░   39.2%  (91x)   46.2% saved
-    aider              ██░░░░░░░░░░░░░░░░░░    9.1%  (21x)   33.6% saved
-    Cursor AI          ██░░░░░░░░░░░░░░░░░░    8.6%  (20x)   22.6% saved
-    Antigravity        █░░░░░░░░░░░░░░░░░░░    2.6%  ( 6x)    0.3% saved
-─────────────────────────────────────────────────
-```
+- **Cost in dollars.** OMNI is a hook; it never sees the API's `usage` block, so
+  it cannot know whether your bytes were billed as fresh input or as a ~10× cheaper
+  prompt-cache read. It reports bytes and tokens, and no longer guesses at USD.
+- **Time-to-first-token, answer quality, hallucination rate.** Plausible, never
+  benchmarked here.
+
+*To see your own numbers rather than these, run `omni stats`.*

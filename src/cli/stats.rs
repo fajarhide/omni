@@ -58,16 +58,6 @@ fn format_bar_with_empty(pct: f64) -> String {
     format!("{}{}", "█".repeat(filled), "░".repeat(empty))
 }
 
-pub fn est_cost_usd(bytes_saved: u64) -> f64 {
-    est_cost_usd_with_hint(bytes_saved, ContentHint::Mixed)
-}
-
-pub fn est_cost_usd_with_hint(bytes_saved: u64, hint: ContentHint) -> f64 {
-    let price = crate::guard::config::get_input_cost();
-    let tokens = estimate_tokens(bytes_saved as usize, hint) as f64;
-    (tokens / 1_000_000.0) * price
-}
-
 fn format_number(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::new();
@@ -385,9 +375,6 @@ fn run_default(store: &Store) -> Result<()> {
             0.0
         };
 
-        let tokens_saved = raw_tokens.saturating_sub(*filtered_tokens);
-        let cost = (tokens_saved as f64 / 1_000_000.0) * crate::guard::config::get_input_cost();
-
         let pct_colored = if reduction_pct > 70.0 {
             format!("{:.1}% saved", reduction_pct).bright_green()
         } else if reduction_pct > 40.0 {
@@ -397,13 +384,12 @@ fn run_default(store: &Store) -> Result<()> {
         };
 
         println!(
-            "  {:<12} {:>3} commands │ {:>4} → {:<4} tokens │  {} │ ~${:.2} USD",
+            "  {:<12} {:>3} commands │ {:>4} → {:<4} tokens │  {}",
             format!("{}:", label).bright_white().bold(),
             format_number(*count).cyan(),
             input_tokens_str.red(),
             output_tokens_str.green(),
             pct_colored,
-            cost,
         );
     }
 
@@ -561,9 +547,6 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         format_bytes(output_total).green()
     );
 
-    let tokens_saved = raw_tokens.saturating_sub(filtered_tokens);
-    let cost_saved = (tokens_saved as f64 / 1_000_000.0) * crate::guard::config::get_input_cost();
-
     println!(
         "  {:<20} {} {} {}",
         "Tokens Reduced:".bright_black(),
@@ -581,11 +564,6 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         ratio_msg.bold().bright_red()
     };
     println!("  {:<20} {}", "Signal Ratio:".bright_black(), ratio_colored);
-    println!(
-        "  {:<20} {}",
-        "Actual Savings:".bright_black(),
-        format!("~${:.3} USD", cost_saved).bold().bright_cyan()
-    );
     println!(
         "  {:<20} {}",
         "Average Latency:".bright_black(),
@@ -876,7 +854,6 @@ pub struct StatsPeriod {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub savings_pct: f64,
-    pub usd_saved: f64,
     pub measurement_method: String,
 }
 
@@ -926,16 +903,12 @@ fn run_json(store: &Store) -> Result<()> {
                 } else {
                     0.0
                 };
-                let tokens_saved = raw_tokens.saturating_sub(*filtered_tokens);
-                let usd_saved =
-                    (tokens_saved as f64 / 1_000_000.0) * crate::guard::config::get_input_cost();
                 StatsPeriod {
                     label: label.to_lowercase().replace(' ', "_"),
                     commands: *count,
                     input_tokens: *raw_tokens,
                     output_tokens: *filtered_tokens,
                     savings_pct,
-                    usd_saved: (usd_saved * 100.0).round() / 100.0,
                     measurement_method: if *raw_tokens > 0 {
                         "actual".to_string()
                     } else {
@@ -1087,19 +1060,6 @@ mod tests {
     }
 
     #[test]
-    fn test_est_cost_usd_returns_expected_value() {
-        let expected_price_per_m = (3.0 + 3.0 + 2.5) / 3.0; // ~2.833
-
-        let cost = est_cost_usd(3_800_000); // 1M tokens
-        assert!((cost - expected_price_per_m).abs() < 0.01);
-
-        let cost2 = est_cost_usd(380_000); // 100k tokens
-        assert!((cost2 - (expected_price_per_m * 0.1)).abs() < 0.01);
-
-        assert_eq!(est_cost_usd(0), 0.0);
-    }
-
-    #[test]
     fn test_stats_default_does_not_crash_when_db_is_empty() {
         let tmp = NamedTempFile::new().unwrap();
         let store = Store::open_path(tmp.path()).unwrap();
@@ -1159,7 +1119,6 @@ mod tests {
                 input_tokens: 10000,
                 output_tokens: 1000,
                 savings_pct: 90.0,
-                usd_saved: 1.5,
                 measurement_method: "test".to_string(),
             }],
             commands: vec![],

@@ -76,12 +76,11 @@ pub fn run_diff(_args: &[String]) -> Result<()> {
     };
 
     let bytes_saved = input.len().saturating_sub(output.len()) as u64;
-    let cost_saved = crate::cli::stats::est_cost_usd(bytes_saved);
 
     println!(
         " Efficiency: {:<28} Saved: {}",
         efficiency_colored,
-        format!("${:.3} USD", cost_saved).bold().bright_cyan()
+        format_bytes(bytes_saved).bold().bright_cyan()
     );
     println!(
         " Reduction:  {:<28} Gain:  {}",

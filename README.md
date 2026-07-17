@@ -132,30 +132,56 @@ OMNI solves both, invisibly:
 
 ## Benchmarks
 
-Because OMNI removes the noise before the AI even sees it, the impact is immediate:
+The honest headline, measured on the release binary against **1,810 real command
+executions** replayed from one developer's actual usage:
 
-* **Token Reduction:** 70% to 90% less tokens per command.
-* **Speed:** ~40% faster Time-To-First-Token (TTFT).
-* **Cost:** ~$35 USD saved per developer/month against flagship models.
-* **Accuracy:** Higher first-try resolution rates because the AI is focused.
+* **58.9% fewer bytes** reaching the model across the whole mix (15.0 MB → 6.2 MB).
+* **63.6% of those calls saved nothing at all.** OMNI handed the output straight
+  back, adding **zero** bytes. Every byte of the saving comes from the other 36.4%,
+  where there was real noise to cut.
+* **Structured output is never touched.** JSON, YAML, NDJSON and CSV pass through
+  byte-for-byte, because a corrupted payload costs more than a missed compression.
+
+That second bullet is the number most tools in this category do not print. A tool
+that claims to save 90% of every command is telling you it summarises output you
+needed.
 
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-OMNI is built in Rust for zero-overhead execution and ruthless efficiency. Here are the actual benchmarks measured on the release binary:
+Where the saving actually comes from, over the same 1,810 executions:
 
-| Command / Context | Input Size | Output Size | Token Savings | Impact on AI |
-|-------------------|------------|-------------|---------------|--------------|
-| `docker build` (multi-stage) | 9.2 KB | 49 bytes | **99.5%** | Eliminates caching noise; AI instantly sees the real build error. |
-| `cargo test` (large suite) | 16.5 KB | 4.3 KB | **78.0%** | Strips hundreds of "ok" tests; AI focuses only on the failures and stack traces. |
-| `git status` (dirty) | 496 bytes | 113 bytes | **77.2%** | Removes clean files and hints; keeps only modified/untracked files. |
-| `kubectl get pods` | 840 bytes | 762 bytes | **10.0%** | Selectively surfaces CrashLoopBackOff/Error pods, skipping healthy ones. |
-| `git diff` (multi-file) | 397 bytes | 220 bytes | **50.0%** | Preserves hunks with changes, dropping excessive context lines. |
+| Command | Calls | Input | Output | Saved |
+|---------|-------|-------|--------|-------|
+| `cargo` | 29 | 424 KB | 13 KB | **96.8%** |
+| `git` | 256 | 5.9 MB | 509 KB | **91.3%** |
+| `ls` | 52 | 71 KB | 29 KB | **59.5%** |
+| `kubectl` | 212 | 4.4 MB | 2.3 MB | **48.0%** |
+| `find` | 39 | 83 KB | 53 KB | **36.2%** |
+| `grep` | 184 | 534 KB | 385 KB | **27.8%** |
+| `cat` | 85 | 515 KB | 468 KB | **9.1%** |
 
-- **Pipeline Latency**: **< 100ms** (end-to-end, including binary startup)
-- **All-Time Savings**: **97.3%** token reduction across average development sessions.
-- **ROI**: **$35+ USD** saved per developer/month (measured against flagship models).
+`git` and `cargo` carry the result; `cat` and `grep` are close to a no-op. OMNI
+earns its place on noisy, repetitive tooling output and gets out of the way
+everywhere else.
+
+Single fixtures from `tests/fixtures/`, if you want to reproduce one by hand:
+
+| Command / Context | Input | Output | Saved |
+|-------------------|-------|--------|-------|
+| `cargo build` (large, successful) | 3,220 B | 9 B | **99.7%** |
+| `cargo test` (490 passed, 10 failed) | 16.5 KB | 1,100 B | **93.3%** |
+| `pytest` (failures) | 730 B | 136 B | **81.4%** |
+| `git status` (dirty) | 496 B | 113 B | **77.2%** |
+| `git diff` (multi-file) | 397 B | 220 B | **44.6%** |
+| `docker build` (heavy noise) | 9.2 KB | 5.8 KB | **37.2%** |
+| `kubectl get pods` (mixed) | 840 B | 762 B | **9.3%** |
+
+**Latency is a real cost, not zero.** OMNI runs on every hooked command, and the
+price grows with your history: a 496-byte `git status` takes ~82 ms against a
+fresh database and ~308 ms against a 97 MB one. A 16.5 KB `cargo test` takes
+~276 ms. Budget for it.
 
 *To see your own actual token savings, just run `omni stats` after a few days of usage.*
 

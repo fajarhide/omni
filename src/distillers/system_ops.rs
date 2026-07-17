@@ -166,75 +166,59 @@ fn is_env_output(lines: &[&str]) -> bool {
 // Grep/Ripgrep distiller
 // ---------------------------------------------------------------------------
 
+/// `path:line:content` (or `path:content`) — split at the first colon, the same
+/// boundary `is_grep_output` keys off.
+fn split_grep_line(line: &str) -> Option<(&str, &str)> {
+    let (path, rest) = line.split_once(':')?;
+    (!path.is_empty() && (path.contains('/') || path.contains('.'))).then_some((path, rest))
+}
+
+/// grep repeats the full path on every match line, so a file with 12 matches
+/// pays for its path 12 times — that repetition is the noise, and it lives
+/// between the lines rather than inside them. Hoist each path to a header and
+/// indent its matches under it.
+///
+/// Every match survives: `header + ':' + indented line` reconstructs the input
+/// exactly. The match text is the whole point of grep — summarising it to
+/// `foo.rs: 12 matches` (what this used to emit) answers a question nobody
+/// asked and forces the agent to grep again.
 fn distill_grep_output(input: &str) -> String {
-    let mut by_file: BTreeMap<String, u32> = BTreeMap::new();
-    let mut total_matches = 0u32;
-    let mut error_lines: Vec<String> = Vec::new();
+    let mut body = String::with_capacity(input.len());
+    let mut current: Option<&str> = None;
+    let (mut matches, mut files) = (0usize, 0usize);
 
     for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+        let Some((path, rest)) = split_grep_line(line.trim_end()) else {
+            // Not a match line (grep's own warnings, blank separators) — keep verbatim.
+            current = None;
+            body.push_str(line);
+            body.push('\n');
             continue;
+        };
+        if current != Some(path) {
+            body.push_str(path);
+            body.push('\n');
+            current = Some(path);
+            files += 1;
         }
-
-        // Parse "filepath:linenum:content" or "filepath:content"
-        if let Some(colon_pos) = trimmed.find(':') {
-            let filepath = &trimmed[..colon_pos];
-            let content = &trimmed[colon_pos + 1..];
-
-            // Skip if filepath doesn't look like a file
-            if filepath.is_empty()
-                || (!filepath.contains('/') && !filepath.contains('.') && !filepath.contains('\\'))
-            {
-                continue;
-            }
-
-            total_matches += 1;
-
-            // Extract just the filename (basename)
-            let basename = filepath.rsplit('/').next().unwrap_or(filepath);
-            *by_file.entry(basename.to_string()).or_insert(0) += 1;
-
-            // Check for error/panic lines — always show these
-            let content_lower = content.to_lowercase();
-            if (content_lower.contains("error")
-                || content_lower.contains("panic")
-                || content_lower.contains("fatal"))
-                && error_lines.len() < 5
-            {
-                error_lines.push(trimmed.to_string());
-            }
-        }
+        body.push_str("  ");
+        body.push_str(rest);
+        body.push('\n');
+        matches += 1;
     }
 
-    if total_matches == 0 {
+    if matches == 0 {
         return "grep: no matches".to_string();
     }
 
-    let file_count = by_file.len();
-    let mut out = format!("grep: {} matches in {} files", total_matches, file_count);
-
-    // Sort by count descending
-    let mut sorted: Vec<(String, u32)> = by_file.into_iter().collect();
-    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
-
-    let shown = sorted.iter().take(10);
-    for (file, count) in shown {
-        out.push_str(&format!("\n  {}: {} matches", file, count));
+    let out = format!("grep: {} matches in {} files\n{}", matches, files, body);
+    // Hoisting costs a header line per file; on output that is one match per file
+    // it can lose. Never hand back something longer than we were given.
+    if out.len() < input.len() {
+        out
+    } else {
+        input.to_string()
     }
-    if sorted.len() > 10 {
-        out.push_str(&format!("\n  +{} more files", sorted.len() - 10));
-    }
-
-    // Always show error lines
-    if !error_lines.is_empty() {
-        out.push_str("\nError matches:");
-        for line in &error_lines {
-            out.push_str(&format!("\n  {}", line));
-        }
-    }
-
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -291,77 +275,66 @@ fn distill_ls_output(input: &str) -> String {
 // find distiller
 // ---------------------------------------------------------------------------
 
+/// Longest directory prefix shared by every path, cut at a `/` so the remainder
+/// stays a valid relative path — a prefix ending mid-filename would not round-trip.
+/// Empty when the paths share no directory.
+fn common_dir_prefix(paths: &[&str]) -> String {
+    let Some(first) = paths.first() else {
+        return String::new();
+    };
+    let mut end = first.len();
+    for p in &paths[1..] {
+        // Walk char boundaries, not bytes: `end` is used to slice below, and a
+        // byte count could land inside a multi-byte path component.
+        let shared = first
+            .char_indices()
+            .zip(p.chars())
+            .take_while(|((_, a), b)| a == b)
+            .map(|((i, a), _)| i + a.len_utf8())
+            .last()
+            .unwrap_or(0);
+        end = end.min(shared);
+        if end == 0 {
+            return String::new();
+        }
+    }
+    first[..end]
+        .rfind('/')
+        .map_or(String::new(), |i| first[..=i].to_string())
+}
+
+/// A find listing IS the answer — the paths are the payload, not noise wrapped
+/// around one. What repeats is the directory prefix: on a real tree it is ~73%
+/// of the bytes, one string restated on every line. Hoist it into a header and
+/// emit each path relative to it.
+///
+/// Lossless: `prefix + line` reconstructs every original path. The previous
+/// version summarised to `find: total=120 files=120` and dropped all 120 paths,
+/// so the agent had to re-run find — paying twice to save once.
 fn distill_find_output(input: &str) -> String {
-    let mut by_ext: BTreeMap<String, u32> = BTreeMap::new();
-    let mut by_dir: BTreeMap<String, u32> = BTreeMap::new();
-    let mut total = 0u32;
-    let mut dirs = 0u32;
-    let mut files = 0u32;
-
-    for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed == "." {
-            continue;
-        }
-        total += 1;
-
-        // Classify dir vs file
-        if !trimmed.contains('.') || trimmed.ends_with('/') {
-            dirs += 1;
-        } else {
-            files += 1;
-        }
-
-        // Extract extension
-        let ext = if let Some(dot_pos) = trimmed.rfind('.') {
-            let after_dot = &trimmed[dot_pos..];
-            if after_dot.len() <= 10 && !after_dot.contains('/') {
-                after_dot.to_string()
-            } else {
-                "(no ext)".to_string()
-            }
-        } else {
-            "(no ext)".to_string()
-        };
-        *by_ext.entry(ext).or_insert(0) += 1;
-
-        // Track top-level directory
-        let dir_key = trimmed
-            .trim_start_matches("./")
-            .split('/')
-            .next()
-            .unwrap_or(".")
-            .to_string();
-        *by_dir.entry(dir_key).or_insert(0) += 1;
-    }
-
-    // Sort extensions by count descending
-    let mut sorted_ext: Vec<(String, u32)> = by_ext.into_iter().collect();
-    sorted_ext.sort_by_key(|a| std::cmp::Reverse(a.1));
-    let ext_strs: Vec<String> = sorted_ext
-        .iter()
-        .take(8)
-        .map(|(ext, n)| format!("{}={}", ext, n))
+    let paths: Vec<&str> = input
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && *l != ".")
         .collect();
 
-    // Sort dirs by count descending
-    let mut sorted_dirs: Vec<(String, u32)> = by_dir.into_iter().collect();
-    sorted_dirs.sort_by_key(|a| std::cmp::Reverse(a.1));
-    let dir_strs: Vec<String> = sorted_dirs
-        .iter()
-        .take(8)
-        .map(|(dir, n)| format!("{}/={}", dir, n))
-        .collect();
+    let prefix = common_dir_prefix(&paths);
+    if prefix.is_empty() {
+        return input.to_string();
+    }
 
-    let mut out = format!("find: total={} files={} dirs={}", total, files, dirs);
-    if !ext_strs.is_empty() {
-        out.push_str(&format!("\n  ext: {}", ext_strs.join(" ")));
+    let mut out = format!("find: {} paths under {}\n", paths.len(), prefix);
+    for p in &paths {
+        out.push_str(p.strip_prefix(prefix.as_str()).unwrap_or(p));
+        out.push('\n');
     }
-    if !dir_strs.is_empty() {
-        out.push_str(&format!("\n  dirs: {}", dir_strs.join(" ")));
+    // A shallow prefix (`./`) buys less than the header costs. Never hand back
+    // something longer than we were given.
+    if out.len() < input.len() {
+        out
+    } else {
+        input.to_string()
     }
-    out.push('\n');
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -644,19 +617,122 @@ mod tests {
         assert!(is_env_output(&lines));
     }
 
-    #[test]
-    fn test_grep_distill_groups_by_file() {
-        let input = "src/main.rs:10:fn main() {\nsrc/main.rs:20:    println!(\"hello\");\nsrc/main.rs:30:}\nsrc/lib.rs:5:pub mod test;\nsrc/utils.rs:1:use std::io;";
-        let result = distill_grep_output(input);
-        assert!(result.contains("grep: 5 matches in 3 files"));
-        assert!(result.contains("main.rs: 3 matches"));
+    /// Rebuild `path:rest` from the hoisted headers and their indented matches.
+    fn rebuild_grep(output: &str) -> Vec<String> {
+        let mut header = "";
+        let mut lines = Vec::new();
+        for line in output.lines().skip(1) {
+            match line.strip_prefix("  ") {
+                Some(rest) => lines.push(format!("{}:{}", header, rest)),
+                None => header = line,
+            }
+        }
+        lines
     }
 
     #[test]
-    fn test_grep_distill_shows_error_lines() {
-        let input = "src/auth.rs:47:    return Err(AuthError::InvalidToken);\nsrc/db.rs:10:fn connect() {\nsrc/db.rs:20:fn query() {\nsrc/auth.rs:50:    panic!(\"fatal auth error\");";
+    fn states_each_grep_path_once_instead_of_per_match() {
+        // Arrange: a path long enough that hoisting it beats the header it costs
+        let input = "src/pipeline/registry.rs:10:fn main() {\n\
+                     src/pipeline/registry.rs:20:    println!(\"hello\");\n\
+                     src/pipeline/registry.rs:30:}\n\
+                     src/pipeline/scorer.rs:5:pub mod test;";
+
+        // Act
         let result = distill_grep_output(input);
-        assert!(result.contains("Error matches:"));
-        assert!(result.contains("AuthError"));
+
+        // Assert
+        assert!(
+            result.contains("grep: 4 matches in 2 files"),
+            "got: {result}"
+        );
+        assert_eq!(
+            result.matches("src/pipeline/registry.rs\n").count(),
+            1,
+            "path should be stated once, not per match: {result}"
+        );
+    }
+
+    /// The old distiller reduced grep to a per-file histogram, dropping every
+    /// matched line — the text that is the entire point of grep. It then had to
+    /// special-case error lines back in, because otherwise they vanished too.
+    /// Keeping everything makes that special case unnecessary, and losslessness
+    /// is the stronger invariant to pin.
+    #[test]
+    fn preserves_every_grep_match_including_errors() {
+        // Arrange
+        let input = "src/pipeline/registry.rs:47:    return Err(AuthError::InvalidToken);\n\
+                     src/pipeline/registry.rs:50:    panic!(\"fatal auth error\");\n\
+                     src/pipeline/scorer.rs:10:fn connect() {\n\
+                     src/pipeline/scorer.rs:20:fn query() {";
+
+        // Act
+        let result = distill_grep_output(input);
+
+        // Assert
+        assert_eq!(
+            rebuild_grep(&result),
+            input.lines().collect::<Vec<_>>(),
+            "output must reconstruct the input exactly: {result}"
+        );
+    }
+
+    #[test]
+    fn hands_back_grep_input_when_hoisting_would_grow_it() {
+        // Arrange: one match per file — every header costs more than it saves
+        let input = "a.rs:1:x\nb.rs:1:y";
+
+        // Act / Assert
+        assert_eq!(distill_grep_output(input), input);
+    }
+
+    #[test]
+    fn factors_the_shared_find_prefix_losslessly() {
+        // Arrange
+        let input = "/home/u/proj/src/lib.rs\n/home/u/proj/src/pipeline/mod.rs\n/home/u/proj/src/distillers/git.rs";
+
+        // Act
+        let result = distill_find_output(input);
+
+        // Assert
+        assert!(
+            result.starts_with("find: 3 paths under /home/u/proj/src/\n"),
+            "got: {result}"
+        );
+        let rebuilt: Vec<String> = result
+            .lines()
+            .skip(1)
+            .map(|l| format!("/home/u/proj/src/{}", l))
+            .collect();
+        assert_eq!(rebuilt, input.lines().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn hands_back_find_input_when_paths_share_no_directory() {
+        // Arrange
+        let input = "/usr/bin/ls\n/etc/hosts\n/var/log/syslog";
+
+        // Act / Assert
+        assert_eq!(distill_find_output(input), input);
+    }
+
+    #[test]
+    fn cuts_the_prefix_at_a_separator_not_mid_filename() {
+        // Arrange: "config" and "connect" share "con", which is not a directory.
+        // A prefix of "/srv/app/con" would not round-trip back to the paths.
+        let paths = ["/srv/app/config.rs", "/srv/app/connect.rs"];
+
+        // Act / Assert
+        assert_eq!(common_dir_prefix(&paths), "/srv/app/");
+    }
+
+    #[test]
+    fn cuts_the_prefix_on_a_char_boundary_for_non_ascii_paths() {
+        // Arrange: shared bytes run into a multi-byte char; slicing by byte
+        // count instead of char boundary would panic here.
+        let paths = ["/srv/données/a.rs", "/srv/donné/b.rs"];
+
+        // Act / Assert
+        assert_eq!(common_dir_prefix(&paths), "/srv/");
     }
 }

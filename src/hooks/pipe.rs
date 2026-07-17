@@ -377,10 +377,20 @@ fn distill(
         }
     }
 
+    // A TOML filter only gets to short-circuit the distiller if it actually beat
+    // the guardrail. `sys_build_domain` matches every `cargo` invocation but strips
+    // only `Compiling`-style lines, so on `cargo test` it won the `find()` race,
+    // shadowed TestDistiller, cut 1%, and had that cut thrown away by best_output()
+    // — reporting 0% on output the distiller reduces by 94%. Weak filter, fall
+    // through; a filter that earns its match still wins, user filters included.
+    let toml_hit = matched_toml.and_then(|f| {
+        let out = f.apply(&input_text);
+        (out.len() < input_text.len() * MIN_REDUCTION_PCT / 100).then_some((out, f.name))
+    });
+
     let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
-        if let Some(filter) = matched_toml {
-            let out = filter.apply(&input_text);
-            (out, filter.name.clone(), None, 0, 0, None, Route::Keep)
+        if let Some((out, name)) = toml_hit {
+            (out, name, None, 0, 0, None, Route::Keep)
         } else {
             let cmd = command_name.unwrap_or("");
 
