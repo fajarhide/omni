@@ -8,6 +8,13 @@
 # rustup reads this file in preference to the workflow's `rustup default stable`,
 # so CI needs no change — cargo picks this toolchain up automatically.
 #
+# That preference is also why `targets` below is not optional. release.yml asks
+# `dtolnay/rust-toolchain@stable` for a cross target, which installs std into
+# *stable* — then cargo switches to the pinned channel, which has no std for that
+# target, and the build dies with `E0463: can't find crate for core`. It sank
+# v0.6.2 twice. Listing the targets here installs them into the pinned toolchain
+# and keeps the version in one place.
+#
 # Caveat: this only binds rustup-managed toolchains. A cargo installed from a
 # distro package or Homebrew ignores this file, and will keep drifting from CI.
 #
@@ -15,4 +22,12 @@
 [toolchain]
 channel = "1.97.0"
 components = ["rustfmt", "clippy"]
+# Keep in sync with the release.yml build matrix.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
+]
 profile = "minimal"
