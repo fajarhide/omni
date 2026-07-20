@@ -192,11 +192,22 @@ pub fn process_payload(
         toml_filters.iter().find(|f| f.matches(clean_command))
     };
 
+    // A TOML filter only gets to short-circuit the distiller if it actually beat
+    // the guardrail — the same rule `hooks::pipe` already applies. Without it the
+    // broad `sys_*_domain` filters win the `find()` race for cargo, npm, docker,
+    // kubectl and terraform while stripping only a few lines, shadowing the
+    // distiller that would have summarised the same input. Weak filter, fall
+    // through; a filter that earns its match still wins, user filters included.
+    let toml_hit = toml_match.and_then(|f| {
+        let out = f.apply(&content);
+        crate::guard::limits::beats_guardrail(out.len(), content.len())
+            .then(|| (out, f.name.clone()))
+    });
+
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
-    let (final_out, filter_name) = if let Some(filter) = toml_match {
-        let output = filter.apply(&content);
-        (output, filter.name.clone())
+    let (final_out, filter_name) = if let Some((output, name)) = toml_hit {
+        (output, name)
     } else {
         // Pure Command Architecture: Resolve profile once
         let profile = crate::pipeline::registry::resolve_profile_for_chain(clean_command);

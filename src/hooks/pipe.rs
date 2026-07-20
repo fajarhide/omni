@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Guardrail: only emit distilled output if it's at least this much smaller than input
-const MIN_REDUCTION_PCT: usize = 95; // e.g., if output is 96% of input, just return original input
+use crate::guard::limits::MIN_REDUCTION_PCT;
 
 /// Maximum output size before truncation to prevent overwhelming context windows
 pub const MAX_OUTPUT_BYTES: usize = 50_000;
@@ -385,7 +385,7 @@ fn distill(
     // through; a filter that earns its match still wins, user filters included.
     let toml_hit = matched_toml.and_then(|f| {
         let out = f.apply(&input_text);
-        (out.len() < input_text.len() * MIN_REDUCTION_PCT / 100).then_some((out, f.name))
+        crate::guard::limits::beats_guardrail(out.len(), input_text.len()).then_some((out, f.name))
     });
 
     let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
