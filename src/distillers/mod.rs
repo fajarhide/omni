@@ -395,7 +395,10 @@ mod tests {
             "zero-parse produced a false success claim: {output:?}"
         );
         // The load-bearing signal (the bound port) survives.
-        assert!(output.contains(":8080"), "dev-server port was dropped: {output:?}");
+        assert!(
+            output.contains(":8080"),
+            "dev-server port was dropped: {output:?}"
+        );
     }
 
     #[test]
