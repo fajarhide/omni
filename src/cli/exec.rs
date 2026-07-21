@@ -1,8 +1,9 @@
 use anyhow::Result;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-use crate::hooks::pipe::run_inner;
+use crate::hooks::pipe::{run_inner, stream_filter_for};
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 
@@ -76,22 +77,50 @@ pub fn run_exec(
         (c, full_cmd)
     };
 
-    let child_stdout = child.stdout.take().expect("Failed to open stdout");
+    let mut child_stdout = child.stdout.take().expect("Failed to open stdout");
 
-    let stdout = std::io::stdout().lock();
-    let stderr = std::io::stderr().lock();
-
-    // Pipe the stdout of the child process through OMNI's pipeline
-    run_inner(
-        child_stdout,
-        stdout,
-        stderr,
-        store.clone(),
-        session.clone(),
-        Some(&cmd_name),
-    )?;
-
-    let status = child.wait()?;
+    let status = if stream_filter_for(&cmd_name).is_some() {
+        // Stream-mode command: distilled output is emitted line-by-line as it
+        // arrives, before the exit code is known, so the exit-code gate below
+        // cannot apply. Keep the live-streaming behavior.
+        let stdout = std::io::stdout().lock();
+        let stderr = std::io::stderr().lock();
+        run_inner(
+            child_stdout,
+            stdout,
+            stderr,
+            store.clone(),
+            session.clone(),
+            Some(&cmd_name),
+        )?;
+        child.wait()?
+    } else {
+        // Buffered path: drain stdout first (draining before wait() avoids the
+        // classic full-pipe deadlock), then gate on the real exit code. #122: a
+        // command that exited non-zero passes its stdout through verbatim and is
+        // never distilled — distillation must not turn a failure into output that
+        // reads as success.
+        let mut buf = Vec::new();
+        child_stdout.read_to_end(&mut buf)?;
+        let status = child.wait()?;
+        if status.success() {
+            let stdout = std::io::stdout().lock();
+            let stderr = std::io::stderr().lock();
+            run_inner(
+                std::io::Cursor::new(&buf),
+                stdout,
+                stderr,
+                store.clone(),
+                session.clone(),
+                Some(&cmd_name),
+            )?;
+        } else {
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(&buf)?;
+            stdout.flush()?;
+        }
+        status
+    };
 
     if !status.success() {
         if let (Some(sess), Some(st)) = (&session, &store) {
