@@ -1,0 +1,12 @@
+> forgepod@0.0.0 format
+> prettier --write .
+
+.prettierrc.json 4ms (unchanged)
+eslint.config.js 10ms (unchanged)
+package.json 3ms (unchanged)
+src/lib/i18n.tsx 21ms
+src/routes/index.tsx 18ms
+src/routes/about.tsx 6ms (unchanged)
+src/components/Header.tsx 9ms
+tsconfig.json 2ms (unchanged)
+vite.config.ts 5ms (unchanged)
