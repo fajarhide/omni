@@ -200,16 +200,34 @@ pub fn process_payload(
         toml_filters.iter().find(|f| f.matches(clean_command))
     };
 
+    // A TOML filter only gets to short-circuit the distiller if it actually beat
+    // the guardrail — the same rule `hooks::pipe` already applies. Without it the
+    // broad `signals/domains/*.toml` filters win the alphabetical `find()` race
+    // for cargo, npm, docker, kubectl and terraform while stripping only a few
+    // lines, shadowing the distiller that would have summarised the same input
+    // (#110). Weak filter, fall through; a filter that earns its match still wins.
+    let toml_hit = toml_match.and_then(|f| {
+        let out = f.apply(&content);
+        crate::guard::limits::beats_guardrail(out.len(), content.len())
+            .then(|| (out, f.name.clone()))
+    });
+
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
-    let (final_out, filter_name) = if let Some(filter) = toml_match {
-        let output = filter.apply(&content);
-        (output, filter.name.clone())
+    let (final_out, filter_name) = if let Some((output, name)) = toml_hit {
+        (output, name)
     } else {
         // Pure Command Architecture: Resolve profile once
         let profile = crate::pipeline::registry::resolve_profile_for_chain(clean_command);
 
-        // 1. Initial Scoring (to evaluate learning/stats)
+        // Score and distill the tool's REAL output. #116: `collapse` rewrites
+        // repeated lines into `[N similar lines collapsed]` markers, and a
+        // distiller that parses columns reads those markers as data — a 35-pod
+        // table came out as `k8s: 2 pods | [5 (lines)`, built entirely from
+        // OMNI's own scaffolding. A distiller is a later stage that parses its
+        // input, exactly what `format::sniff` already protects structured
+        // payloads from; so the distiller sees raw content, and collapse is the
+        // fallback only for commands no distiller handles (below).
         let segments = scorer::score_segments(
             &content,
             profile.segmentation,
@@ -217,34 +235,29 @@ pub fn process_payload(
             clean_command,
         );
 
-        // 2. Collapse repetitive lines SEBELUM distill
-        let collapse_result = collapse::collapse(&content, &profile.collapse);
-        collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to {
-            Some((collapse_result.original_lines, collapse_result.collapsed_to))
-        } else {
-            None
-        };
-        let effective_input = collapse_result.collapsed_lines.join("\n");
-
-        // 3. Re-score dengan collapsed input jika ada savings signifikan
-        let final_segments = if collapse_result.savings_pct > 0.1 {
-            scorer::score_segments(
-                &effective_input,
-                profile.segmentation,
-                session_guard.as_deref(),
-                clean_command,
-            )
-        } else {
-            segments
-        };
-
-        // 4. Distill: command-first dispatch
-        let output = crate::distillers::distill_with_command(
-            &final_segments,
-            &effective_input,
+        let distilled = crate::distillers::distill_with_command(
+            &segments,
+            &content,
             clean_command,
             session_guard.as_deref(),
         );
+
+        // When no distiller meaningfully reduced the raw output — it punted
+        // (returned the input) or produced a near-copy that misses the guardrail —
+        // fall back to the collapsed form for its line savings. A distiller that
+        // earned its summary keeps it; the lossy markers never reached a distiller.
+        let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len()) {
+            let collapse_result = collapse::collapse(&content, &profile.collapse);
+            collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to
+            {
+                Some((collapse_result.original_lines, collapse_result.collapsed_to))
+            } else {
+                None
+            };
+            collapse_result.collapsed_lines.join("\n")
+        } else {
+            distilled
+        };
 
         (
             output,
@@ -1214,6 +1227,54 @@ mod tests {
         assert!(
             out.is_none(),
             "Claude Code failure string must pass through verbatim"
+        );
+    }
+
+    // ── #116/#110: distillers read raw output, not collapse markers ──────
+
+    fn pod_table_35() -> String {
+        let mut rows = vec![
+            "NAME                          READY   STATUS             RESTARTS   AGE".to_string(),
+        ];
+        for i in 0..30 {
+            rows.push(format!(
+                "api-gateway-7fb9c8b6d-{i:04}    1/1     Running            0          3d"
+            ));
+        }
+        for i in 0..5 {
+            rows.push(format!(
+                "api-gateway-7fb9c8b6d-c{i:03}    0/1     CrashLoopBackOff   8          3d"
+            ));
+        }
+        rows.join("\n")
+    }
+
+    #[test]
+    fn kubectl_table_distills_from_raw_not_collapse_markers() {
+        // #116: `collapse` runs before `distill`, so a distiller that parses columns
+        // used to read `[30 similar lines collapsed]` markers as pod rows and report
+        // `k8s: 2 pods | [5 (lines)`. #110: the kubectl TOML filter used to shadow the
+        // distiller unconditionally; the guardrail now lets it fall through. Together
+        // the distiller must see the real 35-row table.
+        let input = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pods"},
+            "tool_response": {"content": pod_table_35()},
+        });
+        let out = process_payload(&input.to_string(), None, None)
+            .expect("a 35-pod table must be distilled, not dropped");
+
+        assert!(
+            out.contains("35 pods"),
+            "must count all 35 real pods, got: {out}"
+        );
+        assert!(
+            out.contains("30 running") && out.contains("5 error"),
+            "must read real statuses, got: {out}"
+        );
+        assert!(
+            !out.contains("collapsed") && !out.contains("(lines)"),
+            "must not be built from collapse markers, got: {out}"
         );
     }
 }

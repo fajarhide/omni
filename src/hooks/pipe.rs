@@ -8,8 +8,9 @@ use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Guardrail: only emit distilled output if it's at least this much smaller than input
-const MIN_REDUCTION_PCT: usize = 95; // e.g., if output is 96% of input, just return original input
+/// Guardrail: only emit distilled output if it's at least this much smaller than
+/// input. Shared with `hooks::post_tool` via `guard::limits` (CLAUDE.md SSOT).
+use crate::guard::limits::MIN_REDUCTION_PCT;
 
 /// Maximum output size before truncation to prevent overwhelming context windows
 pub const MAX_OUTPUT_BYTES: usize = 50_000;
@@ -387,7 +388,7 @@ fn distill(
     // through; a filter that earns its match still wins, user filters included.
     let toml_hit = matched_toml.and_then(|f| {
         let out = f.apply(&input_text);
-        (out.len() < input_text.len() * MIN_REDUCTION_PCT / 100).then_some((out, f.name))
+        crate::guard::limits::beats_guardrail(out.len(), input_text.len()).then_some((out, f.name))
     });
 
     let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
@@ -399,7 +400,11 @@ fn distill(
             // Pure Command Architecture: Resolve profile
             let profile = crate::pipeline::registry::resolve_profile(cmd);
 
-            // 1. Initial Scoring
+            // Score and distill the tool's REAL output. #116: a distiller parses
+            // its input, so feeding it `collapse`'s `[N similar lines collapsed]`
+            // markers makes it read OMNI's own scaffolding as data (a pod table
+            // became `k8s: 2 pods | [5 (lines)`). Collapse is the fallback only for
+            // commands no distiller handles (below).
             let segments = scorer::score_segments(
                 &input_text,
                 profile.segmentation,
@@ -407,48 +412,41 @@ fn distill(
                 cmd,
             );
 
-            // 2. Collapse
-            let collapse_result = collapse::collapse(&input_text, &profile.collapse);
-            let collapse_savings_data =
-                if collapse_result.original_lines > collapse_result.collapsed_to {
-                    Some((collapse_result.original_lines, collapse_result.collapsed_to))
-                } else {
-                    None
-                };
-            let effective_input = collapse_result.collapsed_lines.join("\n");
-
-            // 3. Re-score
-            let final_segments = if collapse_result.savings_pct > 0.1 {
-                scorer::score_segments(
-                    &effective_input,
-                    profile.segmentation,
-                    session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-                    cmd,
-                )
-            } else {
-                segments
-            };
-
-            // 4. Distill
             let mut out = crate::distillers::distill_with_command(
-                &final_segments,
-                &effective_input,
+                &segments,
+                &input_text,
                 cmd,
                 session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
             );
 
+            // When no distiller meaningfully reduced the raw output — it punted
+            // (returned the input) or produced a near-copy that misses the
+            // guardrail — fall back to the collapsed form for its line savings.
+            // `best_output` still drops back to raw if even the collapse is too
+            // weak, so this only ever helps. A distiller that earned its summary
+            // keeps it; the markers never reached the distiller in the first place.
+            let collapse_savings_data =
+                if crate::guard::limits::beats_guardrail(out.len(), input_text.len()) {
+                    None
+                } else {
+                    let collapse_result = collapse::collapse(&input_text, &profile.collapse);
+                    out = collapse_result.collapsed_lines.join("\n");
+                    if collapse_result.original_lines > collapse_result.collapsed_to {
+                        Some((collapse_result.original_lines, collapse_result.collapsed_to))
+                    } else {
+                        None
+                    }
+                };
+
             // Rewind decision
-            let noise_count = final_segments
-                .iter()
-                .filter(|s| s.final_score() < 0.3)
-                .count();
-            let should_store = noise_count as f32 / final_segments.len().max(1) as f32 > 0.4
-                && final_segments.len() > 20;
+            let noise_count = segments.iter().filter(|s| s.final_score() < 0.3).count();
+            let should_store =
+                noise_count as f32 / segments.len().max(1) as f32 > 0.4 && segments.len() > 20;
 
             let d_count = noise_count;
-            let k_count = final_segments.len() - d_count;
+            let k_count = segments.len() - d_count;
 
-            let dropped_lines: usize = final_segments
+            let dropped_lines: usize = segments
                 .iter()
                 .filter(|s| s.final_score() < 0.3)
                 .map(|s| s.content.lines().count())
@@ -456,8 +454,8 @@ fn distill(
 
             // Auto-learn trigger
             if !cmd.is_empty() && input_text.len() > 100 {
-                let poor = final_segments.len() > 5
-                    && (d_count as f32 / final_segments.len().max(1) as f32) < 0.3;
+                let poor =
+                    segments.len() > 5 && (d_count as f32 / segments.len().max(1) as f32) < 0.3;
                 if poor {
                     crate::session::learn::queue_for_learn(&input_text, cmd);
                 }
