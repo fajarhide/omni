@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Fixed
+- **A failed command could be distilled into output that reads as success (#120)**: OMNI's `normalize` layer parsed each agent's failure signal and then threw it away — Codex `exit_code` was never read into `CodexInput`, Pi `toolResponse.isError` sat behind `#[allow(dead_code)]`, and MCP `result.isError` was named in a comment but never deserialized — so a command that exited non-zero still ran the full distiller. A failed `docker build` (`exit_code 1`) on the heavy-noise fixture came out **9,207 → 6,090 bytes**, silently trimmed by the same `DEBUG`/`INFO` stripping a *successful* build gets; the filed case was a `vault` call that failed `exit=2` on a network timeout yet surfaced a clean, fictional `["n8n"]`. This is the worst failure mode — a fabricated success terminates investigation, while a fabricated error only costs a retry. `NormalizedInput` now carries `failed`, set from each agent's own signal, and `post_tool::process_payload` passes a failed command through verbatim at zero marker cost before any distiller runs. Successful commands are untouched — the same output with `exit_code 0` still distils to 6,090 bytes. Claude Code needed no code change: it already sends a failed command as a bare `tool_response` string (`"Error: Exit code N…"`) that never parses into a success summary, and a regression test locks that in so a future, more-lenient parser cannot silently reintroduce the fabrication. The `omni exec` / `pipe.rs` path reads piped stdout only and never sees the child exit code; hardening it is tracked separately.
+
 ## [0.6.2] - 2026-07-17
 
 ### Fixed
