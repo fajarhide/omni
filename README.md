@@ -16,7 +16,10 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-Up to 85% less tokens &middot; Cross-Session Memory &middot; ~40% faster &middot; Zero hallucination triggers </b>
+58.9% fewer tokens on a real command mix &middot; Cross-Session Memory &middot; Format-safe &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
+
+</br></br>
+<img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
 </div>
 
 ---
@@ -42,61 +45,16 @@ OMNI fixes both.
 
 **Problem 1: Your terminal drowns out the signal**
 
-### `npm install`
-**Without OMNI:** 10,000 lines of "Downloading...", "Extracting...", and warnings. AI reads everything.  
-**With OMNI:** Package conflict. Node 20 required.
+Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirations:
 
-### `terraform apply`
-**Without OMNI:** 4,500 lines of unchanged execution plans.  
-**With OMNI:** The 3 resources that failed IAM permissions.
+| Command | Without OMNI | With OMNI | Saved |
+|---|---|---|---|
+| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **93%** |
+| `kubectl get pods` (35 pods, 5 crashing) | the full table | `35 pods \| 30 running, 5 error` + the 5 failing pods named | — |
+| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **45%** |
+| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **37%** |
 
-### `docker build`
-**Without OMNI:** Endless cache hits, layer hashes, and download progress bars.  
-**With OMNI:** Missing dependency `libpq-dev` at layer 12.
-
-### `pytest`
-**Without OMNI:** 500 passing tests and verbose setup logs.  
-**With OMNI:** Only the 2 failed assertions and their stack traces.
-
-### `cargo build`
-**Without OMNI:** 300 lines of compiling dependencies and warnings.  
-**With OMNI:** The exact line where the borrow checker failed.
-
-### `kubectl logs`
-**Without OMNI:** Thousands of successful health checks and normal traffic logs.  
-**With OMNI:** The crash loop and panic stack trace.
-
-### `git diff`
-**Without OMNI:** Formatting tweaks, generated lockfiles, and whitespace changes.  
-**With OMNI:** Only the core business logic changes.
-
-### `go test`
-**Without OMNI:** Pages of standard output from passing packages.  
-**With OMNI:** The single nil pointer dereference.
-
-### `mvn package`
-**Without OMNI:** Megabytes of "Downloading from maven central".  
-**With OMNI:** Compilation error in `UserService.java`.
-
-### `pip install`
-**Without OMNI:** Resolution logs and wheel building outputs.  
-**With OMNI:** Dependency conflict with `numpy`.
-
-### `webpack / vite`
-**Without OMNI:** 2,000 chunk asset lists and build times.  
-**With OMNI:** Missing module resolution in `App.tsx`.
-
-### `helm install`
-**Without OMNI:** Entire rendered YAML output of all templates.  
-**With OMNI:** Pod scheduling failure due to missing secret.
-
-### `ansible-playbook`
-**Without OMNI:** "ok" and "skipped" statuses for 50 servers.  
-**With OMNI:** The single "failed" task on `web-03`.
-
-### GitHub Actions (CI/CD)
-**Without OMNI:** Complete workflow logs including environment setup.  
-**With OMNI:** Only the specific step that exited with code 1.
+> **The honest caveat:** OMNI compresses *noisy successful* output. A command that **fails** is passed through **verbatim** — a hidden error is worse than an uncompressed one — and structured output (JSON/YAML/CSV) is never touched. It earns its keep on repetitive tool chatter and gets out of the way everywhere else.
 
 **Problem 2: Your agent forgets everything overnight**
 
@@ -124,7 +82,8 @@ When you restart an agent and it has no memory, you lose hours re-establishing c
 
 OMNI solves both, invisibly:
 
-* **Less noise** → lower cost, faster responses, zero hallucination triggers.
+* **Less noise** → lower cost, and less irrelevant output for the model to trip over.
+* **Format-safe by design** → JSON, YAML, NDJSON and CSV pass through byte-for-byte; a distiller that can't parse its input stays quiet instead of fabricating a summary.
 * **Persistent memory** → no more re-explaining your project, no more repeating fixes.
 * **One install** → works silently with every agent you already use.
 
