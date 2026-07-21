@@ -1,0 +1,49 @@
+---
+source: src/distillers/mod.rs
+expression: output
+---
+> forgepod@0.0.0 verify
+> build && tsc --noEmit && eslint . && npm run check:secrets && node scripts/run-checks.mjs
+
+> forgepod@0.0.0 build
+> vite build
+
+transforming...
+✓ 342 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   1.23 kB │ gzip:  0.58 kB
+dist/assets/index-a1b2c3d4.css   12.44 kB │ gzip:  3.02 kB
+dist/assets/index-e5f6a7b8.js   184.19 kB │ gzip: 58.31 kB
+dist/assets/vendor-9c0d1e2f.js  512.77 kB │ gzip: 162.44 kB
+✓ built in 3.42s
+
+> forgepod@0.0.0 eslint
+> eslint .
+
+/src/routes/index.tsx
+  12:5   warning  Unexpected console statement       no-console
+  48:11  warning  Prefer optional chaining           @typescript-eslint/prefer-optional-chain
+  73:1   warning  This line has a length of 120       max-len
+
+✖ 3 problems (0 errors, 3 warnings)
+
+> forgepod@0.0.0 check:secrets
+> node scripts/check-secrets.mjs
+
+Scanning dist/ for leaked server secrets...
+✓ positive control: "ForgePod" found in 3 file(s)
+Checking 4 chunk(s) against 12 secret pattern(s)...
+OK — no server secret reaches the browser
+
+> forgepod@0.0.0 run-checks
+> node scripts/run-checks.mjs
+
+route manifest present ......... ok
+csp header configured .......... ok
+no inline event handlers ....... ok
+service worker scope ........... ok
+env allowlist enforced ......... ok
+no debug flags in prod ......... ok
+bundle under budget ............ ok
+all 7 checks passed
