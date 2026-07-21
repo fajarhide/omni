@@ -24,6 +24,7 @@ pub struct NormalizedInput {
     pub command: String,   // command yang dieksekusi
     pub content: String,   // output dari tool
     pub agent_id: String,  // untuk session isolation
+    pub failed: bool,      // command exited non-zero / agent signalled an error (#120)
 }
 
 /// Detect agent format dari raw JSON string
@@ -179,6 +180,11 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         command,
         content,
         agent_id,
+        // Claude Code sends a failed command as a bare `tool_response` string
+        // ("Error: Exit code N…"), which never matches ClaudeToolResponse, so
+        // parsing bails to None (passthrough) before reaching here. Reaching this
+        // point means the tool_response object parsed, i.e. the command succeeded.
+        failed: false,
     })
 }
 
@@ -213,7 +219,6 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
     #[derive(Deserialize)]
     struct PiToolResponse {
         result: Option<Value>,
-        #[allow(dead_code)]
         #[serde(default)]
         #[serde(rename = "isError")]
         is_error: bool,
@@ -249,6 +254,7 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
         command,
         content,
         agent_id,
+        failed: response.is_error,
     })
 }
 
@@ -306,6 +312,7 @@ fn normalize_opencode(input: &str, agent_id: String) -> Option<NormalizedInput> 
         command: parsed.command.unwrap_or_default(),
         content,
         agent_id,
+        failed: false, // OpenCode payload carries no exit/error signal
     })
 }
 
@@ -375,6 +382,7 @@ fn normalize_vscode_continue(input: &str, agent_id: String) -> Option<Normalized
         command,
         content,
         agent_id,
+        failed: false, // Continue.dev payload carries no exit/error signal
     })
 }
 
@@ -389,6 +397,7 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         output: Option<String>,
         stdout: Option<String>,
         stderr: Option<String>,
+        exit_code: Option<i64>,
     }
 
     let parsed: CodexInput = serde_json::from_str(input).ok()?;
@@ -413,6 +422,7 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         command: parsed.command.unwrap_or_default(),
         content,
         agent_id,
+        failed: parsed.exit_code.is_some_and(|c| c != 0),
     })
 }
 
@@ -430,6 +440,7 @@ fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
         command,
         content: input.to_string(),
         agent_id,
+        failed: false, // Aider pipes raw stdout only; no exit signal available
     })
 }
 
@@ -444,13 +455,15 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
     #[derive(Deserialize)]
     struct McpResultContent {
         content: Option<Value>,
+        #[serde(default)]
+        #[serde(rename = "isError")]
+        is_error: bool,
     }
 
     let parsed: McpResult = serde_json::from_str(input).ok()?;
-    let content = parsed
-        .result
-        .and_then(|r| r.content)
-        .and_then(|c| extract_value_content(&c))?;
+    let result = parsed.result?;
+    let failed = result.is_error;
+    let content = result.content.and_then(|c| extract_value_content(&c))?;
 
     if content.is_empty() {
         return None;
@@ -465,6 +478,7 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         command,
         content,
         agent_id,
+        failed,
     })
 }
 
