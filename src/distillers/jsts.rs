@@ -108,18 +108,51 @@ fn is_playwright_output(lines: &[&str]) -> bool {
 }
 
 fn is_eslint_output(lines: &[&str]) -> bool {
+    // Anchor on eslint's real output shape, never the bare word "eslint" — that
+    // matched a *filename* (`eslint.config.js`) in prettier's file list and sent a
+    // `prettier --write` run to `distill_eslint`, which reported the wrong tool
+    // finding nothing (#114). Same substring-in-data trap as #105/#106.
     lines.iter().any(|l| {
-        l.contains("eslint")
-            || l.contains(" problems (")
-            || (l.contains("error") && l.contains("@typescript-eslint"))
+        l.contains(" problems (")            // summary: "✖ 3 problems (0 errors, 3 warnings)"
+            || l.contains("@typescript-eslint/") // a real eslint rule id
+            || is_eslint_finding_line(l) // "  12:5  warning  <msg>  <rule>"
     })
 }
 
+/// eslint prints a finding as `  <line>:<col>  error|warning  …`.
+fn is_eslint_finding_line(l: &str) -> bool {
+    let mut tokens = l.split_whitespace();
+    let Some((line, col)) = tokens.next().and_then(|t| t.split_once(':')) else {
+        return false;
+    };
+    if line.is_empty()
+        || col.is_empty()
+        || !line.bytes().all(|b| b.is_ascii_digit())
+        || !col.bytes().all(|b| b.is_ascii_digit())
+    {
+        return false;
+    }
+    matches!(tokens.next(), Some("error" | "warning"))
+}
+
 fn is_prettier_output(lines: &[&str]) -> bool {
+    // Prettier's real output is capitalised (`Checking formatting…`, `[warn] …`),
+    // so the old lowercase `checking `/`reformatted ` never fired on it — the
+    // detector was dead (#114). Match what prettier actually prints, in either mode.
     lines.iter().any(|l| {
-        l.contains("prettier")
-            || l.contains("checking ") && l.contains(" files")
-            || l.contains("reformatted ") && l.contains(" files")
+        l.contains("Checking formatting")     // --check header
+            || l.contains("[warn]")           // --check finding / summary
+            || l.contains("Code style issues") // --check summary
+            || l.to_lowercase().contains("prettier") // command echo / banner, any case
+            || is_prettier_write_line(l) // --write: "<path> <n>ms"
+    })
+}
+
+/// prettier `--write` prints one line per file: `<path> <n>ms`, with ` (unchanged)`
+/// appended to files it left alone.
+fn is_prettier_write_line(l: &str) -> bool {
+    l.split_whitespace().any(|t| {
+        t.len() > 2 && t.ends_with("ms") && t[..t.len() - 2].bytes().all(|b| b.is_ascii_digit())
     })
 }
 
@@ -539,30 +572,72 @@ fn distill_eslint(input: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn distill_prettier(input: &str) -> String {
-    let mut reformatted = 0;
-    let mut unchanged = 0;
+    // The old body parsed black's `reformatted N files` summary — prettier prints no
+    // such line, so both counters stayed 0 and a *failing* `--check` and a
+    // *successful* `--write` both rendered as "0 files reformatted, 0 unchanged"
+    // (#114). Parse prettier's real output per mode; if neither is recognisable,
+    // decline (return the input) rather than fabricate a count.
+    let lines: Vec<&str> = input.lines().collect();
 
-    for line in input.lines() {
-        let t = line.trim();
-        // Look for summary lines
-        if t.contains("reformatted ")
-            && t.contains(" files")
-            && let Some(num) = t.split_whitespace().find_map(|s| s.parse::<u32>().ok())
-        {
-            reformatted = num;
-        }
-        // In some output, it mentions "unchanged"
-        if t.contains(" unchanged")
-            && let Some(num) = t.split_whitespace().find_map(|s| s.parse::<u32>().ok())
-        {
-            unchanged = num;
-        }
+    // --check: offending files are listed as `[warn] <path>`, ending with a boilerplate
+    // `[warn] Code style issues …` line. The filenames are the actionable signal.
+    let is_check = lines
+        .iter()
+        .any(|l| l.contains("Checking formatting") || l.contains("[warn]"));
+    if is_check {
+        let files: Vec<&str> = lines
+            .iter()
+            .filter_map(|l| l.trim().strip_prefix("[warn] "))
+            .filter(|f| !f.is_empty() && !f.starts_with("Code style issues"))
+            .collect();
+        return if files.is_empty() {
+            "prettier --check: all files formatted".to_string()
+        } else {
+            format!(
+                "prettier --check: {} file(s) need formatting\n{}",
+                files.len(),
+                capped_lines(&files, 20)
+            )
+        };
     }
 
-    format!(
-        "prettier: {} files reformatted, {} unchanged",
-        reformatted, unchanged
-    )
+    // --write: `<path> <n>ms` per file, ` (unchanged)` on files left alone.
+    let file_lines: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| is_prettier_write_line(l))
+        .collect();
+    if file_lines.is_empty() {
+        return input.to_string();
+    }
+    let unchanged = file_lines
+        .iter()
+        .filter(|l| l.contains("(unchanged)"))
+        .count();
+    let changed: Vec<&str> = file_lines
+        .iter()
+        .filter(|l| !l.contains("(unchanged)"))
+        .map(|l| l.split_whitespace().next().unwrap_or(""))
+        .collect();
+    let mut out = format!(
+        "prettier --write: {} reformatted, {} unchanged",
+        changed.len(),
+        unchanged
+    );
+    if !changed.is_empty() {
+        out.push('\n');
+        out.push_str(&capped_lines(&changed, 20));
+    }
+    out
+}
+
+/// Render `items` one per indented line, capped, with an `… and N more` tail.
+fn capped_lines(items: &[&str], cap: usize) -> String {
+    let mut out: Vec<String> = items.iter().take(cap).map(|s| format!("  {s}")).collect();
+    if items.len() > cap {
+        out.push(format!("  … and {} more", items.len() - cap));
+    }
+    out.join("\n")
 }
 
 // ---------------------------------------------------------------------------

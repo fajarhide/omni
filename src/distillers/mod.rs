@@ -467,6 +467,20 @@ mod tests {
         "playwright test"
     );
     snapshot_test!(test_jsts_eslint, "eslint_errors.txt", "eslint");
+    // #114: `prettier --write` (via `npm run format`) used to report `eslint: no
+    // problems found` — `is_eslint_output` matched the filename `eslint.config.js`
+    // in prettier's file list. It must now be recognised as prettier and summarised
+    // per real prettier output (both modes), never as a clean run of another tool.
+    snapshot_test!(
+        test_jsts_prettier_write,
+        "prettier_write.txt",
+        "npm run format"
+    );
+    snapshot_test!(
+        test_jsts_prettier_check,
+        "prettier_check.txt",
+        "prettier --check ."
+    );
 
     snapshot_test!(
         test_database_psql_error,

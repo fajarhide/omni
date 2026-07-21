@@ -1,0 +1,4 @@
+Checking formatting...
+[warn] src/lib/i18n.tsx
+[warn] src/routes/index.tsx
+[warn] Code style issues found in 2 files. Run Prettier with --write to fix.
