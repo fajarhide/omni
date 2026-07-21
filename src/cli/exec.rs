@@ -20,18 +20,14 @@ pub fn run_exec(
     let cmd = &args[2];
     let cmd_args = &args[3..];
 
-    // Detect if we need to run via shell
-    let needs_shell = cmd_args.iter().any(|arg| {
-        arg.contains('|')
-            || arg.contains('>')
-            || arg.contains('<')
-            || arg.contains('&')
-            || arg.contains(';')
-    }) || cmd.contains('|')
-        || cmd.contains('>')
-        || cmd.contains('<')
-        || cmd.contains('&')
-        || cmd.contains(';');
+    // A shell is needed only when the whole command arrived as a SINGLE string
+    // (`omni exec 'a; b'`) — then the metacharacters and word boundaries are the
+    // shell's to interpret. When argv is already split (`omni exec sh -c '…'`,
+    // `omni exec npm run dev`), each element belongs to the program being run;
+    // re-joining and wrapping it in a second `sh -c` corrupts the command (#125).
+    // Those run verbatim via the non-shell branch below.
+    let needs_shell = cmd_args.is_empty()
+        && cmd.contains(|c: char| c.is_whitespace() || matches!(c, ';' | '|' | '&' | '<' | '>'));
 
     let full_cmd = if cmd_args.is_empty() {
         cmd.to_string()
