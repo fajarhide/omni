@@ -56,6 +56,18 @@ impl PipelineResult {
     }
 }
 
+/// The stream-mode TOML filter that governs `cmd`, if any. Stream-mode filters
+/// emit distilled output line-by-line as it arrives — before a wrapped command's
+/// exit code is known — so callers that gate on exit status (`omni exec`, #122)
+/// must treat a stream-mode command as un-gateable and keep it streaming.
+/// Semantics match Phase 0.5: the first filter that matches, and only if it is
+/// stream-mode.
+pub fn stream_filter_for(cmd: &str) -> Option<toml_filter::TomlFilter> {
+    let filters = toml_filter::load_all_filters();
+    let f = filters.iter().find(|filter| filter.matches(cmd))?;
+    f.stream_mode.then(|| f.clone())
+}
+
 pub fn run_inner<R: Read, W: Write, E: Write>(
     input: R,
     mut output: W,
@@ -75,17 +87,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         .map(|c| c.strip_prefix("omni exec ").unwrap_or(c));
 
     // Phase 0.5: Streaming Distillation Check
-    let mut stream_filter = None;
-    if let Some(cmd) = command_to_use {
-        let filters = toml_filter::load_all_filters();
-        if let Some(f) = filters.iter().find(|filter| filter.matches(cmd))
-            && f.stream_mode
-        {
-            stream_filter = Some(f.clone());
-        }
-    }
-
-    if let Some(filter) = stream_filter {
+    if let Some(filter) = command_to_use.and_then(stream_filter_for) {
         return stream_distill(input, output, error, filter, store, session, command_to_use);
     }
 
