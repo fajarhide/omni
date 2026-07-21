@@ -1,6 +1,17 @@
 pub const MAX_INPUT: usize = 16 * 1024 * 1024; // 16MB
 pub const WARN_INPUT: usize = 1024 * 1024; // 1MB
 
+/// Output must be under this percentage of the input to count as a real
+/// reduction. Anything above it is not compression worth taking — e.g. a TOML
+/// filter that strips a few lines does not get to short-circuit a distiller that
+/// would summarise the same input.
+pub const MIN_REDUCTION_PCT: usize = 95;
+
+/// True when `output` compressed `input` enough to be worth keeping.
+pub fn beats_guardrail(output_len: usize, input_len: usize) -> bool {
+    output_len < input_len * MIN_REDUCTION_PCT / 100
+}
+
 pub enum InputCheck {
     Ok,
     Warn,
