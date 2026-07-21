@@ -31,6 +31,14 @@ pub fn process_payload(
 ) -> Option<String> {
     let normalized = crate::hooks::normalize::normalize(input_str)?;
 
+    // #120: a command that exited non-zero passes through verbatim — never distilled.
+    // Distillation must never turn a failed command into output that reads as success
+    // (a fabricated success terminates investigation; a fabricated error only costs a
+    // retry). Emit nothing: the host keeps the original bytes at zero marker cost.
+    if normalized.failed {
+        return None;
+    }
+
     if crate::guard::env::is_passthrough() {
         return None;
     }
@@ -1128,5 +1136,84 @@ mod tests {
         });
         let out = process_payload(&input.to_string(), None, None);
         assert!(out.is_none(), "Edit tool should still return None");
+    }
+
+    // ── #120: failed commands pass through verbatim, never distilled ──────
+
+    /// Distillable output that a passing command WOULD get summarised, but the
+    /// non-zero exit must force passthrough (None).
+    fn distillable_noise() -> String {
+        std::fs::read_to_string("tests/fixtures/heavy_noise.txt")
+            .expect("heavy_noise fixture missing")
+    }
+
+    #[test]
+    fn codex_nonzero_exit_passes_through() {
+        let input = serde_json::json!({
+            "action": "run",
+            "command": "docker build .",
+            "result": distillable_noise(),
+            "exit_code": 1,
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(
+            out.is_none(),
+            "a failed command must pass through verbatim, not be distilled"
+        );
+    }
+
+    #[test]
+    fn codex_zero_exit_still_distills() {
+        // Guards the guard: a successful command with the same output is still distilled.
+        let input = serde_json::json!({
+            "action": "run",
+            "command": "docker build .",
+            "result": distillable_noise(),
+            "exit_code": 0,
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(
+            out.is_some(),
+            "a successful command must still be distilled"
+        );
+    }
+
+    #[test]
+    fn pi_error_passes_through() {
+        let input = serde_json::json!({
+            "toolName": "Bash",
+            "command": "vault kv list apps/x",
+            "toolResponse": { "result": distillable_noise(), "isError": true },
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_none(), "Pi isError=true must pass through verbatim");
+    }
+
+    #[test]
+    fn mcp_error_passes_through() {
+        let input = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "content": distillable_noise(), "isError": true },
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(out.is_none(), "MCP isError=true must pass through verbatim");
+    }
+
+    #[test]
+    fn claude_code_failure_string_passes_through() {
+        // Claude Code sends a failed command as a bare `tool_response` STRING, which
+        // must never be parsed into a success summary. Locks in the passthrough so a
+        // future, more-lenient parser can't silently reintroduce the fabrication.
+        let input = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "vault kv list apps/x"},
+            "tool_response": "Error: Exit code 2\nGet \"https://vault/…\": i/o timeout",
+        });
+        let out = process_payload(&input.to_string(), None, None);
+        assert!(
+            out.is_none(),
+            "Claude Code failure string must pass through verbatim"
+        );
     }
 }
