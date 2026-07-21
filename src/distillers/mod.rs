@@ -452,6 +452,15 @@ mod tests {
 
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
+    // #106: a composite `npm run <script>` (an `&&` chain) must NOT be claimed by a
+    // single tool distiller — `tsc --` in npm's echo used to collapse the whole thing
+    // to `tsc: no errors`. jsts declines composites (returns them for the pipeline's
+    // generic collapse), so every gate's verdict survives.
+    snapshot_test!(
+        test_jsts_npm_composite,
+        "npm_run_verify.txt",
+        "npm run verify"
+    );
     snapshot_test!(
         test_jsts_playwright,
         "playwright_fail.txt",

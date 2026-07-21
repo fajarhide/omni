@@ -29,6 +29,20 @@ impl Distiller for JsTsDistiller {
 
         let filtered_input = lines.join("\n");
 
+        // A composite task runner (`npm run verify` = `build && tsc && eslint && …`)
+        // concatenates several tools' output into one buffer. npm echoes the chained
+        // command it runs, so a `> … && …` line is the tell. Without this guard the
+        // single-tool detectors below each match a fragment and the FIRST wins the
+        // whole buffer — `tsc --` inside npm's own echo made `npm run verify` distil
+        // to `tsc: no errors`, discarding four of five gates (#106). No per-tool
+        // distiller can safely own a composite (there is no delimiter between the
+        // tools' outputs), so decline: return it unchanged and let the pipeline's
+        // generic collapse fold the repeated build noise while keeping every gate's
+        // distinct verdict line.
+        if is_composite_command(&lines) {
+            return filtered_input;
+        }
+
         // Dispatch based on content analysis
         if is_vitest_output(&lines) {
             distill_vitest(&filtered_input)
@@ -55,6 +69,16 @@ impl Distiller for JsTsDistiller {
 // ---------------------------------------------------------------------------
 // Detection helpers
 // ---------------------------------------------------------------------------
+
+fn is_composite_command(lines: &[&str]) -> bool {
+    // npm/yarn/pnpm echo the script they run; a `> a && b && c` echo means several
+    // tools chained, their outputs about to be concatenated with no delimiter. The
+    // per-tool detectors can't safely claim such a buffer. (`make`/`npm-run-all`
+    // composites without an `&&` echo aren't covered yet — add when one is reported.)
+    lines
+        .iter()
+        .any(|l| l.trim_start().starts_with('>') && l.contains("&&"))
+}
 
 fn is_vitest_output(lines: &[&str]) -> bool {
     lines.iter().any(|l| {
