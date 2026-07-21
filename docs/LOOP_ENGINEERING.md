@@ -46,7 +46,7 @@ export OMNI_LOOP_BUDGET=100000
 
 ### 3. Run Your Loop
 
-See `examples/autonomous-loops/` for ready-to-use templates:
+See `autonomous-loops/` for ready-to-use templates:
 - `shell-loop.sh` — Generic shell loop
 - `claude-code-loop.md` — System prompt for Claude Code
 - `mastra-integration.ts` — TypeScript/Mastra orchestrator setup
