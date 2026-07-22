@@ -175,6 +175,50 @@ fn print_separator() {
     );
 }
 
+/// Read by both `print_help` and `super::check_flags`, so this list is what
+/// `omni stats` documents *and* what it accepts (#151).
+const FLAGS: super::Flags = &[
+    (
+        "--detail",
+        "Full technical breakdown (commands, routes, sessions, agents)",
+    ),
+    ("--hour, -H", "Scope to the last 60 minutes"),
+    ("--today, -d", "Scope to today only"),
+    ("--week, -w", "Scope to last 7 days"),
+    ("--month, -m", "Scope to last 30 days (the default)"),
+    (
+        "--all-commands",
+        "List every command, not just the top ones",
+    ),
+    ("--json", "Machine-readable JSON output"),
+    ("--project", "Display breakdown per project path"),
+    ("--context", "Show context composition signals"),
+];
+
+/// The time window the scope flags select, as `(label, since_unix)`.
+///
+/// One resolver for every mode. `run_detail` and `run_project_stats` each had
+/// their own copy and neither matched `--month` at all — it was honoured only by
+/// being the fall-through in one of them, and silently ignored in the other.
+fn scope(args: &[String]) -> (&'static str, i64) {
+    let now = chrono::Utc::now().timestamp();
+    if has(args, "--hour", "-H") {
+        ("last hour", now - 3600)
+    } else if has(args, "--today", "-d") {
+        // Calendar day, not a rolling 24h: "today" means since midnight.
+        ("today", now - (now % 86400))
+    } else if has(args, "--week", "-w") {
+        ("last 7 days", now - 7 * 86400)
+    } else {
+        // `--month` / `-m` and the no-flag default are the same window.
+        ("last 30 days", now - 30 * 86400)
+    }
+}
+
+fn has(args: &[String], long: &str, short: &str) -> bool {
+    args.iter().any(|a| a == long || a == short)
+}
+
 fn print_help() {
     println!(
         "\n{} {} — Token savings analytics",
@@ -184,27 +228,7 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni {} {}", "stats".cyan(), "[FLAGS]".bright_black());
 
-    println!("\n{}", "FLAGS:".bold().bright_white());
-    println!(
-        "  {: <12} Full technical breakdown (commands, routes, sessions, agents)",
-        "--detail".cyan()
-    );
-    println!("  {: <12} Scope to today only", "--today".cyan());
-    println!("  {: <12} Scope to last 7 days", "--week".cyan());
-    println!(
-        "  {: <12} Scope to last 30 days (default for --detail)",
-        "--month".cyan()
-    );
-    println!("  {: <12} Machine-readable JSON output", "--json".cyan());
-    println!(
-        "  {: <12} Display breakdown per project path",
-        "--project".cyan()
-    );
-    println!(
-        "  {: <12} Show context composition signals",
-        "--context".cyan()
-    );
-    println!("  {: <12} Show this help message", "--help, -h".cyan());
+    super::print_flags(FLAGS);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -232,14 +256,17 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("stats", args, FLAGS)?;
 
     let detail_flag = args.iter().any(|a| a == "--detail");
     let json_flag = args.iter().any(|a| a == "--json");
     let project_flag = args.iter().any(|a| a == "--project");
     let context_flag = args.iter().any(|a| a == "--context");
-    let filter_flag = args
-        .iter()
-        .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
+    let filter_flag = has(args, "--hour", "-H")
+        || has(args, "--today", "-d")
+        || has(args, "--week", "-w")
+        || has(args, "--month", "-m")
+        || args.iter().any(|a| a == "--all-commands");
 
     let mode = if context_flag {
         "context"
@@ -500,15 +527,7 @@ fn run_default(store: &Store) -> Result<()> {
 // ─── Detail Mode: Current View (Improved) ───────────────
 
 fn run_detail(args: &[String], store: &Store) -> Result<()> {
-    let (period_label, since) = if args.iter().any(|a| a == "--today") {
-        let now = chrono::Utc::now().timestamp();
-        let start = now - (now % 86400);
-        ("today", start)
-    } else if args.iter().any(|a| a == "--week") {
-        ("last 7 days", chrono::Utc::now().timestamp() - 7 * 86400)
-    } else {
-        ("last 30 days", chrono::Utc::now().timestamp() - 30 * 86400)
-    };
+    let (period_label, since) = scope(args);
 
     let (count, input_total, output_total, sum_latency, _max_latency, raw_tokens, filtered_tokens) =
         store.aggregate_stats(since)?;
@@ -966,17 +985,7 @@ fn run_json(store: &Store) -> Result<()> {
 }
 
 fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
-    let today_flag = args.iter().any(|a| a == "--today");
-    let week_flag = args.iter().any(|a| a == "--week");
-
-    let now = chrono::Utc::now().timestamp();
-    let (since, period_label) = if today_flag {
-        (now - (now % 86400), "Today")
-    } else if week_flag {
-        (now - 7 * 86400, "Last 7 Days")
-    } else {
-        (now - 30 * 86400, "Last 30 Days")
-    };
+    let (period_label, since) = scope(args);
 
     let projects = store.get_project_stats(since)?;
     println!(

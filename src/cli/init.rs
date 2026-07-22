@@ -3,6 +3,44 @@ use serde_json::Value;
 use std::env;
 use std::fs;
 
+/// Read by `print_help` and `super::check_flags` (#151). The first
+/// `AGENT_FLAGS` entries are the agents; the rest are Claude-specific, which is
+/// how help groups them.
+const FLAGS: super::Flags = &[
+    ("--claude", "Configure Claude Code (Anthropic)"),
+    ("--cursor", "Configure Cursor AI"),
+    ("--zed", "Configure Zed Editor"),
+    ("--cline", "Configure Cline"),
+    ("--roo", "Configure Roo Code"),
+    ("--roo-code", "Configure Roo Code (alias)"),
+    ("--copilot", "Configure GitHub Copilot CLI"),
+    ("--gemini", "Configure Gemini CLI"),
+    ("--opencode", "Configure OpenCode"),
+    ("--codex", "Configure Codex CLI"),
+    ("--openclaw", "Configure OpenClaw"),
+    (
+        "--antigravity",
+        "Configure Antigravity IDE / Generic Webhook",
+    ),
+    ("--hermes", "Configure Hermes Agent"),
+    ("--vscode", "Configure VS Code (MCP)"),
+    ("--pi", "Configure Pi Agent"),
+    ("--all", "Perform full Claude setup (hooks + MCP)"),
+    ("--hook", "Only install hooks"),
+    ("--mcp", "Only register MCP server"),
+    ("--status", "Check current installation status"),
+    ("--uninstall", "Remove OMNI hooks and MCP server"),
+];
+
+/// Where `FLAGS` stops listing agents and starts listing Claude-specific flags.
+///
+// ponytail: hand-maintained split index rather than two lists, because
+// `check_flags` wants one flat list and a second const would mean teaching it to
+// take several. `splits_flags_between_the_two_help_groups` below is what keeps
+// it honest. Upgrade path: separate consts + a `check_flags` that accepts a
+// slice of lists — worth it the moment a third group appears.
+const AGENT_FLAGS: usize = 15;
+
 fn print_help() {
     println!(
         "\n{} {} — Setup OMNI for your preferred AI Agent",
@@ -12,45 +50,12 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni {}", "init [FLAGS]".cyan());
 
-    println!("\n{}", "SUPPORTED AGENTS:".bold().bright_white());
-    println!(
-        "  {: <14} Configure Claude Code (Anthropic)",
-        "--claude".cyan()
-    );
-    println!("  {: <14} Configure Cursor AI", "--cursor".cyan());
-    println!("  {: <14} Configure Zed Editor", "--zed".cyan());
-    println!("  {: <14} Configure Cline", "--cline".cyan());
-    println!("  {: <14} Configure Roo Code", "--roo".cyan());
-    println!("  {: <14} Configure GitHub Copilot CLI", "--copilot".cyan());
-    println!("  {: <14} Configure Gemini CLI", "--gemini".cyan());
-    println!("  {: <14} Configure OpenCode", "--opencode".cyan());
-    println!("  {: <14} Configure Codex CLI", "--codex".cyan());
-    println!("  {: <14} Configure OpenClaw", "--openclaw".cyan());
-    println!(
-        "  {: <14} Configure Antigravity IDE / Generic Webhook",
-        "--antigravity".cyan()
-    );
-    println!("  {: <14} Configure Hermes Agent", "--hermes".cyan());
-    println!("  {: <14} Configure VS Code (MCP)", "--vscode".cyan());
-    println!("  {: <14} Configure Pi Agent", "--pi".cyan());
-
-    println!("\n{}", "CLAUDE SPECIFIC FLAGS:".bold().bright_white());
-    println!(
-        "  {: <14} Perform full Claude setup (hooks + MCP)",
-        "--all".cyan()
-    );
-    println!("  {: <14} Only install hooks", "--hook".cyan());
-    println!("  {: <14} Only register MCP server", "--mcp".cyan());
-    println!(
-        "  {: <14} Check current installation status",
-        "--status".cyan()
-    );
-    println!(
-        "  {: <14} Remove OMNI hooks and MCP server",
-        "--uninstall".cyan()
-    );
-
-    println!("  {: <14} Show this help message", "--help, -h".cyan());
+    let entries: Vec<_> = FLAGS
+        .iter()
+        .chain(std::iter::once(&super::HELP_FLAG))
+        .collect();
+    super::print_flag_group("SUPPORTED AGENTS:", &entries[..AGENT_FLAGS]);
+    super::print_flag_group("CLAUDE SPECIFIC FLAGS:", &entries[AGENT_FLAGS..]);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -72,6 +77,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("init", args, FLAGS)?;
 
     let mut is_claude = args.iter().any(|a| a == "--claude");
     let mut is_cursor = args.iter().any(|a| a == "--cursor");
@@ -371,4 +377,25 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `AGENT_FLAGS` is a hand-maintained index into `FLAGS`. Getting it wrong
+    /// files an agent under "CLAUDE SPECIFIC FLAGS" in help and nothing else
+    /// breaks, so this is the only thing that would notice.
+    #[test]
+    fn splits_flags_between_the_two_help_groups() {
+        assert_eq!(
+            FLAGS[AGENT_FLAGS - 1].0,
+            "--pi",
+            "last agent flag moved; AGENT_FLAGS is stale"
+        );
+        assert_eq!(
+            FLAGS[AGENT_FLAGS].0, "--all",
+            "first Claude-specific flag moved; AGENT_FLAGS is stale"
+        );
+    }
 }

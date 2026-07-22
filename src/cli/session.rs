@@ -8,6 +8,19 @@ use chrono::{Local, TimeZone, Utc};
 use colored::*;
 use std::sync::Arc;
 
+/// Read by both `print_help` and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[
+    ("--status", "Check current session status"),
+    ("--history", "View recent session history"),
+    ("--clear", "Reset/Clear the current session"),
+    ("--continue", "Continue a stale session"),
+    ("--resume", "Resume an interrupted session"),
+    ("--transcript", "View transcript of recent session"),
+    ("--health", "Visual session health dashboard"),
+    ("--inject", "Emit session context for an agent to consume"),
+    ("--json", "Machine-readable JSON output"),
+];
+
 fn print_help() {
     println!(
         "\n{} {} — Session state management",
@@ -17,24 +30,7 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni {} {}", "session".cyan(), "[FLAGS]".bright_black());
 
-    println!("\n{}", "FLAGS:".bold().bright_white());
-    println!("  {: <16} Check current session status", "--status".cyan());
-    println!("  {: <16} View recent session history", "--history".cyan());
-    println!(
-        "  {: <16} Reset/Clear the current session",
-        "--clear".cyan()
-    );
-    println!("  {: <16} Continue a stale session", "--continue".cyan());
-    println!("  {: <16} Resume an interrupted session", "--resume".cyan());
-    println!(
-        "  {: <16} View transcript of recent session",
-        "--transcript".cyan()
-    );
-    println!(
-        "  {: <16} Visual session health dashboard",
-        "--health".cyan()
-    );
-    println!("  {: <16} Show this help message", "--help, -h".cyan());
+    super::print_flags(FLAGS);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -64,6 +60,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("session", args, FLAGS)?;
 
     let is_history = args.iter().any(|a| a == "--history");
     let is_clear = args.iter().any(|a| a == "--clear");

@@ -6,6 +6,15 @@ use colored::*;
 use std::fs;
 use std::io::{self, IsTerminal, Read};
 
+/// Read by both `print_help` and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[
+    ("--discover", "Discover and view candidate patterns"),
+    ("--apply", "Automatically append new filters to config"),
+    ("--dry-run", "Preview the generated TOML without writing"),
+    ("--from-queue", "Use background learning queue as source"),
+    ("--verify", "Run inline tests for all existing filters"),
+];
+
 fn print_help() {
     println!(
         "\n{} {} — Auto-generate filters from history",
@@ -15,28 +24,7 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni learn {}", "[FLAGS]".bright_black());
 
-    println!("\n{}", "FLAGS:".bold().bright_white());
-    println!(
-        "  {: <12} Discover and view candidate patterns",
-        "--discover".cyan()
-    );
-    println!(
-        "  {: <12} Automatically append new filters to config",
-        "--apply".cyan()
-    );
-    println!(
-        "  {: <12} Preview the generated TOML without writing",
-        "--dry-run".cyan()
-    );
-    println!(
-        "  {: <12} Use background learning queue as source",
-        "--from-queue".cyan()
-    );
-    println!(
-        "  {: <12} Run inline tests for all existing filters",
-        "--verify".cyan()
-    );
-    println!("  {: <12} Show this help message", "--help, -h".cyan());
+    super::print_flags(FLAGS);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -70,6 +58,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("learn", args, FLAGS)?;
 
     let apply = args.iter().any(|a| a == "--apply");
     let dry_run = args.iter().any(|a| a == "--dry-run");
