@@ -245,7 +245,16 @@ fn distill_vitest(input: &str) -> String {
     }
 
     if failed_tests == 0 && failed_details.is_empty() {
-        return format!("vitest: ✓ {}/{} passed", passed_tests, total_tests);
+        // Zero-state guard (#143): only claim a clean run if we actually parsed a
+        // vitest signal (a "Tests …" summary or at least one ✓ line). Otherwise a
+        // misdetected input (e.g. a `VITE v` dev server, #115) would become a
+        // false `vitest: ✓ 0/0 passed`. No signal → pass the input through.
+        let parsed = has_summary || passed_tests > 0;
+        return super::require_parsed(
+            parsed,
+            input,
+            format!("vitest: ✓ {}/{} passed", passed_tests, total_tests),
+        );
     }
 
     // Deduplicate failed_details

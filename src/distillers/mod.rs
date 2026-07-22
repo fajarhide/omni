@@ -161,6 +161,17 @@ fn should_passthrough_config_output(command: &str, input: &str) -> bool {
         || lower.ends_with(".json")
 }
 
+/// Zero-state guard: a distiller may emit a success/clean summary only if it
+/// positively parsed a recognized signal. With no evidence anything was parsed,
+/// fail open by returning the raw input unchanged — never a synthesized
+/// `✓`/"no errors"/"passed" string that is byte-identical to a real clean run.
+///
+/// This is the shared invariant behind #143: a misdetection upstream then
+/// degrades to passthrough instead of a confident false claim.
+pub(crate) fn require_parsed(parsed: bool, input: &str, summary: String) -> String {
+    if parsed { summary } else { input.to_string() }
+}
+
 /// Distill output based on command
 #[tracing::instrument(skip_all)]
 pub fn distill_with_command(
@@ -368,6 +379,25 @@ mod tests {
         assert_eq!(
             extract_base_executable("env FOO=1 \"/path/to/git\" status"),
             "/path/to/git"
+        );
+    }
+
+    #[test]
+    fn vitest_zero_parse_passes_through_instead_of_claiming_success() {
+        // #143 / #115: a Vite dev server (no tests) must never distill to a
+        // green `vitest: ✓ 0/0 passed`. With nothing parsed, fail open.
+        let input = include_str!("../../tests/fixtures/vite_dev_server.txt");
+        let segments = scorer::score_with_command(input, "vitest", None);
+        let output = distill_with_command(&segments, input, "vitest", None);
+
+        assert!(
+            !output.contains("0/0 passed"),
+            "zero-parse produced a false success claim: {output:?}"
+        );
+        // The load-bearing signal (the bound port) survives.
+        assert!(
+            output.contains(":8080"),
+            "dev-server port was dropped: {output:?}"
         );
     }
 
