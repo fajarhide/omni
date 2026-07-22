@@ -88,21 +88,9 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
-    /// Handoff
-    #[command(trailing_var_arg = true, disable_help_flag = true)]
-    Handoff {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
-    },
     /// Auto-generate filters from history
     #[command(trailing_var_arg = true, disable_help_flag = true)]
     Learn {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
-    },
-    /// View and manage archived content
-    #[command(trailing_var_arg = true, disable_help_flag = true)]
-    Rewind {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
@@ -136,12 +124,6 @@ enum OmniCommand {
         /// Command and arguments to execute
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         cmd_args: Vec<String>,
-    },
-    /// Rewrite
-    #[command(trailing_var_arg = true)]
-    Rewrite {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
     },
     /// Diagnose installation health
     #[command(trailing_var_arg = true, disable_help_flag = true)]
@@ -221,10 +203,6 @@ fn print_help() {
     println!(
         "  {: <12} Auto-generate filters from history",
         "learn".cyan()
-    );
-    println!(
-        "  {: <12} View and manage archived content",
-        "rewind".cyan()
     );
     println!(
         "  {: <12} Query distillation history (OmniQL)",
@@ -457,19 +435,6 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Handoff { .. }) => match Store::open() {
-                    Ok(store) => {
-                        let store_arc = Arc::new(store);
-                        if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
-                            eprintln!("[omni] Handoff error: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[omni] Cannot open database for handoff: {}", e);
-                        std::process::exit(1);
-                    }
-                },
                 Some(OmniCommand::Goal { extra }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::goal::run(&extra, &store) {
@@ -488,18 +453,6 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Rewind { .. }) => match Store::open() {
-                    Ok(store) => {
-                        if let Err(e) = cli::rewind::run_rewind(&args, &store) {
-                            eprintln!("[omni] Rewind error: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[omni] Cannot open database for rewind: {}", e);
-                        std::process::exit(1);
-                    }
-                },
                 Some(OmniCommand::Query { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::query::run_query(&args, &store) {
@@ -533,11 +486,6 @@ fn main() {
                     if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
                         eprintln!("[omni] Exec error: {}", e);
                         std::process::exit(1);
-                    }
-                }
-                Some(OmniCommand::Rewrite { .. }) => {
-                    if let Err(_e) = cli::rewrite::run_rewrite(&args) {
-                        std::process::exit(1); // Standard silent fail for rewrite hook
                     }
                 }
                 Some(OmniCommand::Doctor { .. }) => {
@@ -610,37 +558,12 @@ fn main() {
                                 std::process::exit(1);
                             }
                         },
-                        "handoff" => match Store::open() {
-                            Ok(store) => {
-                                let store_arc = Arc::new(store);
-                                if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
-                                    eprintln!("[omni] Handoff error: {}", e);
-                                    std::process::exit(1);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[omni] Cannot open database for handoff: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
                         "learn" => {
                             if let Err(e) = cli::learn::run_learn(&args) {
                                 eprintln!("[omni] Auto-Learn error: {}", e);
                                 std::process::exit(1);
                             }
                         }
-                        "rewind" => match Store::open() {
-                            Ok(store) => {
-                                if let Err(e) = cli::rewind::run_rewind(&args, &store) {
-                                    eprintln!("[omni] Rewind error: {}", e);
-                                    std::process::exit(1);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[omni] Cannot open database for rewind: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
                         "query" => match Store::open() {
                             Ok(store) => {
                                 if let Err(e) = cli::query::run_query(&args, &store) {
@@ -674,11 +597,6 @@ fn main() {
                             });
                             if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
                                 eprintln!("[omni] Exec error: {}", e);
-                                std::process::exit(1);
-                            }
-                        }
-                        "rewrite" => {
-                            if let Err(_e) = cli::rewrite::run_rewrite(&args) {
                                 std::process::exit(1);
                             }
                         }

@@ -1,18 +1,6 @@
-use anyhow::Result;
-
-pub fn run_rewrite(args: &[String]) -> Result<()> {
-    if args.len() < 3 {
-        std::process::exit(1);
-    }
-
-    let cmd_str = &args[2];
-    if let Some(rewritten) = rewrite_logic(cmd_str) {
-        println!("{}", rewritten);
-        std::process::exit(0);
-    }
-
-    std::process::exit(1);
-}
+// `rewrite_logic` has no CLI entry point: the `omni rewrite` subcommand was
+// deleted in #164 (zero invocations on record). The module stays because
+// `hooks::pre_tool` calls it on every command — see #157.
 
 pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
     let allow_list = [

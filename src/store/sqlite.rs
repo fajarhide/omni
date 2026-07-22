@@ -208,30 +208,6 @@ impl SqliteBackend {
         Ok((total, retrieved))
     }
 
-    pub fn list_recent_rewinds(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<crate::cli::rewind::RewindEntry>> {
-        let conn = self.pool.get().context("DB pool exhausted")?;
-        let mut stmt = conn.prepare(
-            "SELECT hash, ts, original_len, retrieved FROM rewind_store ORDER BY ts DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit as i64], |row| {
-            Ok(crate::cli::rewind::RewindEntry {
-                hash: row.get(0)?,
-                ts: row.get(1)?,
-                original_len: row.get(2)?,
-                retrieved: row.get(3)?,
-            })
-        })?;
-
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
-    }
-
     /// Hot files for session insight
     pub fn hot_files_global(&self, since: i64) -> Result<Vec<(String, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
