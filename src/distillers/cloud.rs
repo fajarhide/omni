@@ -1,39 +1,56 @@
 use crate::distillers::Distiller;
 use crate::pipeline::{OutputSegment, SignalTier};
 
-pub struct CloudDistiller;
+/// The cloud tool that produced this output, as resolved by the dispatcher from
+/// the command it ran.
+///
+/// It is *not* re-derived from the content (#112): content heuristics can
+/// disambiguate a format *within* one tool (`docker ps` vs `docker build` vs
+/// `docker logs`), but they cannot establish identity. `is_docker_logs` matches
+/// any timestamped log, so sniffing routed `kubectl exec` output into the docker
+/// summariser, which then reported `docker logs: 9 lines, no errors detected`
+/// over an `ls: … No such file or directory` — a tool that never ran, denying an
+/// error that was right there.
+pub struct CloudDistiller<'a> {
+    pub tool: &'a str,
+}
 
-impl Distiller for CloudDistiller {
+impl Distiller for CloudDistiller<'_> {
     fn distill(
         &self,
         segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
     ) -> String {
-        // Dispatch to sub-function based on content analysis
-        if input.contains("CONTAINER ID") || input.contains("docker ps") {
-            distill_docker_ps(input)
-        } else if input.contains("Step ") && input.contains(" : ") {
-            distill_docker_build(input)
-        } else if input.contains("docker logs") || is_docker_logs(input) {
-            distill_docker_logs(segments, input)
-        } else if is_kubectl_table(input) {
-            distill_kubectl(input)
-        } else if input.contains("kubectl") {
-            distill_kubectl_generic(segments, input)
-        } else if input.contains("terraform") || input.contains("Terraform") {
-            distill_terraform(input)
-        } else if input.contains("helm") || is_helm_table(input) {
-            distill_helm(input)
-        } else if input.contains("aws ") {
-            distill_aws(segments, input)
-        } else if is_resource_table(input) {
-            // A columnar listing we have no distiller for (`kubectl get pvc|pv|
-            // ns|certificates …`). The fallback would keep 20 lines and drop the
-            // rest with no marker, so hand back the payload untouched.
-            input.to_string()
-        } else {
-            distill_fallback(segments)
+        match self.tool {
+            "docker" | "podman" => {
+                if input.contains("CONTAINER ID") {
+                    distill_docker_ps(input)
+                } else if input.contains("Step ") && input.contains(" : ") {
+                    distill_docker_build(input)
+                } else {
+                    distill_docker_logs(segments, input)
+                }
+            }
+            "kubectl" => {
+                if is_kubectl_table(input) {
+                    distill_kubectl(input)
+                } else if is_resource_table(input) {
+                    // A columnar listing we have no distiller for (`kubectl get
+                    // pvc|pv|ns|certificates …`). The fallback would keep 20
+                    // lines and drop the rest with no marker, so hand back the
+                    // payload untouched.
+                    input.to_string()
+                } else {
+                    distill_kubectl_generic(segments, input)
+                }
+            }
+            "helm" => distill_helm(input),
+            "terraform" | "tofu" => distill_terraform(input),
+            "aws" => distill_aws(segments, input),
+            // gcloud, az, doctl, … — no dedicated parser, so keep the signal
+            // tiers rather than guessing at a format.
+            _ => distill_fallback(segments, input),
         }
     }
 }
@@ -290,7 +307,7 @@ fn distill_kubectl_generic(segments: &[OutputSegment], input: &str) -> String {
     }
 
     if out.trim().is_empty() {
-        return distill_fallback(segments);
+        return distill_fallback(segments, input);
     }
 
     out.trim().to_string()
@@ -452,22 +469,29 @@ fn distill_terraform(input: &str) -> String {
     let mut changed = 0u32;
     let mut destroyed = 0u32;
     let mut resources: Vec<String> = Vec::new();
+    // Whether a plan/apply was actually read. `terraform init` and `fmt` reach
+    // here too, and "+0 ~0 -0 resources" would report an empty plan for output
+    // that never contained one.
+    let mut parsed = false;
 
     for line in input.lines() {
         let trimmed = line.trim();
 
         // terraform plan lines like: "# aws_instance.web will be created"
         if trimmed.contains("will be created") {
+            parsed = true;
             added += 1;
             if let Some(res) = extract_tf_resource(trimmed) {
                 resources.push(format!("+ {}", res));
             }
         } else if trimmed.contains("will be updated") || trimmed.contains("must be replaced") {
+            parsed = true;
             changed += 1;
             if let Some(res) = extract_tf_resource(trimmed) {
                 resources.push(format!("~ {}", res));
             }
         } else if trimmed.contains("will be destroyed") {
+            parsed = true;
             destroyed += 1;
             if let Some(res) = extract_tf_resource(trimmed) {
                 resources.push(format!("- {}", res));
@@ -478,6 +502,7 @@ fn distill_terraform(input: &str) -> String {
 
         // Also catch the summary line: "Plan: X to add, Y to change, Z to destroy."
         if t_lower.contains("plan:") {
+            parsed = true;
             // Parse "Plan: 3 to add, 1 to change, 0 to destroy."
             for part in trimmed.split(',') {
                 let part = part.trim();
@@ -527,7 +552,7 @@ fn distill_terraform(input: &str) -> String {
         }
     }
 
-    out.trim().to_string()
+    super::require_parsed(parsed, input, out.trim().to_string())
 }
 
 fn extract_tf_resource(line: &str) -> Option<String> {
@@ -547,9 +572,9 @@ fn distill_helm(input: &str) -> String {
     let mut other_h = 0u32;
     let mut releases: Vec<String> = Vec::new();
 
-    let has_header = input
-        .lines()
-        .any(|l| l.contains("NAME") && l.contains("STATUS"));
+    // `NAME` + `STATUS` is the common prefix of half of kubectl's tables too;
+    // `REVISION` + `CHART` is what only `helm list` prints.
+    let has_header = is_helm_table(input);
 
     if has_header {
         for line in input.lines().skip(1) {
@@ -591,7 +616,9 @@ fn distill_helm(input: &str) -> String {
         out.push_str(&releases.join(", "));
     }
 
-    out
+    // Without the release table there is nothing to count, and "0 deployed,
+    // 0 failed, 0 pending" would assert a cluster state we never read.
+    super::require_parsed(has_header, input, out)
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +665,7 @@ fn distill_aws(segments: &[OutputSegment], input: &str) -> String {
     }
 
     if out.trim().is_empty() {
-        return distill_fallback(segments);
+        return distill_fallback(segments, input);
     }
 
     out.trim().to_string()
@@ -648,7 +675,7 @@ fn distill_aws(segments: &[OutputSegment], input: &str) -> String {
 // Fallback: take Critical + Important segments, max 20 lines
 // ---------------------------------------------------------------------------
 
-fn distill_fallback(segments: &[OutputSegment]) -> String {
+fn distill_fallback(segments: &[OutputSegment], input: &str) -> String {
     let mut out = String::new();
     let mut lines = 0;
 
@@ -676,7 +703,9 @@ fn distill_fallback(segments: &[OutputSegment]) -> String {
         }
     }
 
-    out.trim().to_string()
+    // Nothing survived scoring — returning "" would delete the output entirely
+    // and report it as a 100% saving.
+    super::require_parsed(!out.trim().is_empty(), input, out.trim().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -699,8 +728,50 @@ NAMESPACE   NAME                     READY   STATUS             RESTARTS   AGE
 default     api-7fb96c846b-f4jnm     1/1     Running            0          5d
 kube-系统   auth-5d4f6c8b99-abc12    0/1     CrashLoopBackOff   15         2h";
 
+    fn distill_as(tool: &str, input: &str) -> String {
+        CloudDistiller { tool }.distill(&[], input, None)
+    }
+
     fn distill(input: &str) -> String {
-        CloudDistiller.distill(&[], input, None)
+        distill_as("kubectl", input)
+    }
+
+    /// From issue #112: `is_docker_logs` is a pure shape heuristic — five
+    /// timestamped lines — so `kubectl exec` output was routed into the docker
+    /// summariser, which erased a real `ls:` error and asserted there was none.
+    #[test]
+    fn routes_by_command_not_by_content_shape() {
+        let mut input = String::from("ls: /data/models: No such file or directory\n");
+        for i in 0..8 {
+            input.push_str(&format!(
+                "2026-07-20T10:0{i}:11Z  worker heartbeat ok, queue depth 0, uptime 42h\n"
+            ));
+        }
+
+        assert!(
+            is_docker_logs(&input),
+            "precondition: the sniff still fires"
+        );
+        assert_eq!(distill_as("kubectl", &input), input);
+    }
+
+    #[test]
+    fn refuses_a_release_summary_without_a_helm_table() {
+        let input = "Release \"api\" has been upgraded. Happy Helming!\nNAMESPACE: prod\n";
+        assert_eq!(distill_as("helm", input), input);
+    }
+
+    #[test]
+    fn refuses_a_plan_summary_when_no_plan_was_read() {
+        let input =
+            "Terraform has been successfully initialized!\n\nTry running \"terraform plan\".\n";
+        assert_eq!(distill_as("terraform", input), input);
+    }
+
+    #[test]
+    fn returns_input_rather_than_nothing_when_no_segment_survives() {
+        let input = "some output no cloud parser understands\n";
+        assert_eq!(distill_as("gcloud", input), input);
     }
 
     #[test]

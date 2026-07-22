@@ -309,7 +309,7 @@ pub fn distill_with_command(
             | "az"
             | "doctl"
     ) {
-        return cloud::CloudDistiller.distill(segments, input, session);
+        return cloud::CloudDistiller { tool: &base }.distill(segments, input, session);
     }
 
     // Config file protection: avoid over-distilling small configs
