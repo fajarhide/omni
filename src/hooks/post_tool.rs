@@ -17,11 +17,43 @@ struct HookOutput {
 struct HookSpecificOutput {
     #[serde(rename = "hookEventName")]
     hook_event_name: &'static str,
-    #[serde(rename = "updatedResponse")]
-    updated_response: String,
+    /// The key the host reads to replace what the model sees.
+    ///
+    /// This was `updatedResponse` from the first day of the Rust rewrite until
+    /// #158 — a key Claude Code does not recognise. Unknown keys are dropped
+    /// silently, so the agent received the raw output for the whole life of the
+    /// hook while OMNI recorded `Route::Keep` and printed a savings footer for
+    /// each one. The sibling `additionalContext` *was* spelled correctly, which
+    /// is why the footer appeared and made the failure look like success.
+    ///
+    /// `serialises_the_key_the_host_actually_reads` is what keeps this honest:
+    /// a struct-level test cannot catch a wrong key, because it asserts on the
+    /// same field name it serialised.
+    #[serde(rename = "updatedToolOutput")]
+    updated_tool_output: ToolOutput,
     #[serde(rename = "additionalContext")]
     #[serde(skip_serializing_if = "Option::is_none")]
     additional_context: Option<String>,
+}
+
+/// The replacement tool result, in the object shape the host expects.
+///
+/// `status` is always `success` because a failed command returns `None` well
+/// before this point (#120) and never reaches here — so this cannot assert a
+/// success for a command that failed.
+#[derive(Serialize)]
+struct ToolOutput {
+    status: &'static str,
+    result: String,
+}
+
+impl ToolOutput {
+    fn success(result: String) -> Self {
+        Self {
+            status: "success",
+            result,
+        }
+    }
 }
 #[tracing::instrument(skip_all)]
 pub fn process_payload(
@@ -522,7 +554,7 @@ pub fn process_payload(
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
-            updated_response: final_out,
+            updated_tool_output: ToolOutput::success(final_out),
             additional_context,
         },
     })
@@ -668,7 +700,7 @@ fn wrap_hook_output(distilled: String) -> String {
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
-            updated_response: distilled,
+            updated_tool_output: ToolOutput::success(distilled),
             additional_context: None,
         },
     })
@@ -729,6 +761,27 @@ fn strip_html_simple(html: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// #158. The host replaces what the model sees only when it finds
+    /// `updatedToolOutput`; any other key is dropped without a word, and the
+    /// agent silently keeps the raw output while OMNI records the saving.
+    ///
+    /// This asserts on the **serialized bytes** on purpose. A test that builds
+    /// `HookSpecificOutput` and reads `.updated_tool_output` back passes with
+    /// any key whatsoever, which is exactly how `updatedResponse` survived from
+    /// the first day of the Rust rewrite until it was found by hand.
+    #[test]
+    fn serialises_the_key_the_host_actually_reads() {
+        let json = wrap_hook_output("distilled".to_string());
+
+        assert!(json.contains(r#""updatedToolOutput""#), "{json}");
+        assert!(json.contains(r#""status":"success""#), "{json}");
+        assert!(json.contains(r#""result":"distilled""#), "{json}");
+        assert!(
+            !json.contains("updatedResponse"),
+            "the ignored key is back: {json}"
+        );
+    }
 
     #[test]
     fn bash_tool_with_git_diff_output() {
