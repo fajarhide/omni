@@ -65,55 +65,55 @@ struct OmniArgs {
 #[derive(Subcommand, Debug)]
 enum OmniCommand {
     /// Setup OMNI Hooks and MCP server
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Init {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// View token savings analytics
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Stats {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Manage session state
-    #[command(alias = "sessions", trailing_var_arg = true)]
+    #[command(alias = "sessions", trailing_var_arg = true, disable_help_flag = true)]
     Session {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Engram
-    #[command(alias = "engrams", trailing_var_arg = true)]
+    #[command(alias = "engrams", trailing_var_arg = true, disable_help_flag = true)]
     Engram {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Handoff
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Handoff {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Auto-generate filters from history
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Learn {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// View and manage archived content
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Rewind {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Query distillation history (OmniQL)
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Query {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// View recurring error patterns
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Patterns {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -125,7 +125,7 @@ enum OmniCommand {
         extra: Vec<String>,
     },
     /// Set or view the project goal (North Star context pinning)
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Goal {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -144,7 +144,7 @@ enum OmniCommand {
         extra: Vec<String>,
     },
     /// Diagnose installation health
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Doctor {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -158,7 +158,7 @@ enum OmniCommand {
         extra: Vec<String>,
     },
     /// Upgrade OMNI to latest
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Update {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -393,7 +393,12 @@ fn main() {
                     }
                 }
                 Some(OmniCommand::Init { .. }) => {
-                    let _ = cli::init::run_init(&args);
+                    // Not `let _ =`: a rejected flag has to reach the user, or
+                    // `omni init --curser` installs nothing and exits 0 (#151).
+                    if let Err(e) = cli::init::run_init(&args) {
+                        eprintln!("[omni] Init error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
                 Some(OmniCommand::Reset) => {
                     if let Err(e) = cli::reset::handle_reset() {

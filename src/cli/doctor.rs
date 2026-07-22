@@ -3,6 +3,31 @@ use colored::*;
 use std::fs;
 use std::path::PathBuf;
 
+/// Read by both `print_help` and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[
+    (
+        "--fix",
+        "Automatically fix configuration and integration issues",
+    ),
+    (
+        "--test-filter <name>",
+        "Run inline tests for a specific filter",
+    ),
+    (
+        "--benchmark",
+        "Run filter tests and report slow filters (> 5ms)",
+    ),
+    (
+        "--coverage",
+        "Analyze filter coverage against past commands",
+    ),
+    (
+        "--validate <file.toml>",
+        "Validate a TOML filter file (syntax and tests)",
+    ),
+    ("--json", "Machine-readable JSON output"),
+];
+
 fn print_help() {
     println!(
         "\n{} {} — Installation diagnostics",
@@ -19,27 +44,7 @@ fn print_help() {
     println!("  • Claude Code hook installation");
     println!("  • MCP server registration");
     println!("  • Filter trust and loading status");
-    println!("\n{}", "FLAGS:".bold().bright_white());
-    println!(
-        "  {: <32} Automatically fix configuration and integration issues",
-        "--fix".cyan()
-    );
-    println!(
-        "  {: <32} Run inline tests for a specific filter",
-        "--test-filter <name>".cyan()
-    );
-    println!(
-        "  {: <32} Run filter tests and report slow filters (> 5ms)",
-        "--benchmark".cyan()
-    );
-    println!(
-        "  {: <32} Analyze filter coverage against past commands",
-        "--coverage".cyan()
-    );
-    println!(
-        "  {: <32} Validate a TOML filter file (syntax and tests)",
-        "--validate <file.toml>".cyan()
-    );
+    super::print_flags(FLAGS);
     println!();
 
     if let Some(latest) = crate::guard::update::check() {
@@ -215,6 +220,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("doctor", args, FLAGS)?;
 
     if args.iter().any(|a| a == "--json") {
         return run_json(args);
