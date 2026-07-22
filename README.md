@@ -78,7 +78,7 @@ That is the one thing a bigger compression number can't buy: **you can always re
 
 ### Fixing the same bug twice
 **Without OMNI:** Agent hits the same framework gotcha it already solved yesterday because it has no memory.  
-**With OMNI:** The fix is already stored. `omni recall` surfaces the exact solution in under 10ms.
+**With OMNI:** The fix is already stored. The agent surfaces it through the `omni_recall` MCP tool before it repeats the mistake.
 
 ### Multi-IDE workflows (Cursor → Claude Code)
 **Without OMNI:** New IDE, new agent, zero context. You're starting from scratch.  
@@ -248,9 +248,10 @@ If the AI *really* needs the dropped noise, OMNI's local SQLite **RewindStore** 
   <img src="media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
 </div>
 
-Built in Rust for imperceptible latency.
+Built in Rust, though the end-to-end cost is not zero.
 
-* **Pipeline Latency**: < 10ms overhead.
+* **Distillation**: the scoring and collapsing pipeline itself runs in single-digit milliseconds.
+* **End to end**: what you actually wait for is that plus the RewindStore write, and it grows with your history — roughly 82 ms against a fresh database and ~308 ms against a 97 MB one. See [Benchmarks](#benchmarks) before you assume it is free.
 * **Memory**: Operates via efficient streams, keeping memory usage flat even on 20,000-line logs.
 * **Fail Open**: If OMNI panics, it fails silently and passes the raw output through. It will never crash your host agent.
 
@@ -269,7 +270,7 @@ make fmt && make clippy
 No. The raw logs are compressed and stored locally in the SQLite RewindStore. The AI receives a hash and can retrieve the full log if needed.
 
 **Will this slow down my terminal?**  
-No. OMNI is written in Rust and executes the distillation pipeline in under 10ms.
+Yes, measurably, and the cost grows with your history. The distillation pipeline itself runs in single-digit milliseconds, but every hooked command also writes to the local RewindStore: a 496-byte `git status` takes ~82 ms against a fresh database and ~308 ms against a 97 MB one, and a 16.5 KB `cargo test` takes ~276 ms. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely when you need the raw output back.
 
 **Can I add my own filters?**  
 Yes. You can teach OMNI to strip noise specific to your internal tools using TOML:

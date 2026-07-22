@@ -179,6 +179,72 @@ fn init_globals() -> (Option<Arc<Store>>, Option<Arc<Mutex<SessionState>>>) {
 
 // ─── Help Text ──────────────────────────────────────────
 
+/// Every subcommand, grouped by what a user is trying to do, with the payoff
+/// rather than the noun.
+///
+/// This is the **only** command list. `omni help` and `omni --help` used to be
+/// two hand-maintained copies that had already drifted — six commands including
+/// `exec`, the harness every issue in this tracker asks reporters to run, were
+/// missing from the one a user gets by typing `omni` (#152).
+/// `lists_every_subcommand` keeps this honest.
+const COMMANDS: &[(&str, &str, &str)] = &[
+    (
+        "SET UP",
+        "init",
+        "Install OMNI into your agent (hooks + MCP)",
+    ),
+    (
+        "SET UP",
+        "doctor",
+        "Check the install is healthy, and fix what isn't",
+    ),
+    ("SET UP", "update", "Upgrade OMNI to the latest release"),
+    (
+        "SET UP",
+        "reset",
+        "Uninstall cleanly, keeping a backup of your config",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "stats",
+        "How many tokens OMNI cut, and from which commands",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "diff",
+        "The last command's output, before vs after",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "session",
+        "What this session has spent, and on what",
+    ),
+    (
+        "TUNE IT",
+        "learn",
+        "Build filters from the noise in your own history",
+    ),
+    (
+        "TUNE IT",
+        "exec",
+        "Run one command through OMNI, to see what it would do",
+    ),
+    ("TUNE IT", "query", "Search past distillations (OmniQL)"),
+    ("TUNE IT", "patterns", "Errors that keep coming back"),
+    ("MEMORY", "remember", "Save a fact for future sessions"),
+    ("MEMORY", "engram", "Digests of finished subtasks"),
+    (
+        "MEMORY",
+        "goal",
+        "Pin a north-star goal so scoring favours it",
+    ),
+    ("MEMORY", "version", "Version and environment details"),
+];
+
+/// The order groups render in. A group not listed here would silently vanish
+/// from help, so `lists_every_subcommand` rejects one.
+const GROUPS: &[&str] = &["SET UP", "SEE WHAT IT SAVED", "TUNE IT", "MEMORY"];
+
 fn print_help() {
     let version = env!("CARGO_PKG_VERSION");
 
@@ -189,60 +255,41 @@ fn print_help() {
     );
 
     println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni {} {}", "[COMMAND]".cyan(), "[FLAGS]".bright_black());
+    println!("  omni {} {}", "<COMMAND>".cyan(), "[FLAGS]".bright_black());
     println!(
         "  {} | omni       {}",
-        "cmd / cli".bright_black(),
-        "# Distill command output".bright_black()
+        "cmd".bright_black(),
+        "# distill any command's output".bright_black()
     );
 
-    println!("\n{}", "COMMANDS:".bold().bright_white());
-    println!("  {: <12} Setup OMNI Hooks and MCP server", "init".cyan());
-    println!("  {: <12} View token savings analytics", "stats".cyan());
-    println!("  {: <12} Manage session state", "session".cyan());
-    println!(
-        "  {: <12} Auto-generate filters from history",
-        "learn".cyan()
-    );
-    println!(
-        "  {: <12} Query distillation history (OmniQL)",
-        "query".cyan()
-    );
-    println!("  {: <12} View recurring error patterns", "patterns".cyan());
-
-    println!("\n{}", "UTILITIES:".bold().bright_white());
-    println!("  {: <12} Diagnose installation health", "doctor".cyan());
-    println!(
-        "  {: <12} Clean uninstall (for backups config)",
-        "reset".cyan()
-    );
-    println!(
-        "  {: <12} Compare last original input vs distilled",
-        "diff".cyan()
-    );
-    println!("  {: <12} Upgrade OMNI to latest", "update".cyan());
-    println!(
-        "  {: <12} View version and environment info",
-        "version".cyan()
-    );
-    println!("  {: <12} Show this help message", "help, -h".cyan());
+    let width = COMMANDS.iter().map(|(_, n, _)| n.len()).max().unwrap_or(0);
+    for group in GROUPS {
+        println!("\n{}", format!("{group}:").bold().bright_white());
+        for (_, name, payoff) in COMMANDS.iter().filter(|(g, _, _)| g == group) {
+            println!("  {} {}", format!("{name:<width$}").cyan(), payoff);
+        }
+    }
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni init             {}",
-        "# OMNI setup (interactive)".bright_black()
-    );
-    println!(
-        "  omni doctor           {}",
-        "# Diagnose installation health".bright_black()
-    );
-    println!(
         "  omni stats            {}",
-        "# View your savings".bright_black()
+        "# what did OMNI save me?".bright_black()
+    );
+    println!(
+        "  omni stats -d         {}",
+        "# ...just today".bright_black()
+    );
+    println!(
+        "  omni init             {}",
+        "# set up your agent (interactive)".bright_black()
     );
     println!(
         "  ls -R | omni          {}",
-        "# Distill long output".bright_black()
+        "# distill a long output by hand".bright_black()
+    );
+    println!(
+        "\n  {}",
+        "omni <command> --help for that command's flags".bright_black()
     );
     println!();
 
@@ -275,6 +322,17 @@ fn main() {
             eprintln!("[omni] Pipe engine error: {}", e);
             std::process::exit(1);
         }
+        return;
+    }
+
+    // One help text (#152, #166). `omni help` / bare `omni` rendered a
+    // hand-written list while `omni --help` rendered clap's, and the two had
+    // already drifted — six commands, `exec` among them, were missing from the
+    // one a user gets by typing `omni`. Intercept before clap so every route
+    // reaches the same renderer. A subcommand's own `--help` is untouched:
+    // `args.len() == 2` means nothing but the flag was passed.
+    if args.len() == 2 && matches!(args[1].as_str(), "--help" | "-h" | "help") {
+        print_help();
         return;
     }
 
@@ -622,6 +680,43 @@ fn main() {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// `COMMANDS` is hand-maintained and drives the only help a user sees, so
+    /// nothing but this test notices when a subcommand is added to the enum and
+    /// not to the list — which is how `exec`, `remember`, `goal` and `engram`
+    /// came to be invisible in `omni help` while `omni --help` showed them (#152).
+    #[test]
+    fn lists_every_subcommand() {
+        let cmd = OmniArgs::command();
+        let declared: Vec<&str> = cmd
+            .get_subcommands()
+            .map(|s| s.get_name())
+            .filter(|n| *n != "help")
+            .collect();
+
+        for name in &declared {
+            assert!(
+                COMMANDS.iter().any(|(_, n, _)| n == name),
+                "subcommand `{name}` is missing from COMMANDS, so it is invisible in help"
+            );
+        }
+        for (group, name, _) in COMMANDS {
+            assert!(
+                declared.contains(name),
+                "COMMANDS lists `{name}`, which is not a subcommand"
+            );
+            assert!(
+                GROUPS.contains(group),
+                "`{name}` is in group `{group}`, which GROUPS does not render"
+            );
         }
     }
 }
