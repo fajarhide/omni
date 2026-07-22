@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Noise-canceling context and long-term memory for your AI agent. Stop paying Claude to read 10,000 lines of terminal noise like a headphone for AI agent</em>
+    <em>Noise-canceling context and long-term memory for your AI agent — <b>lossy, but always reversible, and it never fabricates a result.</b> Stop paying Claude to read 10,000 lines of terminal noise.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-58.9% fewer tokens on a real command mix &middot; Cross-Session Memory &middot; Format-safe &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
+58.9% fewer tokens on a real command mix &middot; Cross-Session Memory &middot; Format-safe &middot; Always reversible &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
 
 </br></br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
@@ -55,6 +55,20 @@ Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirati
 | `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **37%** |
 
 > **The honest caveat:** OMNI compresses *noisy successful* output. A command that **fails** is passed through **verbatim** — a hidden error is worse than an uncompressed one — and structured output (JSON/YAML/CSV) is never touched. It earns its keep on repetitive tool chatter and gets out of the way everywhere else.
+
+### Why you can trust a lossy tool
+
+Every other compressor asks you to *trust* that what it cut didn't matter. OMNI doesn't ask — it guarantees, and each guarantee is backed by code you can read:
+
+| Guarantee | How | Proof |
+|---|---|---|
+| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite **RewindStore** (SHA-256 → content); the agent gets a hash and calls `omni_retrieve` | [`How it works`](#how-it-works) |
+| **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
+| **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
+| **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
+| **Numbers are measured, not aspirational** | 1,810 real traces replayed on the release binary — and 63.6% of calls net zero, which we publish too | [`Benchmarks`](#benchmarks) |
+
+That is the one thing a bigger compression number can't buy: **you can always recover the original, and it will never lie to your agent.**
 
 **Problem 2: Your agent forgets everything overnight**
 
