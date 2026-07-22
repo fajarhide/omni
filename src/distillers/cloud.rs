@@ -416,7 +416,16 @@ fn distill_docker_logs(_segments: &[OutputSegment], input: &str) -> String {
 
     if critical_lines.is_empty() {
         let total = input.lines().count();
-        return format!("docker logs: {} lines, no errors detected", total);
+        // Zero-state guard (#143): "no errors detected" is only truthful about
+        // real logs. The dispatch reaches here on a weak content sniff too
+        // (`input.contains("docker logs")`, #112), so require the log shape —
+        // otherwise a misrouted payload (kubectl exec, a manifest) passes through
+        // instead of being falsely certified clean.
+        return super::require_parsed(
+            is_docker_logs(input),
+            input,
+            format!("docker logs: {} lines, no errors detected", total),
+        );
     }
 
     let mut out = format!(
