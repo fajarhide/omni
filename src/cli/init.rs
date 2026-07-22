@@ -33,6 +33,12 @@ const FLAGS: super::Flags = &[
 ];
 
 /// Where `FLAGS` stops listing agents and starts listing Claude-specific flags.
+///
+// ponytail: hand-maintained split index rather than two lists, because
+// `check_flags` wants one flat list and a second const would mean teaching it to
+// take several. `splits_flags_between_the_two_help_groups` below is what keeps
+// it honest. Upgrade path: separate consts + a `check_flags` that accepts a
+// slice of lists — worth it the moment a third group appears.
 const AGENT_FLAGS: usize = 15;
 
 fn print_help() {
@@ -371,4 +377,25 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `AGENT_FLAGS` is a hand-maintained index into `FLAGS`. Getting it wrong
+    /// files an agent under "CLAUDE SPECIFIC FLAGS" in help and nothing else
+    /// breaks, so this is the only thing that would notice.
+    #[test]
+    fn splits_flags_between_the_two_help_groups() {
+        assert_eq!(
+            FLAGS[AGENT_FLAGS - 1].0,
+            "--pi",
+            "last agent flag moved; AGENT_FLAGS is stale"
+        );
+        assert_eq!(
+            FLAGS[AGENT_FLAGS].0, "--all",
+            "first Claude-specific flag moved; AGENT_FLAGS is stale"
+        );
+    }
 }
