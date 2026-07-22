@@ -627,6 +627,18 @@ fn persist<E: Write>(
     }
 }
 
+/// Who ran this, on the `omni exec` / pipe path.
+///
+/// This used to be a third, private set of rules (#160). It knew only
+/// `OMNI_AGENT_ID`, then guessed **`aider`** for anything with `OMNI_CMD` set —
+/// a variable OMNI documents for its own pipe mode and that any caller may set,
+/// so 3,296 rows on one machine were filed under an agent that had not run.
+/// Everything else became `terminal`, which is why work done inside Claude Code
+/// appeared in `omni stats` as shell usage.
+///
+/// It now defers to the one env-based detector, so `omni exec`, the pipe, and
+/// the peer-session tracker all name an agent the same way, and that name
+/// matches what `hooks::normalize` derives from a payload on the hook path.
 fn resolve_pipe_agent_id() -> String {
     if let Ok(agent) = std::env::var("OMNI_AGENT_ID")
         && !agent.trim().is_empty()
@@ -634,12 +646,7 @@ fn resolve_pipe_agent_id() -> String {
         return agent;
     }
 
-    if std::env::var("OMNI_CMD").is_ok() {
-        return "aider".to_string();
-    }
-
-    // Plain terminal pipe usage (e.g., `git diff | omni`) should stay terminal-scoped.
-    "terminal".to_string()
+    crate::agents::multiagent::detect_agent_id()
 }
 
 fn emit_output<W: Write, E: Write>(

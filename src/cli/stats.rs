@@ -147,6 +147,12 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
     }
 }
 
+/// `unknown` is **not** folded into `Terminal` (#160). "a human ran this in a
+/// shell" and "OMNI could not tell who ran this" are different facts and only
+/// one is actionable — collapsing them is what hid the missing Claude Code
+/// branch in `agents::multiagent::detect_agent_id` for the life of the feature.
+/// A detection gap now shows up in the table as `Unknown` instead of looking
+/// like ordinary shell usage.
 fn agent_display_name(agent_id: &str) -> &str {
     match agent_id {
         "claude_code" | "claude" => "Claude Code",
@@ -157,11 +163,17 @@ fn agent_display_name(agent_id: &str) -> &str {
         "copilot" => "Copilot CLI",
         "gemini" => "Gemini CLI",
         "opencode" => "OpenCode",
-        "codex" => "Codex CLI",
+        "codex_cli" | "codex" => "Codex CLI",
+        "vscode_continue" => "Continue (VS Code)",
         "openclaw" => "OpenClaw",
         "antigravity" => "Antigravity",
         "vscode" => "VS Code",
-        "unknown" | "terminal" | "" => "Terminal",
+        "windsurf" => "Windsurf",
+        "aider" => "Aider",
+        "pi" => "Pi",
+        "mcp_generic" => "MCP client",
+        "terminal" => "Terminal",
+        "unknown" | "" => "Unknown",
         other => other,
     }
 }

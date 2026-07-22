@@ -21,11 +21,24 @@ pub fn project_hash(path: &str) -> String {
     hex::encode(&hasher.finalize()[..8])
 }
 
-/// Detect the current agent from environment
+/// Detect the current agent from environment.
+///
+/// This runs on the `omni exec` and pipe paths, where there is no JSON payload
+/// to inspect. The ids it returns **must match**
+/// `hooks::normalize::detect_agent_id`, which names the same agents from the
+/// payload shape on the hook path — otherwise one agent's work splits across two
+/// rows in `omni stats` and neither row is the true total (#160).
 pub fn detect_agent_id() -> String {
     // Explicit override (set by agent-specific wrapper scripts)
     if let Ok(id) = std::env::var("OMNI_AGENT_ID") {
         return id;
+    }
+    // Claude Code first: it sets `TERM_PROGRAM`/`VSCODE_PID` too when run from
+    // VS Code's integrated terminal, so checking it after the VSCode branch
+    // below would label it `vscode` — trading a vague answer for a confidently
+    // wrong one. Same reasoning as the Antigravity-before-VSCode ordering.
+    if std::env::var("CLAUDECODE").is_ok() || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok() {
+        return "claude_code".to_string();
     }
     // Auto-detect from known env variables each agent sets
     if std::env::var("CURSOR_TRACE_ID").is_ok() || std::env::var("CURSOR_SESSION_ID").is_ok() {
@@ -35,13 +48,13 @@ pub fn detect_agent_id() -> String {
         return "cline".to_string();
     }
     if std::env::var("CODEX_SESSION").is_ok() {
-        return "codex".to_string();
+        return "codex_cli".to_string();
     }
     if std::env::var("WINDSURF_SESSION").is_ok() {
         return "windsurf".to_string();
     }
     if std::env::var("CONTINUE_SESSION_ID").is_ok() {
-        return "continue".to_string();
+        return "vscode_continue".to_string();
     }
     if std::env::var("AIDER_SESSION").is_ok() {
         return "aider".to_string();
@@ -204,25 +217,6 @@ pub fn auto_learn_project_patterns(
     }
 }
 
-/// Format agent ID for display (e.g. "claude_code" → "Claude Code")
-pub fn agent_display_name(agent_id: &str) -> String {
-    match agent_id {
-        "claude_code" => "Claude Code".to_string(),
-        "cursor" => "Cursor AI".to_string(),
-        "cline" => "Cline".to_string(),
-        "codex" => "Codex CLI".to_string(),
-        "windsurf" => "Windsurf".to_string(),
-        "continue" => "Continue.dev".to_string(),
-        "aider" => "Aider".to_string(),
-        "roo_code" => "Roo Code".to_string(),
-        "copilot" => "GitHub Copilot".to_string(),
-        "antigravity" => "Antigravity".to_string(),
-        "hermes" => "Hermes Agent".to_string(),
-        "vscode" => "VS Code".to_string(),
-        other => other.replace('_', " "),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +261,11 @@ mod tests {
             std::env::remove_var("WINDSURF_SESSION");
             std::env::remove_var("CONTINUE_SESSION_ID");
             std::env::remove_var("AIDER_SESSION");
+            // #160: without these the "default is terminal" assertion fails on
+            // any machine where OMNI's own tests run under Claude Code — which
+            // is most of them.
+            std::env::remove_var("CLAUDECODE");
+            std::env::remove_var("CLAUDE_CODE_ENTRYPOINT");
         }
         let id = detect_agent_id();
         assert_eq!(id, "terminal");
@@ -279,6 +278,64 @@ mod tests {
         assert_eq!(id, "windsurf");
         unsafe {
             std::env::remove_var("OMNI_AGENT_ID");
+        }
+
+        // #160: Claude Code had no branch at all and fell through to
+        // `terminal`, splitting one agent's work across two rows in
+        // `omni stats`. It must also win over the VSCode branch, because
+        // Claude Code in VS Code's integrated terminal sets `VSCODE_PID` too —
+        // ordering it after would turn a vague answer into a wrong one.
+        unsafe {
+            std::env::set_var("CLAUDECODE", "1");
+            std::env::set_var("VSCODE_PID", "12345");
+            std::env::set_var("TERM_PROGRAM", "vscode");
+        }
+        assert_eq!(
+            detect_agent_id(),
+            "claude_code",
+            "Claude Code must outrank the VSCode branch it also matches"
+        );
+        unsafe {
+            std::env::remove_var("CLAUDECODE");
+            std::env::remove_var("VSCODE_PID");
+            std::env::remove_var("TERM_PROGRAM");
+        }
+
+        // The env detector and the payload detector must name the same agents.
+        // If they disagree, one agent's work lands in two rows of `omni stats`
+        // and neither is the true total (#160).
+        //
+        // Folded into this test rather than given its own, for the reason at the
+        // top: env vars are process-global, so a second test mutating them races
+        // this one. As a separate `#[test]` it passed alone and failed in the
+        // full suite — and under Claude Code the ambient `CLAUDECODE` made
+        // `CURSOR_TRACE_ID` resolve to `claude_code`, since that branch is
+        // checked first by design.
+        use crate::hooks::normalize::{AgentFormat, detect_agent_id as from_payload};
+        for (env_var, format) in [
+            ("CLAUDECODE", AgentFormat::ClaudeCode),
+            ("CODEX_SESSION", AgentFormat::CodexCLI),
+            ("CONTINUE_SESSION_ID", AgentFormat::VSCodeContinue),
+            ("CURSOR_TRACE_ID", AgentFormat::CursorWindsurf),
+            ("AIDER_SESSION", AgentFormat::Aider),
+        ] {
+            unsafe {
+                // Ambient vars from the terminal this suite runs in would
+                // shadow the one under test.
+                std::env::remove_var("CLAUDECODE");
+                std::env::remove_var("CLAUDE_CODE_ENTRYPOINT");
+                std::env::set_var(env_var, "1");
+            }
+            let from_env = detect_agent_id();
+            unsafe { std::env::remove_var(env_var) };
+
+            assert_eq!(
+                from_env,
+                from_payload(&format),
+                "`{env_var}` yields `{from_env}` from the environment but \
+                 `{}` from the payload — same agent, two rows",
+                from_payload(&format)
+            );
         }
     }
 
@@ -344,12 +401,5 @@ mod tests {
         let ctx = build_knowledge_context(&store, "/my/project");
         assert!(ctx.is_some());
         assert!(ctx.unwrap().contains("npm install"));
-    }
-
-    #[test]
-    fn test_agent_display_name() {
-        assert_eq!(agent_display_name("claude_code"), "Claude Code");
-        assert_eq!(agent_display_name("cursor"), "Cursor AI");
-        assert_eq!(agent_display_name("unknown_tool"), "unknown tool");
     }
 }
