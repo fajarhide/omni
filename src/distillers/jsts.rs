@@ -292,6 +292,8 @@ fn distill_vitest(input: &str) -> String {
 fn distill_tsc(input: &str) -> String {
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut total_errors = 0;
+    // Zero-state guard (#143): did we positively recognize tsc output at all?
+    let mut saw_tsc_signal = false;
 
     for line in input.lines() {
         let t = line.trim();
@@ -299,6 +301,7 @@ fn distill_tsc(input: &str) -> String {
         // Or "error TS2307: Cannot find module './utils' in 'src/app.ts'"
 
         if let Some(ts_idx) = t.find("error TS") {
+            saw_tsc_signal = true;
             total_errors += 1;
 
             // Try to extract file and line
@@ -343,7 +346,8 @@ fn distill_tsc(input: &str) -> String {
                 by_file.entry(file_display).or_default().push(issue_display);
             }
         } else if t.to_lowercase().contains("found ") && t.to_lowercase().contains(" error") {
-            // "Found 5 errors"
+            // "Found 5 errors" (also matches the clean "Found 0 errors" summary)
+            saw_tsc_signal = true;
             if let Some(num) = t
                 .split_whitespace()
                 .nth(1)
@@ -356,7 +360,9 @@ fn distill_tsc(input: &str) -> String {
     }
 
     if total_errors == 0 {
-        return "tsc: no errors".to_string();
+        // Only claim "no errors" if we actually parsed a tsc signal; a misrouted
+        // non-tsc input (or empty output from another command) passes through.
+        return super::require_parsed(saw_tsc_signal, input, "tsc: no errors".to_string());
     }
 
     let file_count = by_file.len();
@@ -454,7 +460,14 @@ fn distill_playwright(input: &str) -> String {
     let total = passed + failed;
 
     if failed == 0 {
-        return format!("playwright: ✓ {}/{} passed", passed, total);
+        // Zero-state guard (#143): only claim a clean run if we parsed at least one
+        // passing test (a summary count or a ✓ line). No signal → pass through, so a
+        // misrouted input never becomes a false `playwright: ✓ 0/0 passed`.
+        return super::require_parsed(
+            passed > 0,
+            input,
+            format!("playwright: ✓ {}/{} passed", passed, total),
+        );
     }
 
     let mut out = format!("playwright: ✓ {}/{} | ✗ {}", passed, total, failed);
@@ -476,6 +489,10 @@ fn distill_eslint(input: &str) -> String {
     let mut total_warnings = 0;
     let mut by_rule: BTreeMap<String, u32> = BTreeMap::new();
     let mut files_affected: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Zero-state guard (#143): a bare file list (e.g. prettier output, #114) also
+    // populates `files_affected`, so that is NOT proof this is eslint. Only an
+    // eslint "problems (" summary or a parsed rule counts as a positive signal.
+    let mut saw_eslint_signal = false;
 
     for line in input.lines() {
         let t = line.trim();
@@ -485,6 +502,7 @@ fn distill_eslint(input: &str) -> String {
         if t.is_empty() || t.contains('✖') || t_lower.contains("checking") {
             // But still parse summary counts
             if t.contains("problems (") {
+                saw_eslint_signal = true;
                 if let Some(err_idx) = t.find(" errors") {
                     if let Some(start) = t[..err_idx].rfind('(') {
                         if let Ok(n) = t[start + 1..err_idx].trim().parse::<u32>() {
@@ -539,6 +557,7 @@ fn distill_eslint(input: &str) -> String {
 
         // Parse individual rules: "src/index.ts:10:15 error Unexpected console statement @typescript-eslint/no-console"
         if t.contains(" error ") || t.contains(" warning ") {
+            saw_eslint_signal = true;
             let parts = t.split_whitespace();
             if let Some(last) = parts.last()
                 && (last.contains('/') || last.contains('-'))
@@ -550,7 +569,13 @@ fn distill_eslint(input: &str) -> String {
     }
 
     if total_errors == 0 && total_warnings == 0 {
-        return "eslint: no problems found".to_string();
+        // No counts parsed. Only report a clean lint if we saw a genuine eslint
+        // signal; otherwise (e.g. prettier's file list, #114) pass the input through.
+        return super::require_parsed(
+            saw_eslint_signal,
+            input,
+            "eslint: no problems found".to_string(),
+        );
     }
 
     let mut out = format!(

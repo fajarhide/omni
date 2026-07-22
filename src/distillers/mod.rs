@@ -401,6 +401,80 @@ mod tests {
         );
     }
 
+    // #143 umbrella: each distiller below is routed a payload that trips its
+    // content detector but carries no signal it can actually parse. The zero-state
+    // must pass the input through, never emit a confident green string. Each asserts
+    // the false claim is absent AND the original content survives (passthrough).
+
+    #[test]
+    fn tsc_zero_parse_passes_through_instead_of_no_errors() {
+        // `tsc --` command echo trips is_tsc_output, but there is no `error TS`
+        // line to parse — the #106 shape.
+        let input = "> tsc --noEmit\nresolving project references, nothing to compile\n";
+        let segments = scorer::score_with_command(input, "tsc", None);
+        let output = distill_with_command(&segments, input, "tsc", None);
+        assert!(
+            !output.contains("tsc: no errors"),
+            "false claim: {output:?}"
+        );
+        assert!(output.contains("nothing to compile"), "dropped: {output:?}");
+    }
+
+    #[test]
+    fn playwright_zero_parse_passes_through_instead_of_passed() {
+        // A `[chromium]` banner trips is_playwright_output with no result summary.
+        let input = "[chromium] › launching browser\nno spec files matched the filter\n";
+        let segments = scorer::score_with_command(input, "playwright", None);
+        let output = distill_with_command(&segments, input, "playwright", None);
+        assert!(!output.contains("0/0 passed"), "false claim: {output:?}");
+        assert!(output.contains("no spec files"), "dropped: {output:?}");
+    }
+
+    #[test]
+    fn eslint_zero_parse_passes_through_instead_of_no_problems() {
+        // A banner naming an eslint rule id trips is_eslint_output, but there is no
+        // finding line or `problems (` summary to parse — the #114 shape.
+        let input = "Oxc linter v0.15\nusing preset @typescript-eslint/recommended\n";
+        let segments = scorer::score_with_command(input, "eslint", None);
+        let output = distill_with_command(&segments, input, "eslint", None);
+        assert!(
+            !output.contains("no problems found"),
+            "false claim: {output:?}"
+        );
+        assert!(output.contains("Oxc linter"), "dropped: {output:?}");
+    }
+
+    #[test]
+    fn security_zero_parse_passes_through_instead_of_no_issues() {
+        // A clean scan with no severity token must not be certified `no issues`.
+        let input = "trivy image myapp:latest\nscanning filesystem, database up to date\n";
+        let segments = scorer::score_with_command(input, "trivy", None);
+        let output = distill_with_command(&segments, input, "trivy", None);
+        assert!(
+            !output.contains("no issues found"),
+            "false claim: {output:?}"
+        );
+        assert!(
+            output.contains("database up to date"),
+            "dropped: {output:?}"
+        );
+    }
+
+    #[test]
+    fn docker_logs_zero_parse_passes_through_instead_of_no_errors_detected() {
+        // A manifest that merely mentions "docker logs" routes to distill_docker_logs
+        // but is not log-shaped (is_docker_logs false) — the #112 misroute.
+        let input =
+            "apiVersion: v1\nkind: Pod\n# inspect with: docker logs app\nmetadata:\n  name: app\n";
+        let segments = scorer::score_with_command(input, "docker", None);
+        let output = distill_with_command(&segments, input, "docker", None);
+        assert!(
+            !output.contains("no errors detected"),
+            "false claim: {output:?}"
+        );
+        assert!(output.contains("kind: Pod"), "dropped: {output:?}");
+    }
+
     #[test]
     fn test_cat_small_config_passthrough() {
         let input = "[db]\nurl = \"postgres://example\"\nmax_connections = 10\n";
