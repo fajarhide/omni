@@ -22,6 +22,28 @@ pub trait Distiller: Send + Sync {
     ) -> String;
 }
 
+/// The subcommand of a `cargo` invocation, skipping env-var prefixes, the path
+/// the binary was called by, a `+toolchain` override, and any leading flags.
+///
+/// `None` when there is no subcommand at all (`cargo`, `cargo --version`), which
+/// routes to passthrough — the honest answer for output we cannot classify.
+fn cargo_subcommand(command: &str) -> Option<&str> {
+    let mut tokens = command.split_whitespace().skip_while(|t| {
+        // `RUST_BACKTRACE=1 cargo test`, and the cargo path itself.
+        let is_env_assignment = t.contains('=') && !t.starts_with('-');
+        let is_cargo = std::path::Path::new(t.trim_matches(['"', '\'', '`']))
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n == "cargo" || n == "cargo.exe")
+            .unwrap_or(false);
+        is_env_assignment || !is_cargo
+    });
+    tokens.next()?; // the cargo token itself
+
+    // `cargo +nightly tree`, `cargo --offline tree`
+    tokens.find(|t| !t.starts_with('-') && !t.starts_with('+'))
+}
+
 fn extract_base_executable(command: &str) -> String {
     let tokens = shell_split_tokens(command, 8);
     if tokens.is_empty() {
@@ -265,6 +287,24 @@ pub fn distill_with_command(
             | "rspec"
             | "phpunit"
     ) {
+        // `cargo` is routed by subcommand, not by executable (#170). Most of
+        // cargo is not a build: `cargo tree` prints a dependency tree that *is*
+        // the answer, and `BuildDistiller` summarised 21.4 KB of it as
+        // `Build: ok` — 9 bytes — reported as a 100% reduction. A command whose
+        // output is data must not be handed to a distiller that only knows how
+        // to count compile steps.
+        if base == "cargo" {
+            return match cargo_subcommand(command) {
+                Some("test" | "bench") => test::TestDistiller.distill(segments, input, session),
+                Some(
+                    "build" | "check" | "run" | "clippy" | "rustc" | "fix" | "doc" | "install",
+                ) => build::BuildDistiller.distill(segments, input, session),
+                // tree, metadata, search, pkgid, locate-project, vendor, add,
+                // remove, update, publish, … — output is the answer, hand it back.
+                _ => input.to_string(),
+            };
+        }
+
         // Tapi test → TestDistiller
         if cmd_lower.contains("test")
             || cmd_lower.contains("pytest")
@@ -359,6 +399,68 @@ pub fn distill_with_command(
 mod tests {
     use super::*;
     use crate::pipeline::scorer;
+
+    #[test]
+    fn reads_the_cargo_subcommand_past_prefixes_and_flags() {
+        assert_eq!(cargo_subcommand("cargo tree"), Some("tree"));
+        assert_eq!(cargo_subcommand("cargo tree --depth 1"), Some("tree"));
+        assert_eq!(
+            cargo_subcommand("RUST_BACKTRACE=1 cargo test"),
+            Some("test")
+        );
+        assert_eq!(cargo_subcommand("cargo +nightly build"), Some("build"));
+        assert_eq!(cargo_subcommand("cargo --offline tree"), Some("tree"));
+        assert_eq!(
+            cargo_subcommand("/usr/local/bin/cargo clippy"),
+            Some("clippy")
+        );
+        // No subcommand at all — routes to passthrough, which is the honest
+        // answer for output we cannot classify.
+        assert_eq!(cargo_subcommand("cargo"), None);
+        assert_eq!(cargo_subcommand("cargo --version"), None);
+    }
+
+    /// From #170: `cargo tree` prints a dependency tree that *is* the answer.
+    /// Routing every `cargo` command to `BuildDistiller` summarised 21.4 KB of
+    /// it as `Build: ok` — 9 bytes — and reported a 100% reduction as a win.
+    #[test]
+    fn hands_back_the_output_of_cargo_commands_that_are_not_builds() {
+        let tree = "omni v0.6.3 (/repo)\n\
+                    ├── anyhow v1.0.100\n\
+                    ├── chrono v0.4.42\n\
+                    │   ├── iana-time-zone v0.1.64\n\
+                    │   └── num-traits v0.2.19\n\
+                    └── serde v1.0.228\n";
+
+        for cmd in [
+            "cargo tree",
+            "cargo metadata --no-deps",
+            "cargo search serde",
+            "cargo pkgid",
+        ] {
+            assert_eq!(
+                distill_with_command(&[], tree, cmd, None),
+                tree,
+                "`{cmd}` output is data, not build progress — it must survive"
+            );
+        }
+    }
+
+    #[test]
+    fn still_routes_real_cargo_builds_and_tests_to_their_distillers() {
+        // Guards the other direction: the fix must not turn every cargo command
+        // into passthrough and quietly end all savings on the ones that work.
+        let noisy_build: String = (0..40)
+            .map(|i| format!("   Compiling crate_{i} v0.1.0\n"))
+            .collect::<String>()
+            + "    Finished `dev` profile [unoptimized] target(s) in 12.61s\n";
+
+        let out = distill_with_command(&[], &noisy_build, "cargo build", None);
+        assert!(
+            out.len() < noisy_build.len(),
+            "cargo build must still be distilled, got {out:?}"
+        );
+    }
 
     #[test]
     fn test_extract_base_executable_handles_quotes_and_env_prefixes() {
