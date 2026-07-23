@@ -477,19 +477,19 @@ fn run_default(store: &Store) -> Result<()> {
 
     // Group by display name
     let mut grouped_agents: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for (id, count, input, output) in &agent_data {
-        if id == "unknown" || id == "terminal" || id.is_empty() {
+    for r in &agent_data {
+        if r.agent_id == "unknown" || r.agent_id == "terminal" || r.agent_id.is_empty() {
             continue;
         }
-        let name = agent_display_name(id).to_string();
+        let name = agent_display_name(&r.agent_id).to_string();
         let entry = grouped_agents.entry(name).or_insert((0, 0, 0));
-        entry.0 += count;
-        entry.1 += input;
-        entry.2 += output;
+        entry.0 += r.calls;
+        entry.1 += r.input_bytes;
+        entry.2 += r.output_bytes;
     }
 
     if !grouped_agents.is_empty() {
-        let total_cmds: u64 = agent_data.iter().map(|(_, c, _, _)| c).sum();
+        let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n  {}", "Agent Distribution:".bold().bright_white());
 
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
@@ -796,19 +796,22 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     // Group by display name
     let mut grouped_agents: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for (id, count, input, output) in &agent_data {
-        if id == "unknown" || id == "terminal" || id.is_empty() {
+    // #163: kept beside the totals, not folded into them.
+    let mut grouped_unverified: HashMap<String, u64> = HashMap::new();
+    for r in &agent_data {
+        if r.agent_id == "unknown" || r.agent_id == "terminal" || r.agent_id.is_empty() {
             continue;
         }
-        let name = agent_display_name(id).to_string();
-        let entry = grouped_agents.entry(name).or_insert((0, 0, 0));
-        entry.0 += count;
-        entry.1 += input;
-        entry.2 += output;
+        let name = agent_display_name(&r.agent_id).to_string();
+        let entry = grouped_agents.entry(name.clone()).or_insert((0, 0, 0));
+        entry.0 += r.calls;
+        entry.1 += r.input_bytes;
+        entry.2 += r.output_bytes;
+        *grouped_unverified.entry(name).or_insert(0) += r.unverified;
     }
 
     if !grouped_agents.is_empty() {
-        let total_cmds: u64 = agent_data.iter().map(|(_, c, _, _)| c).sum();
+        let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n {}", "Agent Distribution:".bold().bright_white());
         println!(
             "   {:<16} {:>6} {:>7}  {}",
@@ -853,6 +856,19 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 bar_colored,
                 savings,
             );
+            // #163: the excluded rows are named, not silently missing. A count
+            // that shrinks without explanation reads as OMNI having stopped
+            // working; this says what was set aside and why.
+            if let Some(&u) = grouped_unverified.get(&name)
+                && u > 0
+            {
+                println!(
+                    "   {:<16} {:>5}x  {}",
+                    "".bright_black(),
+                    u,
+                    "unverified — recorded before #158, never applied".bright_black()
+                );
+            }
         }
     }
 
@@ -908,8 +924,13 @@ pub struct CommandStat {
 pub struct AgentStat {
     pub agent: String,
     pub agent_id: String,
+    /// Calls whose distillation reached the agent. `savings_pct` covers these.
     pub count: u64,
     pub savings_pct: f64,
+    /// Calls excluded from `count` and `savings_pct`: recorded before the #158
+    /// fix on a path where the host discarded the output (#163). Reported so a
+    /// consumer of this JSON can see the correction rather than infer a drop.
+    pub unverified: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -972,17 +993,18 @@ fn run_json(store: &Store) -> Result<()> {
         .get_agent_breakdown(0)
         .unwrap_or_default()
         .iter()
-        .map(|(agent_id, count, input, output)| {
-            let savings = if *input > 0 {
-                (100.0 * (1.0 - *output as f64 / *input as f64) * 10.0).round() / 10.0
+        .map(|r| {
+            let savings = if r.input_bytes > 0 {
+                (100.0 * (1.0 - r.output_bytes as f64 / r.input_bytes as f64) * 10.0).round() / 10.0
             } else {
                 0.0
             };
             AgentStat {
-                agent: agent_display_name(agent_id).to_string(),
-                agent_id: agent_id.clone(),
-                count: *count,
+                agent: agent_display_name(&r.agent_id).to_string(),
+                agent_id: r.agent_id.clone(),
+                count: r.calls,
                 savings_pct: savings,
+                unverified: r.unverified,
             }
         })
         .collect();
