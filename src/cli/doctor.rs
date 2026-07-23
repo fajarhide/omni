@@ -87,6 +87,18 @@ pub struct DoctorCheck {
     pub message: String,
 }
 
+/// Changelog entries this build carries that no release contains (#137).
+///
+/// Counted by `build.rs` from the `## [Unreleased]` section of the tree the
+/// binary was compiled from, so a properly cut release reports 0 and says
+/// nothing. Parsing cannot fail into a false alarm: an unreadable or malformed
+/// value means "nothing to report", never "something is wrong".
+fn unreleased_entries() -> usize {
+    option_env!("OMNI_UNRELEASED_ENTRIES")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
 fn run_json(args: &[String]) -> anyhow::Result<()> {
     let fix_mode = args.iter().any(|a| a == "--fix");
     let mut checks = Vec::new();
@@ -289,6 +301,23 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     };
 
     println!("  {:<15} {}", "Binary:".bright_black(), version_info);
+
+    // #137: `[LATEST]` above answers "is there a newer release than mine". It
+    // cannot see fixes that were never released, because then the newest
+    // release *is* the running version — exactly the state #127 filed, where
+    // six correctness fixes sat merged and unshipped while doctor said
+    // `[LATEST]`. This is the other question, answered from the tree the binary
+    // was built from.
+    if unreleased_entries() > 0 {
+        println!(
+            "  {:<15} {} {}",
+            "".bright_black(),
+            format!("[{} UNRELEASED]", unreleased_entries())
+                .yellow()
+                .bold(),
+            "changes built into this binary are in no release — cut a tag".bright_black()
+        );
+    }
 
     // 2. Config Dir (with actual write test for sandbox detection)
     let conf_dir = dirs::home_dir()
