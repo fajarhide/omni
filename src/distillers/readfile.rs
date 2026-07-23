@@ -54,6 +54,35 @@ pub fn distill_readfile_with_context(
     }
 }
 
+/// What a code distiller must say about the lines it dropped (#176).
+///
+/// These distillers keep selected lines — imports, signatures, risk markers —
+/// and discard everything else, function bodies included. The never-drop
+/// invariant requires the output to say so with a count; a skeleton returned
+/// silently is data loss wearing a compression badge, the #111 shape.
+///
+/// `distill_rust_file` was the only one that said anything, and it said it
+/// without a number. The other four returned the skeleton and left the reader
+/// no way to tell the bodies had ever existed: a 24,999 B Python file came back
+/// as 3,275 B of repeated signatures, 86.9% reported as a win, with the business
+/// rule it was read for deleted and unmentioned.
+fn omitted_note(total_lines: usize, kept_lines: usize) -> String {
+    let omitted = total_lines.saturating_sub(kept_lines);
+    if omitted == 0 {
+        return String::new();
+    }
+    format!(
+        "\n\n... [{omitted} of {total_lines} lines omitted — bodies and comments not shown. \
+         Re-read with offset/limit for the full file.] ..."
+    )
+}
+
+/// The scan behind every `--- … ---` section runs over the **whole** file, not
+/// over the lines kept, so an empty section means "absent from the file" rather
+/// than "absent from what you can see". A bare `None` next to a visibly
+/// truncated body cannot convey which, so it says which.
+const NONE_IN_FULL_FILE: &str = "None in the full file\n";
+
 fn content_hint_for_extension(ext: &str) -> crate::util::token_estimate::ContentHint {
     match ext {
         "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "go" | "java" | "kt" | "c" | "cpp" | "h"
@@ -95,24 +124,25 @@ fn distill_rust_file(content: &str) -> String {
     }
 
     if imports.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&imports);
     }
     out.push_str("\n--- Public API / Structure ---\n");
     if api.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&api);
     }
     out.push_str("\n--- Risk Markers (TODOs, panics) ---\n");
     if risk.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&risk);
     }
 
-    out.push_str("\n... [Method bodies omitted. Use Read with offset/limit or Edit directly] ...");
+    let kept = imports.lines().count() + api.lines().count() + risk.lines().count();
+    out.push_str(&omitted_note(content.lines().count(), kept));
     out.trim().to_string()
 }
 
@@ -141,23 +171,25 @@ fn distill_python_file(content: &str) -> String {
         }
     }
     if imports.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&imports);
     }
     out.push_str("\n--- Public API / Structure ---\n");
     if api.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&api);
     }
     out.push_str("\n--- Risk Markers ---\n");
     if risk.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&risk);
     }
 
+    let kept = imports.lines().count() + api.lines().count() + risk.lines().count();
+    out.push_str(&omitted_note(content.lines().count(), kept));
     out.trim().to_string()
 }
 
@@ -188,23 +220,25 @@ fn distill_js_ts_file(content: &str) -> String {
         }
     }
     if imports.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&imports);
     }
     out.push_str("\n--- Public API / Structure ---\n");
     if api.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&api);
     }
     out.push_str("\n--- Risk Markers ---\n");
     if risk.is_empty() {
-        out.push_str("None\n");
+        out.push_str(NONE_IN_FULL_FILE);
     } else {
         out.push_str(&risk);
     }
 
+    let kept = imports.lines().count() + api.lines().count() + risk.lines().count();
+    out.push_str(&omitted_note(content.lines().count(), kept));
     out.trim().to_string()
 }
 
@@ -225,6 +259,8 @@ fn distill_go_file(content: &str) -> String {
     if out.is_empty() {
         distill_unknown_file(content)
     } else {
+        let kept = out.lines().count();
+        out.push_str(&omitted_note(content.lines().count(), kept));
         out.trim().to_string()
     }
 }
@@ -249,6 +285,8 @@ fn distill_java_file(content: &str) -> String {
     if out.is_empty() {
         distill_unknown_file(content)
     } else {
+        let kept = out.lines().count();
+        out.push_str(&omitted_note(content.lines().count(), kept));
         out.trim().to_string()
     }
 }
@@ -361,6 +399,95 @@ mod tests {
     fn readfile_passthrough_when_below_token_threshold() {
         let content = "pub fn a() {}\n";
         assert!(distill_readfile(content, "src/lib.rs").is_none());
+    }
+
+    /// Enough repeated bodies to clear MIN_DISTILL_TOKENS in any language.
+    fn bulky(unit: &str) -> String {
+        unit.repeat(200)
+    }
+
+    /// #176: every code distiller drops the lines it did not select, so every
+    /// one of them must say how many went. Four of the five said nothing, and a
+    /// silently returned skeleton is the #111 never-drop violation.
+    #[test]
+    fn every_code_distiller_reports_how_many_lines_it_dropped() {
+        let cases = [
+            (
+                "billing.py",
+                bulky(
+                    "def process(o):\n    if o.total > 1000:\n        o.discount(0.1)\n    return o\n",
+                ),
+            ),
+            (
+                "billing.ts",
+                bulky(
+                    "export function process(o) {\n  if (o.total > 1000) {\n    o.discount(0.1);\n  }\n}\n",
+                ),
+            ),
+            (
+                "billing.go",
+                bulky(
+                    "func Process(o Order) Order {\n\tif o.Total > 1000 {\n\t\to.Discount(0.1)\n\t}\n\treturn o\n}\n",
+                ),
+            ),
+            (
+                "Billing.java",
+                bulky(
+                    "public Order process(Order o) {\n    if (o.total > 1000) {\n        o.discount(0.1);\n    }\n    return o;\n}\n",
+                ),
+            ),
+            (
+                "billing.rs",
+                bulky(
+                    "pub fn process(o: Order) -> Order {\n    if o.total > 1000 {\n        o.discount(0.1);\n    }\n    o\n}\n",
+                ),
+            ),
+        ];
+
+        for (path, content) in cases {
+            let out = distill_readfile(&content, path)
+                .unwrap_or_else(|| panic!("{path} should distill at this size"));
+            assert!(
+                out.contains("lines omitted"),
+                "{path} dropped lines without saying so:\n{out}"
+            );
+        }
+    }
+
+    /// The count is the point — "output was truncated" does not let a reader
+    /// judge whether to re-read, a number does.
+    #[test]
+    fn states_the_omitted_line_count_against_the_file_total() {
+        let content = bulky("def f(o):\n    return o.total * 2\n");
+        let total = content.lines().count();
+
+        let out = distill_readfile(&content, "a.py").unwrap();
+
+        assert!(
+            out.contains(&format!("of {total} lines omitted")),
+            "expected a count against {total} total, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn says_nothing_when_no_lines_were_dropped() {
+        assert_eq!(omitted_note(10, 10), "");
+        assert_eq!(omitted_note(10, 99), "", "kept > total must not underflow");
+        assert_eq!(omitted_note(0, 0), "");
+    }
+
+    /// The section scans the whole file, including the lines it then drops, so
+    /// an empty section means absent from the file — not merely absent from
+    /// what is shown. Next to a visibly truncated body a bare `None` cannot
+    /// convey which.
+    #[test]
+    fn qualifies_an_empty_section_as_covering_the_whole_file() {
+        let content = bulky("def f(o):\n    return o.total * 2\n");
+
+        let out = distill_readfile(&content, "a.py").unwrap();
+
+        assert!(out.contains("--- Risk Markers ---"));
+        assert!(out.contains("None in the full file"), "got:\n{out}");
     }
 
     #[test]
