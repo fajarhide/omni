@@ -251,11 +251,9 @@ When OMNI drops a large chunk, it tells Claude:
 
 Claude can automatically call `omni_retrieve("a3f8c2d1")` via MCP to get the full content whenever it actually needs it. **This is fully automatic** — Claude handles this itself when needed.
 
-To browse what's archived:
-```bash
-omni rewind list        # Show recent archived chunks
-omni rewind a3f8c2d1   # View the full content of a specific archive
-```
+Retrieval is the MCP tool only. The `omni rewind` subcommand that used to browse
+the archive from a shell was removed in #164 — it was inert end to end, so there
+is no shell equivalent to point you at.
 
 ---
 
@@ -1004,17 +1002,6 @@ When `--fix` is passed, OMNI will automatically resolve detected issues:
 | Missing `~/.omni/` directory | Creates the directory |
 | Untrusted project filters | Runs `omni trust` on the project |
 | Invalid user filter files | Renames broken `.toml` to `.toml.bak` |
-
----
-
-### `omni rewind`
-
-View and manage archived content that was filtered out.
-
-```bash
-omni rewind list        # Show recent archived chunks
-omni rewind <hash>      # View full content of a specific archive
-```
 
 ---
 
