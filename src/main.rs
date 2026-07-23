@@ -300,7 +300,37 @@ fn print_help() {
 
 // ─── Main ───────────────────────────────────────────────
 
+/// Restore the default disposition of `SIGPIPE` (#155).
+///
+/// Rust sets `SIGPIPE` to `SIG_IGN` before `main` runs, so writing to a pipe
+/// whose reader has closed returns `EPIPE` instead of killing the process — and
+/// `println!` panics on that error. Every other Unix tool dies quietly, which is
+/// why `omni --help | head -1` printed a panic and a backtrace note where `ls |
+/// head` prints nothing.
+///
+/// Fixing it here rather than at each `println!` is deliberate: the panic is not
+/// specific to the help text. `omni doctor | head` reproduces it too, and so
+/// would any command whose output outlives its reader. One line at the entry
+/// point covers every writer; guarding each call site would not.
+///
+/// `#[cfg(unix)]` because Windows has no `SIGPIPE`; a closed pipe there surfaces
+/// as an ordinary write error.
+#[cfg(unix)]
+fn restore_default_sigpipe() {
+    // SAFETY: called before any thread is spawned, and `SIG_DFL` is the
+    // disposition the OS starts with — this restores it rather than installing
+    // a handler.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_default_sigpipe() {}
+
 fn main() {
+    restore_default_sigpipe();
+
     // Initialize observability
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -341,9 +371,27 @@ fn main() {
         Ok(p) => p,
         Err(e) => {
             // Because we use allow_external_subcommands, this error only happens
-            // for invalid global flags.
-            e.print().expect("failed to print error");
-            std::process::exit(1);
+            // for invalid global flags, and for `--help` / `--version`, which
+            // clap reports as an `Err` it expects the caller to classify.
+            //
+            // `let _`, not `.expect()` (#155): the reader owns the other end of
+            // this pipe. `omni --help | head -1` closes it mid-write, the write
+            // returns EPIPE, and an `.expect()` turns an ordinary end-of-pipe
+            // into a panic with a backtrace note. `CLAUDE.md` forbids `.expect()`
+            // on IO for exactly this reason. Nothing can be done about a reader
+            // that has gone away, so nothing is what we do.
+            let _ = e.print();
+
+            // `--help` and `--version` are how the CLI is asked to explain
+            // itself, not failures — exiting 1 made `omni --help && echo ok`
+            // print nothing.
+            let code = match e.kind() {
+                clap::error::ErrorKind::DisplayHelp
+                | clap::error::ErrorKind::DisplayVersion
+                | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => 0,
+                _ => 1,
+            };
+            std::process::exit(code);
         }
     };
 
