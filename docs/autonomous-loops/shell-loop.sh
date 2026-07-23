@@ -38,12 +38,19 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     echo ""
     echo "▸ Iteration $i/$MAX_ITERATIONS"
 
-    # Check budget/status before iteration
-    if command -v omni &>/dev/null; then
-        STATUS=$(omni handoff --json 2>/dev/null | jq -r '.recommendation.action // "CONTINUE"' 2>/dev/null || echo "CONTINUE")
-    else
-        STATUS="CONTINUE"
-    fi
+    # No shell-reachable checkpoint any more (#180).
+    #
+    # This used to be `omni handoff --json | jq -r '.recommendation.action'`.
+    # #164 removed `handoff` as a CLI subcommand; the `omni_handoff` MCP tool is
+    # unchanged but is reachable only from an MCP client, not from a shell.
+    #
+    # The old line is not kept-but-guarded on purpose: it ended in
+    # `|| echo "CONTINUE"`, so once the command was gone the loop kept running
+    # against a default it never computed — a confident value standing in for a
+    # missing one, which is the failure OMNI exists to stop. Whether `handoff`
+    # returns as a CLI subcommand for exactly this use is the open question on
+    # #180. Until it is answered, this loop runs to MAX_ITERATIONS.
+    STATUS="CONTINUE"
 
     case "$STATUS" in
         DONE)

@@ -170,6 +170,7 @@ omni stats --json
 # Health check
 omni doctor
 
-# Check current session budget status
-omni handoff --json | jq '.loop_context'
+# Check current session budget status — MCP only.
+# `omni handoff` was removed as a CLI subcommand in #164; the `omni_handoff`
+# MCP tool is unchanged, so this is reachable from an MCP client, not a shell.
 ```
