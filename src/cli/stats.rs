@@ -205,6 +205,10 @@ const FLAGS: super::Flags = &[
     ("--json", "Machine-readable JSON output"),
     ("--project", "Display breakdown per project path"),
     ("--context", "Show context composition signals"),
+    (
+        "--rerun",
+        "Which distillers cost a re-run — the check reduction % cannot make",
+    ),
 ];
 
 /// The time window the scope flags select, as `(label, since_unix)`.
@@ -274,13 +278,16 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let json_flag = args.iter().any(|a| a == "--json");
     let project_flag = args.iter().any(|a| a == "--project");
     let context_flag = args.iter().any(|a| a == "--context");
+    let rerun_flag = args.iter().any(|a| a == "--rerun");
     let filter_flag = has(args, "--hour", "-H")
         || has(args, "--today", "-d")
         || has(args, "--week", "-w")
         || has(args, "--month", "-m")
         || args.iter().any(|a| a == "--all-commands");
 
-    let mode = if context_flag {
+    let mode = if rerun_flag {
+        "rerun"
+    } else if context_flag {
         "context"
     } else if detail_flag {
         "detail"
@@ -295,6 +302,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
@@ -993,6 +1001,96 @@ fn run_json(store: &Store) -> Result<()> {
     };
 
     println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+/// `omni stats --rerun` — the check reduction % cannot make (#109).
+///
+/// Reduction measures bytes removed. A distiller that emitted `""` for every
+/// input would score 100%. This measures whether the agent had to run the
+/// command again, which is the closest thing to ground truth on whether the
+/// bytes removed were the ones it needed.
+fn run_rerun(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
+    let rows = store.rerun_breakdown(since)?;
+
+    println!(
+        "\n  {} — {}",
+        "OMNI Re-run Analysis".bold().bright_white(),
+        period_label
+    );
+    print_separator();
+
+    if rows.is_empty() {
+        println!(
+            "  Not enough paired data yet: a filter needs {} distilled and {} raw",
+            crate::pipeline::RERUN_MIN_SAMPLES,
+            crate::pipeline::RERUN_MIN_SAMPLES
+        );
+        println!("  runs in this window before its delta means anything.");
+        return Ok(());
+    }
+
+    println!(
+        " {:<22} {:>9} {:>9} {:>8}",
+        "Filter", "distilled", "raw", "delta"
+    );
+    println!(" {:─<22} ───────── ───────── ────────", "");
+
+    let mut confounded = Vec::new();
+    for r in &rows {
+        let delta = r.delta_pp();
+        let label = format!("{:+.1}pp", delta);
+        // Only a *comparable* pair earns a verdict. A skewed one prints its
+        // numbers and is sent to the caveat list — never coloured as a finding.
+        let shown = if r.is_confounded() {
+            confounded.push(r);
+            "  n/a".normal()
+        } else if delta > 10.0 {
+            label.bright_red()
+        } else if delta > 3.0 {
+            label.bright_yellow()
+        } else {
+            label.bright_green()
+        };
+        println!(
+            " {:<22} {:>8.1}% {:>8.1}% {:>8}",
+            crate::util::text::safe_truncate_with_ellipsis(&r.filter_name, 22),
+            r.distilled_pct(),
+            r.raw_pct(),
+            shown
+        );
+    }
+
+    println!();
+    println!(
+        "  {} a command re-run within {}s of reading its distilled output.",
+        "delta =".bright_black(),
+        crate::pipeline::RERUN_WINDOW_SECS
+    );
+    println!(
+        "  {} distillation removed something the agent needed.",
+        "positive =".bright_black()
+    );
+
+    if !confounded.is_empty() {
+        println!();
+        println!(
+            "  {} the two arms are not the same population, so the",
+            "n/a:".bold().bright_yellow()
+        );
+        println!("  comparison measures input size, not lost signal:");
+        for r in confounded {
+            println!(
+                "    {:<20} {} B distilled vs {} B raw",
+                crate::util::text::safe_truncate_with_ellipsis(&r.filter_name, 20),
+                r.distilled_avg_input,
+                r.raw_avg_input
+            );
+        }
+    }
+
+    println!();
     Ok(())
 }
 

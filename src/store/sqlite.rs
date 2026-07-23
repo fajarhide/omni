@@ -177,6 +177,94 @@ impl SqliteBackend {
         Ok(rows)
     }
 
+    /// Per-filter re-run rate, distilled arm against raw arm (#109).
+    ///
+    /// Needs no new instrumentation: `session_id`, `ts`, `command` and `route`
+    /// are already on every row, so this answers "which distillers cost the
+    /// agent a second run" over history already collected.
+    ///
+    /// A re-run is the same command, in the same session, within
+    /// `RERUN_WINDOW_SECS`. That is the closest thing to an objective statement
+    /// that distillation dropped something needed: the agent held the output,
+    /// it was not enough, and it paid to fetch the rest.
+    ///
+    /// Claude Code rows from before `POST_HOOK_FIX_TS` are excluded: on that
+    /// path nothing was applied, so their `Keep` rows are controls wearing a
+    /// treatment label. Keeping them does not just add noise, it can zero out a
+    /// true finding — see the constant. This is not a call on what `omni stats`
+    /// does with those rows for *savings* (#163); it is this comparison
+    /// refusing rows that were never the experiment it is running.
+    ///
+    /// ponytail: correlated `EXISTS` per row — O(n²) worst case. Fine at the
+    /// ~7k rows this table holds in practice; if it ever gets slow, materialise
+    /// the window join into a temp table keyed on `(session_id, cmd)`.
+    pub fn rerun_breakdown(&self, since: i64) -> Result<Vec<RerunRow>> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        let mut stmt = conn.prepare(
+            "WITH r AS (
+                 SELECT session_id, ts, filter_name, route, input_bytes,
+                        TRIM(command) AS cmd
+                 FROM distillations
+                 WHERE ts >= ?1 AND TRIM(command) != ''
+                   AND NOT (agent_id = 'claude_code' AND ts < ?4)
+             ),
+             f AS (
+                 SELECT r.filter_name,
+                        r.input_bytes,
+                        (r.route != 'Passthrough') AS distilled,
+                        EXISTS (
+                            SELECT 1 FROM r r2
+                            WHERE r2.session_id = r.session_id
+                              AND r2.cmd = r.cmd
+                              AND r2.ts > r.ts
+                              AND r2.ts <= r.ts + ?2
+                        ) AS rerun
+                 FROM r
+             )
+             SELECT filter_name,
+                    SUM(distilled),
+                    SUM(1 - distilled),
+                    SUM(rerun * distilled),
+                    SUM(rerun * (1 - distilled)),
+                    CAST(COALESCE(AVG(CASE WHEN distilled = 1 THEN input_bytes END), 0) AS INTEGER),
+                    CAST(COALESCE(AVG(CASE WHEN distilled = 0 THEN input_bytes END), 0) AS INTEGER)
+             FROM f
+             GROUP BY filter_name
+             HAVING SUM(distilled) >= ?3 AND SUM(1 - distilled) >= ?3",
+        )?;
+
+        let mut rows: Vec<RerunRow> = stmt
+            .query_map(
+                params![
+                    since,
+                    crate::pipeline::RERUN_WINDOW_SECS,
+                    crate::pipeline::RERUN_MIN_SAMPLES,
+                    crate::pipeline::POST_HOOK_FIX_TS
+                ],
+                |row| {
+                    Ok(RerunRow {
+                        filter_name: row.get(0)?,
+                        distilled: row.get(1)?,
+                        raw: row.get(2)?,
+                        distilled_reruns: row.get(3)?,
+                        raw_reruns: row.get(4)?,
+                        distilled_avg_input: row.get(5)?,
+                        raw_avg_input: row.get(6)?,
+                    })
+                },
+            )?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Worst offender first — that is the one worth reading a distiller for.
+        rows.sort_by(|a, b| {
+            b.delta_pp()
+                .partial_cmp(&a.delta_pp())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Ok(rows)
+    }
+
     /// Route distribution: (route, count)
     pub fn route_distribution(&self, since: i64) -> Result<Vec<(String, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
@@ -1697,6 +1785,66 @@ pub struct DistillationRow {
     pub filter_name: String,
 }
 
+/// One filter's re-run comparison: distilled output against raw output (#109).
+///
+/// `Passthrough` rows are the control arm — the agent read the original bytes —
+/// so the two arms differ only in whether OMNI changed what was read. A filter
+/// whose distilled arm is re-run more often than its raw arm removed something
+/// the agent needed, whatever its reduction percentage claims.
+#[derive(Debug, Clone)]
+pub struct RerunRow {
+    pub filter_name: String,
+    pub distilled: u64,
+    pub raw: u64,
+    pub distilled_reruns: u64,
+    pub raw_reruns: u64,
+    pub distilled_avg_input: u64,
+    pub raw_avg_input: u64,
+}
+
+impl RerunRow {
+    pub fn distilled_pct(&self) -> f64 {
+        pct(self.distilled_reruns, self.distilled)
+    }
+
+    pub fn raw_pct(&self) -> f64 {
+        pct(self.raw_reruns, self.raw)
+    }
+
+    /// Percentage points by which distilling this filter's output raised the
+    /// re-run rate. Positive means distillation cost the agent a second run.
+    pub fn delta_pp(&self) -> f64 {
+        self.distilled_pct() - self.raw_pct()
+    }
+
+    /// Whether the two arms are too differently sized to compare.
+    ///
+    /// See `RERUN_SIZE_SKEW_LIMIT`: distillation only fires on large output, so
+    /// a filter can land its big invocations in one arm and its small ones in
+    /// the other. When that happens the delta measures input size, not lost
+    /// signal, and must not be reported as if it measured lost signal.
+    pub fn is_confounded(&self) -> bool {
+        let (lo, hi) = if self.distilled_avg_input <= self.raw_avg_input {
+            (self.distilled_avg_input, self.raw_avg_input)
+        } else {
+            (self.raw_avg_input, self.distilled_avg_input)
+        };
+        // A zero-byte arm cannot be size-matched against a non-zero one.
+        if lo == 0 {
+            return hi > 0;
+        }
+        hi as f64 / lo as f64 > crate::pipeline::RERUN_SIZE_SKEW_LIMIT
+    }
+}
+
+fn pct(part: u64, whole: u64) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        100.0 * part as f64 / whole as f64
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionSummaryRow {
     pub session_id: String,
@@ -2197,5 +2345,310 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM distillations", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    // ─── Re-run metric (#109) ───────────────────────────
+
+    fn row(distilled: u64, raw: u64, d_avg: u64, r_avg: u64) -> RerunRow {
+        RerunRow {
+            filter_name: "f".into(),
+            distilled,
+            raw,
+            distilled_reruns: 0,
+            raw_reruns: 0,
+            distilled_avg_input: d_avg,
+            raw_avg_input: r_avg,
+        }
+    }
+
+    /// The guard that stopped `kubectl`'s +48.6pp from being published as a
+    /// finding: 244,606 B of `get -A` dumps against 115 B of config reads is
+    /// not one population, so the delta measures size, not lost signal.
+    #[test]
+    fn flags_arms_of_wildly_different_size_as_confounded() {
+        assert!(row(239, 140, 244_606, 115).is_confounded());
+    }
+
+    /// `grep`'s arms are matched (3,196 B vs 3,240 B), so its delta is real.
+    #[test]
+    fn treats_similarly_sized_arms_as_comparable() {
+        assert!(!row(103, 255, 3_196, 3_240).is_confounded());
+    }
+
+    #[test]
+    fn treats_a_skew_at_the_limit_as_comparable() {
+        // Exactly 3× — the limit is exclusive, so this still compares.
+        assert!(!row(10, 10, 3_000, 1_000).is_confounded());
+        assert!(row(10, 10, 3_001, 1_000).is_confounded());
+    }
+
+    /// An empty arm cannot be size-matched, and must not divide by zero.
+    #[test]
+    fn treats_an_empty_arm_as_confounded_without_panicking() {
+        assert!(row(10, 10, 0, 4_000).is_confounded());
+        assert!(row(10, 10, 4_000, 0).is_confounded());
+        assert!(!row(0, 0, 0, 0).is_confounded());
+    }
+
+    #[test]
+    fn computes_delta_as_distilled_minus_raw_percentage_points() {
+        let r = RerunRow {
+            filter_name: "npm".into(),
+            distilled: 100,
+            raw: 100,
+            distilled_reruns: 48,
+            raw_reruns: 8,
+            distilled_avg_input: 1_000,
+            raw_avg_input: 1_000,
+        };
+        assert_eq!(r.delta_pp(), 40.0);
+    }
+
+    #[test]
+    fn reports_zero_rate_for_an_arm_with_no_rows() {
+        assert_eq!(row(0, 5, 100, 100).distilled_pct(), 0.0);
+    }
+
+    fn insert(store: &Store, session: &str, ts: i64, filter: &str, cmd: &str, route: &str) {
+        insert_as(store, session, ts, filter, cmd, route, "aider");
+    }
+
+    fn insert_as(
+        store: &Store,
+        session: &str,
+        ts: i64,
+        filter: &str,
+        cmd: &str,
+        route: &str,
+        agent: &str,
+    ) {
+        let conn = store.pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO distillations
+             (session_id, ts, filter_name, input_bytes, output_bytes, route,
+              score, context_score, latency_ms, command, agent_id)
+             VALUES (?1, ?2, ?3, 1000, 500, ?4, 0, 0, 0, ?5, ?6)",
+            params![session, ts, filter, route, cmd, agent],
+        )
+        .unwrap();
+    }
+
+    /// Four commands run twice under distillation (so the first of each pair is
+    /// a re-run) against eight distinct commands passed through raw.
+    fn seed_rerun_fixture(store: &Store, filter: &str) {
+        for i in 0..4 {
+            let cmd = format!("{filter} task{i}");
+            insert(store, "s1", 1000, filter, &cmd, "Keep");
+            insert(store, "s1", 1100, filter, &cmd, "Keep");
+        }
+        for i in 0..8 {
+            insert(
+                store,
+                "s1",
+                1000,
+                filter,
+                &format!("{filter} raw{i}"),
+                "Passthrough",
+            );
+        }
+    }
+
+    #[test]
+    fn counts_a_repeat_of_the_same_command_within_the_window_as_a_rerun() {
+        let (store, _dir) = get_temp_store();
+        seed_rerun_fixture(&store, "npm");
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        let npm = rows.iter().find(|r| r.filter_name == "npm").unwrap();
+        assert_eq!(npm.distilled, 8);
+        assert_eq!(npm.raw, 8);
+        // Only the first of each pair has a later twin.
+        assert_eq!(npm.distilled_reruns, 4);
+        assert_eq!(npm.raw_reruns, 0);
+        assert_eq!(npm.delta_pp(), 50.0);
+    }
+
+    #[test]
+    fn ignores_a_repeat_that_falls_outside_the_window() {
+        let (store, _dir) = get_temp_store();
+        for i in 0..4 {
+            let cmd = format!("npm task{i}");
+            insert(&store, "s1", 1000, "npm", &cmd, "Keep");
+            // One second past RERUN_WINDOW_SECS.
+            insert(
+                &store,
+                "s1",
+                1000 + crate::pipeline::RERUN_WINDOW_SECS + 1,
+                "npm",
+                &cmd,
+                "Keep",
+            );
+        }
+        for i in 0..8 {
+            insert(
+                &store,
+                "s1",
+                1000,
+                "npm",
+                &format!("npm raw{i}"),
+                "Passthrough",
+            );
+        }
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.filter_name == "npm")
+                .unwrap()
+                .distilled_reruns,
+            0
+        );
+    }
+
+    #[test]
+    fn does_not_count_a_repeat_from_a_different_session() {
+        let (store, _dir) = get_temp_store();
+        for i in 0..8 {
+            let cmd = format!("npm task{i}");
+            insert(&store, "s1", 1000, "npm", &cmd, "Keep");
+            insert(&store, "s2", 1100, "npm", &cmd, "Keep");
+            insert(
+                &store,
+                "s1",
+                1000,
+                "npm",
+                &format!("npm raw{i}"),
+                "Passthrough",
+            );
+        }
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.filter_name == "npm")
+                .unwrap()
+                .distilled_reruns,
+            0
+        );
+    }
+
+    /// Below the sample floor a delta is noise, and publishing it would be the
+    /// confident-but-unsupported number this metric exists to catch.
+    #[test]
+    fn excludes_a_filter_below_the_minimum_sample_size() {
+        let (store, _dir) = get_temp_store();
+        seed_rerun_fixture(&store, "npm");
+        // One short on the distilled arm.
+        for i in 0..(crate::pipeline::RERUN_MIN_SAMPLES - 1) {
+            insert(&store, "s1", 1000, "rare", &format!("rare a{i}"), "Keep");
+        }
+        for i in 0..crate::pipeline::RERUN_MIN_SAMPLES {
+            insert(
+                &store,
+                "s1",
+                1000,
+                "rare",
+                &format!("rare b{i}"),
+                "Passthrough",
+            );
+        }
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        assert!(rows.iter().any(|r| r.filter_name == "npm"));
+        assert!(!rows.iter().any(|r| r.filter_name == "rare"));
+    }
+
+    /// Pre-#158 Claude Code `Keep` rows are controls wearing a treatment label;
+    /// counting them can zero out a real finding.
+    #[test]
+    fn excludes_claude_code_rows_recorded_before_the_post_hook_fix() {
+        let (store, _dir) = get_temp_store();
+        let before = crate::pipeline::POST_HOOK_FIX_TS - 1;
+        for i in 0..16 {
+            insert_as(
+                &store,
+                "s1",
+                before,
+                "ghost",
+                &format!("ghost {i}"),
+                "Keep",
+                "claude_code",
+            );
+            insert_as(
+                &store,
+                "s1",
+                before,
+                "ghost",
+                &format!("ghost r{i}"),
+                "Passthrough",
+                "claude_code",
+            );
+        }
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        assert!(!rows.iter().any(|r| r.filter_name == "ghost"));
+    }
+
+    #[test]
+    fn keeps_claude_code_rows_recorded_after_the_post_hook_fix() {
+        let (store, _dir) = get_temp_store();
+        let after = crate::pipeline::POST_HOOK_FIX_TS + 1;
+        for i in 0..8 {
+            insert_as(
+                &store,
+                "s1",
+                after,
+                "live",
+                &format!("live {i}"),
+                "Keep",
+                "claude_code",
+            );
+            insert_as(
+                &store,
+                "s1",
+                after,
+                "live",
+                &format!("live r{i}"),
+                "Passthrough",
+                "claude_code",
+            );
+        }
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        assert!(rows.iter().any(|r| r.filter_name == "live"));
+    }
+
+    #[test]
+    fn returns_no_rows_when_nothing_has_been_recorded() {
+        let (store, _dir) = get_temp_store();
+        assert!(store.rerun_breakdown(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ranks_the_worst_offender_first() {
+        let (store, _dir) = get_temp_store();
+        seed_rerun_fixture(&store, "npm");
+        // `quiet` is distilled but never re-run: delta 0 against npm's +50.
+        for i in 0..8 {
+            insert(&store, "s1", 1000, "quiet", &format!("quiet a{i}"), "Keep");
+            insert(
+                &store,
+                "s1",
+                1000,
+                "quiet",
+                &format!("quiet b{i}"),
+                "Passthrough",
+            );
+        }
+
+        let rows = store.rerun_breakdown(0).unwrap();
+
+        assert_eq!(rows.first().unwrap().filter_name, "npm");
     }
 }
