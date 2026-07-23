@@ -34,6 +34,38 @@ pub const DEFAULT_PRESSURE_CRITICAL_THRESHOLD: f64 = 0.82;
 /// Minimum tool calls between repeated pressure warnings
 pub const PRESSURE_WARNING_COOLDOWN: u32 = 5;
 
+/// How long after a distillation a repeat of the same command still counts as a
+/// re-run caused by it (#109). Wide enough to cover an agent reading the output
+/// and reacting, narrow enough that unrelated later work is not blamed on it.
+pub const RERUN_WINDOW_SECS: i64 = 300;
+
+/// Minimum rows required on *each* arm before a filter's re-run delta is
+/// reported. Below this the delta is noise, and publishing it would be the
+/// confident-but-unsupported number OMNI exists to stop emitting.
+pub const RERUN_MIN_SAMPLES: u64 = 8;
+
+/// Commit timestamp of the #158 fix — `fix(hooks): emit the key Claude Code
+/// actually reads (#162)`, 2026-07-22 21:47:55 +0700.
+///
+/// Before it, the Claude Code post-hook emitted its output under a key the host
+/// ignores, so `Keep` rows on that path were recorded as distilled while the
+/// agent read the raw bytes. They are controls mislabelled as treatment, and
+/// including them does not merely add noise — on the maintainer's store `grep`
+/// reads +9.2pp with them excluded and +0.0pp with them included, so dilution
+/// alone can hide a real finding. Any before/after comparison must drop them.
+pub const POST_HOOK_FIX_TS: i64 = 1_784_731_675;
+
+/// How far the two arms' mean input size may diverge before the comparison is
+/// flagged as confounded.
+///
+/// Distillation only fires on large output, so "distilled" and "passed through"
+/// are not always the same population. On the maintainer's store `kubectl`
+/// averaged 244,606 B distilled against 115 B raw — a 2,127× skew that made a
+/// +48.6pp delta look like evidence when it compared `get -A` dumps against
+/// one-line config reads. `grep` (3,196 B vs 3,240 B) and `npm` (11,419 B vs
+/// 14,065 B) are matched and survive. 3× separates the two cases cleanly.
+pub const RERUN_SIZE_SKEW_LIMIT: f64 = 3.0;
+
 // 1. Segmentation Strategy — how to split tokens
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SegmentationMode {
