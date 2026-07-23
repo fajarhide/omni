@@ -1196,6 +1196,7 @@ dependencies = [
  "indicatif",
  "insta",
  "is-terminal",
+ "libc",
  "lru",
  "r2d2",
  "r2d2_sqlite",

@@ -19,6 +19,11 @@ path = "src/lib.rs"
 name = "omni"
 path = "src/main.rs"
 
+[target.'cfg(unix)'.dependencies]
+# Only to restore default SIGPIPE (#155). Already in the tree via rusqlite and
+# tempfile, so this adds no compilation — it just makes the use direct.
+libc = "0.2"
+
 [dependencies]
 # Core
 anyhow = "1.0"
