@@ -136,7 +136,10 @@ impl SqliteBackend {
         let conn = self.pool.get().context("DB pool exhausted")?;
         // returns (count, total_input, total_output, sum_latency, max_latency, raw_tokens, filtered_tokens)
         let r = conn.query_row(
-            "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0), COALESCE(SUM(latency_ms),0), COALESCE(MAX(latency_ms),0), COALESCE(SUM(raw_tokens),0), COALESCE(SUM(filtered_tokens),0) FROM distillations WHERE ts >= ?1",
+            &format!(
+                "SELECT COALESCE(COUNT(*),0), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0), COALESCE(SUM(latency_ms),0), COALESCE(MAX(latency_ms),0), COALESCE(SUM(raw_tokens),0), COALESCE(SUM(filtered_tokens),0) FROM distillations WHERE ts >= ?1 AND {}",
+                applied_only()
+            ),
             params![since],
             |row| Ok((
                 row.get::<_,u64>(0)?,
@@ -155,12 +158,13 @@ impl SqliteBackend {
     #[allow(clippy::type_complexity)]
     pub fn filter_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT CASE WHEN command != '' THEN command ELSE '[unknown command]' END as grp_name, COUNT(*),
                     COALESCE(SUM(input_bytes), 0), COALESCE(SUM(output_bytes), 0),
                     COALESCE(SUM(raw_tokens), 0), COALESCE(SUM(filtered_tokens), 0)
-             FROM distillations WHERE ts >= ?1 GROUP BY grp_name ORDER BY COUNT(*) DESC"
-        )?;
+             FROM distillations WHERE ts >= ?1 AND {} GROUP BY grp_name ORDER BY COUNT(*) DESC",
+            applied_only()
+        ))?;
         let rows = stmt
             .query_map(params![since], |row| {
                 Ok((
@@ -1097,7 +1101,7 @@ impl SqliteBackend {
         limit: usize,
     ) -> Result<Vec<(String, u64, u64, u64, u64, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT
                 command,
                 COUNT(*) as calls,
@@ -1106,11 +1110,12 @@ impl SqliteBackend {
                 COALESCE(SUM(raw_tokens), 0) as raw_tok,
                 COALESCE(SUM(filtered_tokens), 0) as filt_tok
             FROM distillations
-            WHERE ts >= ?1 AND command != '' AND command != '[pipe]'
+            WHERE ts >= ?1 AND command != '' AND command != '[pipe]' AND {}
             GROUP BY command
             ORDER BY calls DESC
             LIMIT ?2",
-        )?;
+            applied_only()
+        ))?;
 
         let rows = stmt
             .query_map(params![since, limit as i64], |row| {
@@ -1130,28 +1135,38 @@ impl SqliteBackend {
     }
 
     /// Agent breakdown: (agent_id, count, input_bytes, output_bytes)
-    pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<(String, u64, u64, u64)>> {
+    /// Per-agent totals, with the unapplied rows counted but not added in (#163).
+    ///
+    /// `calls` / `input_bytes` / `output_bytes` cover only rows that reached an
+    /// agent. `unverified` counts the ones excluded — pre-#158 Claude Code rows
+    /// whose savings the host discarded. They are reported rather than dropped
+    /// so a shrinking call count reads as the correction it is, instead of
+    /// looking like OMNI stopped working.
+    pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<AgentRow>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
-        let mut stmt = conn.prepare(
+        let applied = applied_only();
+        let mut stmt = conn.prepare(&format!(
             "SELECT
                 COALESCE(agent_id, 'unknown') as agent,
-                COUNT(*) as calls,
-                COALESCE(SUM(input_bytes), 0) as total_input,
-                COALESCE(SUM(output_bytes), 0) as total_output
+                COALESCE(SUM({applied}), 0) as calls,
+                COALESCE(SUM(CASE WHEN {applied} THEN input_bytes ELSE 0 END), 0) as total_input,
+                COALESCE(SUM(CASE WHEN {applied} THEN output_bytes ELSE 0 END), 0) as total_output,
+                COALESCE(SUM(NOT ({applied})), 0) as unverified
             FROM distillations
             WHERE ts >= ?1
             GROUP BY agent
-            ORDER BY calls DESC",
-        )?;
+            ORDER BY calls DESC"
+        ))?;
 
         let rows = stmt
             .query_map(params![since], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, u64>(1)?,
-                    row.get::<_, u64>(2)?,
-                    row.get::<_, u64>(3)?,
-                ))
+                Ok(AgentRow {
+                    agent_id: row.get(0)?,
+                    calls: row.get(1)?,
+                    input_bytes: row.get(2)?,
+                    output_bytes: row.get(3)?,
+                    unverified: row.get(4)?,
+                })
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -1167,7 +1182,7 @@ impl SqliteBackend {
         limit: usize,
     ) -> Result<Vec<(String, String, u64, u64, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT
                 CASE WHEN command != '' THEN command ELSE '[unknown command]' END as command_name,
                 COALESCE(agent_id, 'unknown') as agent,
@@ -1175,11 +1190,12 @@ impl SqliteBackend {
                 COALESCE(SUM(input_bytes), 0) as total_input,
                 COALESCE(SUM(output_bytes), 0) as total_output
             FROM distillations
-            WHERE ts >= ?1 AND command != '[pipe]'
+            WHERE ts >= ?1 AND command != '[pipe]' AND {}
             GROUP BY command_name, agent
             ORDER BY calls DESC
             LIMIT ?2",
-        )?;
+            applied_only()
+        ))?;
 
         let rows = stmt
             .query_map(params![since, limit as i64], |row| {
@@ -1218,19 +1234,20 @@ impl SqliteBackend {
 
     pub fn get_project_stats(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
-        let mut stmt = conn.prepare(
-            "SELECT 
-                project_path, 
+        let mut stmt = conn.prepare(&format!(
+            "SELECT
+                project_path,
                 COUNT(*) as count,
                 CASE 
                     WHEN SUM(input_bytes) = 0 THEN 0.0 
                     ELSE ROUND(100.0 * (1.0 - CAST(SUM(output_bytes) AS REAL) / SUM(input_bytes)), 1)
                 END as savings
-             FROM distillations 
-             WHERE ts >= ?1 AND project_path != ''
-             GROUP BY project_path 
-             ORDER BY count DESC"
-        )?;
+             FROM distillations
+             WHERE ts >= ?1 AND project_path != '' AND {}
+             GROUP BY project_path
+             ORDER BY count DESC",
+            applied_only()
+        ))?;
 
         let rows = stmt
             .query_map(params![since], |row| {
@@ -1835,6 +1852,43 @@ impl RerunRow {
         }
         hi as f64 / lo as f64 > crate::pipeline::RERUN_SIZE_SKEW_LIMIT
     }
+}
+
+/// One agent's totals, with the rows excluded from them counted separately.
+#[derive(Debug, Clone)]
+pub struct AgentRow {
+    pub agent_id: String,
+    /// Calls whose distillation reached the agent.
+    pub calls: u64,
+    pub input_bytes: u64,
+    pub output_bytes: u64,
+    /// Calls excluded from the three fields above: pre-#158 Claude Code rows
+    /// whose savings were recorded but never applied.
+    pub unverified: u64,
+}
+
+/// SQL restricting a savings sum to rows whose distillation actually reached an
+/// agent (#163).
+///
+/// A `claude_code` row written before `POST_HOOK_FIX_TS` records a distillation
+/// that was computed, scored, routed and stored — and then dropped by the host,
+/// because the hook emitted `updatedResponse`, a key Claude Code ignores (#158).
+/// The agent read the raw bytes. Those rows are indistinguishable from the
+/// `omni exec` and pipe rows where the same numbers are true.
+///
+/// The rest of such a row is still good evidence — latency, command, project and
+/// file access all really happened. Only the byte and token columns are fiction,
+/// so this gates **sums over those columns**, not the row. Deleting the rows
+/// would destroy true history to remove a false column, which is what the
+/// never-drop invariant argues against.
+///
+/// Interpolated rather than bound because `POST_HOOK_FIX_TS` is a compile-time
+/// `i64` constant, never user input.
+pub(crate) fn applied_only() -> String {
+    format!(
+        "NOT (agent_id = 'claude_code' AND ts < {})",
+        crate::pipeline::POST_HOOK_FIX_TS
+    )
 }
 
 fn pct(part: u64, whole: u64) -> f64 {
@@ -2650,5 +2704,130 @@ mod tests {
         let rows = store.rerun_breakdown(0).unwrap();
 
         assert_eq!(rows.first().unwrap().filter_name, "npm");
+    }
+
+    // ─── Unapplied savings (#163) ───────────────────────
+
+    const BEFORE_FIX: i64 = crate::pipeline::POST_HOOK_FIX_TS - 1;
+    const AFTER_FIX: i64 = crate::pipeline::POST_HOOK_FIX_TS + 1;
+
+    /// A `claude_code` row written before #158 landed recorded a saving the host
+    /// threw away. Summing it overstates what OMNI actually did.
+    #[test]
+    fn excludes_unapplied_claude_code_savings_from_the_totals() {
+        let (store, _dir) = get_temp_store();
+        insert_as(
+            &store,
+            "s1",
+            BEFORE_FIX,
+            "git",
+            "git log",
+            "Keep",
+            "claude_code",
+        );
+
+        let (count, input, output, ..) = store.aggregate_stats(0).unwrap();
+
+        assert_eq!((count, input, output), (0, 0, 0));
+    }
+
+    #[test]
+    fn counts_claude_code_savings_recorded_after_the_fix() {
+        let (store, _dir) = get_temp_store();
+        insert_as(
+            &store,
+            "s1",
+            AFTER_FIX,
+            "git",
+            "git log",
+            "Keep",
+            "claude_code",
+        );
+
+        let (count, input, output, ..) = store.aggregate_stats(0).unwrap();
+
+        assert_eq!((count, input, output), (1, 1000, 500));
+    }
+
+    /// The `omni exec` and pipe paths wrote stdout directly and were always
+    /// genuine — the cutoff must not touch them at any timestamp.
+    #[test]
+    fn counts_other_agents_savings_regardless_of_when_they_were_recorded() {
+        let (store, _dir) = get_temp_store();
+        insert_as(&store, "s1", BEFORE_FIX, "git", "git log", "Keep", "aider");
+        insert_as(
+            &store, "s1", BEFORE_FIX, "git", "git diff", "Keep", "terminal",
+        );
+
+        let (count, ..) = store.aggregate_stats(0).unwrap();
+
+        assert_eq!(count, 2);
+    }
+
+    /// Excluded rows are reported, not silently missing: a call count that
+    /// shrinks without explanation reads as OMNI having stopped working.
+    #[test]
+    fn reports_unapplied_rows_beside_the_totals_rather_than_dropping_them() {
+        let (store, _dir) = get_temp_store();
+        for i in 0..3 {
+            insert_as(
+                &store,
+                "s1",
+                BEFORE_FIX,
+                "git",
+                &format!("old {i}"),
+                "Keep",
+                "claude_code",
+            );
+        }
+        insert_as(&store, "s1", AFTER_FIX, "git", "new", "Keep", "claude_code");
+
+        let rows = store.get_agent_breakdown(0).unwrap();
+
+        let cc = rows.iter().find(|r| r.agent_id == "claude_code").unwrap();
+        assert_eq!(cc.calls, 1, "only the applied row counts");
+        assert_eq!(cc.unverified, 3, "the excluded rows are still named");
+        assert_eq!(cc.input_bytes, 1000, "excluded bytes stay out of the sum");
+    }
+
+    /// The rows survive — only their byte columns are disowned. Deleting them
+    /// would destroy true latency and command history to remove a false sum.
+    #[test]
+    fn keeps_the_unapplied_rows_in_the_table() {
+        let (store, _dir) = get_temp_store();
+        insert_as(
+            &store,
+            "s1",
+            BEFORE_FIX,
+            "git",
+            "git log",
+            "Keep",
+            "claude_code",
+        );
+
+        let _ = store.aggregate_stats(0).unwrap();
+
+        let conn = store.pool.get().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM distillations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn reports_no_unapplied_rows_when_there_are_none() {
+        let (store, _dir) = get_temp_store();
+        insert_as(&store, "s1", AFTER_FIX, "git", "git log", "Keep", "aider");
+
+        let rows = store.get_agent_breakdown(0).unwrap();
+
+        assert!(rows.iter().all(|r| r.unverified == 0));
+    }
+
+    #[test]
+    fn aggregates_an_empty_table_without_panicking() {
+        let (store, _dir) = get_temp_store();
+        assert_eq!(store.aggregate_stats(0).unwrap().0, 0);
+        assert!(store.get_agent_breakdown(0).unwrap().is_empty());
     }
 }
