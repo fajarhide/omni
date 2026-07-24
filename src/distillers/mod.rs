@@ -618,6 +618,15 @@ mod tests {
         "git_status_dirty.txt",
         "git status"
     );
+    // #107: `--oneline` puts the hash and subject on one line. The distiller used
+    // to keep 7 chars of hash and drop the subject, joining every commit into a
+    // wall of hashes. This locks the whole line surviving — there was no git_log
+    // snapshot before, which is why the regression shipped unseen.
+    snapshot_test!(
+        test_git_log_oneline_distillation,
+        "git_log.txt",
+        "git log --oneline"
+    );
     snapshot_test!(
         test_cargo_build_distillation,
         "cargo_build_errors.txt",
