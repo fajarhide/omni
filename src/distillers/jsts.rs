@@ -55,13 +55,10 @@ impl Distiller for JsTsDistiller {
         } else if is_prettier_output(&lines) {
             distill_prettier(&filtered_input)
         } else {
-            // Update segments if lines were dropped, or just use filtered_input
-            if filtered_input.len() < input.len() {
-                // Not perfectly accurate for line ranges, but safe for fallback
-                distill_fallback(segments, session)
-            } else {
-                distill_fallback(segments, session)
-            }
+            // Both arms of the `filtered_input.len() < input.len()` branch that
+            // used to stand here called this same function with the same
+            // arguments, so the condition decided nothing.
+            distill_fallback(segments, session)
         }
     }
 }
@@ -665,11 +662,21 @@ fn distill_prettier(input: &str) -> String {
     out
 }
 
+/// The `… and N more` tail every capped renderer in this file shares.
+///
+/// A cap without one is silent data loss wearing a compression badge: the reader
+/// gets a well-formed output and no way to tell it is a tenth of what there was
+/// (#111, #176). `distill_fallback` was the one capped renderer that did not
+/// emit it, which is #188.
+fn more_tail(total: usize, shown: usize) -> Option<String> {
+    (total > shown).then(|| format!("… and {} more", total - shown))
+}
+
 /// Render `items` one per indented line, capped, with an `… and N more` tail.
 fn capped_lines(items: &[&str], cap: usize) -> String {
     let mut out: Vec<String> = items.iter().take(cap).map(|s| format!("  {s}")).collect();
-    if items.len() > cap {
-        out.push(format!("  … and {} more", items.len() - cap));
+    if let Some(tail) = more_tail(items.len(), cap) {
+        out.push(format!("  {tail}"));
     }
     out.join("\n")
 }
@@ -678,65 +685,81 @@ fn capped_lines(items: &[&str], cap: usize) -> String {
 // Fallback
 // ---------------------------------------------------------------------------
 
+/// Lines the fallback keeps before it says how many it dropped.
+///
+/// The number is unchanged; what changed in #188 is that exceeding it is now
+/// reported. It silently deleted 270 of 300 lines and the result was published
+/// as a 90% saving.
+const FALLBACK_MAX_LINES: usize = 30;
+
+/// Segments sampled when nothing in the output scored Critical or Important.
+const FALLBACK_SAMPLE_SEGMENTS: usize = 10;
+
+/// Package-manager chatter the session hint already told us to expect.
+///
+/// Both loops below filtered this with the same two `contains` checks written
+/// out twice; a predicate keeps them from drifting apart.
+fn is_pm_noise(line: &str, js_pm: Option<&str>) -> bool {
+    match js_pm {
+        Some("pnpm") => line.contains("pnpm: packages are hard linked"),
+        Some("yarn") => line.contains("yarn install v1."),
+        _ => false,
+    }
+}
+
 fn distill_fallback(
     segments: &[OutputSegment],
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
-    let mut out = String::new();
-    let mut lines_count = 0;
-
     let js_pm = session.and_then(|s| s.toolchain_hints.get("js").map(|v| v.as_str()));
 
-    for seg in segments {
-        if matches!(seg.tier, SignalTier::Critical | SignalTier::Important) {
-            for line in seg.content.lines() {
-                if lines_count >= 30 {
-                    break;
-                }
+    let eligible: Vec<&str> = segments
+        .iter()
+        .filter(|seg| matches!(seg.tier, SignalTier::Critical | SignalTier::Important))
+        .flat_map(|seg| seg.content.lines())
+        .filter(|line| !is_pm_noise(line, js_pm))
+        .collect();
 
-                // Filter toolchain-specific noise if session hint exists
-                if let Some(pm) = js_pm {
-                    if pm == "pnpm" && line.contains("pnpm: packages are hard linked") {
-                        continue;
-                    }
-                    if pm == "yarn" && line.contains("yarn install v1.") {
-                        continue;
-                    }
-                }
-
-                out.push_str(line);
-                out.push('\n');
-                lines_count += 1;
-            }
-        }
-        if lines_count >= 30 {
-            break;
-        }
+    if !eligible.is_empty() {
+        return with_tail(&eligible, FALLBACK_MAX_LINES);
     }
 
-    if out.trim().is_empty() {
-        for seg in segments.iter().take(10) {
-            let mut line_added = false;
-            for line in seg.content.lines() {
-                if let Some(pm) = js_pm {
-                    if pm == "pnpm" && line.contains("pnpm: packages are hard linked") {
-                        continue;
-                    }
-                    if pm == "yarn" && line.contains("yarn install v1.") {
-                        continue;
-                    }
-                }
-                out.push_str(line);
-                out.push('\n');
-                line_added = true;
-                break; // only take first line for fallback summary
-            }
-            if !line_added {
-                // if we filtered the only line, just skip
-            }
-        }
-    }
+    // Nothing scored: sample the first line of each of the first N segments
+    // rather than return nothing at all. That is still a sample, so it is
+    // counted against every line there was — not against the ones sampled.
+    let sample: Vec<&str> = segments
+        .iter()
+        .take(FALLBACK_SAMPLE_SEGMENTS)
+        .filter_map(|seg| seg.content.lines().find(|l| !is_pm_noise(l, js_pm)))
+        .collect();
+    let total_lines = segments
+        .iter()
+        .flat_map(|seg| seg.content.lines())
+        .filter(|l| !is_pm_noise(l, js_pm))
+        .count();
 
+    let mut out = sample.join("\n");
+    if let Some(tail) = more_tail(total_lines, sample.len()) {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&tail);
+    }
+    out.trim().to_string()
+}
+
+/// `items` capped at `cap`, one per line, with the omission tail when it bites.
+fn with_tail(items: &[&str], cap: usize) -> String {
+    let mut out = items
+        .iter()
+        .take(cap)
+        .copied()
+        .collect::<Vec<&str>>()
+        .join("\n");
+    if let Some(tail) = more_tail(items.len(), cap) {
+        out.push('\n');
+        out.push_str(&tail);
+    }
     out.trim().to_string()
 }
 
@@ -744,6 +767,107 @@ fn distill_fallback(
 mod tests {
     use super::*;
     use crate::pipeline::{SessionState, SignalTier};
+
+    /// One `Important` segment per line, which is what the scorer produces for a
+    /// wall of undifferentiated log output — the shape that hit #188.
+    fn important_segments(lines: &[String]) -> Vec<OutputSegment> {
+        lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| OutputSegment {
+                content: l.clone(),
+                tier: SignalTier::Important,
+                base_score: 0.8,
+                context_score: 0.0,
+                line_range: (i + 1, i + 1),
+            })
+            .collect()
+    }
+
+    fn npm_warnings(n: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| format!("npm WARN deprecated fake-package@1.0.{i}: no longer supported"))
+            .collect()
+    }
+
+    /// #188. The fallback stopped at 30 lines with a bare `break` and returned
+    /// `out.trim()` — no marker on any path. 270 of 300 lines disappeared and the
+    /// result was published as a 90% saving, so nothing downstream could tell a
+    /// 30-warning install from a 300-warning one.
+    ///
+    /// The assertion is on the **count**, not merely on the presence of an
+    /// ellipsis: a marker without a number does not let a reader judge whether to
+    /// re-read, which is what #176 settled.
+    #[test]
+    fn reports_how_many_lines_the_cap_dropped() {
+        let lines = npm_warnings(300);
+        let out = distill_fallback(&important_segments(&lines), None);
+
+        assert!(
+            out.contains("… and 270 more"),
+            "270 dropped lines went unreported: {out}"
+        );
+        assert_eq!(
+            out.lines().count(),
+            FALLBACK_MAX_LINES + 1,
+            "expected {FALLBACK_MAX_LINES} kept lines plus one tail: {out}"
+        );
+    }
+
+    /// The tail must not appear when the cap did not bite — a marker claiming
+    /// zero omissions is its own small false claim.
+    #[test]
+    fn stays_silent_when_nothing_was_dropped() {
+        let lines = npm_warnings(FALLBACK_MAX_LINES);
+        let out = distill_fallback(&important_segments(&lines), None);
+
+        assert!(
+            !out.contains("more"),
+            "marked an omission that never happened: {out}"
+        );
+        assert_eq!(out.lines().count(), FALLBACK_MAX_LINES);
+    }
+
+    /// Lines dropped by the package-manager filter must not be counted as
+    /// capped-away, or the tail overstates what is missing.
+    #[test]
+    fn counts_only_lines_the_cap_removed_not_ones_already_filtered() {
+        let mut lines = vec!["pnpm: packages are hard linked".to_string()];
+        lines.extend(npm_warnings(300));
+        let mut session = SessionState::default();
+        session
+            .toolchain_hints
+            .insert("js".to_string(), "pnpm".to_string());
+
+        let out = distill_fallback(&important_segments(&lines), Some(&session));
+
+        assert!(
+            out.contains("… and 270 more"),
+            "pm-filtered line was counted as capped away: {out}"
+        );
+    }
+
+    /// The zero-state sample path (nothing scored Critical or Important) takes
+    /// one line per segment and used to drop the rest just as silently.
+    #[test]
+    fn marks_omissions_in_the_zero_state_sample_too() {
+        let segments: Vec<OutputSegment> = (0..20)
+            .map(|i| OutputSegment {
+                content: format!("context line {i}a\ncontext line {i}b"),
+                tier: SignalTier::Context,
+                base_score: 0.3,
+                context_score: 0.0,
+                line_range: (i + 1, i + 1),
+            })
+            .collect();
+
+        let out = distill_fallback(&segments, None);
+
+        assert!(
+            out.contains("more"),
+            "sampled 10 of 40 lines with nothing saying so: {out}"
+        );
+    }
 
     #[test]
     fn test_toolchain_filtering() {
