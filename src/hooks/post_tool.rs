@@ -36,24 +36,70 @@ struct HookSpecificOutput {
     additional_context: Option<String>,
 }
 
-/// The replacement tool result, in the object shape the host expects.
+/// The replacement tool result. There is no single shape — the host validates
+/// this value against **the schema of the tool that ran**, so it has one shape
+/// per host tool, not one shape per hook.
 ///
-/// `status` is always `success` because a failed command returns `None` well
-/// before this point (#120) and never reaches here — so this cannot assert a
-/// success for a command that failed.
+/// #158 fixed the key and left this wrong, which is why the symptom survived it:
+/// Claude Code parsed `updatedToolOutput`, rejected `{status, result}` against
+/// Bash's schema (`stdout`/`stderr`/`interrupted` "expected string, received
+/// undefined"), restored the original output, and rendered
+/// `PostToolUse:Bash hook warning` — while the sibling `additionalContext` went
+/// through and printed a saving for a distillation that had just been discarded.
 #[derive(Serialize)]
-struct ToolOutput {
-    status: &'static str,
-    result: String,
+#[serde(untagged)]
+enum ToolOutput {
+    /// The host tool's own result object, echoed back with the output text
+    /// swapped and every other key preserved verbatim. Optional members
+    /// (`isImage`, `backgroundTaskId`, `persistedOutputPath`, `timedOutAfterMs`,
+    /// …) are part of the schema, so dropping them would fail validation exactly
+    /// as the old shape did.
+    Host(serde_json::Value),
+    /// The MCP tool-result shape, for payloads that arrived without a host
+    /// response object to echo. Unchanged from before #187 **on purpose**: those
+    /// hosts' contracts were not investigated, and guessing at a second one is
+    /// how the first was got wrong.
+    ///
+    /// `status` is always `success` because a failed command returns `None` well
+    /// before this point (#120) and never reaches here — so this cannot assert a
+    /// success for a command that failed.
+    Mcp {
+        status: &'static str,
+        result: String,
+    },
 }
 
-impl ToolOutput {
-    fn success(result: String) -> Self {
-        Self {
+/// Put `distilled` into the shape the host will accept for this call.
+///
+/// Verified against Claude Code 2.1.218's own dispatch: it runs
+/// `tool.outputSchema.safeParse(value)` and falls back to
+/// `tool.mapToolResultToToolResultBlockParam(value)`, both keyed on the tool
+/// that ran — which is why this reads the shape off the payload that arrived
+/// instead of asserting one. The rule is "reply in the shape you were spoken
+/// to in", and it needs no table of per-tool schemas to stay correct.
+fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -> ToolOutput {
+    // Only an object carrying `stdout` is known to be echoable: that is the
+    // Bash-family result, the one shape #187 measured against a live host.
+    // Anything else keeps the MCP shape rather than inventing a schema.
+    let Some(obj) = raw_response
+        .and_then(|v| v.as_object())
+        .filter(|o| o.get("stdout").is_some_and(serde_json::Value::is_string))
+    else {
+        return ToolOutput::Mcp {
             status: "success",
-            result,
-        }
-    }
+            result: distilled,
+        };
+    };
+
+    let mut echoed = obj.clone();
+    echoed.insert("stdout".into(), serde_json::Value::String(distilled));
+    // `normalize` folds a non-empty stderr into the text that was distilled, so
+    // the distilled `stdout` already carries it. Echoing the original back too
+    // would show it twice. Blanked rather than removed: Bash's schema requires
+    // `stderr` to be a string, so dropping the key fails validation.
+    echoed.insert("stderr".into(), serde_json::Value::String(String::new()));
+
+    ToolOutput::Host(serde_json::Value::Object(echoed))
 }
 #[tracing::instrument(skip_all)]
 pub fn process_payload(
@@ -153,24 +199,26 @@ pub fn process_payload(
                     filepath,
                     imported_by_count,
                 )
-                .map(wrap_hook_output);
+                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
             }
 
             // Fallback if graph fails
             return crate::distillers::readfile::distill_readfile(&content, filepath)
-                .map(wrap_hook_output);
+                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "Grep" => {
             if !agent_config.grep_enabled() {
                 return None;
             }
-            return distill_grep(&content).map(wrap_hook_output);
+            return distill_grep(&content)
+                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "WebFetch" => {
             if !agent_config.webfetch_enabled() {
                 return None;
             }
-            return process_web_content(&content).map(wrap_hook_output);
+            return process_web_content(&content)
+                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "Edit" | "Write" | "Create" | "Move" | "Delete" | "Replace" => return None,
         "MultiEdit" => {
@@ -184,7 +232,7 @@ pub fn process_payload(
                 lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
             );
             if summary.len() < content.len() * 8 / 10 {
-                return Some(wrap_hook_output(summary));
+                return Some(wrap_hook_output(normalized.raw_response.as_ref(), summary));
             }
             return None;
         }
@@ -200,7 +248,7 @@ pub fn process_payload(
                     lines.len(),
                     lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
                 );
-                return Some(wrap_hook_output(summary));
+                return Some(wrap_hook_output(normalized.raw_response.as_ref(), summary));
             }
             return None;
         }
@@ -422,11 +470,14 @@ pub fn process_payload(
 
         if final_out.len() < 1000 {
             // F-07: Label small passthrough output instead of silent drop
-            return Some(wrap_hook_output(format!(
-                "[OMNI: Passthrough — output too small for meaningful compression ({} bytes)]\n{}",
-                content.len(),
-                final_out
-            )));
+            return Some(wrap_hook_output(
+                normalized.raw_response.as_ref(),
+                format!(
+                    "[OMNI: Passthrough — output too small for meaningful compression ({} bytes)]\n{}",
+                    content.len(),
+                    final_out
+                ),
+            ));
         } else {
             final_out.insert_str(0, "[OMNI: Passthrough (low compression)]\n");
         }
@@ -554,7 +605,7 @@ pub fn process_payload(
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
-            updated_tool_output: ToolOutput::success(final_out),
+            updated_tool_output: shape_for_host(normalized.raw_response.as_ref(), final_out),
             additional_context,
         },
     })
@@ -696,11 +747,11 @@ fn build_additional_context(
     }
 }
 
-fn wrap_hook_output(distilled: String) -> String {
+fn wrap_hook_output(raw_response: Option<&serde_json::Value>, distilled: String) -> String {
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
-            updated_tool_output: ToolOutput::success(distilled),
+            updated_tool_output: shape_for_host(raw_response, distilled),
             additional_context: None,
         },
     })
@@ -772,15 +823,182 @@ mod tests {
     /// the first day of the Rust rewrite until it was found by hand.
     #[test]
     fn serialises_the_key_the_host_actually_reads() {
-        let json = wrap_hook_output("distilled".to_string());
+        let json = wrap_hook_output(None, "distilled".to_string());
 
         assert!(json.contains(r#""updatedToolOutput""#), "{json}");
-        assert!(json.contains(r#""status":"success""#), "{json}");
-        assert!(json.contains(r#""result":"distilled""#), "{json}");
         assert!(
             !json.contains("updatedResponse"),
             "the ignored key is back: {json}"
         );
+    }
+
+    /// A Bash payload as Claude Code actually sends one.
+    fn bash_response(stdout: &str) -> serde_json::Value {
+        json!({
+            "stdout": stdout,
+            "stderr": "",
+            "interrupted": false,
+            "isImage": false,
+        })
+    }
+
+    /// #187. The key was right after #158 and the **value shape** was not, so the
+    /// symptom — savings reported for output the agent never received — survived
+    /// the fix that was supposed to end it.
+    ///
+    /// The assertion that matters is the negative one. `status`/`result` is a
+    /// well-formed object that serialises cleanly and that OMNI's own tests were
+    /// happy with; the only thing wrong with it is that **Claude Code's Bash
+    /// schema rejects it**. So this test is written from the host's schema
+    /// (`stdout: string`, `stderr: string`, `interrupted: boolean`) and not from
+    /// OMNI's struct — asserting on the same field names we serialised is what
+    /// let both halves of this bug through.
+    #[test]
+    fn replies_in_the_hosts_bash_result_shape() {
+        let out = shape_for_host(Some(&bash_response("raw noisy output")), "distilled".into());
+        let v = serde_json::to_value(&out).expect("serialises");
+
+        // What Claude Code 2.1.218's outputSchema.safeParse requires.
+        assert_eq!(v["stdout"].as_str(), Some("distilled"));
+        assert!(v["stderr"].is_string(), "stderr must be a string: {v}");
+        assert!(
+            v["interrupted"].is_boolean(),
+            "interrupted must be a boolean: {v}"
+        );
+
+        // The shape that was rejected. Its absence is the regression guard.
+        assert!(v.get("status").is_none(), "MCP shape is back: {v}");
+        assert!(v.get("result").is_none(), "MCP shape is back: {v}");
+    }
+
+    /// The schema carries optional members, and the old shape failed partly by
+    /// omitting them. Rebuilding a minimal object would reintroduce that.
+    #[test]
+    fn preserves_host_keys_it_does_not_understand() {
+        let mut resp = bash_response("raw");
+        resp["backgroundTaskId"] = json!("bg_42");
+        resp["persistedOutputPath"] = json!("/tmp/out.txt");
+        resp["timedOutAfterMs"] = json!(120_000);
+
+        let v = serde_json::to_value(shape_for_host(Some(&resp), "distilled".into()))
+            .expect("serialises");
+
+        assert_eq!(v["backgroundTaskId"].as_str(), Some("bg_42"));
+        assert_eq!(v["persistedOutputPath"].as_str(), Some("/tmp/out.txt"));
+        assert_eq!(v["timedOutAfterMs"].as_i64(), Some(120_000));
+        assert_eq!(v["isImage"].as_bool(), Some(false));
+    }
+
+    /// `normalize` folds stderr into the text that gets distilled, so echoing the
+    /// original stderr back as well would show it to the agent twice.
+    #[test]
+    fn does_not_repeat_stderr_already_folded_into_the_distilled_text() {
+        let mut resp = bash_response("out");
+        resp["stderr"] = json!("warning: deprecated");
+
+        let v = serde_json::to_value(shape_for_host(
+            Some(&resp),
+            "out\n[stderr]\nwarning: deprecated".into(),
+        ))
+        .expect("serialises");
+
+        assert_eq!(v["stderr"].as_str(), Some(""));
+        assert!(
+            v["stdout"].as_str().is_some_and(|s| s.contains("warning")),
+            "the distilled text must still carry it: {v}"
+        );
+    }
+
+    /// Payloads that arrived without a host response object keep the MCP shape.
+    /// Those hosts were not investigated in #187 and must not be guessed at.
+    #[test]
+    fn keeps_the_mcp_shape_when_no_host_response_arrived() {
+        let v = serde_json::to_value(shape_for_host(None, "distilled".into())).expect("serialises");
+
+        assert_eq!(v["status"].as_str(), Some("success"));
+        assert_eq!(v["result"].as_str(), Some("distilled"));
+    }
+
+    /// A response object without a `stdout` member is not a shape #187 measured,
+    /// so it must fall back rather than have `stdout` invented for it.
+    #[test]
+    fn keeps_the_mcp_shape_for_a_response_without_stdout() {
+        let resp = json!({ "content": "some text" });
+        let v = serde_json::to_value(shape_for_host(Some(&resp), "distilled".into())).expect("ok");
+
+        assert_eq!(v["status"].as_str(), Some("success"));
+        assert!(v.get("stdout").is_none(), "invented a stdout member: {v}");
+    }
+
+    /// End-to-end through `process_payload`: the F-07 labeled-passthrough branch
+    /// emitted the same rejected shape, so that label has never once reached a
+    /// Claude Code user either. It has to be fixed by the same change, not left
+    /// behind as the one path still speaking MCP.
+    #[test]
+    fn labels_passthrough_in_the_hosts_shape_too() {
+        // Incompressible: distinct lines, no noise for the pipeline to drop.
+        let stdout: String = (0..40)
+            .map(|i| format!("{i} \u{1F300} unique-token-{i}\n"))
+            .collect();
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "some-unknown-tool" },
+            "tool_response": {
+                "stdout": stdout,
+                "stderr": "",
+                "interrupted": false,
+                "isImage": false,
+            }
+        });
+
+        let Some(out) = process_payload(&input.to_string(), None, None) else {
+            return; // emitted nothing at all — also a shape the host cannot reject
+        };
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let updated = &v["hookSpecificOutput"]["updatedToolOutput"];
+
+        assert!(
+            updated["stdout"].is_string(),
+            "passthrough still speaks MCP: {v}"
+        );
+        assert!(
+            updated.get("status").is_none(),
+            "passthrough still speaks MCP: {v}"
+        );
+    }
+
+    /// The two sibling fields were independent, which is the whole reason a
+    /// rejected payload still printed a saving. A footer may only ride along with
+    /// output the host can actually accept.
+    #[test]
+    fn never_reports_a_saving_without_a_host_shaped_payload() {
+        let mut noisy = String::new();
+        for i in 0..400 {
+            noisy.push_str(&format!(
+                "npm WARN deprecated pkg@1.0.{i}: no longer supported\n"
+            ));
+        }
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "npm install" },
+            "tool_response": {
+                "stdout": noisy,
+                "stderr": "",
+                "interrupted": false,
+                "isImage": false,
+            }
+        });
+
+        let out = process_payload(&input.to_string(), None, None).expect("distills");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let hook = &v["hookSpecificOutput"];
+
+        if hook.get("additionalContext").is_some() {
+            assert!(
+                hook["updatedToolOutput"]["stdout"].is_string(),
+                "a saving was reported for a payload the host rejects: {v}"
+            );
+        }
     }
 
     #[test]
