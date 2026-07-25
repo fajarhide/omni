@@ -262,17 +262,16 @@ pub fn distill_with_command(
     // Bare script interpreters run arbitrary programs whose stdout IS the
     // answer — not a build log. Routing `python3 -c "..."` to BuildDistiller
     // fabricated `Build: ok` for any script that printed no error/warning line
-    // (#190) — the same class as `cargo tree` → `Build: ok` (#170). Only a test
-    // invocation has a distiller here; everything else passes through verbatim,
-    // so we never invent a success verdict for output we cannot parse. (`pip`,
-    // `rake` stay in the build path below: their output is build/task oriented.)
+    // (#190) — the same class as `cargo tree` → `Build: ok` (#170). They always
+    // pass through verbatim, so we never invent a success verdict for output we
+    // cannot parse. No `contains("test")` shortcut to TestDistiller: it matched
+    // inside a `-c` code arg or a path segment (`ruby /projects/contest/x.rb`)
+    // and TestDistiller fabricates too — `Tests: 1 passed` for a script that
+    // ran no tests — which is #190 wearing a different distiller's name. Real
+    // test runners are handled upstream: `signals/tools/pytest.toml` and
+    // `mypy.toml` are TOML-first and shadow this arm for `python -m pytest|mypy`.
+    // (`pip`, `rake` stay in the build path below: their output is task oriented.)
     if matches!(base.as_str(), "python" | "python3" | "ruby") {
-        if cmd_lower.contains("test")
-            || cmd_lower.contains("pytest")
-            || cmd_lower.contains("unittest")
-        {
-            return test::TestDistiller.distill(segments, input, session);
-        }
         return input.to_string();
     }
 
@@ -472,6 +471,11 @@ mod tests {
             "python3 -c \"import re; print('dangling  : NONE')\"",
             "python audit.py",
             "ruby check.rb",
+            // The substring "test" inside a `-c` arg or a path segment must NOT
+            // route to TestDistiller — it fabricates `Tests: 1 passed` on this
+            // output, which is #190 via a different distiller. Boundary locked.
+            "python3 -c \"testing_flag = True; print('config ok')\"",
+            "ruby /projects/contest/verify.rb",
         ] {
             let segments = scorer::score_with_command(script_out, cmd, None);
             let out = distill_with_command(&segments, script_out, cmd, None);
