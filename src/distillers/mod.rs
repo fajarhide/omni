@@ -259,6 +259,23 @@ pub fn distill_with_command(
         return build::BuildDistiller.distill(segments, input, session);
     }
 
+    // Bare script interpreters run arbitrary programs whose stdout IS the
+    // answer — not a build log. Routing `python3 -c "..."` to BuildDistiller
+    // fabricated `Build: ok` for any script that printed no error/warning line
+    // (#190) — the same class as `cargo tree` → `Build: ok` (#170). Only a test
+    // invocation has a distiller here; everything else passes through verbatim,
+    // so we never invent a success verdict for output we cannot parse. (`pip`,
+    // `rake` stay in the build path below: their output is build/task oriented.)
+    if matches!(base.as_str(), "python" | "python3" | "ruby") {
+        if cmd_lower.contains("test")
+            || cmd_lower.contains("pytest")
+            || cmd_lower.contains("unittest")
+        {
+            return test::TestDistiller.distill(segments, input, session);
+        }
+        return input.to_string();
+    }
+
     // Build tools → BuildDistiller
     if matches!(
         base.as_str(),
@@ -275,15 +292,12 @@ pub fn distill_with_command(
             | "ruff"
             | "mypy"
             | "black"
-            | "ruby"
             | "rake"
             | "rubocop"
             | "dotnet"
             | "gradle"
             | "mvn"
             | "pytest"
-            | "python"
-            | "python3"
             | "rspec"
             | "phpunit"
     ) {
@@ -442,6 +456,33 @@ mod tests {
                 distill_with_command(&[], tree, cmd, None),
                 tree,
                 "`{cmd}` output is data, not build progress — it must survive"
+            );
+        }
+    }
+
+    /// From #190: a `python3 -c "..."` script prints arbitrary output that *is*
+    /// the answer. Routing bare interpreters to `BuildDistiller` fabricated
+    /// `Build: ok` for any script with no error/warning line — inventing success
+    /// for a verification command whose real answer was the printed text.
+    #[test]
+    fn hands_back_the_output_of_bare_script_interpreters() {
+        let script_out = " tokenRefs : ['vmuser-a']\n VSS dests : ['vault-a']\n dangling  : NONE\n";
+
+        for cmd in [
+            "python3 -c \"import re; print('dangling  : NONE')\"",
+            "python audit.py",
+            "ruby check.rb",
+        ] {
+            let segments = scorer::score_with_command(script_out, cmd, None);
+            let out = distill_with_command(&segments, script_out, cmd, None);
+            assert_eq!(
+                out, script_out,
+                "`{cmd}` output is data, not build progress — it must survive verbatim"
+            );
+            assert_ne!(
+                out.trim(),
+                "Build: ok",
+                "`{cmd}` fabricated a build verdict"
             );
         }
     }
