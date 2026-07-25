@@ -259,6 +259,22 @@ pub fn distill_with_command(
         return build::BuildDistiller.distill(segments, input, session);
     }
 
+    // Bare script interpreters run arbitrary programs whose stdout IS the
+    // answer — not a build log. Routing `python3 -c "..."` to BuildDistiller
+    // fabricated `Build: ok` for any script that printed no error/warning line
+    // (#190) — the same class as `cargo tree` → `Build: ok` (#170). They always
+    // pass through verbatim, so we never invent a success verdict for output we
+    // cannot parse. No `contains("test")` shortcut to TestDistiller: it matched
+    // inside a `-c` code arg or a path segment (`ruby /projects/contest/x.rb`)
+    // and TestDistiller fabricates too — `Tests: 1 passed` for a script that
+    // ran no tests — which is #190 wearing a different distiller's name. Real
+    // test runners are handled upstream: `signals/tools/pytest.toml` and
+    // `mypy.toml` are TOML-first and shadow this arm for `python -m pytest|mypy`.
+    // (`pip`, `rake` stay in the build path below: their output is task oriented.)
+    if matches!(base.as_str(), "python" | "python3" | "ruby") {
+        return input.to_string();
+    }
+
     // Build tools → BuildDistiller
     if matches!(
         base.as_str(),
@@ -275,15 +291,12 @@ pub fn distill_with_command(
             | "ruff"
             | "mypy"
             | "black"
-            | "ruby"
             | "rake"
             | "rubocop"
             | "dotnet"
             | "gradle"
             | "mvn"
             | "pytest"
-            | "python"
-            | "python3"
             | "rspec"
             | "phpunit"
     ) {
@@ -442,6 +455,38 @@ mod tests {
                 distill_with_command(&[], tree, cmd, None),
                 tree,
                 "`{cmd}` output is data, not build progress — it must survive"
+            );
+        }
+    }
+
+    /// From #190: a `python3 -c "..."` script prints arbitrary output that *is*
+    /// the answer. Routing bare interpreters to `BuildDistiller` fabricated
+    /// `Build: ok` for any script with no error/warning line — inventing success
+    /// for a verification command whose real answer was the printed text.
+    #[test]
+    fn hands_back_the_output_of_bare_script_interpreters() {
+        let script_out = " tokenRefs : ['vmuser-a']\n VSS dests : ['vault-a']\n dangling  : NONE\n";
+
+        for cmd in [
+            "python3 -c \"import re; print('dangling  : NONE')\"",
+            "python audit.py",
+            "ruby check.rb",
+            // The substring "test" inside a `-c` arg or a path segment must NOT
+            // route to TestDistiller — it fabricates `Tests: 1 passed` on this
+            // output, which is #190 via a different distiller. Boundary locked.
+            "python3 -c \"testing_flag = True; print('config ok')\"",
+            "ruby /projects/contest/verify.rb",
+        ] {
+            let segments = scorer::score_with_command(script_out, cmd, None);
+            let out = distill_with_command(&segments, script_out, cmd, None);
+            assert_eq!(
+                out, script_out,
+                "`{cmd}` output is data, not build progress — it must survive verbatim"
+            );
+            assert_ne!(
+                out.trim(),
+                "Build: ok",
+                "`{cmd}` fabricated a build verdict"
             );
         }
     }
