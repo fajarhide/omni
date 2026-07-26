@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -19,7 +20,7 @@ struct Asset;
 struct TomlDocument {
     schema_version: u32,
     #[serde(alias = "signals")]
-    filters: Option<HashMap<String, FilterConfig>>,
+    filters: Option<BTreeMap<String, FilterConfig>>,
     tests: Option<HashMap<String, Vec<TestConfig>>>,
 }
 
@@ -719,6 +720,12 @@ struct FiltersCache {
 
 static ALL_FILTERS_CACHE: OnceLock<Mutex<FiltersCache>> = OnceLock::new();
 
+fn sort_filters_by_priority(filters: &mut [TomlFilter]) {
+    // Stable sorting keeps project > user > built-in precedence for equal
+    // priorities while making the documented priority knob effective.
+    filters.sort_by_key(|filter| Reverse(filter.priority));
+}
+
 pub fn load_all_filters() -> Vec<TomlFilter> {
     let cache = ALL_FILTERS_CACHE.get_or_init(|| {
         Mutex::new(FiltersCache {
@@ -807,6 +814,7 @@ fn load_all_filters_uncached() -> Vec<TomlFilter> {
         }
     }
 
+    sort_filters_by_priority(&mut all);
     all
 }
 
@@ -1048,11 +1056,35 @@ mod tests {
     }
 
     #[test]
-    fn test_load_all_filters_priority_project_gt_user_gt_built_in() {
-        // Without mocking environment extensively, we test `load_all_filters` logic by its output conceptually.
-        // It should just safely evaluate into an empty/populated array without panicking.
-        let _filters = load_all_filters();
-        // Just verify it doesn't crash traversing systems.
+    fn orders_filters_by_priority_with_deterministic_ties() {
+        // `aaa_low` is named so BTreeMap's alphabetical load order
+        // (aaa_low, high_a, high_b) is NOT already priority-sorted: the sort must
+        // move the low-priority filter from first to last. A no-op
+        // `sort_filters_by_priority` leaves it first and fails this test.
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+        schema_version = 1
+        [filters.aaa_low]
+        match_command = "^tool"
+        priority = 50
+        [filters.high_b]
+        match_command = "^tool"
+        priority = 200
+        [filters.high_a]
+        match_command = "^tool"
+        priority = 200
+        "#
+        )
+        .unwrap();
+
+        let mut filters = load_from_file(file.path()).unwrap().filters;
+        sort_filters_by_priority(&mut filters);
+
+        // Descending priority; the two 200s keep their alphabetical (stable) order.
+        let names: Vec<_> = filters.iter().map(|filter| filter.name.as_str()).collect();
+        assert_eq!(names, ["high_a", "high_b", "aaa_low"]);
     }
 
     #[test]
