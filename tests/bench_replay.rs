@@ -72,24 +72,36 @@ fn replay_execution_traces_net_savings() {
         .collect();
 
     assert!(!rows.is_empty(), "trace DB has no rows to replay");
+    assert!(
+        rows.iter().any(|(_, r)| !r.is_empty()),
+        "all trace rows have empty raw_input — nothing to measure"
+    );
 
     let (mut n, mut raw_total, mut out_total) = (0u64, 0u64, 0u64);
-    let (mut shrank, mut unchanged, mut grew) = (0u64, 0u64, 0u64);
+    let (mut shrank, mut unchanged, mut grew, mut errored) = (0u64, 0u64, 0u64, 0u64);
     // base command -> (calls, raw_bytes, out_bytes)
     let mut per_cmd: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
 
     for (cmd, raw) in &rows {
         let mut out = Vec::new();
         let mut err = std::io::sink();
-        // None store + None session = fresh, deterministic, no persistence.
-        let _ = omni::hooks::pipe::run_inner(
+        // None store + None session = fresh, deterministic, no persistence. A
+        // failed replay would leave `out` empty and be counted as 100% savings,
+        // inflating the honest figure (review of #202) — exclude it entirely and
+        // report the count instead.
+        if omni::hooks::pipe::run_inner(
             Cursor::new(raw.as_bytes()),
             &mut out,
             &mut err,
             None,
             None,
             Some(cmd),
-        );
+        )
+        .is_err()
+        {
+            errored += 1;
+            continue;
+        }
 
         let (r, o) = (raw.len() as u64, out.len() as u64);
         n += 1;
@@ -106,11 +118,16 @@ fn replay_execution_traces_net_savings() {
         e.2 += o;
     }
 
-    let net = 100.0 * (raw_total - out_total.min(raw_total)) as f64 / raw_total as f64;
+    assert!(
+        n > 0,
+        "every replayed trace errored ({errored} of {})",
+        rows.len()
+    );
+    let net = 100.0 * (raw_total - out_total.min(raw_total)) as f64 / raw_total.max(1) as f64;
     let pct = |part: u64| 100.0 * part as f64 / n as f64;
 
     println!("\n=== #184 net-savings replay (current pipeline) ===");
-    println!("corpus:            {n} traces from {db}");
+    println!("corpus:            {n} traces from {db} ({errored} errored, excluded)");
     println!("bytes:             {raw_total} -> {out_total}");
     println!("NET SAVINGS:       {net:.1}%");
     println!(
