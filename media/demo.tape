@@ -16,7 +16,10 @@
 
 Output media/demo.gif
 
-Require omni
+# No `Require omni`: VHS evaluates Require at parse time, before the Hide block
+# below patches PATH, so it would check the system PATH and abort on a
+# clean-build-only machine. The Hide block guarantees ./target/release/omni is on
+# PATH at record time; that is the binary the demo must use.
 
 Set Shell bash
 Set FontSize 20
@@ -33,7 +36,7 @@ Type `export PATH="$PWD/target/release:$PATH" OMNI_QUIET=1`
 Enter
 Type `export RAW=$(wc -c < media/demo/cargo-test.txt)`
 Enter
-Type `bar() { local o; o=$(cat); printf '%s\n' "$o"; printf '\n\033[1;38;5;120m  ⏺ %s B -> %s B  ·  %s%% smaller, every failure kept\033[0m\n' "$RAW" "${#o}" "$((100*(RAW-${#o})/RAW))"; }`
+Type `bar() { local f o; f=$(mktemp); tee "$f"; o=$(wc -c < "$f"); printf '\n\033[1;38;5;120m  ⏺ %s B -> %s B  ·  %s%% smaller, every failure kept\033[0m\n' "$RAW" "$o" "$((100*(RAW-o)/RAW))"; rm -f "$f"; }`
 Enter
 Type `export PS1="❯ "`
 Enter
