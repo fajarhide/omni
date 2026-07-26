@@ -45,6 +45,21 @@ OMNI fixes both.
 
 **Problem 1: Your terminal drowns out the signal**
 
+A real `git log` is a wall of `Author` / `Date` / body lines. OMNI keeps **every
+commit** — as one `hash subject` line — and drops the rest. Nothing is
+summarised away; the count on the right is measured, not promised.
+
+<table>
+<tr>
+<td align="center"><b>Without OMNI</b><br/><sub>one <code>git log</code>, raw</sub></td>
+<td align="center"><b>With OMNI</b><br/><sub>every commit kept, 95% smaller</sub></td>
+</tr>
+<tr>
+<td valign="top"><img src="media/demo-git-without.gif" alt="a raw verbose git log — one commit's Author, Date and body fill the screen" width="420" /></td>
+<td valign="top"><img src="media/demo-git-with.gif" alt="the same git log through OMNI: every commit as a compact hash + subject line, 95% smaller" width="420" /></td>
+</tr>
+</table>
+
 Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirations:
 
 | Command | Without OMNI | With OMNI | Saved |
