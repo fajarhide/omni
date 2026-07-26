@@ -114,10 +114,10 @@ fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
             };
             format!(
                 "  {:<w_label$} {:>w_count$} commands │ {:>w_in$} → {:<w_out$} tokens │  {}",
-                labels[i].clone().bright_white().bold(),
-                counts[i].clone().cyan(),
-                inputs[i].clone().red(),
-                outputs[i].clone().green(),
+                labels[i].as_str().bright_white().bold(),
+                counts[i].as_str().cyan(),
+                inputs[i].as_str().red(),
+                outputs[i].as_str().green(),
                 pct_colored,
             )
         })
@@ -125,10 +125,11 @@ fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
 }
 
 /// Widest entry, in characters. Bars and CJK are not involved in these columns,
-/// so `chars()` is the right unit.
-fn max_width<S: AsRef<str>>(items: &[S]) -> usize {
+/// so `chars()` is the right unit. Takes an iterator so callers pad straight from
+/// what they are about to print, without collecting a throwaway `Vec` first.
+fn max_width<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> usize {
     items
-        .iter()
+        .into_iter()
         .map(|s| s.as_ref().chars().count())
         .max()
         .unwrap_or(0)
@@ -499,10 +500,9 @@ fn run_default(store: &Store) -> Result<()> {
     if !top_commands.is_empty() {
         println!("\n  {}", "Top Commands:".bold().bright_white());
         let w_count = max_width(
-            &top_commands
+            top_commands
                 .iter()
-                .map(|(_, count, _, _)| count.to_string())
-                .collect::<Vec<_>>(),
+                .map(|(_, count, _, _)| count.to_string()),
         );
         for (cmd, count, pct, tokens_saved) in &top_commands {
             let short_cmd = shorten_command(cmd, 18);
@@ -555,18 +555,11 @@ fn run_default(store: &Store) -> Result<()> {
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
         sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.1.0));
 
-        let w_name = max_width(
-            &sorted_agents
-                .iter()
-                .map(|(name, _)| name.clone())
-                .collect::<Vec<_>>(),
-        )
-        .max(18);
+        let w_name = max_width(sorted_agents.iter().map(|(name, _)| name.as_str())).max(18);
         let w_count = max_width(
-            &sorted_agents
+            sorted_agents
                 .iter()
-                .map(|(_, (count, _, _))| count.to_string())
-                .collect::<Vec<_>>(),
+                .map(|(_, (count, _, _))| count.to_string()),
         );
 
         for (name, (count, input, output)) in sorted_agents {
