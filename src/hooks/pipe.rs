@@ -425,8 +425,13 @@ fn distill(
             // `best_output` still drops back to raw if even the collapse is too
             // weak, so this only ever helps. A distiller that earned its summary
             // keeps it; the markers never reached the distiller in the first place.
+            // Enumeration commands (`ls`/`find`/`ps`/…) return the input verbatim
+            // by design; collapsing them would drop rows that are the answer, so
+            // never fall back to collapse for them (#200).
             let collapse_savings_data =
-                if crate::guard::limits::beats_guardrail(out.len(), input_text.len()) {
+                if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
+                    || crate::distillers::is_enumeration_command(cmd)
+                {
                     None
                 } else {
                     let collapse_result = collapse::collapse(&input_text, &profile.collapse);
