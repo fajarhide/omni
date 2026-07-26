@@ -509,27 +509,12 @@ mod ansible {
 //  Git / Build Tools
 // ═══════════════════════════════════════════════════════════════════════
 
-mod git_log {
-    use super::*;
-
-    #[test]
-    fn matches_git_log() {
-        let filters = load_filters();
-        let f = get_filter(&filters, "git_log");
-        assert_matches(f, "git log");
-        assert_matches(f, "git log --oneline -10");
-        assert_matches(f, "git log --graph --all");
-    }
-
-    #[test]
-    fn does_not_match_unrelated() {
-        let filters = load_filters();
-        let f = get_filter(&filters, "git_log");
-        assert_not_matches(f, "git status");
-        assert_not_matches(f, "git diff");
-        assert_not_matches(f, "git commit -m 'msg'");
-    }
-}
+// The `git_log` TOML filter was removed (#199): its line-strip rules cannot tell
+// a commit subject from a body line (both are 4-space indented), so on a verbose
+// multi-commit log it kept the bodies, blew past `max_lines = 20`, and dropped the
+// older commits with no marker. Verbose `git log` now falls through to the Rust
+// `distill_log`, which keeps one compact `hash subject` line per commit — every
+// commit survives. `--oneline` already relied on the Rust distiller.
 
 mod make {
     use super::*;
@@ -601,7 +586,6 @@ fn all_filter_files_loaded() {
         "kubectl_logs",
         "terraform",
         "ansible",
-        "git_log",
         "make",
     ];
     for name in expected {
