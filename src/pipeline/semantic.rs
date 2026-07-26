@@ -166,7 +166,34 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.starts_with("error ")
         || lower_text.contains("build failed")
         || lower_text.contains("--- fail")
-        || lower_text.contains("failed")
+        || mentions_failure(lower_text)
+}
+
+/// Whether `failed` appears as a *verdict* rather than incidentally.
+///
+/// The bare substring is not evidence of failure. Every green cargo tally reads
+/// `test result: ok. 479 passed; 0 failed`, and a passing test can be named after
+/// failure (`test guard::preserves_failed_lines ... ok`). Matching it anywhere
+/// classified both as Critical, which is how a fully green suite came out of the
+/// TestDistiller as `... 6 more failures` (#210).
+///
+/// Two exclusions, both decided by what sits immediately before the word:
+/// a preceding identifier character means it names something, and a preceding
+/// count of exactly zero means the runner is reporting none.
+fn mentions_failure(lower_text: &str) -> bool {
+    lower_text.match_indices("failed").any(|(i, _)| {
+        let before = &lower_text[..i];
+        if before.ends_with(|c: char| c.is_alphanumeric() || c == '_') {
+            return false;
+        }
+        let count: String = before
+            .trim_end()
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        count != "0"
+    })
 }
 
 #[allow(clippy::collapsible_match)]
