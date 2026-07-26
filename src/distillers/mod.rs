@@ -765,6 +765,19 @@ mod tests {
     );
     passthrough_test!(env_passes_through_verbatim, "env_output.txt", "env");
 
+    /// Review of #205: bare `env` and `command env` both leave `base` empty (the
+    /// wrapper is stripped), so the guard matches on any `env` token. Locks that
+    /// in — a narrowing back to "first word only" would silently drop `command
+    /// env` passthrough.
+    #[test]
+    fn treats_bare_and_wrapped_env_as_enumeration() {
+        assert!(is_enumeration_command("env"));
+        assert!(is_enumeration_command("command env"));
+        assert!(is_enumeration_command("ls -la"));
+        assert!(!is_enumeration_command("grep -r foo"));
+        assert!(!is_enumeration_command("echo hi"));
+    }
+
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
     // #106: a composite `npm run <script>` (an `&&` chain) must NOT be claimed by a
