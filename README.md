@@ -45,20 +45,14 @@ OMNI fixes both.
 
 **Problem 1: Your terminal drowns out the signal**
 
-A real `git log` is a wall of `Author` / `Date` / body lines. OMNI keeps **every
-commit** — as one `hash subject` line — and drops the rest. Nothing is
-summarised away; the count on the right is measured, not promised.
+The same `git log` shown three ways: how big it is, the raw wall of
+`Author` / `Date` / body lines, then the same log through OMNI — **every commit
+kept** as one `hash subject` line, 94% smaller. Nothing is summarised away; the
+footer is measured from the real byte counts, not promised.
 
-<table>
-<tr>
-<td align="center"><b>Without OMNI</b><br/><sub>one <code>git log</code>, raw</sub></td>
-<td align="center"><b>With OMNI</b><br/><sub>every commit kept, 95% smaller</sub></td>
-</tr>
-<tr>
-<td valign="top"><img src="media/demo-git-without.gif" alt="a raw verbose git log — one commit's Author, Date and body fill the screen" width="420" /></td>
-<td valign="top"><img src="media/demo-git-with.gif" alt="the same git log through OMNI: every commit as a compact hash + subject line, 95% smaller" width="420" /></td>
-</tr>
-</table>
+<div align="center">
+<img src="media/demo-git.gif" alt="git log -15 is 340 lines / 23 KB of Author/Date/body noise; through OMNI it is every commit as a compact hash + subject line, 94% smaller" width="760" />
+</div>
 
 Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirations:
 
