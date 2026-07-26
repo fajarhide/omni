@@ -87,10 +87,6 @@ paid on every turn once the context is cached.
 
 ## How to reproduce
 
-```
-OMNI_DB_PATH=$(mktemp -d)/d.db OMNI_QUIET=1 \
-  <command> | OMNI_CMD="<command>" ./target/debug/omni
-```
 
 Compare line/byte counts against the raw command, and **read the whole distilled
 output** — a byte count cannot tell a dropped item from removed noise.
