@@ -70,6 +70,70 @@ fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+/// One period row of the overview, before layout.
+struct PeriodRow<'a> {
+    label: &'a str,
+    count: u64,
+    raw_tokens: u64,
+    filtered_tokens: u64,
+    reduction_pct: f64,
+}
+
+/// Lays out the overview period rows, padding every numeric column to the widest
+/// value present. The widths have to come from the rows: `format_number` grows a
+/// separator every three digits and `format_exact_tokens` widens as it crosses
+/// into K and M, so any hardcoded width is wrong for some future row and shifts
+/// every column to its right (#209).
+fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
+    let labels: Vec<String> = rows.iter().map(|r| format!("{}:", r.label)).collect();
+    let counts: Vec<String> = rows.iter().map(|r| format_number(r.count)).collect();
+    let inputs: Vec<String> = rows
+        .iter()
+        .map(|r| format_exact_tokens(r.raw_tokens))
+        .collect();
+    let outputs: Vec<String> = rows
+        .iter()
+        .map(|r| format_exact_tokens(r.filtered_tokens))
+        .collect();
+
+    let w_label = max_width(&labels).max(12);
+    let w_count = max_width(&counts);
+    let w_in = max_width(&inputs);
+    let w_out = max_width(&outputs);
+
+    rows.iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let pct = format!("{:.1}% saved", r.reduction_pct);
+            let pct_colored = if r.reduction_pct > 70.0 {
+                pct.bright_green()
+            } else if r.reduction_pct > 40.0 {
+                pct.bright_yellow()
+            } else {
+                pct.bright_red()
+            };
+            format!(
+                "  {:<w_label$} {:>w_count$} commands │ {:>w_in$} → {:<w_out$} tokens │  {}",
+                labels[i].clone().bright_white().bold(),
+                counts[i].clone().cyan(),
+                inputs[i].clone().red(),
+                outputs[i].clone().green(),
+                pct_colored,
+            )
+        })
+        .collect()
+}
+
+/// Widest entry, in characters. Bars and CJK are not involved in these columns,
+/// so `chars()` is the right unit.
+fn max_width<S: AsRef<str>>(items: &[S]) -> usize {
+    items
+        .iter()
+        .map(|s| s.as_ref().chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
 fn group_and_calculate_stats(
     items: Vec<(String, u64, u64, u64, u64, u64)>,
     limit: usize,
@@ -405,45 +469,41 @@ fn run_default(store: &Store) -> Result<()> {
     }
 
     // Multi-period rows
-    for (label, count, input, output, raw_tokens, filtered_tokens) in &periods {
-        if *count == 0 && label != "All Time" {
-            continue;
-        }
+    let period_rows: Vec<PeriodRow<'_>> = periods
+        .iter()
+        .filter(|(label, count, ..)| *count > 0 || label == "All Time")
+        .map(
+            |(label, count, input, output, raw_tokens, filtered_tokens)| PeriodRow {
+                label,
+                count: *count,
+                raw_tokens: *raw_tokens,
+                filtered_tokens: *filtered_tokens,
+                reduction_pct: if *raw_tokens > 0 {
+                    100.0 * (1.0 - *filtered_tokens as f64 / *raw_tokens as f64)
+                } else if *input > 0 {
+                    // Fallback for legacy records that haven't been backfilled properly
+                    100.0 * (1.0 - *output as f64 / *input as f64)
+                } else {
+                    0.0
+                },
+            },
+        )
+        .collect();
 
-        let input_tokens_str = format_exact_tokens(*raw_tokens);
-        let output_tokens_str = format_exact_tokens(*filtered_tokens);
-
-        let reduction_pct = if *raw_tokens > 0 {
-            100.0 * (1.0 - *filtered_tokens as f64 / *raw_tokens as f64)
-        } else if *input > 0 {
-            // Fallback for legacy records that haven't been backfilled properly
-            100.0 * (1.0 - *output as f64 / *input as f64)
-        } else {
-            0.0
-        };
-
-        let pct_colored = if reduction_pct > 70.0 {
-            format!("{:.1}% saved", reduction_pct).bright_green()
-        } else if reduction_pct > 40.0 {
-            format!("{:.1}% saved", reduction_pct).bright_yellow()
-        } else {
-            format!("{:.1}% saved", reduction_pct).bright_red()
-        };
-
-        println!(
-            "  {:<12} {:>3} commands │ {:>4} → {:<4} tokens │  {}",
-            format!("{}:", label).bright_white().bold(),
-            format_number(*count).cyan(),
-            input_tokens_str.red(),
-            output_tokens_str.green(),
-            pct_colored,
-        );
+    for line in format_period_rows(&period_rows) {
+        println!("{}", line);
     }
 
     let top_commands = get_top_commands(store, 0, 8);
 
     if !top_commands.is_empty() {
         println!("\n  {}", "Top Commands:".bold().bright_white());
+        let w_count = max_width(
+            &top_commands
+                .iter()
+                .map(|(_, count, _, _)| count.to_string())
+                .collect::<Vec<_>>(),
+        );
         for (cmd, count, pct, tokens_saved) in &top_commands {
             let short_cmd = shorten_command(cmd, 18);
             let bar = format_bar_with_empty(*pct);
@@ -462,7 +522,7 @@ fn run_default(store: &Store) -> Result<()> {
             };
 
             println!(
-                "    {:<18} {}  {:>5.1}%  ({:>2}x)  {}",
+                "    {:<18} {}  {:>5.1}%  ({:>w_count$}x)  {}",
                 short_cmd.bright_cyan(),
                 bar_colored,
                 pct,
@@ -495,6 +555,20 @@ fn run_default(store: &Store) -> Result<()> {
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
         sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.1.0));
 
+        let w_name = max_width(
+            &sorted_agents
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>(),
+        )
+        .max(18);
+        let w_count = max_width(
+            &sorted_agents
+                .iter()
+                .map(|(_, (count, _, _))| count.to_string())
+                .collect::<Vec<_>>(),
+        );
+
         for (name, (count, input, output)) in sorted_agents {
             let pct = if total_cmds > 0 {
                 count as f64 / total_cmds as f64 * 100.0
@@ -508,7 +582,7 @@ fn run_default(store: &Store) -> Result<()> {
             };
             let bar = format_bar_with_empty(pct);
             println!(
-                "   {:<18} {}  {:>5.1}%  ({:>2}x)  {:>5.1}% saved",
+                "   {:<w_name$} {}  {:>5.1}%  ({:>w_count$}x)  {:>5.1}% saved",
                 name.bright_cyan(),
                 bar.bright_blue(),
                 pct,
@@ -1180,6 +1254,51 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn aligns_period_columns_across_mixed_number_widths() {
+        // Arrange: the widths that broke the old hardcoded layout — a 3-digit
+        // count beside a 5-digit one, and a K-scale total beside an M-scale one.
+        let rows = [
+            PeriodRow {
+                label: "Today",
+                count: 118,
+                raw_tokens: 137_000,
+                filtered_tokens: 74_000,
+                reduction_pct: 46.2,
+            },
+            PeriodRow {
+                label: "This Week",
+                count: 1_218,
+                raw_tokens: 10_200_000,
+                filtered_tokens: 647_000,
+                reduction_pct: 93.6,
+            },
+            PeriodRow {
+                label: "All Time",
+                count: 5_047,
+                raw_tokens: 21_200_000,
+                filtered_tokens: 4_800_000,
+                reduction_pct: 77.2,
+            },
+        ];
+
+        // Act
+        let lines = format_period_rows(&rows);
+
+        // Assert: every row starts its labels at the same offset.
+        for word in ["commands", "tokens", "saved"] {
+            let offsets: Vec<_> = lines
+                .iter()
+                .map(|l| l.find(word).unwrap_or_else(|| panic!("{word} missing")))
+                .collect();
+            assert!(
+                offsets.windows(2).all(|w| w[0] == w[1]),
+                "`{word}` drifts between rows: {offsets:?}\n{}",
+                lines.join("\n")
+            );
+        }
+    }
 
     #[test]
     fn test_format_bytes_handles_all_ranges() {
