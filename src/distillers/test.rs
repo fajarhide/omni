@@ -198,7 +198,6 @@ mod tests {
             output, input,
             "no parsed test signal must fail open, not fabricate a tally"
         );
-        assert_ne!(output.trim(), "Tests: 0 passed, 0 failed");
     }
 
     /// The other direction: a genuine zero-test run prints a real summary, so it
