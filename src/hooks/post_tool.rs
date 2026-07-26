@@ -326,7 +326,12 @@ pub fn process_payload(
         // (returned the input) or produced a near-copy that misses the guardrail —
         // fall back to the collapsed form for its line savings. A distiller that
         // earned its summary keeps it; the lossy markers never reached a distiller.
-        let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len()) {
+        // Enumeration commands (`ls`/`find`/`ps`/…) deliberately pass through
+        // verbatim; collapsing them drops rows that are the answer, so skip the
+        // fallback for them (#200).
+        let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
+            && !crate::distillers::is_enumeration_command(clean_command)
+        {
             let collapse_result = collapse::collapse(&content, &profile.collapse);
             collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to
             {
