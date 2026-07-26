@@ -36,16 +36,21 @@ fn base_command(cmd: &str) -> String {
 #[ignore = "needs a populated trace DB; run with --ignored (see file header)"]
 fn replay_execution_traces_net_savings() {
     // Resolve the corpus DB from the REAL home before we repoint HOME below.
+    // Build the path with PathBuf, not a hardcoded `/` (CLAUDE.md cross-platform
+    // rule 1) — review of #202.
     let db = std::env::var("OMNI_BENCH_DB").unwrap_or_else(|_| {
-        format!(
-            "{}/.omni/omni.db",
-            std::env::var("HOME").unwrap_or_default()
-        )
+        std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".omni")
+            .join("omni.db")
+            .to_string_lossy()
+            .into_owned()
     });
 
     // Match the method: no user config, no passthrough shortcut.
     let tmp_home = tempfile::tempdir().expect("temp home");
-    // SAFETY: single-threaded test; set before any pipeline call reads the env.
+    // SAFETY: this integration binary holds exactly one test, so no other test
+    // reads the environment concurrently while these mutations run (review of
+    // #202). If a second test is ever added here, serialize env access first.
     unsafe {
         std::env::set_var("HOME", tmp_home.path());
         std::env::remove_var("OMNI_PASSTHROUGH");
