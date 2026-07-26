@@ -4,19 +4,15 @@
 //!
 //! So every bound here is **catastrophic-only**: orders of magnitude above the
 //! design target named in each test. A tight bound cannot tell "the code got
-//! slower" from "the runner was busy" — `bench_handoff_export_latency` proved
-//! it, failing at 100ms on Windows and passing on a rerun of the same commit,
-//! reddening an unrelated PR.
+//! slower" from "the runner was busy" — the since-deleted
+//! `bench_handoff_export_latency` proved it, failing at 100ms on Windows and
+//! passing on a rerun of the same commit, reddening an unrelated PR.
 //!
 //! Real performance tracking lives in `benches/pipeline.rs` (criterion,
 //! `cargo bench`), which measures against a baseline instead of a magic number.
 
-use omni::cli::handoff::run_handoff;
 use omni::pipeline::scorer;
-use omni::store::sqlite::Store;
-use std::sync::Arc;
 use std::time::Instant;
-use tempfile::tempdir;
 
 /// Upper bound for every timing assertion here. Anything this slow is broken,
 /// not merely unlucky — these operations are all designed to run in ~milliseconds.
@@ -34,28 +30,6 @@ fn bench_distillation_latency() {
     assert!(
         elapsed.as_millis() < CATASTROPHIC_MS,
         "Distillation latency too high: {elapsed:?}"
-    );
-}
-
-#[test]
-fn bench_handoff_export_latency() {
-    let dir = tempdir().unwrap();
-    let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-    let mut state = omni::pipeline::SessionState::new();
-    state.session_id = "bench_session".to_string();
-    store.upsert_session(&state);
-
-    // Only time the actual handoff operation
-    let start = Instant::now();
-    let _ = run_handoff(&["--json".to_string()], store);
-    let elapsed = start.elapsed();
-
-    // Design target: < 50ms. Bounded catastrophically because this one does
-    // real SQLite and tempdir I/O, which is exactly what a loaded CI runner
-    // stalls on — the source of the original flake.
-    assert!(
-        elapsed.as_millis() < CATASTROPHIC_MS,
-        "Handoff latency too high: {elapsed:?}"
     );
 }
 

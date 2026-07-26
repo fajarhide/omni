@@ -178,7 +178,14 @@ fn test_hook_json_escaping_quotes_and_newlines() {
         // Output should be valid JSON
         let parsed: serde_json::Value = serde_json::from_str(&output)
             .expect("Hook output must be valid JSON even with special chars");
-        assert!(parsed["hookSpecificOutput"]["updatedResponse"].is_string());
+        // #158: `updatedToolOutput`, not `updatedResponse` — this assertion used
+        // to hold the wrong key in place, passing happily while the host ignored
+        // every replacement OMNI produced.
+        assert!(parsed["hookSpecificOutput"]["updatedToolOutput"]["result"].is_string());
+        assert_eq!(
+            parsed["hookSpecificOutput"]["updatedToolOutput"]["status"],
+            "success"
+        );
     }
 }
 

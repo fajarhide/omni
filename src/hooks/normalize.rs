@@ -25,6 +25,20 @@ pub struct NormalizedInput {
     pub content: String,   // output dari tool
     pub agent_id: String,  // untuk session isolation
     pub failed: bool,      // command exited non-zero / agent signalled an error (#120)
+    /// The host's original `tool_response` object, kept verbatim.
+    ///
+    /// `content` above is a flattened, lossy view of it — stdout and stderr are
+    /// concatenated, and every other key is dropped. That was fine while the
+    /// replacement was emitted in OMNI's own `{status, result}` shape, and became
+    /// the bug in #187: Claude Code validates `updatedToolOutput` against the
+    /// *host tool's* output schema, so the reply has to be the same object shape
+    /// that arrived, with only the output text swapped. Reconstructing it from
+    /// `content` is not possible — `interrupted`, `isImage`, `backgroundTaskId`
+    /// and friends live only here.
+    ///
+    /// `None` for agents whose payload has no `tool_response` object; those keep
+    /// the MCP shape, since their host contracts were not investigated.
+    pub raw_response: Option<Value>,
 }
 
 /// Detect agent format dari raw JSON string
@@ -132,33 +146,31 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
     struct ClaudeInput {
         tool_name: String,
         tool_input: Option<ClaudeToolInput>,
-        tool_response: Option<ClaudeToolResponse>,
+        /// Kept as a raw `Value` rather than a typed struct so the untouched
+        /// object can be handed back to the host (#187). Deserialising into
+        /// named fields here is what discarded `interrupted` / `isImage` and
+        /// made a host-shaped reply impossible to build downstream.
+        tool_response: Option<Value>,
     }
     #[derive(Deserialize)]
     struct ClaudeToolInput {
         command: Option<String>,
         path: Option<String>,
     }
-    #[derive(Deserialize)]
-    struct ClaudeToolResponse {
-        content: Option<Value>,
-        stdout: Option<String>,
-        stderr: Option<String>,
-    }
 
     let parsed: ClaudeInput = serde_json::from_str(input).ok()?;
 
     // Extract content (sama persis dengan extract_tool_content yang lama)
     let response = parsed.tool_response.as_ref()?;
-    let content = if let Some(ref c) = response.content {
+    let content = if let Some(c) = response.get("content") {
         extract_value_content(c)?
     } else {
-        let stdout = response.stdout.as_ref()?;
+        let stdout = response.get("stdout").and_then(Value::as_str)?;
         if stdout.is_empty() {
             return None;
         }
-        let mut s = stdout.clone();
-        if let Some(ref stderr) = response.stderr
+        let mut s = stdout.to_string();
+        if let Some(stderr) = response.get("stderr").and_then(Value::as_str)
             && !stderr.is_empty()
         {
             s.push_str("\n[stderr]\n");
@@ -181,10 +193,17 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         content,
         agent_id,
         // Claude Code sends a failed command as a bare `tool_response` string
-        // ("Error: Exit code N…"), which never matches ClaudeToolResponse, so
-        // parsing bails to None (passthrough) before reaching here. Reaching this
-        // point means the tool_response object parsed, i.e. the command succeeded.
+        // ("Error: Exit code N…"). A string has no `content` and no `stdout`
+        // member, so both extraction arms above bail to None (passthrough)
+        // before reaching here. Reaching this point means the tool_response was
+        // an object carrying output, i.e. the command succeeded.
+        //
+        // #187 moved where that bail happens — it used to be serde rejecting a
+        // string for a typed `ClaudeToolResponse`, and is now `Value::get`
+        // returning None — but not whether it happens. `passes_through_failed_
+        // command_payload` locks the behaviour, not the mechanism.
         failed: false,
+        raw_response: parsed.tool_response,
     })
 }
 
@@ -255,6 +274,8 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
         content,
         agent_id,
         failed: response.is_error,
+        // Host contract not investigated (#187) — keeps the MCP shape.
+        raw_response: None,
     })
 }
 
@@ -313,6 +334,8 @@ fn normalize_opencode(input: &str, agent_id: String) -> Option<NormalizedInput> 
         content,
         agent_id,
         failed: false, // OpenCode payload carries no exit/error signal
+        // Host contract not investigated (#187) — keeps the MCP shape.
+        raw_response: None,
     })
 }
 
@@ -383,6 +406,8 @@ fn normalize_vscode_continue(input: &str, agent_id: String) -> Option<Normalized
         content,
         agent_id,
         failed: false, // Continue.dev payload carries no exit/error signal
+        // Host contract not investigated (#187) — keeps the MCP shape.
+        raw_response: None,
     })
 }
 
@@ -423,6 +448,8 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         content,
         agent_id,
         failed: parsed.exit_code.is_some_and(|c| c != 0),
+        // Host contract not investigated (#187) — keeps the MCP shape.
+        raw_response: None,
     })
 }
 
@@ -441,6 +468,8 @@ fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
         content: input.to_string(),
         agent_id,
         failed: false, // Aider pipes raw stdout only; no exit signal available
+        // Host contract not investigated (#187) — keeps the MCP shape.
+        raw_response: None,
     })
 }
 
@@ -479,6 +508,8 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         content,
         agent_id,
         failed,
+        // Host contract not investigated (#187) — keeps the MCP shape.
+        raw_response: None,
     })
 }
 

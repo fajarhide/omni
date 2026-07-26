@@ -251,11 +251,9 @@ When OMNI drops a large chunk, it tells Claude:
 
 Claude can automatically call `omni_retrieve("a3f8c2d1")` via MCP to get the full content whenever it actually needs it. **This is fully automatic** — Claude handles this itself when needed.
 
-To browse what's archived:
-```bash
-omni rewind list        # Show recent archived chunks
-omni rewind a3f8c2d1   # View the full content of a specific archive
-```
+Retrieval is the MCP tool only. The `omni rewind` subcommand that used to browse
+the archive from a shell was removed in #164 — it was inert end to end, so there
+is no shell equivalent to point you at.
 
 ---
 
@@ -265,9 +263,11 @@ Run this any time to see how much OMNI has saved you.
 
 ```bash
 omni stats              # Last 30 days (default)
-omni stats --today      # Today only
-omni stats --week       # Last 7 days
-omni stats --month      # Last 30 days (explicit)
+omni stats --hour       # Last 60 minutes (-H)
+omni stats --today      # Today only (-d)
+omni stats --week       # Last 7 days (-w)
+omni stats --month      # Last 30 days, explicit (-m)
+omni stats --rerun      # Which distillers cost a re-run (see below)
 ```
 
 ### Example Output
@@ -783,6 +783,20 @@ omni doctor --fix   # Check AND auto-repair
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+The binary-version check answers two separate questions. One is "is there a
+newer release than mine" — a GitHub lookup. The other, added in 0.6.4, is "does
+this build carry fixes that are in no release yet":
+
+```
+Binary:  omni v0.6.4 [LATEST]
+         [3 UNRELEASED] changes built into this binary are in no release — cut a tag
+```
+
+The second line only appears on a build made from a tree with pending changelog
+entries — a contributor's local build, not a released binary. It exists because
+a released version can still be `[LATEST]` while sitting on merged-but-unshipped
+fixes, which is exactly how six correctness fixes stayed invisible before 0.6.3.
+
 ### Auto-Fix Coverage
 
 When you run `omni doctor --fix`, OMNI will automatically repair:
@@ -924,20 +938,38 @@ omni init --uninstall  # Remove all OMNI components from Claude
 Token savings analytics dashboard.
 
 ```bash
-omni stats              # Last 30 days (default)
-omni stats --today      # Today only
-omni stats --week       # Last 7 days
-omni stats --month      # Last 30 days (explicit)
-omni stats --passthrough  # Show commands without filter coverage
-omni stats --session    # Session-level breakdown
+omni stats                # Last 30 days (default)
+omni stats --hour  / -H   # Last 60 minutes
+omni stats --today / -d   # Today only
+omni stats --week  / -w   # Last 7 days
+omni stats --month / -m   # Last 30 days (explicit)
+omni stats --detail       # Full breakdown: commands, routes, sessions, agents
+omni stats --all-commands # List every command, not just the top ones
+omni stats --project      # Breakdown per project path
+omni stats --context      # Context composition signals
+omni stats --rerun        # Which distillers cost a re-run
+omni stats --json         # Machine-readable
 ```
 
 **Output includes:**
 - Commands processed, input/output bytes, signal ratio
-- Estimated cost savings (@$3/1M tokens)
 - Per-filter breakdown with ASCII bar charts
-- Route distribution (Keep/Soft/Passthrough/Rewind)
+- Route distribution (Keep/Soft/Passthrough)
 - Session insights (hot files, accuracy signals)
+
+#### `--rerun`: the check reduction % cannot make
+
+Reduction percentage counts bytes removed, so a distiller that returned an empty
+string would score 100%. `--rerun` measures the thing reduction cannot see:
+**how often the agent had to run a command again** within five minutes of reading
+its distilled output. A high re-run rate means the distiller dropped something
+the agent needed, whatever its reduction says.
+
+`Passthrough` rows — where the agent read the raw output — are the control arm,
+so each filter is shown distilled-rate against raw-rate. Two guards keep the
+number honest: a filter whose two arms are very different sizes prints `n/a`
+(the delta would measure input size, not lost signal), and a filter needs enough
+runs on both arms before any delta is shown at all.
 
 ---
 
@@ -1004,17 +1036,6 @@ When `--fix` is passed, OMNI will automatically resolve detected issues:
 | Missing `~/.omni/` directory | Creates the directory |
 | Untrusted project filters | Runs `omni trust` on the project |
 | Invalid user filter files | Renames broken `.toml` to `.toml.bak` |
-
----
-
-### `omni rewind`
-
-View and manage archived content that was filtered out.
-
-```bash
-omni rewind list        # Show recent archived chunks
-omni rewind <hash>      # View full content of a specific archive
-```
 
 ---
 
@@ -1181,7 +1202,7 @@ If you are using Claude Code, Cursor, or OpenClaw, the AI can independently call
 
 **DO:**
 - Run `omni doctor` after any system update or Claude Code upgrade
-- Check `omni stats --passthrough` to see which tools aren't being filtered yet (those are learning opportunities)
+- Check `omni stats --all-commands` to see which tools aren't being filtered yet (those are learning opportunities)
 - Pair with [Heimsense](https://github.com/fajarhide/heimsense) if using non-Anthropic models
 
 **DON'T:**

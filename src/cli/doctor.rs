@@ -3,6 +3,31 @@ use colored::*;
 use std::fs;
 use std::path::PathBuf;
 
+/// Read by both `print_help` and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[
+    (
+        "--fix",
+        "Automatically fix configuration and integration issues",
+    ),
+    (
+        "--test-filter <name>",
+        "Run inline tests for a specific filter",
+    ),
+    (
+        "--benchmark",
+        "Run filter tests and report slow filters (> 5ms)",
+    ),
+    (
+        "--coverage",
+        "Analyze filter coverage against past commands",
+    ),
+    (
+        "--validate <file.toml>",
+        "Validate a TOML filter file (syntax and tests)",
+    ),
+    ("--json", "Machine-readable JSON output"),
+];
+
 fn print_help() {
     println!(
         "\n{} {} — Installation diagnostics",
@@ -19,27 +44,7 @@ fn print_help() {
     println!("  • Claude Code hook installation");
     println!("  • MCP server registration");
     println!("  • Filter trust and loading status");
-    println!("\n{}", "FLAGS:".bold().bright_white());
-    println!(
-        "  {: <32} Automatically fix configuration and integration issues",
-        "--fix".cyan()
-    );
-    println!(
-        "  {: <32} Run inline tests for a specific filter",
-        "--test-filter <name>".cyan()
-    );
-    println!(
-        "  {: <32} Run filter tests and report slow filters (> 5ms)",
-        "--benchmark".cyan()
-    );
-    println!(
-        "  {: <32} Analyze filter coverage against past commands",
-        "--coverage".cyan()
-    );
-    println!(
-        "  {: <32} Validate a TOML filter file (syntax and tests)",
-        "--validate <file.toml>".cyan()
-    );
+    super::print_flags(FLAGS);
     println!();
 
     if let Some(latest) = crate::guard::update::check() {
@@ -80,6 +85,18 @@ pub struct DoctorCheck {
     pub name: String,
     pub ok: bool,
     pub message: String,
+}
+
+/// Changelog entries this build carries that no release contains (#137).
+///
+/// Counted by `build.rs` from the `## [Unreleased]` section of the tree the
+/// binary was compiled from, so a properly cut release reports 0 and says
+/// nothing. Parsing cannot fail into a false alarm: an unreadable or malformed
+/// value means "nothing to report", never "something is wrong".
+fn unreleased_entries() -> usize {
+    option_env!("OMNI_UNRELEASED_ENTRIES")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 fn run_json(args: &[String]) -> anyhow::Result<()> {
@@ -215,6 +232,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("doctor", args, FLAGS)?;
 
     if args.iter().any(|a| a == "--json") {
         return run_json(args);
@@ -283,6 +301,23 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     };
 
     println!("  {:<15} {}", "Binary:".bright_black(), version_info);
+
+    // #137: `[LATEST]` above answers "is there a newer release than mine". It
+    // cannot see fixes that were never released, because then the newest
+    // release *is* the running version — exactly the state #127 filed, where
+    // six correctness fixes sat merged and unshipped while doctor said
+    // `[LATEST]`. This is the other question, answered from the tree the binary
+    // was built from.
+    if unreleased_entries() > 0 {
+        println!(
+            "  {:<15} {} {}",
+            "".bright_black(),
+            format!("[{} UNRELEASED]", unreleased_entries())
+                .yellow()
+                .bold(),
+            "changes built into this binary are in no release — cut a tag".bright_black()
+        );
+    }
 
     // 2. Config Dir (with actual write test for sandbox detection)
     let conf_dir = dirs::home_dir()

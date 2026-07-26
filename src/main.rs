@@ -65,55 +65,43 @@ struct OmniArgs {
 #[derive(Subcommand, Debug)]
 enum OmniCommand {
     /// Setup OMNI Hooks and MCP server
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Init {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// View token savings analytics
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Stats {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Manage session state
-    #[command(alias = "sessions", trailing_var_arg = true)]
+    #[command(alias = "sessions", trailing_var_arg = true, disable_help_flag = true)]
     Session {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// Engram
-    #[command(alias = "engrams", trailing_var_arg = true)]
+    #[command(alias = "engrams", trailing_var_arg = true, disable_help_flag = true)]
     Engram {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
-    /// Handoff
-    #[command(trailing_var_arg = true)]
-    Handoff {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
-    },
     /// Auto-generate filters from history
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Learn {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
-    /// View and manage archived content
-    #[command(trailing_var_arg = true)]
-    Rewind {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
-    },
     /// Query distillation history (OmniQL)
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Query {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
     /// View recurring error patterns
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Patterns {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -125,7 +113,7 @@ enum OmniCommand {
         extra: Vec<String>,
     },
     /// Set or view the project goal (North Star context pinning)
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Goal {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -137,14 +125,8 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         cmd_args: Vec<String>,
     },
-    /// Rewrite
-    #[command(trailing_var_arg = true)]
-    Rewrite {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
-    },
     /// Diagnose installation health
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Doctor {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -158,7 +140,7 @@ enum OmniCommand {
         extra: Vec<String>,
     },
     /// Upgrade OMNI to latest
-    #[command(trailing_var_arg = true)]
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
     Update {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
@@ -197,6 +179,72 @@ fn init_globals() -> (Option<Arc<Store>>, Option<Arc<Mutex<SessionState>>>) {
 
 // ─── Help Text ──────────────────────────────────────────
 
+/// Every subcommand, grouped by what a user is trying to do, with the payoff
+/// rather than the noun.
+///
+/// This is the **only** command list. `omni help` and `omni --help` used to be
+/// two hand-maintained copies that had already drifted — six commands including
+/// `exec`, the harness every issue in this tracker asks reporters to run, were
+/// missing from the one a user gets by typing `omni` (#152).
+/// `lists_every_subcommand` keeps this honest.
+const COMMANDS: &[(&str, &str, &str)] = &[
+    (
+        "SET UP",
+        "init",
+        "Install OMNI into your agent (hooks + MCP)",
+    ),
+    (
+        "SET UP",
+        "doctor",
+        "Check the install is healthy, and fix what isn't",
+    ),
+    ("SET UP", "update", "Upgrade OMNI to the latest release"),
+    (
+        "SET UP",
+        "reset",
+        "Uninstall cleanly, keeping a backup of your config",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "stats",
+        "How many tokens OMNI cut, and from which commands",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "diff",
+        "The last command's output, before vs after",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "session",
+        "What this session has spent, and on what",
+    ),
+    (
+        "TUNE IT",
+        "learn",
+        "Build filters from the noise in your own history",
+    ),
+    (
+        "TUNE IT",
+        "exec",
+        "Run one command through OMNI, to see what it would do",
+    ),
+    ("TUNE IT", "query", "Search past distillations (OmniQL)"),
+    ("TUNE IT", "patterns", "Errors that keep coming back"),
+    ("MEMORY", "remember", "Save a fact for future sessions"),
+    ("MEMORY", "engram", "Digests of finished subtasks"),
+    (
+        "MEMORY",
+        "goal",
+        "Pin a north-star goal so scoring favours it",
+    ),
+    ("MEMORY", "version", "Version and environment details"),
+];
+
+/// The order groups render in. A group not listed here would silently vanish
+/// from help, so `lists_every_subcommand` rejects one.
+const GROUPS: &[&str] = &["SET UP", "SEE WHAT IT SAVED", "TUNE IT", "MEMORY"];
+
 fn print_help() {
     let version = env!("CARGO_PKG_VERSION");
 
@@ -207,64 +255,41 @@ fn print_help() {
     );
 
     println!("\n{}", "USAGE:".bold().bright_white());
-    println!("  omni {} {}", "[COMMAND]".cyan(), "[FLAGS]".bright_black());
+    println!("  omni {} {}", "<COMMAND>".cyan(), "[FLAGS]".bright_black());
     println!(
         "  {} | omni       {}",
-        "cmd / cli".bright_black(),
-        "# Distill command output".bright_black()
+        "cmd".bright_black(),
+        "# distill any command's output".bright_black()
     );
 
-    println!("\n{}", "COMMANDS:".bold().bright_white());
-    println!("  {: <12} Setup OMNI Hooks and MCP server", "init".cyan());
-    println!("  {: <12} View token savings analytics", "stats".cyan());
-    println!("  {: <12} Manage session state", "session".cyan());
-    println!(
-        "  {: <12} Auto-generate filters from history",
-        "learn".cyan()
-    );
-    println!(
-        "  {: <12} View and manage archived content",
-        "rewind".cyan()
-    );
-    println!(
-        "  {: <12} Query distillation history (OmniQL)",
-        "query".cyan()
-    );
-    println!("  {: <12} View recurring error patterns", "patterns".cyan());
-
-    println!("\n{}", "UTILITIES:".bold().bright_white());
-    println!("  {: <12} Diagnose installation health", "doctor".cyan());
-    println!(
-        "  {: <12} Clean uninstall (for backups config)",
-        "reset".cyan()
-    );
-    println!(
-        "  {: <12} Compare last original input vs distilled",
-        "diff".cyan()
-    );
-    println!("  {: <12} Upgrade OMNI to latest", "update".cyan());
-    println!(
-        "  {: <12} View version and environment info",
-        "version".cyan()
-    );
-    println!("  {: <12} Show this help message", "help, -h".cyan());
+    let width = COMMANDS.iter().map(|(_, n, _)| n.len()).max().unwrap_or(0);
+    for group in GROUPS {
+        println!("\n{}", format!("{group}:").bold().bright_white());
+        for (_, name, payoff) in COMMANDS.iter().filter(|(g, _, _)| g == group) {
+            println!("  {} {}", format!("{name:<width$}").cyan(), payoff);
+        }
+    }
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni init             {}",
-        "# OMNI setup (interactive)".bright_black()
-    );
-    println!(
-        "  omni doctor           {}",
-        "# Diagnose installation health".bright_black()
-    );
-    println!(
         "  omni stats            {}",
-        "# View your savings".bright_black()
+        "# what did OMNI save me?".bright_black()
+    );
+    println!(
+        "  omni stats -d         {}",
+        "# ...just today".bright_black()
+    );
+    println!(
+        "  omni init             {}",
+        "# set up your agent (interactive)".bright_black()
     );
     println!(
         "  ls -R | omni          {}",
-        "# Distill long output".bright_black()
+        "# distill a long output by hand".bright_black()
+    );
+    println!(
+        "\n  {}",
+        "omni <command> --help for that command's flags".bright_black()
     );
     println!();
 
@@ -275,7 +300,37 @@ fn print_help() {
 
 // ─── Main ───────────────────────────────────────────────
 
+/// Restore the default disposition of `SIGPIPE` (#155).
+///
+/// Rust sets `SIGPIPE` to `SIG_IGN` before `main` runs, so writing to a pipe
+/// whose reader has closed returns `EPIPE` instead of killing the process — and
+/// `println!` panics on that error. Every other Unix tool dies quietly, which is
+/// why `omni --help | head -1` printed a panic and a backtrace note where `ls |
+/// head` prints nothing.
+///
+/// Fixing it here rather than at each `println!` is deliberate: the panic is not
+/// specific to the help text. `omni doctor | head` reproduces it too, and so
+/// would any command whose output outlives its reader. One line at the entry
+/// point covers every writer; guarding each call site would not.
+///
+/// `#[cfg(unix)]` because Windows has no `SIGPIPE`; a closed pipe there surfaces
+/// as an ordinary write error.
+#[cfg(unix)]
+fn restore_default_sigpipe() {
+    // SAFETY: called before any thread is spawned, and `SIG_DFL` is the
+    // disposition the OS starts with — this restores it rather than installing
+    // a handler.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_default_sigpipe() {}
+
 fn main() {
+    restore_default_sigpipe();
+
     // Initialize observability
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -300,14 +355,43 @@ fn main() {
         return;
     }
 
+    // One help text (#152, #166). `omni help` / bare `omni` rendered a
+    // hand-written list while `omni --help` rendered clap's, and the two had
+    // already drifted — six commands, `exec` among them, were missing from the
+    // one a user gets by typing `omni`. Intercept before clap so every route
+    // reaches the same renderer. A subcommand's own `--help` is untouched:
+    // `args.len() == 2` means nothing but the flag was passed.
+    if args.len() == 2 && matches!(args[1].as_str(), "--help" | "-h" | "help") {
+        print_help();
+        return;
+    }
+
     // Parse CLI arguments with clap
     let parsed = match OmniArgs::try_parse() {
         Ok(p) => p,
         Err(e) => {
             // Because we use allow_external_subcommands, this error only happens
-            // for invalid global flags.
-            e.print().expect("failed to print error");
-            std::process::exit(1);
+            // for invalid global flags, and for `--help` / `--version`, which
+            // clap reports as an `Err` it expects the caller to classify.
+            //
+            // `let _`, not `.expect()` (#155): the reader owns the other end of
+            // this pipe. `omni --help | head -1` closes it mid-write, the write
+            // returns EPIPE, and an `.expect()` turns an ordinary end-of-pipe
+            // into a panic with a backtrace note. `CLAUDE.md` forbids `.expect()`
+            // on IO for exactly this reason. Nothing can be done about a reader
+            // that has gone away, so nothing is what we do.
+            let _ = e.print();
+
+            // `--help` and `--version` are how the CLI is asked to explain
+            // itself, not failures — exiting 1 made `omni --help && echo ok`
+            // print nothing.
+            let code = match e.kind() {
+                clap::error::ErrorKind::DisplayHelp
+                | clap::error::ErrorKind::DisplayVersion
+                | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => 0,
+                _ => 1,
+            };
+            std::process::exit(code);
         }
     };
 
@@ -393,7 +477,12 @@ fn main() {
                     }
                 }
                 Some(OmniCommand::Init { .. }) => {
-                    let _ = cli::init::run_init(&args);
+                    // Not `let _ =`: a rejected flag has to reach the user, or
+                    // `omni init --curser` installs nothing and exits 0 (#151).
+                    if let Err(e) = cli::init::run_init(&args) {
+                        eprintln!("[omni] Init error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
                 Some(OmniCommand::Reset) => {
                     if let Err(e) = cli::reset::handle_reset() {
@@ -452,19 +541,6 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Handoff { .. }) => match Store::open() {
-                    Ok(store) => {
-                        let store_arc = Arc::new(store);
-                        if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
-                            eprintln!("[omni] Handoff error: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[omni] Cannot open database for handoff: {}", e);
-                        std::process::exit(1);
-                    }
-                },
                 Some(OmniCommand::Goal { extra }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::goal::run(&extra, &store) {
@@ -483,18 +559,6 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                Some(OmniCommand::Rewind { .. }) => match Store::open() {
-                    Ok(store) => {
-                        if let Err(e) = cli::rewind::run_rewind(&args, &store) {
-                            eprintln!("[omni] Rewind error: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[omni] Cannot open database for rewind: {}", e);
-                        std::process::exit(1);
-                    }
-                },
                 Some(OmniCommand::Query { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::query::run_query(&args, &store) {
@@ -528,11 +592,6 @@ fn main() {
                     if let Err(e) = cli::exec::run_exec(&args, store_arc, session_arc) {
                         eprintln!("[omni] Exec error: {}", e);
                         std::process::exit(1);
-                    }
-                }
-                Some(OmniCommand::Rewrite { .. }) => {
-                    if let Err(_e) = cli::rewrite::run_rewrite(&args) {
-                        std::process::exit(1); // Standard silent fail for rewrite hook
                     }
                 }
                 Some(OmniCommand::Doctor { .. }) => {
@@ -605,37 +664,12 @@ fn main() {
                                 std::process::exit(1);
                             }
                         },
-                        "handoff" => match Store::open() {
-                            Ok(store) => {
-                                let store_arc = Arc::new(store);
-                                if let Err(e) = cli::handoff::run_handoff(&args, store_arc) {
-                                    eprintln!("[omni] Handoff error: {}", e);
-                                    std::process::exit(1);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[omni] Cannot open database for handoff: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
                         "learn" => {
                             if let Err(e) = cli::learn::run_learn(&args) {
                                 eprintln!("[omni] Auto-Learn error: {}", e);
                                 std::process::exit(1);
                             }
                         }
-                        "rewind" => match Store::open() {
-                            Ok(store) => {
-                                if let Err(e) = cli::rewind::run_rewind(&args, &store) {
-                                    eprintln!("[omni] Rewind error: {}", e);
-                                    std::process::exit(1);
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[omni] Cannot open database for rewind: {}", e);
-                                std::process::exit(1);
-                            }
-                        },
                         "query" => match Store::open() {
                             Ok(store) => {
                                 if let Err(e) = cli::query::run_query(&args, &store) {
@@ -672,11 +706,6 @@ fn main() {
                                 std::process::exit(1);
                             }
                         }
-                        "rewrite" => {
-                            if let Err(_e) = cli::rewrite::run_rewrite(&args) {
-                                std::process::exit(1);
-                            }
-                        }
                         "doctor" => {
                             if let Err(e) = cli::doctor::run(&args) {
                                 eprintln!("[omni] Doctor error: {}", e);
@@ -699,6 +728,43 @@ fn main() {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// `COMMANDS` is hand-maintained and drives the only help a user sees, so
+    /// nothing but this test notices when a subcommand is added to the enum and
+    /// not to the list — which is how `exec`, `remember`, `goal` and `engram`
+    /// came to be invisible in `omni help` while `omni --help` showed them (#152).
+    #[test]
+    fn lists_every_subcommand() {
+        let cmd = OmniArgs::command();
+        let declared: Vec<&str> = cmd
+            .get_subcommands()
+            .map(|s| s.get_name())
+            .filter(|n| *n != "help")
+            .collect();
+
+        for name in &declared {
+            assert!(
+                COMMANDS.iter().any(|(_, n, _)| n == name),
+                "subcommand `{name}` is missing from COMMANDS, so it is invisible in help"
+            );
+        }
+        for (group, name, _) in COMMANDS {
+            assert!(
+                declared.contains(name),
+                "COMMANDS lists `{name}`, which is not a subcommand"
+            );
+            assert!(
+                GROUPS.contains(group),
+                "`{name}` is in group `{group}`, which GROUPS does not render"
+            );
         }
     }
 }

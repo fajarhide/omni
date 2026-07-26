@@ -88,7 +88,7 @@ If budget < 20%, defer non-critical file reads
 ### After completing a subtask:
 ```
 Call omni_signal_extract to review what was accomplished
-Call omni_handoff --json to checkpoint progress
+Call omni_handoff to checkpoint progress
 ```
 
 ## Example: Full Loop Script
@@ -101,12 +101,10 @@ export OMNI_LOOP_GOAL="$1"
 for i in $(seq 1 ${MAX_ITERATIONS:-20}); do
     export OMNI_LOOP_ITERATION=$i
 
-    STATUS=$(omni handoff --json | jq -r '.recommendation.action')
-    case "$STATUS" in
-        DONE) echo "✅ Loop completed"; break ;;
-        ESCALATE) echo "⚠️ Human review needed"; exit 2 ;;
-    esac
-
+    # The DONE / ESCALATE checkpoint that sat here called
+    # `omni handoff --json`, removed as a CLI subcommand in #164. The
+    # `omni_handoff` MCP tool still exists but is not reachable from a shell,
+    # so this loop runs to MAX_ITERATIONS until #180 decides the replacement.
     claude --dangerously-skip-permissions "Continue: $OMNI_LOOP_GOAL"
 done
 ```

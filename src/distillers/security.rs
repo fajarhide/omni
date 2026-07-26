@@ -33,7 +33,15 @@ impl Distiller for SecurityDistiller {
         let total_high = high_findings.len();
 
         if total_critical == 0 && total_high == 0 && medium_count == 0 {
-            return "Security scan: no issues found ✓".to_string();
+            // Zero-state guard (#143): this distiller only counts severity keywords,
+            // so with none seen it cannot tell a clean scan from a misrouted input.
+            // Only assert "no issues" if at least one severity token was parsed.
+            let parsed = total_critical > 0 || total_high > 0 || medium_count > 0 || low_count > 0;
+            return crate::distillers::require_parsed(
+                parsed,
+                input,
+                "Security scan: no issues found ✓".to_string(),
+            );
         }
 
         let mut out = format!(

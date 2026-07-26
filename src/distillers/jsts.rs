@@ -29,6 +29,20 @@ impl Distiller for JsTsDistiller {
 
         let filtered_input = lines.join("\n");
 
+        // A composite task runner (`npm run verify` = `build && tsc && eslint && …`)
+        // concatenates several tools' output into one buffer. npm echoes the chained
+        // command it runs, so a `> … && …` line is the tell. Without this guard the
+        // single-tool detectors below each match a fragment and the FIRST wins the
+        // whole buffer — `tsc --` inside npm's own echo made `npm run verify` distil
+        // to `tsc: no errors`, discarding four of five gates (#106). No per-tool
+        // distiller can safely own a composite (there is no delimiter between the
+        // tools' outputs), so decline: return it unchanged and let the pipeline's
+        // generic collapse fold the repeated build noise while keeping every gate's
+        // distinct verdict line.
+        if is_composite_command(&lines) {
+            return filtered_input;
+        }
+
         // Dispatch based on content analysis
         if is_vitest_output(&lines) {
             distill_vitest(&filtered_input)
@@ -41,13 +55,10 @@ impl Distiller for JsTsDistiller {
         } else if is_prettier_output(&lines) {
             distill_prettier(&filtered_input)
         } else {
-            // Update segments if lines were dropped, or just use filtered_input
-            if filtered_input.len() < input.len() {
-                // Not perfectly accurate for line ranges, but safe for fallback
-                distill_fallback(segments, session)
-            } else {
-                distill_fallback(segments, session)
-            }
+            // Both arms of the `filtered_input.len() < input.len()` branch that
+            // used to stand here called this same function with the same
+            // arguments, so the condition decided nothing.
+            distill_fallback(segments, session)
         }
     }
 }
@@ -55,6 +66,16 @@ impl Distiller for JsTsDistiller {
 // ---------------------------------------------------------------------------
 // Detection helpers
 // ---------------------------------------------------------------------------
+
+fn is_composite_command(lines: &[&str]) -> bool {
+    // npm/yarn/pnpm echo the script they run; a `> a && b && c` echo means several
+    // tools chained, their outputs about to be concatenated with no delimiter. The
+    // per-tool detectors can't safely claim such a buffer. (`make`/`npm-run-all`
+    // composites without an `&&` echo aren't covered yet — add when one is reported.)
+    lines
+        .iter()
+        .any(|l| l.trim_start().starts_with('>') && l.contains("&&"))
+}
 
 fn is_vitest_output(lines: &[&str]) -> bool {
     lines.iter().any(|l| {
@@ -84,18 +105,51 @@ fn is_playwright_output(lines: &[&str]) -> bool {
 }
 
 fn is_eslint_output(lines: &[&str]) -> bool {
+    // Anchor on eslint's real output shape, never the bare word "eslint" — that
+    // matched a *filename* (`eslint.config.js`) in prettier's file list and sent a
+    // `prettier --write` run to `distill_eslint`, which reported the wrong tool
+    // finding nothing (#114). Same substring-in-data trap as #105/#106.
     lines.iter().any(|l| {
-        l.contains("eslint")
-            || l.contains(" problems (")
-            || (l.contains("error") && l.contains("@typescript-eslint"))
+        l.contains(" problems (")            // summary: "✖ 3 problems (0 errors, 3 warnings)"
+            || l.contains("@typescript-eslint/") // a real eslint rule id
+            || is_eslint_finding_line(l) // "  12:5  warning  <msg>  <rule>"
     })
 }
 
+/// eslint prints a finding as `  <line>:<col>  error|warning  …`.
+fn is_eslint_finding_line(l: &str) -> bool {
+    let mut tokens = l.split_whitespace();
+    let Some((line, col)) = tokens.next().and_then(|t| t.split_once(':')) else {
+        return false;
+    };
+    if line.is_empty()
+        || col.is_empty()
+        || !line.bytes().all(|b| b.is_ascii_digit())
+        || !col.bytes().all(|b| b.is_ascii_digit())
+    {
+        return false;
+    }
+    matches!(tokens.next(), Some("error" | "warning"))
+}
+
 fn is_prettier_output(lines: &[&str]) -> bool {
+    // Prettier's real output is capitalised (`Checking formatting…`, `[warn] …`),
+    // so the old lowercase `checking `/`reformatted ` never fired on it — the
+    // detector was dead (#114). Match what prettier actually prints, in either mode.
     lines.iter().any(|l| {
-        l.contains("prettier")
-            || l.contains("checking ") && l.contains(" files")
-            || l.contains("reformatted ") && l.contains(" files")
+        l.contains("Checking formatting")     // --check header
+            || l.contains("[warn]")           // --check finding / summary
+            || l.contains("Code style issues") // --check summary
+            || l.to_lowercase().contains("prettier") // command echo / banner, any case
+            || is_prettier_write_line(l) // --write: "<path> <n>ms"
+    })
+}
+
+/// prettier `--write` prints one line per file: `<path> <n>ms`, with ` (unchanged)`
+/// appended to files it left alone.
+fn is_prettier_write_line(l: &str) -> bool {
+    l.split_whitespace().any(|t| {
+        t.len() > 2 && t.ends_with("ms") && t[..t.len() - 2].bytes().all(|b| b.is_ascii_digit())
     })
 }
 
@@ -188,7 +242,16 @@ fn distill_vitest(input: &str) -> String {
     }
 
     if failed_tests == 0 && failed_details.is_empty() {
-        return format!("vitest: ✓ {}/{} passed", passed_tests, total_tests);
+        // Zero-state guard (#143): only claim a clean run if we actually parsed a
+        // vitest signal (a "Tests …" summary or at least one ✓ line). Otherwise a
+        // misdetected input (e.g. a `VITE v` dev server, #115) would become a
+        // false `vitest: ✓ 0/0 passed`. No signal → pass the input through.
+        let parsed = has_summary || passed_tests > 0;
+        return super::require_parsed(
+            parsed,
+            input,
+            format!("vitest: ✓ {}/{} passed", passed_tests, total_tests),
+        );
     }
 
     // Deduplicate failed_details
@@ -226,6 +289,8 @@ fn distill_vitest(input: &str) -> String {
 fn distill_tsc(input: &str) -> String {
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut total_errors = 0;
+    // Zero-state guard (#143): did we positively recognize tsc output at all?
+    let mut saw_tsc_signal = false;
 
     for line in input.lines() {
         let t = line.trim();
@@ -233,6 +298,7 @@ fn distill_tsc(input: &str) -> String {
         // Or "error TS2307: Cannot find module './utils' in 'src/app.ts'"
 
         if let Some(ts_idx) = t.find("error TS") {
+            saw_tsc_signal = true;
             total_errors += 1;
 
             // Try to extract file and line
@@ -277,7 +343,8 @@ fn distill_tsc(input: &str) -> String {
                 by_file.entry(file_display).or_default().push(issue_display);
             }
         } else if t.to_lowercase().contains("found ") && t.to_lowercase().contains(" error") {
-            // "Found 5 errors"
+            // "Found 5 errors" (also matches the clean "Found 0 errors" summary)
+            saw_tsc_signal = true;
             if let Some(num) = t
                 .split_whitespace()
                 .nth(1)
@@ -290,7 +357,9 @@ fn distill_tsc(input: &str) -> String {
     }
 
     if total_errors == 0 {
-        return "tsc: no errors".to_string();
+        // Only claim "no errors" if we actually parsed a tsc signal; a misrouted
+        // non-tsc input (or empty output from another command) passes through.
+        return super::require_parsed(saw_tsc_signal, input, "tsc: no errors".to_string());
     }
 
     let file_count = by_file.len();
@@ -388,7 +457,14 @@ fn distill_playwright(input: &str) -> String {
     let total = passed + failed;
 
     if failed == 0 {
-        return format!("playwright: ✓ {}/{} passed", passed, total);
+        // Zero-state guard (#143): only claim a clean run if we parsed at least one
+        // passing test (a summary count or a ✓ line). No signal → pass through, so a
+        // misrouted input never becomes a false `playwright: ✓ 0/0 passed`.
+        return super::require_parsed(
+            passed > 0,
+            input,
+            format!("playwright: ✓ {}/{} passed", passed, total),
+        );
     }
 
     let mut out = format!("playwright: ✓ {}/{} | ✗ {}", passed, total, failed);
@@ -410,6 +486,10 @@ fn distill_eslint(input: &str) -> String {
     let mut total_warnings = 0;
     let mut by_rule: BTreeMap<String, u32> = BTreeMap::new();
     let mut files_affected: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Zero-state guard (#143): a bare file list (e.g. prettier output, #114) also
+    // populates `files_affected`, so that is NOT proof this is eslint. Only an
+    // eslint "problems (" summary or a parsed rule counts as a positive signal.
+    let mut saw_eslint_signal = false;
 
     for line in input.lines() {
         let t = line.trim();
@@ -419,6 +499,7 @@ fn distill_eslint(input: &str) -> String {
         if t.is_empty() || t.contains('✖') || t_lower.contains("checking") {
             // But still parse summary counts
             if t.contains("problems (") {
+                saw_eslint_signal = true;
                 if let Some(err_idx) = t.find(" errors") {
                     if let Some(start) = t[..err_idx].rfind('(') {
                         if let Ok(n) = t[start + 1..err_idx].trim().parse::<u32>() {
@@ -473,6 +554,7 @@ fn distill_eslint(input: &str) -> String {
 
         // Parse individual rules: "src/index.ts:10:15 error Unexpected console statement @typescript-eslint/no-console"
         if t.contains(" error ") || t.contains(" warning ") {
+            saw_eslint_signal = true;
             let parts = t.split_whitespace();
             if let Some(last) = parts.last()
                 && (last.contains('/') || last.contains('-'))
@@ -484,7 +566,13 @@ fn distill_eslint(input: &str) -> String {
     }
 
     if total_errors == 0 && total_warnings == 0 {
-        return "eslint: no problems found".to_string();
+        // No counts parsed. Only report a clean lint if we saw a genuine eslint
+        // signal; otherwise (e.g. prettier's file list, #114) pass the input through.
+        return super::require_parsed(
+            saw_eslint_signal,
+            input,
+            "eslint: no problems found".to_string(),
+        );
     }
 
     let mut out = format!(
@@ -515,95 +603,163 @@ fn distill_eslint(input: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn distill_prettier(input: &str) -> String {
-    let mut reformatted = 0;
-    let mut unchanged = 0;
+    // The old body parsed black's `reformatted N files` summary — prettier prints no
+    // such line, so both counters stayed 0 and a *failing* `--check` and a
+    // *successful* `--write` both rendered as "0 files reformatted, 0 unchanged"
+    // (#114). Parse prettier's real output per mode; if neither is recognisable,
+    // decline (return the input) rather than fabricate a count.
+    let lines: Vec<&str> = input.lines().collect();
 
-    for line in input.lines() {
-        let t = line.trim();
-        // Look for summary lines
-        if t.contains("reformatted ")
-            && t.contains(" files")
-            && let Some(num) = t.split_whitespace().find_map(|s| s.parse::<u32>().ok())
-        {
-            reformatted = num;
-        }
-        // In some output, it mentions "unchanged"
-        if t.contains(" unchanged")
-            && let Some(num) = t.split_whitespace().find_map(|s| s.parse::<u32>().ok())
-        {
-            unchanged = num;
-        }
+    // --check: offending files are listed as `[warn] <path>`, ending with a boilerplate
+    // `[warn] Code style issues …` line. The filenames are the actionable signal.
+    let is_check = lines
+        .iter()
+        .any(|l| l.contains("Checking formatting") || l.contains("[warn]"));
+    if is_check {
+        let files: Vec<&str> = lines
+            .iter()
+            .filter_map(|l| l.trim().strip_prefix("[warn] "))
+            .filter(|f| !f.is_empty() && !f.starts_with("Code style issues"))
+            .collect();
+        return if files.is_empty() {
+            "prettier --check: all files formatted".to_string()
+        } else {
+            format!(
+                "prettier --check: {} file(s) need formatting\n{}",
+                files.len(),
+                capped_lines(&files, 20)
+            )
+        };
     }
 
-    format!(
-        "prettier: {} files reformatted, {} unchanged",
-        reformatted, unchanged
-    )
+    // --write: `<path> <n>ms` per file, ` (unchanged)` on files left alone.
+    let file_lines: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| is_prettier_write_line(l))
+        .collect();
+    if file_lines.is_empty() {
+        return input.to_string();
+    }
+    let unchanged = file_lines
+        .iter()
+        .filter(|l| l.contains("(unchanged)"))
+        .count();
+    let changed: Vec<&str> = file_lines
+        .iter()
+        .filter(|l| !l.contains("(unchanged)"))
+        .map(|l| l.split_whitespace().next().unwrap_or(""))
+        .collect();
+    let mut out = format!(
+        "prettier --write: {} reformatted, {} unchanged",
+        changed.len(),
+        unchanged
+    );
+    if !changed.is_empty() {
+        out.push('\n');
+        out.push_str(&capped_lines(&changed, 20));
+    }
+    out
+}
+
+/// The `… and N more` tail every capped renderer in this file shares.
+///
+/// A cap without one is silent data loss wearing a compression badge: the reader
+/// gets a well-formed output and no way to tell it is a tenth of what there was
+/// (#111, #176). `distill_fallback` was the one capped renderer that did not
+/// emit it, which is #188.
+fn more_tail(total: usize, shown: usize) -> Option<String> {
+    (total > shown).then(|| format!("… and {} more", total - shown))
+}
+
+/// Render `items` one per indented line, capped, with an `… and N more` tail.
+fn capped_lines(items: &[&str], cap: usize) -> String {
+    let mut out: Vec<String> = items.iter().take(cap).map(|s| format!("  {s}")).collect();
+    if let Some(tail) = more_tail(items.len(), cap) {
+        out.push(format!("  {tail}"));
+    }
+    out.join("\n")
 }
 
 // ---------------------------------------------------------------------------
 // Fallback
 // ---------------------------------------------------------------------------
 
+/// Lines the fallback keeps before it says how many it dropped.
+///
+/// The number is unchanged; what changed in #188 is that exceeding it is now
+/// reported. It silently deleted 270 of 300 lines and the result was published
+/// as a 90% saving.
+const FALLBACK_MAX_LINES: usize = 30;
+
+/// Segments sampled when nothing in the output scored Critical or Important.
+const FALLBACK_SAMPLE_SEGMENTS: usize = 10;
+
+/// Package-manager chatter the session hint already told us to expect.
+///
+/// Both loops below filtered this with the same two `contains` checks written
+/// out twice; a predicate keeps them from drifting apart.
+fn is_pm_noise(line: &str, js_pm: Option<&str>) -> bool {
+    match js_pm {
+        Some("pnpm") => line.contains("pnpm: packages are hard linked"),
+        Some("yarn") => line.contains("yarn install v1."),
+        _ => false,
+    }
+}
+
 fn distill_fallback(
     segments: &[OutputSegment],
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
-    let mut out = String::new();
-    let mut lines_count = 0;
-
     let js_pm = session.and_then(|s| s.toolchain_hints.get("js").map(|v| v.as_str()));
 
-    for seg in segments {
-        if matches!(seg.tier, SignalTier::Critical | SignalTier::Important) {
-            for line in seg.content.lines() {
-                if lines_count >= 30 {
-                    break;
-                }
+    let eligible: Vec<&str> = segments
+        .iter()
+        .filter(|seg| matches!(seg.tier, SignalTier::Critical | SignalTier::Important))
+        .flat_map(|seg| seg.content.lines())
+        .filter(|line| !is_pm_noise(line, js_pm))
+        .collect();
 
-                // Filter toolchain-specific noise if session hint exists
-                if let Some(pm) = js_pm {
-                    if pm == "pnpm" && line.contains("pnpm: packages are hard linked") {
-                        continue;
-                    }
-                    if pm == "yarn" && line.contains("yarn install v1.") {
-                        continue;
-                    }
-                }
-
-                out.push_str(line);
-                out.push('\n');
-                lines_count += 1;
-            }
-        }
-        if lines_count >= 30 {
-            break;
-        }
+    if !eligible.is_empty() {
+        return with_tail(&eligible, FALLBACK_MAX_LINES);
     }
 
-    if out.trim().is_empty() {
-        for seg in segments.iter().take(10) {
-            let mut line_added = false;
-            for line in seg.content.lines() {
-                if let Some(pm) = js_pm {
-                    if pm == "pnpm" && line.contains("pnpm: packages are hard linked") {
-                        continue;
-                    }
-                    if pm == "yarn" && line.contains("yarn install v1.") {
-                        continue;
-                    }
-                }
-                out.push_str(line);
-                out.push('\n');
-                line_added = true;
-                break; // only take first line for fallback summary
-            }
-            if !line_added {
-                // if we filtered the only line, just skip
-            }
-        }
-    }
+    // Nothing scored: sample the first line of each of the first N segments
+    // rather than return nothing at all. That is still a sample, so it is
+    // counted against every line there was — not against the ones sampled.
+    let sample: Vec<&str> = segments
+        .iter()
+        .take(FALLBACK_SAMPLE_SEGMENTS)
+        .filter_map(|seg| seg.content.lines().find(|l| !is_pm_noise(l, js_pm)))
+        .collect();
+    let total_lines = segments
+        .iter()
+        .flat_map(|seg| seg.content.lines())
+        .filter(|l| !is_pm_noise(l, js_pm))
+        .count();
 
+    let mut out = sample.join("\n");
+    if let Some(tail) = more_tail(total_lines, sample.len()) {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&tail);
+    }
+    out.trim().to_string()
+}
+
+/// `items` capped at `cap`, one per line, with the omission tail when it bites.
+fn with_tail(items: &[&str], cap: usize) -> String {
+    let mut out = items
+        .iter()
+        .take(cap)
+        .copied()
+        .collect::<Vec<&str>>()
+        .join("\n");
+    if let Some(tail) = more_tail(items.len(), cap) {
+        out.push('\n');
+        out.push_str(&tail);
+    }
     out.trim().to_string()
 }
 
@@ -611,6 +767,107 @@ fn distill_fallback(
 mod tests {
     use super::*;
     use crate::pipeline::{SessionState, SignalTier};
+
+    /// One `Important` segment per line, which is what the scorer produces for a
+    /// wall of undifferentiated log output — the shape that hit #188.
+    fn important_segments(lines: &[String]) -> Vec<OutputSegment> {
+        lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| OutputSegment {
+                content: l.clone(),
+                tier: SignalTier::Important,
+                base_score: 0.8,
+                context_score: 0.0,
+                line_range: (i + 1, i + 1),
+            })
+            .collect()
+    }
+
+    fn npm_warnings(n: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| format!("npm WARN deprecated fake-package@1.0.{i}: no longer supported"))
+            .collect()
+    }
+
+    /// #188. The fallback stopped at 30 lines with a bare `break` and returned
+    /// `out.trim()` — no marker on any path. 270 of 300 lines disappeared and the
+    /// result was published as a 90% saving, so nothing downstream could tell a
+    /// 30-warning install from a 300-warning one.
+    ///
+    /// The assertion is on the **count**, not merely on the presence of an
+    /// ellipsis: a marker without a number does not let a reader judge whether to
+    /// re-read, which is what #176 settled.
+    #[test]
+    fn reports_how_many_lines_the_cap_dropped() {
+        let lines = npm_warnings(300);
+        let out = distill_fallback(&important_segments(&lines), None);
+
+        assert!(
+            out.contains("… and 270 more"),
+            "270 dropped lines went unreported: {out}"
+        );
+        assert_eq!(
+            out.lines().count(),
+            FALLBACK_MAX_LINES + 1,
+            "expected {FALLBACK_MAX_LINES} kept lines plus one tail: {out}"
+        );
+    }
+
+    /// The tail must not appear when the cap did not bite — a marker claiming
+    /// zero omissions is its own small false claim.
+    #[test]
+    fn stays_silent_when_nothing_was_dropped() {
+        let lines = npm_warnings(FALLBACK_MAX_LINES);
+        let out = distill_fallback(&important_segments(&lines), None);
+
+        assert!(
+            !out.contains("more"),
+            "marked an omission that never happened: {out}"
+        );
+        assert_eq!(out.lines().count(), FALLBACK_MAX_LINES);
+    }
+
+    /// Lines dropped by the package-manager filter must not be counted as
+    /// capped-away, or the tail overstates what is missing.
+    #[test]
+    fn counts_only_lines_the_cap_removed_not_ones_already_filtered() {
+        let mut lines = vec!["pnpm: packages are hard linked".to_string()];
+        lines.extend(npm_warnings(300));
+        let mut session = SessionState::default();
+        session
+            .toolchain_hints
+            .insert("js".to_string(), "pnpm".to_string());
+
+        let out = distill_fallback(&important_segments(&lines), Some(&session));
+
+        assert!(
+            out.contains("… and 270 more"),
+            "pm-filtered line was counted as capped away: {out}"
+        );
+    }
+
+    /// The zero-state sample path (nothing scored Critical or Important) takes
+    /// one line per segment and used to drop the rest just as silently.
+    #[test]
+    fn marks_omissions_in_the_zero_state_sample_too() {
+        let segments: Vec<OutputSegment> = (0..20)
+            .map(|i| OutputSegment {
+                content: format!("context line {i}a\ncontext line {i}b"),
+                tier: SignalTier::Context,
+                base_score: 0.3,
+                context_score: 0.0,
+                line_range: (i + 1, i + 1),
+            })
+            .collect();
+
+        let out = distill_fallback(&segments, None);
+
+        assert!(
+            out.contains("more"),
+            "sampled 10 of 40 lines with nothing saying so: {out}"
+        );
+    }
 
     #[test]
     fn test_toolchain_filtering() {

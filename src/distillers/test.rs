@@ -84,6 +84,16 @@ impl Distiller for TestDistiller {
             .unwrap_or_else(|| format!("Tests: {} passed, {} failed", passed, failed));
 
         if failed == 0 && failure_details.is_empty() {
+            // Fail open when we parsed no test signal at all: no runner tally,
+            // nothing counted. Emitting `Tests: 0 passed, 0 failed` here would
+            // fabricate a completed (empty) test run for output that never was
+            // one — `go test ./...` printing only `[no test files]`, or any
+            // non-test command misrouted here (#195, the TestDistiller sibling
+            // of #190). A genuine zero-test run is safe: the runner prints a
+            // real summary, so `summary` is `Some` and is returned above.
+            if summary.is_none() && passed == 0 {
+                return input.to_string();
+            }
             return headline;
         }
 
@@ -159,6 +169,57 @@ mod tests {
             output.starts_with("Tests:"),
             "expected the counted fallback, got: {}",
             output
+        );
+    }
+
+    /// #195: output with no runner tally and nothing counted was fabricated into
+    /// `Tests: 0 passed, 0 failed` — a completed empty test run that never
+    /// happened. It must fail open and return the input verbatim (#143), the
+    /// TestDistiller sibling of #190's `Build: ok`.
+    #[test]
+    fn fails_open_when_no_test_signal_was_parsed() {
+        // Arrange — real `go test ./...` output where no package has tests.
+        let input = "?   \tgithub.com/acme/app/config\t[no test files]\n\
+                     ?   \tgithub.com/acme/app/handlers\t[no test files]\n\
+                     ?   \tgithub.com/acme/app/store\t[no test files]\n\
+                     ?   \tgithub.com/acme/app/util\t[no test files]\n";
+        let segments = scorer::score_segments(
+            input,
+            registry::resolve_profile("go test ./...").segmentation,
+            None,
+            "go test ./...",
+        );
+
+        // Act
+        let output = TestDistiller.distill(&segments, input, None);
+
+        // Assert
+        assert_eq!(
+            output, input,
+            "no parsed test signal must fail open, not fabricate a tally"
+        );
+    }
+
+    /// The other direction: a genuine zero-test run prints a real summary, so it
+    /// is quoted rather than treated as unparsed — the fail-open guard must not
+    /// swallow it.
+    #[test]
+    fn keeps_a_real_zero_test_summary() {
+        let input = "     Running unittests src/lib.rs\n\n\
+                     test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
+        let segments = scorer::score_segments(
+            input,
+            registry::resolve_profile("cargo test").segmentation,
+            None,
+            "cargo test",
+        );
+
+        let output = TestDistiller.distill(&segments, input, None);
+
+        assert!(
+            output.starts_with("test result: ok. 0 passed"),
+            "a real 0-test summary must survive, got: {}",
+            output.lines().next().unwrap_or("")
         );
     }
 }

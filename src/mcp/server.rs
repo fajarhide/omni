@@ -134,21 +134,6 @@ pub struct OmniSignalExtractParams {
     pub context: Option<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct OmniGoalAlignmentParams {
-    pub goal: String,
-    pub last_n: usize,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct OmniNoiseProfileParams {}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct OmniIterationSummaryParams {
-    pub iteration_start_command: u32,
-    pub iteration_end_command: u32,
-}
-
 // Automatically bind tool signatures
 #[tool_router(server_handler)]
 impl OmniServer {
@@ -1380,62 +1365,6 @@ impl OmniServer {
             "critical": critical,
             "important": important,
             "dropped_pct": dropped_pct
-        })
-        .to_string()
-    }
-
-    #[tool(
-        name = "omni_goal_alignment",
-        description = "Check if recent tool outputs aligned with stated goal"
-    )]
-    pub async fn omni_goal_alignment(&self, params: Parameters<OmniGoalAlignmentParams>) -> String {
-        let _goal = params.0.goal;
-        let _last_n = params.0.last_n.max(1);
-
-        // Since we don't have the session_id string here explicitly, we could just query globally or just return mock/best-effort
-        let progress_score = 0.5; // Stub for now
-
-        serde_json::json!({
-            "aligned": progress_score > 0.5,
-            "progress_score": progress_score,
-            "divergence_signals": ["Not implemented in MVP"]
-        })
-        .to_string()
-    }
-
-    #[tool(
-        name = "omni_noise_profile",
-        description = "Identify pattern noise mostly dropped in this session"
-    )]
-    pub async fn omni_noise_profile(&self, _params: Parameters<OmniNoiseProfileParams>) -> String {
-        let mut savings = std::collections::HashMap::new();
-        savings.insert("progress_bars", 15000);
-        savings.insert("debug_logs", 45000);
-
-        serde_json::json!({
-            "top_noise_patterns": [],
-            "savings_by_category": savings
-        })
-        .to_string()
-    }
-
-    #[tool(
-        name = "omni_iteration_summary",
-        description = "Compact summary of what happened in a loop iteration"
-    )]
-    pub async fn omni_iteration_summary(
-        &self,
-        params: Parameters<OmniIterationSummaryParams>,
-    ) -> String {
-        let start = params.0.iteration_start_command;
-        let end = params.0.iteration_end_command;
-
-        serde_json::json!({
-            "markdown_summary": format!("Iteration covers commands {} to {}.", start, end),
-            "json_summary": {
-                "commands_run": end.saturating_sub(start),
-                "errors_encountered": 0
-            }
         })
         .to_string()
     }

@@ -1,3 +1,4 @@
+pub mod changelog;
 pub mod command_family;
 pub mod omni_str;
 pub mod stream;

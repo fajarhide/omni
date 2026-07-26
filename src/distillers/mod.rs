@@ -22,6 +22,28 @@ pub trait Distiller: Send + Sync {
     ) -> String;
 }
 
+/// The subcommand of a `cargo` invocation, skipping env-var prefixes, the path
+/// the binary was called by, a `+toolchain` override, and any leading flags.
+///
+/// `None` when there is no subcommand at all (`cargo`, `cargo --version`), which
+/// routes to passthrough — the honest answer for output we cannot classify.
+fn cargo_subcommand(command: &str) -> Option<&str> {
+    let mut tokens = command.split_whitespace().skip_while(|t| {
+        // `RUST_BACKTRACE=1 cargo test`, and the cargo path itself.
+        let is_env_assignment = t.contains('=') && !t.starts_with('-');
+        let is_cargo = std::path::Path::new(t.trim_matches(['"', '\'', '`']))
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n == "cargo" || n == "cargo.exe")
+            .unwrap_or(false);
+        is_env_assignment || !is_cargo
+    });
+    tokens.next()?; // the cargo token itself
+
+    // `cargo +nightly tree`, `cargo --offline tree`
+    tokens.find(|t| !t.starts_with('-') && !t.starts_with('+'))
+}
+
 fn extract_base_executable(command: &str) -> String {
     let tokens = shell_split_tokens(command, 8);
     if tokens.is_empty() {
@@ -161,6 +183,17 @@ fn should_passthrough_config_output(command: &str, input: &str) -> bool {
         || lower.ends_with(".json")
 }
 
+/// Zero-state guard: a distiller may emit a success/clean summary only if it
+/// positively parsed a recognized signal. With no evidence anything was parsed,
+/// fail open by returning the raw input unchanged — never a synthesized
+/// `✓`/"no errors"/"passed" string that is byte-identical to a real clean run.
+///
+/// This is the shared invariant behind #143: a misdetection upstream then
+/// degrades to passthrough instead of a confident false claim.
+pub(crate) fn require_parsed(parsed: bool, input: &str, summary: String) -> String {
+    if parsed { summary } else { input.to_string() }
+}
+
 /// Distill output based on command
 #[tracing::instrument(skip_all)]
 pub fn distill_with_command(
@@ -226,6 +259,22 @@ pub fn distill_with_command(
         return build::BuildDistiller.distill(segments, input, session);
     }
 
+    // Bare script interpreters run arbitrary programs whose stdout IS the
+    // answer — not a build log. Routing `python3 -c "..."` to BuildDistiller
+    // fabricated `Build: ok` for any script that printed no error/warning line
+    // (#190) — the same class as `cargo tree` → `Build: ok` (#170). They always
+    // pass through verbatim, so we never invent a success verdict for output we
+    // cannot parse. No `contains("test")` shortcut to TestDistiller: it matched
+    // inside a `-c` code arg or a path segment (`ruby /projects/contest/x.rb`)
+    // and TestDistiller fabricates too — `Tests: 1 passed` for a script that
+    // ran no tests — which is #190 wearing a different distiller's name. Real
+    // test runners are handled upstream: `signals/tools/pytest.toml` and
+    // `mypy.toml` are TOML-first and shadow this arm for `python -m pytest|mypy`.
+    // (`pip`, `rake` stay in the build path below: their output is task oriented.)
+    if matches!(base.as_str(), "python" | "python3" | "ruby") {
+        return input.to_string();
+    }
+
     // Build tools → BuildDistiller
     if matches!(
         base.as_str(),
@@ -242,18 +291,33 @@ pub fn distill_with_command(
             | "ruff"
             | "mypy"
             | "black"
-            | "ruby"
             | "rake"
             | "rubocop"
             | "dotnet"
             | "gradle"
             | "mvn"
             | "pytest"
-            | "python"
-            | "python3"
             | "rspec"
             | "phpunit"
     ) {
+        // `cargo` is routed by subcommand, not by executable (#170). Most of
+        // cargo is not a build: `cargo tree` prints a dependency tree that *is*
+        // the answer, and `BuildDistiller` summarised 21.4 KB of it as
+        // `Build: ok` — 9 bytes — reported as a 100% reduction. A command whose
+        // output is data must not be handed to a distiller that only knows how
+        // to count compile steps.
+        if base == "cargo" {
+            return match cargo_subcommand(command) {
+                Some("test" | "bench") => test::TestDistiller.distill(segments, input, session),
+                Some(
+                    "build" | "check" | "run" | "clippy" | "rustc" | "fix" | "doc" | "install",
+                ) => build::BuildDistiller.distill(segments, input, session),
+                // tree, metadata, search, pkgid, locate-project, vendor, add,
+                // remove, update, publish, … — output is the answer, hand it back.
+                _ => input.to_string(),
+            };
+        }
+
         // Tapi test → TestDistiller
         if cmd_lower.contains("test")
             || cmd_lower.contains("pytest")
@@ -298,7 +362,7 @@ pub fn distill_with_command(
             | "az"
             | "doctl"
     ) {
-        return cloud::CloudDistiller.distill(segments, input, session);
+        return cloud::CloudDistiller { tool: &base }.distill(segments, input, session);
     }
 
     // Config file protection: avoid over-distilling small configs
@@ -350,6 +414,100 @@ mod tests {
     use crate::pipeline::scorer;
 
     #[test]
+    fn reads_the_cargo_subcommand_past_prefixes_and_flags() {
+        assert_eq!(cargo_subcommand("cargo tree"), Some("tree"));
+        assert_eq!(cargo_subcommand("cargo tree --depth 1"), Some("tree"));
+        assert_eq!(
+            cargo_subcommand("RUST_BACKTRACE=1 cargo test"),
+            Some("test")
+        );
+        assert_eq!(cargo_subcommand("cargo +nightly build"), Some("build"));
+        assert_eq!(cargo_subcommand("cargo --offline tree"), Some("tree"));
+        assert_eq!(
+            cargo_subcommand("/usr/local/bin/cargo clippy"),
+            Some("clippy")
+        );
+        // No subcommand at all — routes to passthrough, which is the honest
+        // answer for output we cannot classify.
+        assert_eq!(cargo_subcommand("cargo"), None);
+        assert_eq!(cargo_subcommand("cargo --version"), None);
+    }
+
+    /// From #170: `cargo tree` prints a dependency tree that *is* the answer.
+    /// Routing every `cargo` command to `BuildDistiller` summarised 21.4 KB of
+    /// it as `Build: ok` — 9 bytes — and reported a 100% reduction as a win.
+    #[test]
+    fn hands_back_the_output_of_cargo_commands_that_are_not_builds() {
+        let tree = "omni v0.6.3 (/repo)\n\
+                    ├── anyhow v1.0.100\n\
+                    ├── chrono v0.4.42\n\
+                    │   ├── iana-time-zone v0.1.64\n\
+                    │   └── num-traits v0.2.19\n\
+                    └── serde v1.0.228\n";
+
+        for cmd in [
+            "cargo tree",
+            "cargo metadata --no-deps",
+            "cargo search serde",
+            "cargo pkgid",
+        ] {
+            assert_eq!(
+                distill_with_command(&[], tree, cmd, None),
+                tree,
+                "`{cmd}` output is data, not build progress — it must survive"
+            );
+        }
+    }
+
+    /// From #190: a `python3 -c "..."` script prints arbitrary output that *is*
+    /// the answer. Routing bare interpreters to `BuildDistiller` fabricated
+    /// `Build: ok` for any script with no error/warning line — inventing success
+    /// for a verification command whose real answer was the printed text.
+    #[test]
+    fn hands_back_the_output_of_bare_script_interpreters() {
+        let script_out = " tokenRefs : ['vmuser-a']\n VSS dests : ['vault-a']\n dangling  : NONE\n";
+
+        for cmd in [
+            "python3 -c \"import re; print('dangling  : NONE')\"",
+            "python audit.py",
+            "ruby check.rb",
+            // The substring "test" inside a `-c` arg or a path segment must NOT
+            // route to TestDistiller — it fabricates `Tests: 1 passed` on this
+            // output, which is #190 via a different distiller. Boundary locked.
+            "python3 -c \"testing_flag = True; print('config ok')\"",
+            "ruby /projects/contest/verify.rb",
+        ] {
+            let segments = scorer::score_with_command(script_out, cmd, None);
+            let out = distill_with_command(&segments, script_out, cmd, None);
+            assert_eq!(
+                out, script_out,
+                "`{cmd}` output is data, not build progress — it must survive verbatim"
+            );
+            assert_ne!(
+                out.trim(),
+                "Build: ok",
+                "`{cmd}` fabricated a build verdict"
+            );
+        }
+    }
+
+    #[test]
+    fn still_routes_real_cargo_builds_and_tests_to_their_distillers() {
+        // Guards the other direction: the fix must not turn every cargo command
+        // into passthrough and quietly end all savings on the ones that work.
+        let noisy_build: String = (0..40)
+            .map(|i| format!("   Compiling crate_{i} v0.1.0\n"))
+            .collect::<String>()
+            + "    Finished `dev` profile [unoptimized] target(s) in 12.61s\n";
+
+        let out = distill_with_command(&[], &noisy_build, "cargo build", None);
+        assert!(
+            out.len() < noisy_build.len(),
+            "cargo build must still be distilled, got {out:?}"
+        );
+    }
+
+    #[test]
     fn test_extract_base_executable_handles_quotes_and_env_prefixes() {
         assert_eq!(extract_base_executable("git diff"), "git");
         assert_eq!(
@@ -369,6 +527,99 @@ mod tests {
             extract_base_executable("env FOO=1 \"/path/to/git\" status"),
             "/path/to/git"
         );
+    }
+
+    #[test]
+    fn vitest_zero_parse_passes_through_instead_of_claiming_success() {
+        // #143 / #115: a Vite dev server (no tests) must never distill to a
+        // green `vitest: ✓ 0/0 passed`. With nothing parsed, fail open.
+        let input = include_str!("../../tests/fixtures/vite_dev_server.txt");
+        let segments = scorer::score_with_command(input, "vitest", None);
+        let output = distill_with_command(&segments, input, "vitest", None);
+
+        assert!(
+            !output.contains("0/0 passed"),
+            "zero-parse produced a false success claim: {output:?}"
+        );
+        // The load-bearing signal (the bound port) survives.
+        assert!(
+            output.contains(":8080"),
+            "dev-server port was dropped: {output:?}"
+        );
+    }
+
+    // #143 umbrella: each distiller below is routed a payload that trips its
+    // content detector but carries no signal it can actually parse. The zero-state
+    // must pass the input through, never emit a confident green string. Each asserts
+    // the false claim is absent AND the original content survives (passthrough).
+
+    #[test]
+    fn tsc_zero_parse_passes_through_instead_of_no_errors() {
+        // `tsc --` command echo trips is_tsc_output, but there is no `error TS`
+        // line to parse — the #106 shape.
+        let input = "> tsc --noEmit\nresolving project references, nothing to compile\n";
+        let segments = scorer::score_with_command(input, "tsc", None);
+        let output = distill_with_command(&segments, input, "tsc", None);
+        assert!(
+            !output.contains("tsc: no errors"),
+            "false claim: {output:?}"
+        );
+        assert!(output.contains("nothing to compile"), "dropped: {output:?}");
+    }
+
+    #[test]
+    fn playwright_zero_parse_passes_through_instead_of_passed() {
+        // A `[chromium]` banner trips is_playwright_output with no result summary.
+        let input = "[chromium] › launching browser\nno spec files matched the filter\n";
+        let segments = scorer::score_with_command(input, "playwright", None);
+        let output = distill_with_command(&segments, input, "playwright", None);
+        assert!(!output.contains("0/0 passed"), "false claim: {output:?}");
+        assert!(output.contains("no spec files"), "dropped: {output:?}");
+    }
+
+    #[test]
+    fn eslint_zero_parse_passes_through_instead_of_no_problems() {
+        // A banner naming an eslint rule id trips is_eslint_output, but there is no
+        // finding line or `problems (` summary to parse — the #114 shape.
+        let input = "Oxc linter v0.15\nusing preset @typescript-eslint/recommended\n";
+        let segments = scorer::score_with_command(input, "eslint", None);
+        let output = distill_with_command(&segments, input, "eslint", None);
+        assert!(
+            !output.contains("no problems found"),
+            "false claim: {output:?}"
+        );
+        assert!(output.contains("Oxc linter"), "dropped: {output:?}");
+    }
+
+    #[test]
+    fn security_zero_parse_passes_through_instead_of_no_issues() {
+        // A clean scan with no severity token must not be certified `no issues`.
+        let input = "trivy image myapp:latest\nscanning filesystem, database up to date\n";
+        let segments = scorer::score_with_command(input, "trivy", None);
+        let output = distill_with_command(&segments, input, "trivy", None);
+        assert!(
+            !output.contains("no issues found"),
+            "false claim: {output:?}"
+        );
+        assert!(
+            output.contains("database up to date"),
+            "dropped: {output:?}"
+        );
+    }
+
+    #[test]
+    fn docker_logs_zero_parse_passes_through_instead_of_no_errors_detected() {
+        // A manifest that merely mentions "docker logs" routes to distill_docker_logs
+        // but is not log-shaped (is_docker_logs false) — the #112 misroute.
+        let input =
+            "apiVersion: v1\nkind: Pod\n# inspect with: docker logs app\nmetadata:\n  name: app\n";
+        let segments = scorer::score_with_command(input, "docker", None);
+        let output = distill_with_command(&segments, input, "docker", None);
+        assert!(
+            !output.contains("no errors detected"),
+            "false claim: {output:?}"
+        );
+        assert!(output.contains("kind: Pod"), "dropped: {output:?}");
     }
 
     #[test]
@@ -412,6 +663,15 @@ mod tests {
         "git_status_dirty.txt",
         "git status"
     );
+    // #107: `--oneline` puts the hash and subject on one line. The distiller used
+    // to keep 7 chars of hash and drop the subject, joining every commit into a
+    // wall of hashes. This locks the whole line surviving — there was no git_log
+    // snapshot before, which is why the regression shipped unseen.
+    snapshot_test!(
+        test_git_log_oneline_distillation,
+        "git_log.txt",
+        "git log --oneline"
+    );
     snapshot_test!(
         test_cargo_build_distillation,
         "cargo_build_errors.txt",
@@ -452,12 +712,35 @@ mod tests {
 
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
+    // #106: a composite `npm run <script>` (an `&&` chain) must NOT be claimed by a
+    // single tool distiller — `tsc --` in npm's echo used to collapse the whole thing
+    // to `tsc: no errors`. jsts declines composites (returns them for the pipeline's
+    // generic collapse), so every gate's verdict survives.
+    snapshot_test!(
+        test_jsts_npm_composite,
+        "npm_run_verify.txt",
+        "npm run verify"
+    );
     snapshot_test!(
         test_jsts_playwright,
         "playwright_fail.txt",
         "playwright test"
     );
     snapshot_test!(test_jsts_eslint, "eslint_errors.txt", "eslint");
+    // #114: `prettier --write` (via `npm run format`) used to report `eslint: no
+    // problems found` — `is_eslint_output` matched the filename `eslint.config.js`
+    // in prettier's file list. It must now be recognised as prettier and summarised
+    // per real prettier output (both modes), never as a clean run of another tool.
+    snapshot_test!(
+        test_jsts_prettier_write,
+        "prettier_write.txt",
+        "npm run format"
+    );
+    snapshot_test!(
+        test_jsts_prettier_check,
+        "prettier_check.txt",
+        "prettier --check ."
+    );
 
     snapshot_test!(
         test_database_psql_error,

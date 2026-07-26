@@ -1,7 +1,9 @@
 <div align="center">
   <img src="../media/hero.svg" alt="OMNI" width="800" />
   
-  **Sistem Operasi Konteks untuk Agen AI. Sedikit noise. Lebih banyak sinyal. Kurangi konsumsi token hingga 90%.**
+  **Konteks bebas-noise dan memori jangka panjang untuk agen AI Anda — _lossy_, tapi selalu bisa dikembalikan, dan tidak pernah mengarang hasil. Berhenti membayar Claude untuk membaca 10.000 baris noise terminal.**
+
+  **58,9% lebih sedikit token pada campuran perintah nyata · Memori lintas sesi · Aman terhadap format · Selalu reversibel · Gagal terbuka, tidak pernah mengarang · Angka yang bisa Anda reproduksi**
 
   [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
 
@@ -16,7 +18,7 @@
 <br/>
 
 > **OMNI** adalah **Sistem Operasi Konteks (Context OS) untuk Agen AI Otonom**. 
-> OMNI bertindak sebagai filter semantik berkinerja tinggi antara terminal Anda dan LLM. Dengan secara cerdas menyaring log yang bising, menyimpan *state*, dan mengelola anggaran token, OMNI memastikan agen Anda tetap fokus, mengurangi halusinasi, dan mengeksekusi *loop* dengan sempurna—semuanya sambil **memangkas biaya API Anda hingga 90%**.
+> OMNI bertindak sebagai filter semantik berkinerja tinggi antara terminal Anda dan LLM. Dengan secara cerdas menyaring log yang bising, menyimpan *state*, dan mengelola anggaran token, OMNI memastikan agen Anda tetap fokus, mengurangi halusinasi, dan mengeksekusi *loop* dengan sempurna. Diukur pada 1.810 trace nyata yang diputar ulang di biner rilis: **58,9% lebih sedikit byte** yang sampai ke model (15,0 MB → 6,2 MB) — dan **63,6% panggilan tidak menghemat apa pun**, angka yang kami terbitkan juga.
 > 
 > *Berhenti membayar untuk kebisingan terminal. Mulai membangun dengan sinyal murni.*
 ---
@@ -142,7 +144,7 @@ Fixture tunggal dari `tests/fixtures/`, bila ingin direproduksi sendiri:
 
 ### Core Distillation Engine (Mesin Distilasi Inti)
 - **Tidak Ada Lagi Kebingungan AI**: Omni bertindak seperti saringan pintar. Jika tes gagal, ia hanya menunjukkan baris kesalahan dan stack trace, memblokir log dependensi yang bising.
-- **Pengurangan Token 90%**: Dengan menghilangkan noise terminal, Anda memotong tagihan API agen secara drastis.
+- **58,9% lebih sedikit token pada campuran perintah nyata**: bukan angka aspirasi — 1.810 trace diputar ulang di biner rilis. Perhatikan bahwa 63,6% panggilan menghemat **nol**: OMNI mengembalikan output apa adanya tanpa menambah satu byte pun, dan seluruh penghematan berasal dari 36,4% sisanya yang memang berisik.
 - **Kompresi Adaptif**: OMNI melacak kapan agen mengambil output yang dihilangkan dan secara otomatis melunakkan kompresi pada waktu berikutnya — menyetel sendiri secara otomatis.
 - **Smart High-Speed Bypass**: Untuk menjamin latensi nol pada tugas kecil, OMNI secara otomatis melewati distilasi untuk output di bawah ambang 2000-token.
 

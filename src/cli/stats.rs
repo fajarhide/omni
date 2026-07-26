@@ -147,6 +147,12 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
     }
 }
 
+/// `unknown` is **not** folded into `Terminal` (#160). "a human ran this in a
+/// shell" and "OMNI could not tell who ran this" are different facts and only
+/// one is actionable — collapsing them is what hid the missing Claude Code
+/// branch in `agents::multiagent::detect_agent_id` for the life of the feature.
+/// A detection gap now shows up in the table as `Unknown` instead of looking
+/// like ordinary shell usage.
 fn agent_display_name(agent_id: &str) -> &str {
     match agent_id {
         "claude_code" | "claude" => "Claude Code",
@@ -157,11 +163,17 @@ fn agent_display_name(agent_id: &str) -> &str {
         "copilot" => "Copilot CLI",
         "gemini" => "Gemini CLI",
         "opencode" => "OpenCode",
-        "codex" => "Codex CLI",
+        "codex_cli" | "codex" => "Codex CLI",
+        "vscode_continue" => "Continue (VS Code)",
         "openclaw" => "OpenClaw",
         "antigravity" => "Antigravity",
         "vscode" => "VS Code",
-        "unknown" | "terminal" | "" => "Terminal",
+        "windsurf" => "Windsurf",
+        "aider" => "Aider",
+        "pi" => "Pi",
+        "mcp_generic" => "MCP client",
+        "terminal" => "Terminal",
+        "unknown" | "" => "Unknown",
         other => other,
     }
 }
@@ -175,6 +187,54 @@ fn print_separator() {
     );
 }
 
+/// Read by both `print_help` and `super::check_flags`, so this list is what
+/// `omni stats` documents *and* what it accepts (#151).
+const FLAGS: super::Flags = &[
+    (
+        "--detail",
+        "Full technical breakdown (commands, routes, sessions, agents)",
+    ),
+    ("--hour, -H", "Scope to the last 60 minutes"),
+    ("--today, -d", "Scope to today only"),
+    ("--week, -w", "Scope to last 7 days"),
+    ("--month, -m", "Scope to last 30 days (the default)"),
+    (
+        "--all-commands",
+        "List every command, not just the top ones",
+    ),
+    ("--json", "Machine-readable JSON output"),
+    ("--project", "Display breakdown per project path"),
+    ("--context", "Show context composition signals"),
+    (
+        "--rerun",
+        "Which distillers cost a re-run — the check reduction % cannot make",
+    ),
+];
+
+/// The time window the scope flags select, as `(label, since_unix)`.
+///
+/// One resolver for every mode. `run_detail` and `run_project_stats` each had
+/// their own copy and neither matched `--month` at all — it was honoured only by
+/// being the fall-through in one of them, and silently ignored in the other.
+fn scope(args: &[String]) -> (&'static str, i64) {
+    let now = chrono::Utc::now().timestamp();
+    if has(args, "--hour", "-H") {
+        ("last hour", now - 3600)
+    } else if has(args, "--today", "-d") {
+        // Calendar day, not a rolling 24h: "today" means since midnight.
+        ("today", now - (now % 86400))
+    } else if has(args, "--week", "-w") {
+        ("last 7 days", now - 7 * 86400)
+    } else {
+        // `--month` / `-m` and the no-flag default are the same window.
+        ("last 30 days", now - 30 * 86400)
+    }
+}
+
+fn has(args: &[String], long: &str, short: &str) -> bool {
+    args.iter().any(|a| a == long || a == short)
+}
+
 fn print_help() {
     println!(
         "\n{} {} — Token savings analytics",
@@ -184,27 +244,7 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni {} {}", "stats".cyan(), "[FLAGS]".bright_black());
 
-    println!("\n{}", "FLAGS:".bold().bright_white());
-    println!(
-        "  {: <12} Full technical breakdown (commands, routes, sessions, agents)",
-        "--detail".cyan()
-    );
-    println!("  {: <12} Scope to today only", "--today".cyan());
-    println!("  {: <12} Scope to last 7 days", "--week".cyan());
-    println!(
-        "  {: <12} Scope to last 30 days (default for --detail)",
-        "--month".cyan()
-    );
-    println!("  {: <12} Machine-readable JSON output", "--json".cyan());
-    println!(
-        "  {: <12} Display breakdown per project path",
-        "--project".cyan()
-    );
-    println!(
-        "  {: <12} Show context composition signals",
-        "--context".cyan()
-    );
-    println!("  {: <12} Show this help message", "--help, -h".cyan());
+    super::print_flags(FLAGS);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -232,16 +272,22 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("stats", args, FLAGS)?;
 
     let detail_flag = args.iter().any(|a| a == "--detail");
     let json_flag = args.iter().any(|a| a == "--json");
     let project_flag = args.iter().any(|a| a == "--project");
     let context_flag = args.iter().any(|a| a == "--context");
-    let filter_flag = args
-        .iter()
-        .any(|a| a == "--today" || a == "--week" || a == "--month" || a == "--all-commands");
+    let rerun_flag = args.iter().any(|a| a == "--rerun");
+    let filter_flag = has(args, "--hour", "-H")
+        || has(args, "--today", "-d")
+        || has(args, "--week", "-w")
+        || has(args, "--month", "-m")
+        || args.iter().any(|a| a == "--all-commands");
 
-    let mode = if context_flag {
+    let mode = if rerun_flag {
+        "rerun"
+    } else if context_flag {
         "context"
     } else if detail_flag {
         "detail"
@@ -256,6 +302,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
@@ -430,19 +477,19 @@ fn run_default(store: &Store) -> Result<()> {
 
     // Group by display name
     let mut grouped_agents: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for (id, count, input, output) in &agent_data {
-        if id == "unknown" || id == "terminal" || id.is_empty() {
+    for r in &agent_data {
+        if r.agent_id == "unknown" || r.agent_id == "terminal" || r.agent_id.is_empty() {
             continue;
         }
-        let name = agent_display_name(id).to_string();
+        let name = agent_display_name(&r.agent_id).to_string();
         let entry = grouped_agents.entry(name).or_insert((0, 0, 0));
-        entry.0 += count;
-        entry.1 += input;
-        entry.2 += output;
+        entry.0 += r.calls;
+        entry.1 += r.input_bytes;
+        entry.2 += r.output_bytes;
     }
 
     if !grouped_agents.is_empty() {
-        let total_cmds: u64 = agent_data.iter().map(|(_, c, _, _)| c).sum();
+        let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n  {}", "Agent Distribution:".bold().bright_white());
 
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
@@ -500,15 +547,7 @@ fn run_default(store: &Store) -> Result<()> {
 // ─── Detail Mode: Current View (Improved) ───────────────
 
 fn run_detail(args: &[String], store: &Store) -> Result<()> {
-    let (period_label, since) = if args.iter().any(|a| a == "--today") {
-        let now = chrono::Utc::now().timestamp();
-        let start = now - (now % 86400);
-        ("today", start)
-    } else if args.iter().any(|a| a == "--week") {
-        ("last 7 days", chrono::Utc::now().timestamp() - 7 * 86400)
-    } else {
-        ("last 30 days", chrono::Utc::now().timestamp() - 30 * 86400)
-    };
+    let (period_label, since) = scope(args);
 
     let (count, input_total, output_total, sum_latency, _max_latency, raw_tokens, filtered_tokens) =
         store.aggregate_stats(since)?;
@@ -757,19 +796,22 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     // Group by display name
     let mut grouped_agents: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for (id, count, input, output) in &agent_data {
-        if id == "unknown" || id == "terminal" || id.is_empty() {
+    // #163: kept beside the totals, not folded into them.
+    let mut grouped_unverified: HashMap<String, u64> = HashMap::new();
+    for r in &agent_data {
+        if r.agent_id == "unknown" || r.agent_id == "terminal" || r.agent_id.is_empty() {
             continue;
         }
-        let name = agent_display_name(id).to_string();
-        let entry = grouped_agents.entry(name).or_insert((0, 0, 0));
-        entry.0 += count;
-        entry.1 += input;
-        entry.2 += output;
+        let name = agent_display_name(&r.agent_id).to_string();
+        let entry = grouped_agents.entry(name.clone()).or_insert((0, 0, 0));
+        entry.0 += r.calls;
+        entry.1 += r.input_bytes;
+        entry.2 += r.output_bytes;
+        *grouped_unverified.entry(name).or_insert(0) += r.unverified;
     }
 
     if !grouped_agents.is_empty() {
-        let total_cmds: u64 = agent_data.iter().map(|(_, c, _, _)| c).sum();
+        let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n {}", "Agent Distribution:".bold().bright_white());
         println!(
             "   {:<16} {:>6} {:>7}  {}",
@@ -814,6 +856,19 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 bar_colored,
                 savings,
             );
+            // #163: the excluded rows are named, not silently missing. A count
+            // that shrinks without explanation reads as OMNI having stopped
+            // working; this says what was set aside and why.
+            if let Some(&u) = grouped_unverified.get(&name)
+                && u > 0
+            {
+                println!(
+                    "   {:<16} {:>5}x  {}",
+                    "".bright_black(),
+                    u,
+                    "unverified — recorded before #158, never applied".bright_black()
+                );
+            }
         }
     }
 
@@ -869,8 +924,13 @@ pub struct CommandStat {
 pub struct AgentStat {
     pub agent: String,
     pub agent_id: String,
+    /// Calls whose distillation reached the agent. `savings_pct` covers these.
     pub count: u64,
     pub savings_pct: f64,
+    /// Calls excluded from `count` and `savings_pct`: recorded before the #158
+    /// fix on a path where the host discarded the output (#163). Reported so a
+    /// consumer of this JSON can see the correction rather than infer a drop.
+    pub unverified: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -933,17 +993,18 @@ fn run_json(store: &Store) -> Result<()> {
         .get_agent_breakdown(0)
         .unwrap_or_default()
         .iter()
-        .map(|(agent_id, count, input, output)| {
-            let savings = if *input > 0 {
-                (100.0 * (1.0 - *output as f64 / *input as f64) * 10.0).round() / 10.0
+        .map(|r| {
+            let savings = if r.input_bytes > 0 {
+                (100.0 * (1.0 - r.output_bytes as f64 / r.input_bytes as f64) * 10.0).round() / 10.0
             } else {
                 0.0
             };
             AgentStat {
-                agent: agent_display_name(agent_id).to_string(),
-                agent_id: agent_id.clone(),
-                count: *count,
+                agent: agent_display_name(&r.agent_id).to_string(),
+                agent_id: r.agent_id.clone(),
+                count: r.calls,
                 savings_pct: savings,
+                unverified: r.unverified,
             }
         })
         .collect();
@@ -965,18 +1026,98 @@ fn run_json(store: &Store) -> Result<()> {
     Ok(())
 }
 
-fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
-    let today_flag = args.iter().any(|a| a == "--today");
-    let week_flag = args.iter().any(|a| a == "--week");
+/// `omni stats --rerun` — the check reduction % cannot make (#109).
+///
+/// Reduction measures bytes removed. A distiller that emitted `""` for every
+/// input would score 100%. This measures whether the agent had to run the
+/// command again, which is the closest thing to ground truth on whether the
+/// bytes removed were the ones it needed.
+fn run_rerun(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
+    let rows = store.rerun_breakdown(since)?;
 
-    let now = chrono::Utc::now().timestamp();
-    let (since, period_label) = if today_flag {
-        (now - (now % 86400), "Today")
-    } else if week_flag {
-        (now - 7 * 86400, "Last 7 Days")
-    } else {
-        (now - 30 * 86400, "Last 30 Days")
-    };
+    println!(
+        "\n  {} — {}",
+        "OMNI Re-run Analysis".bold().bright_white(),
+        period_label
+    );
+    print_separator();
+
+    if rows.is_empty() {
+        println!(
+            "  Not enough paired data yet: a filter needs {} distilled and {} raw",
+            crate::pipeline::RERUN_MIN_SAMPLES,
+            crate::pipeline::RERUN_MIN_SAMPLES
+        );
+        println!("  runs in this window before its delta means anything.");
+        return Ok(());
+    }
+
+    println!(
+        " {:<22} {:>9} {:>9} {:>8}",
+        "Filter", "distilled", "raw", "delta"
+    );
+    println!(" {:─<22} ───────── ───────── ────────", "");
+
+    let mut confounded = Vec::new();
+    for r in &rows {
+        let delta = r.delta_pp();
+        let label = format!("{:+.1}pp", delta);
+        // Only a *comparable* pair earns a verdict. A skewed one prints its
+        // numbers and is sent to the caveat list — never coloured as a finding.
+        let shown = if r.is_confounded() {
+            confounded.push(r);
+            "  n/a".normal()
+        } else if delta > 10.0 {
+            label.bright_red()
+        } else if delta > 3.0 {
+            label.bright_yellow()
+        } else {
+            label.bright_green()
+        };
+        println!(
+            " {:<22} {:>8.1}% {:>8.1}% {:>8}",
+            crate::util::text::safe_truncate_with_ellipsis(&r.filter_name, 22),
+            r.distilled_pct(),
+            r.raw_pct(),
+            shown
+        );
+    }
+
+    println!();
+    println!(
+        "  {} a command re-run within {}s of reading its distilled output.",
+        "delta =".bright_black(),
+        crate::pipeline::RERUN_WINDOW_SECS
+    );
+    println!(
+        "  {} distillation removed something the agent needed.",
+        "positive =".bright_black()
+    );
+
+    if !confounded.is_empty() {
+        println!();
+        println!(
+            "  {} the two arms are not the same population, so the",
+            "n/a:".bold().bright_yellow()
+        );
+        println!("  comparison measures input size, not lost signal:");
+        for r in confounded {
+            println!(
+                "    {:<20} {} B distilled vs {} B raw",
+                crate::util::text::safe_truncate_with_ellipsis(&r.filter_name, 20),
+                r.distilled_avg_input,
+                r.raw_avg_input
+            );
+        }
+    }
+
+    println!();
+    Ok(())
+}
+
+fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
 
     let projects = store.get_project_stats(since)?;
     println!(

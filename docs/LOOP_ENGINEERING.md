@@ -46,7 +46,7 @@ export OMNI_LOOP_BUDGET=100000
 
 ### 3. Run Your Loop
 
-See `examples/autonomous-loops/` for ready-to-use templates:
+See `autonomous-loops/` for ready-to-use templates:
 - `shell-loop.sh` — Generic shell loop
 - `claude-code-loop.md` — System prompt for Claude Code
 - `mastra-integration.ts` — TypeScript/Mastra orchestrator setup
@@ -170,6 +170,7 @@ omni stats --json
 # Health check
 omni doctor
 
-# Check current session budget status
-omni handoff --json | jq '.loop_context'
+# Check current session budget status — MCP only.
+# `omni handoff` was removed as a CLI subcommand in #164; the `omni_handoff`
+# MCP tool is unchanged, so this is reachable from an MCP client, not a shell.
 ```

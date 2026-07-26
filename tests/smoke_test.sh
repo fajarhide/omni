@@ -83,7 +83,6 @@ check "help shows init" "$HELP_OUT" "init"
 check "help shows stats" "$HELP_OUT" "stats"
 check "help shows session" "$HELP_OUT" "session"
 check "help shows learn" "$HELP_OUT" "learn"
-check "help shows rewind" "$HELP_OUT" "rewind"
 check "help shows doctor" "$HELP_OUT" "doctor"
 check "help shows reset" "$HELP_OUT" "reset"
 check "help shows diff" "$HELP_OUT" "diff"
@@ -251,17 +250,6 @@ fi
 TOTAL=$((TOTAL + 1))
 check "session json has context_pressure" "$SESSION_JSON" "context_pressure"
 
-# Test handoff --json
-HANDOFF_JSON=$("$OMNI" handoff --json 2>&1 || true)
-if echo "$HANDOFF_JSON" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then
-    echo "  ✓ handoff --json is valid JSON"
-    PASS=$((PASS + 1))
-else
-    echo "  ✗ handoff --json is NOT valid JSON"
-    FAIL=$((FAIL + 1))
-fi
-TOTAL=$((TOTAL + 1))
-check "handoff json has schema_version" "$HANDOFF_JSON" "schema_version"
 
 # ─── Results ─────────────────────────────────────────────
 echo ""

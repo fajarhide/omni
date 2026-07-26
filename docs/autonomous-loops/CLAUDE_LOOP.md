@@ -28,7 +28,7 @@ OMNI is the context management middleware providing:
 After completing significant work:
 1. Run verification command (e.g., `cargo test`, `npm test`)
 2. OMNI will automatically create an engram on test success
-3. Call `omni_handoff --json` to checkpoint progress for the orchestrator
+3. Call `omni_handoff` (MCP tool) to checkpoint progress for the orchestrator
 
 ## Available MCP Tools
 

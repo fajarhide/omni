@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Noise-canceling context and long-term memory for your AI agent. Stop paying Claude to read 10,000 lines of terminal noise like a headphone for AI agent</em>
+    <em>Noise-canceling context and long-term memory for your AI agent — <b>lossy, but always reversible, and it never fabricates a result.</b> Stop paying Claude to read 10,000 lines of terminal noise.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -16,7 +16,10 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-Up to 85% less tokens &middot; Cross-Session Memory &middot; ~40% faster &middot; Zero hallucination triggers </b>
+58.9% fewer tokens on a real command mix &middot; Cross-Session Memory &middot; Format-safe &middot; Always reversible &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
+
+</br></br>
+<img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
 </div>
 
 ---
@@ -42,61 +45,30 @@ OMNI fixes both.
 
 **Problem 1: Your terminal drowns out the signal**
 
-### `npm install`
-**Without OMNI:** 10,000 lines of "Downloading...", "Extracting...", and warnings. AI reads everything.  
-**With OMNI:** Package conflict. Node 20 required.
+Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirations:
 
-### `terraform apply`
-**Without OMNI:** 4,500 lines of unchanged execution plans.  
-**With OMNI:** The 3 resources that failed IAM permissions.
+| Command | Without OMNI | With OMNI | Saved |
+|---|---|---|---|
+| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **93%** |
+| `kubectl get pods` (35 pods, 5 crashing) | the full table | `35 pods \| 30 running, 5 error` + the 5 failing pods named | — |
+| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **45%** |
+| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **37%** |
 
-### `docker build`
-**Without OMNI:** Endless cache hits, layer hashes, and download progress bars.  
-**With OMNI:** Missing dependency `libpq-dev` at layer 12.
+> **The honest caveat:** OMNI compresses *noisy successful* output. A command that **fails** is passed through **verbatim** — a hidden error is worse than an uncompressed one — and structured output (JSON/YAML/CSV) is never touched. It earns its keep on repetitive tool chatter and gets out of the way everywhere else.
 
-### `pytest`
-**Without OMNI:** 500 passing tests and verbose setup logs.  
-**With OMNI:** Only the 2 failed assertions and their stack traces.
+### Why you can trust a lossy tool
 
-### `cargo build`
-**Without OMNI:** 300 lines of compiling dependencies and warnings.  
-**With OMNI:** The exact line where the borrow checker failed.
+Every other compressor asks you to *trust* that what it cut didn't matter. OMNI doesn't ask — it guarantees, and each guarantee is backed by code you can read:
 
-### `kubectl logs`
-**Without OMNI:** Thousands of successful health checks and normal traffic logs.  
-**With OMNI:** The crash loop and panic stack trace.
+| Guarantee | How | Proof |
+|---|---|---|
+| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite **RewindStore** (SHA-256 → content); the agent gets a hash and calls `omni_retrieve` | [`How it works`](#how-it-works) |
+| **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
+| **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
+| **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
+| **Numbers are measured, not aspirational** | 1,810 real traces replayed on the release binary — and 63.6% of calls net zero, which we publish too | [`Benchmarks`](#benchmarks) |
 
-### `git diff`
-**Without OMNI:** Formatting tweaks, generated lockfiles, and whitespace changes.  
-**With OMNI:** Only the core business logic changes.
-
-### `go test`
-**Without OMNI:** Pages of standard output from passing packages.  
-**With OMNI:** The single nil pointer dereference.
-
-### `mvn package`
-**Without OMNI:** Megabytes of "Downloading from maven central".  
-**With OMNI:** Compilation error in `UserService.java`.
-
-### `pip install`
-**Without OMNI:** Resolution logs and wheel building outputs.  
-**With OMNI:** Dependency conflict with `numpy`.
-
-### `webpack / vite`
-**Without OMNI:** 2,000 chunk asset lists and build times.  
-**With OMNI:** Missing module resolution in `App.tsx`.
-
-### `helm install`
-**Without OMNI:** Entire rendered YAML output of all templates.  
-**With OMNI:** Pod scheduling failure due to missing secret.
-
-### `ansible-playbook`
-**Without OMNI:** "ok" and "skipped" statuses for 50 servers.  
-**With OMNI:** The single "failed" task on `web-03`.
-
-### GitHub Actions (CI/CD)
-**Without OMNI:** Complete workflow logs including environment setup.  
-**With OMNI:** Only the specific step that exited with code 1.
+That is the one thing a bigger compression number can't buy: **you can always recover the original, and it will never lie to your agent.**
 
 **Problem 2: Your agent forgets everything overnight**
 
@@ -106,7 +78,7 @@ OMNI fixes both.
 
 ### Fixing the same bug twice
 **Without OMNI:** Agent hits the same framework gotcha it already solved yesterday because it has no memory.  
-**With OMNI:** The fix is already stored. `omni recall` surfaces the exact solution in under 10ms.
+**With OMNI:** The fix is already stored. The agent surfaces it through the `omni_recall` MCP tool before it repeats the mistake.
 
 ### Multi-IDE workflows (Cursor → Claude Code)
 **Without OMNI:** New IDE, new agent, zero context. You're starting from scratch.  
@@ -124,7 +96,8 @@ When you restart an agent and it has no memory, you lose hours re-establishing c
 
 OMNI solves both, invisibly:
 
-* **Less noise** → lower cost, faster responses, zero hallucination triggers.
+* **Less noise** → lower cost, and less irrelevant output for the model to trip over.
+* **Format-safe by design** → JSON, YAML, NDJSON and CSV pass through byte-for-byte; a distiller that can't parse its input stays quiet instead of fabricating a summary.
 * **Persistent memory** → no more re-explaining your project, no more repeating fixes.
 * **One install** → works silently with every agent you already use.
 
@@ -275,9 +248,10 @@ If the AI *really* needs the dropped noise, OMNI's local SQLite **RewindStore** 
   <img src="media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
 </div>
 
-Built in Rust for imperceptible latency.
+Built in Rust, though the end-to-end cost is not zero.
 
-* **Pipeline Latency**: < 10ms overhead.
+* **Distillation**: the scoring and collapsing pipeline itself runs in single-digit milliseconds.
+* **End to end**: what you actually wait for is that plus the RewindStore write, and it grows with your history — roughly 82 ms against a fresh database and ~308 ms against a 97 MB one. See [Benchmarks](#benchmarks) before you assume it is free.
 * **Memory**: Operates via efficient streams, keeping memory usage flat even on 20,000-line logs.
 * **Fail Open**: If OMNI panics, it fails silently and passes the raw output through. It will never crash your host agent.
 
@@ -296,7 +270,7 @@ make fmt && make clippy
 No. The raw logs are compressed and stored locally in the SQLite RewindStore. The AI receives a hash and can retrieve the full log if needed.
 
 **Will this slow down my terminal?**  
-No. OMNI is written in Rust and executes the distillation pipeline in under 10ms.
+Yes, measurably, and the cost grows with your history. The distillation pipeline itself runs in single-digit milliseconds, but every hooked command also writes to the local RewindStore: a 496-byte `git status` takes ~82 ms against a fresh database and ~308 ms against a 97 MB one, and a 16.5 KB `cargo test` takes ~276 ms. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely when you need the raw output back.
 
 **Can I add my own filters?**  
 Yes. You can teach OMNI to strip noise specific to your internal tools using TOML:

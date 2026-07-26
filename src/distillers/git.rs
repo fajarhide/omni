@@ -172,9 +172,15 @@ fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
                 out.push_str(&hash);
                 out.push(' ');
             } else if crate::distillers::git::RE_GIT_LOG_HASH.is_match(line) {
-                let hash: String = line.chars().take(7).collect();
-                out.push_str(&hash);
-                out.push(' ');
+                // `--oneline`: the hash and the subject share one line. Taking
+                // `chars().take(7)` kept the hash and threw the subject away —
+                // the only part a reader wanted — and `push(' ')` then joined
+                // every commit into a wall of hashes reported as an ~89% saving
+                // (#107). The hash is the cheap part; the subject is the signal.
+                // Keep the line whole. (The `commit <sha>` branch above still
+                // handles verbose logs, so this only ever fires on oneline.)
+                out.push_str(line);
+                out.push('\n');
             } else if !line.starts_with("Author:")
                 && !line.starts_with("Date:")
                 && !line.starts_with("Merge:")
@@ -201,3 +207,69 @@ fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
 
 pub static RE_GIT_LOG_HASH: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new(r"^[a-f0-9]{7,40} ").unwrap());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn one_segment(content: &str) -> Vec<OutputSegment> {
+        vec![OutputSegment {
+            content: content.to_string(),
+            tier: SignalTier::Important,
+            base_score: 0.8,
+            context_score: 0.0,
+            line_range: (1, content.lines().count().max(1)),
+        }]
+    }
+
+    /// #107. Each `--oneline` entry carries its subject on the same line as the
+    /// hash; the distiller kept 7 chars and dropped the rest, joining every
+    /// commit into a wall of hashes reported as an ~89% saving. Assert the
+    /// subjects survive — the hash alone is close to worthless to a reader.
+    #[test]
+    fn oneline_keeps_every_commit_subject() {
+        let input = "\
+a370713 Wordmark ForgePod: bobot 900 asli, italic (#72)
+93db32e feat: idea length limit
+1017f0e fix: success token hardcoded hex";
+        let out = distill_log(&one_segment(input), input);
+
+        assert!(
+            out.contains("Wordmark ForgePod"),
+            "subject dropped: {out:?}"
+        );
+        assert!(
+            out.contains("feat: idea length limit"),
+            "subject dropped: {out:?}"
+        );
+        assert!(
+            out.contains("fix: success token hardcoded hex"),
+            "subject dropped: {out:?}"
+        );
+        // One line per commit, not a single space-joined run of hashes.
+        assert_eq!(
+            out.lines().count(),
+            3,
+            "commits joined onto one line: {out:?}"
+        );
+    }
+
+    /// Verbose `git log` keeps the `commit <sha>` handling untouched: the subject
+    /// still arrives on its own indented line and must survive.
+    #[test]
+    fn verbose_log_still_keeps_the_subject() {
+        let input = "\
+commit a370713abc1234567890abcdef1234567890abcd
+Author: Someone <s@example.com>
+Date:   Mon Mar 20 10:30:00 2026 +0700
+
+    feat: add the thing";
+        let out = distill_log(&one_segment(input), input);
+
+        assert!(
+            out.contains("feat: add the thing"),
+            "subject dropped: {out:?}"
+        );
+        assert!(!out.contains("Author:"), "kept noise: {out:?}");
+    }
+}
