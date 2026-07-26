@@ -3,19 +3,50 @@ use crate::pipeline::{OutputSegment, SignalTier};
 
 pub struct TestDistiller;
 
-/// Every major runner states its own totals on one summary line — cargo
-/// `test result: FAILED. 490 passed; 10 failed; ...`, pytest `3 failed, 42 passed
-/// in 3.15s`, jest `Tests: 3 failed, 51 passed, 54 total`. Quote it instead of
-/// recounting: the runner is authoritative, and counting result lines is both
-/// fragile and wrong here — cargo_test_500 prints 330 `... ok` lines for 490
-/// passing tests, and CollapseMode::Test folds those lines away before the
-/// distiller ever sees them.
-fn runner_summary(input: &str) -> Option<&str> {
-    input.lines().map(str::trim).find(|line| {
-        line.starts_with("test result:")
-            || line.starts_with("Tests:")
-            || (line.contains(" passed") && line.contains(" in "))
-    })
+/// A runner's tally line — cargo `test result: FAILED. 490 passed; 10 failed;
+/// ...`, pytest `3 failed, 42 passed in 3.15s`, jest `Tests: 3 failed, 51 passed,
+/// 54 total`. It states totals, so it is never a failure *detail*: on a green run
+/// it reads `0 failed`, and classifying details by the substring `failed` is what
+/// made a fully green suite report failures (#210).
+fn is_summary_line(line: &str) -> bool {
+    line.starts_with("test result:")
+        || line.starts_with("Tests:")
+        || (line.contains(" passed") && line.contains(" in "))
+}
+
+/// Every tally the runner printed. Quote them instead of recounting: the runner
+/// is authoritative, and counting result lines is both fragile and wrong here —
+/// cargo_test_500 prints 330 `... ok` lines for 490 passing tests, and
+/// CollapseMode::Test folds those lines away before the distiller ever sees them.
+///
+/// There is more than one because `cargo test` prints a tally per target, so a
+/// workspace run has many and quoting only the first reports the whole run as
+/// though it were the first target's numbers.
+fn runner_summaries(input: &str) -> Vec<&str> {
+    input
+        .lines()
+        .map(str::trim)
+        .filter(|line| is_summary_line(line))
+        .collect()
+}
+
+/// cargo prints one line per test and ends a passing one `... ok`. A test *named*
+/// after failure (`preserves_failed_lines ... ok`) carries the word without being
+/// one, so the name must not decide this either (#210).
+fn is_passing_test_line(line: &str) -> bool {
+    line.starts_with("test ") && (line.ends_with(" ... ok") || line.ends_with(" ... ignored"))
+}
+
+/// Whether a raw line is failure *detail*. Tally lines and passing per-test lines
+/// are excluded first, because both carry the runner's failure vocabulary on a
+/// run where nothing failed.
+fn is_failure_detail(line: &str) -> bool {
+    let trimmed = line.trim();
+    if is_summary_line(trimmed) || is_passing_test_line(trimmed) {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    lower.contains("failed") || lower.contains("error:") || lower.contains("err ")
 }
 
 impl Distiller for TestDistiller {
@@ -28,12 +59,18 @@ impl Distiller for TestDistiller {
         let mut passed = 0;
         let mut failed = 0;
         let mut failure_details = Vec::new();
-        let summary = runner_summary(input);
+        let summaries = runner_summaries(input);
+        let summary = summaries.first().copied();
 
         for seg in segments {
-            if seg.tier == SignalTier::Critical
+            // The tier alone is not enough. `semantic::is_critical` works on a
+            // whole block, so a chunk holding one real failure and nine green
+            // tallies is Critical as a unit — the segment only counts as a
+            // failure if some line in it actually reads as one (#210).
+            if (seg.tier == SignalTier::Critical
                 || seg.content.contains("FAIL")
-                || seg.content.contains('✗')
+                || seg.content.contains('✗'))
+                && seg.content.lines().any(is_failure_detail)
             {
                 failed += 1;
                 // Avoid pushing pure summary lines as failure details if they are just the aggregate count
@@ -59,18 +96,14 @@ impl Distiller for TestDistiller {
             }
         }
 
-        // Try to find explicit summary in input
+        // Collect the failure detail lines the runner printed. Tally lines are
+        // excluded by `is_failure_detail`, not just the one chosen as the
+        // headline: cargo prints one per target and every green one says
+        // `0 failed`, so matching the substring filed 16 of a 17-target green
+        // run's tallies as failures and labelled the remainder
+        // `... 6 more failures` (#210).
         for line in input.lines() {
-            // The summary line is the headline below; pytest's
-            // `=== 1 failed, 2 passed ===` also matches "failed", so skip it here
-            // or it gets printed twice.
-            if Some(line.trim()) == summary {
-                continue;
-            }
-            let lower = line.to_lowercase();
-            if (lower.contains("failed") || lower.contains("error:") || lower.contains("err "))
-                && !failure_details.contains(&line.to_string())
-            {
+            if is_failure_detail(line) && !failure_details.contains(&line.to_string()) {
                 failure_details.push(line.to_string());
             }
         }
@@ -93,6 +126,14 @@ impl Distiller for TestDistiller {
             // real summary, so `summary` is `Some` and is returned above.
             if summary.is_none() && passed == 0 {
                 return input.to_string();
+            }
+            // Quote every target's tally. Before #210 a green workspace run
+            // reached this branch with `failure_details` wrongly non-empty, so
+            // all the tallies got printed as "failures"; returning only
+            // `headline` here would have fixed the label and replaced it with a
+            // second false claim, reporting 17 targets as the first one's count.
+            if summaries.len() > 1 {
+                return summaries.join("\n");
             }
             return headline;
         }
@@ -197,6 +238,100 @@ mod tests {
         assert_eq!(
             output, input,
             "no parsed test signal must fail open, not fabricate a tally"
+        );
+    }
+
+    /// Builds a green multi-target `cargo test` run: one tally per target, every
+    /// one of them reading `0 failed`.
+    fn green_workspace_run(counts: &[u32]) -> String {
+        counts
+            .iter()
+            .map(|n| {
+                format!(
+                    "test result: ok. {n} passed; 0 failed; 0 ignored; 0 measured; \
+                     0 filtered out; finished in 0.1s\n"
+                )
+            })
+            .collect()
+    }
+
+    /// #210: a fully green workspace run was reported as failing. Every passing
+    /// tally reads `0 failed`, the detail loop classified lines by
+    /// `contains("failed")`, and only the line *equal to* the chosen headline was
+    /// skipped — so 16 of 17 green tallies were filed as failure details and the
+    /// truncated remainder came out as `... 6 more failures`.
+    #[test]
+    fn does_not_report_a_green_workspace_run_as_failures() {
+        // Arrange
+        let input = green_workspace_run(&[
+            479, 480, 4, 25, 15, 3, 12, 13, 33, 7, 9, 11, 5, 8, 6, 21, 44,
+        ]);
+        let segments = scorer::score_segments(
+            &input,
+            registry::resolve_profile("cargo test").segmentation,
+            None,
+            "cargo test",
+        );
+
+        // Act
+        let output = TestDistiller.distill(&segments, &input, None);
+
+        // Assert
+        assert!(
+            !output.to_lowercase().contains("failure"),
+            "a run with 0 failures must not mention failures, got:\n{output}"
+        );
+    }
+
+    /// The fix's own failure mode: excluding tallies from the details empties them,
+    /// and returning only the first tally would report a 17-target run as though
+    /// it were the first target's numbers.
+    #[test]
+    fn quotes_every_target_tally_on_a_green_workspace_run() {
+        // Arrange
+        let counts = [
+            479, 480, 4, 25, 15, 3, 12, 13, 33, 7, 9, 11, 5, 8, 6, 21, 44,
+        ];
+        let input = green_workspace_run(&counts);
+        let segments = scorer::score_segments(
+            &input,
+            registry::resolve_profile("cargo test").segmentation,
+            None,
+            "cargo test",
+        );
+
+        // Act
+        let output = TestDistiller.distill(&segments, &input, None);
+
+        // Assert
+        assert_eq!(
+            output.lines().count(),
+            counts.len(),
+            "every target's tally must survive, got:\n{output}"
+        );
+    }
+
+    /// A test *named* after failure is not a failure. `contains("failed")` filed
+    /// `preserves_failed_lines ... ok` as one (#210).
+    #[test]
+    fn does_not_file_a_passing_test_named_after_failure() {
+        // Arrange
+        let input = "test guard::preserves_failed_lines ... ok\n\
+                     test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
+        let segments = scorer::score_segments(
+            input,
+            registry::resolve_profile("cargo test").segmentation,
+            None,
+            "cargo test",
+        );
+
+        // Act
+        let output = TestDistiller.distill(&segments, input, None);
+
+        // Assert
+        assert_eq!(
+            output, "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+            "a passing test whose name contains `failed` must not be reported as one"
         );
     }
 

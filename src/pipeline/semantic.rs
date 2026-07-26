@@ -166,7 +166,51 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.starts_with("error ")
         || lower_text.contains("build failed")
         || lower_text.contains("--- fail")
-        || lower_text.contains("failed")
+        || mentions_failure(lower_text)
+}
+
+/// Whether `failed` appears as a *verdict* rather than incidentally.
+///
+/// The bare substring is not evidence of failure. Every green cargo tally reads
+/// `test result: ok. 479 passed; 0 failed`, and a passing test can be named after
+/// failure (`test guard::preserves_failed_lines ... ok`). Matching it anywhere
+/// classified both as Critical, which is how a fully green suite came out of the
+/// TestDistiller as `... 6 more failures` (#210).
+///
+/// Two exclusions. An identifier character on *either* side means the word is
+/// part of a name rather than a report, and a preceding count of exactly zero
+/// means the runner is reporting none.
+// Safety: `match_indices` yields byte offsets that are always char boundaries,
+// so slicing at one cannot split a UTF-8 character.
+#[allow(clippy::string_slice)]
+fn mentions_failure(lower_text: &str) -> bool {
+    const WORD: &str = "failed";
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+
+    lower_text.match_indices(WORD).any(|(i, _)| {
+        let before = &lower_text[..i];
+        let after = &lower_text[i + WORD.len()..];
+
+        // Inside an identifier, so it names something rather than reporting it.
+        // Both sides, because a name can start with the word (`failed_to_parse`)
+        // as readily as end with it (`preserves_failed_lines`).
+        if before.ends_with(is_ident) || after.starts_with(is_ident) {
+            return false;
+        }
+
+        // A tally reporting none: `0 failed`, `; 0 failed;`. The digit run is read
+        // back-to-front, so it comes out reversed — `10 failed` yields `"01"`.
+        // Only an exact zero matters here and `"0"` reversed is itself, so the
+        // comparison holds; anything else, including a multi-digit count, is a
+        // real failure.
+        let digits_reversed: String = before
+            .trim_end()
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        digits_reversed != "0"
+    })
 }
 
 #[allow(clippy::collapsible_match)]
@@ -237,6 +281,37 @@ fn is_data(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #210: `contains("failed")` made every green cargo tally Critical, and a
+    /// passing test named after failure with it. Both directions are asserted,
+    /// because a predicate that stops matching real failures is the worse bug.
+    #[test]
+    fn treats_failed_as_a_verdict_not_a_substring() {
+        // Not failures: a tally reporting none, and a name containing the word.
+        for green in [
+            "test result: ok. 479 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+            "test guard::preserves_failed_lines ... ok",
+            "test failed_to_parse_config ... ok",
+            "tests: 0 failed, 51 passed, 51 total",
+        ] {
+            assert!(
+                !is_critical(&green.to_lowercase(), Some("cargo")),
+                "green output classified Critical: {green}"
+            );
+        }
+
+        // Still failures.
+        for red in [
+            "test result: FAILED. 479 passed; 1 failed; 0 ignored",
+            "assertion failed: left == right",
+            "tests: 3 failed, 51 passed, 54 total",
+        ] {
+            assert!(
+                is_critical(&red.to_lowercase(), Some("cargo")),
+                "real failure not classified Critical: {red}"
+            );
+        }
+    }
 
     #[test]
     fn test_is_progress() {
