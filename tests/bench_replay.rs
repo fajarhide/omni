@@ -37,7 +37,10 @@ fn base_command(cmd: &str) -> String {
 fn replay_execution_traces_net_savings() {
     // Resolve the corpus DB from the REAL home before we repoint HOME below.
     let db = std::env::var("OMNI_BENCH_DB").unwrap_or_else(|_| {
-        format!("{}/.omni/omni.db", std::env::var("HOME").unwrap_or_default())
+        format!(
+            "{}/.omni/omni.db",
+            std::env::var("HOME").unwrap_or_default()
+        )
     });
 
     // Match the method: no user config, no passthrough shortcut.
@@ -74,8 +77,14 @@ fn replay_execution_traces_net_savings() {
         let mut out = Vec::new();
         let mut err = std::io::sink();
         // None store + None session = fresh, deterministic, no persistence.
-        let _ =
-            omni::hooks::pipe::run_inner(Cursor::new(raw.as_bytes()), &mut out, &mut err, None, None, Some(cmd));
+        let _ = omni::hooks::pipe::run_inner(
+            Cursor::new(raw.as_bytes()),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some(cmd),
+        );
 
         let (r, o) = (raw.len() as u64, out.len() as u64);
         n += 1;
@@ -99,15 +108,27 @@ fn replay_execution_traces_net_savings() {
     println!("corpus:            {n} traces from {db}");
     println!("bytes:             {raw_total} -> {out_total}");
     println!("NET SAVINGS:       {net:.1}%");
-    println!("saved nothing:     {:.1}% ({} passthrough + {} grew)", pct(unchanged + grew), unchanged, grew);
+    println!(
+        "saved nothing:     {:.1}% ({} passthrough + {} grew)",
+        pct(unchanged + grew),
+        unchanged,
+        grew
+    );
     println!("actually shrank:   {:.1}% ({shrank})", pct(shrank));
     println!("ADDED BYTES:       {grew} calls");
     println!("\ntop commands by input bytes:");
     let mut cmds: Vec<_> = per_cmd.into_iter().filter(|(k, _)| !k.is_empty()).collect();
     cmds.sort_by_key(|(_, v)| std::cmp::Reverse(v.1));
-    println!("{:<12} {:>7} {:>14} {:>14} {:>8}", "command", "calls", "input", "output", "saved");
+    println!(
+        "{:<12} {:>7} {:>14} {:>14} {:>8}",
+        "command", "calls", "input", "output", "saved"
+    );
     for (cmd, (calls, r, o)) in cmds.into_iter().take(15) {
-        let saved = if r > 0 { 100.0 * (r - o.min(r)) as f64 / r as f64 } else { 0.0 };
+        let saved = if r > 0 {
+            100.0 * (r - o.min(r)) as f64 / r as f64
+        } else {
+            0.0
+        };
         println!("{cmd:<12} {calls:>7} {r:>14} {o:>14} {saved:>7.1}%");
     }
     println!();
