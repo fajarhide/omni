@@ -67,6 +67,25 @@ fn extract_base_executable(command: &str) -> String {
     String::new()
 }
 
+/// Enumeration commands (`ls`, `find`, `ps`, `wc`, `df`, `du`, `stat`, `tree`,
+/// and bare `env`) list distinct data one datum per line — the items *are* the
+/// answer, there is no noise to drop. They must pass through verbatim, and the
+/// hooks must also skip the collapse fallback for them (#198/#200): collapsing a
+/// process or path list into `[N similar lines collapsed]` drops rows exactly the
+/// way truncation does. `grep`/`rg` are deliberately excluded — their distiller
+/// hoists the repeated path losslessly and keeps every match.
+pub fn is_enumeration_command(command: &str) -> bool {
+    let base_exec = extract_base_executable(command);
+    let base = std::path::Path::new(&base_exec)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(base_exec.as_str());
+    matches!(
+        base,
+        "ls" | "tree" | "find" | "ps" | "df" | "du" | "stat" | "wc"
+    ) || (base.is_empty() && command.split_whitespace().next() == Some("env"))
+}
+
 fn looks_like_env_assignment(token: &str) -> bool {
     let Some((key, _value)) = token.split_once('=') else {
         return false;
@@ -370,24 +389,29 @@ pub fn distill_with_command(
         return input.to_string();
     }
 
+    // Enumeration commands list distinct data, one datum per line, with no noise
+    // to drop — the paths, filenames, processes and mounts *are* the answer. A
+    // command audit (docs/COMMAND_AUDIT.md) measured every one of these either
+    // dropping items (`find` 68/98 paths #198, `ls` every filename, `ps` most
+    // processes, `wc` per-file counts) or *growing* the output (`env` +50%,
+    // `df` +16%). There is nothing to distill losslessly here, so hand the output
+    // back verbatim rather than truncate it to a shorter, plausible, incomplete
+    // list (#200). `grep`/`rg` are NOT here: their distiller hoists the repeated
+    // path losslessly and keeps every match.
+    if is_enumeration_command(command) {
+        return input.to_string();
+    }
+
     // System ops → SystemOpsDistiller
     if matches!(
         base.as_str(),
-        "ls" | "tree"
-            | "find"
-            | "grep"
+        "grep"
             | "rg"
-            | "ps"
-            | "df"
-            | "du"
-            | "env"
-            | "stat"
             | "cat"
             | "head"
             | "tail"
             | "curl"
             | "wget"
-            | "wc"
             | "sort"
             | "uniq"
             | "awk"
@@ -706,9 +730,36 @@ mod tests {
         "terraform plan"
     );
     snapshot_test!(test_systemops_grep, "grep_recursive_output.txt", "grep -r");
-    snapshot_test!(test_systemops_ls, "ls_la_output.txt", "ls -l");
-    snapshot_test!(test_systemops_find, "find_project_output.txt", "find .");
-    snapshot_test!(test_systemops_env, "env_output.txt", "env");
+
+    // #198/#200: `ls`, `find` and `env` are enumerations — every line is the
+    // answer, not noise — so they must pass through verbatim, never be summarised
+    // or truncated. (These replaced snapshot tests that asserted the old lossy
+    // distillation; `grep` above stays snapshotted because its hoisting is
+    // lossless.)
+    macro_rules! passthrough_test {
+        ($name:ident, $file:expr, $cmd:expr) => {
+            #[test]
+            fn $name() {
+                let input = include_str!(concat!("../../tests/fixtures/", $file));
+                let segments = scorer::score_with_command(input, $cmd, None);
+                let output = distill_with_command(&segments, input, $cmd, None);
+                assert_eq!(
+                    output, input,
+                    concat!(
+                        $cmd,
+                        " is an enumeration; it must pass through verbatim (#200)"
+                    )
+                );
+            }
+        };
+    }
+    passthrough_test!(test_systemops_ls_passthrough, "ls_la_output.txt", "ls -l");
+    passthrough_test!(
+        test_systemops_find_passthrough,
+        "find_project_output.txt",
+        "find ."
+    );
+    passthrough_test!(test_systemops_env_passthrough, "env_output.txt", "env");
 
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
