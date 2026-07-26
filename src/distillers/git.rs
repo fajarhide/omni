@@ -193,6 +193,10 @@ fn distill_log(segments: &[OutputSegment], input: &str) -> String {
                 // Keep the line whole.
                 out.push_str(line);
                 out.push('\n');
+                // A verbose-log subject can itself start with a 7+ hex word
+                // (`a1b2c3d fix …`) and match here; clear the flag so the next
+                // body line is not then taken as the subject too (review of #204).
+                awaiting_subject = false;
             } else if line.starts_with("Author:")
                 || line.starts_with("Date:")
                 || line.starts_with("Merge:")
@@ -336,6 +340,28 @@ Date:   Sat Mar 18 10:00:00 2026 +0700
             out.lines().count(),
             3,
             "one line per commit expected: {out:?}"
+        );
+    }
+
+    /// Review of #204: a subject that itself starts with a 7+ hex word matches the
+    /// `--oneline` regex; that branch must clear `awaiting_subject` too, or the
+    /// next body line is appended as a second "subject".
+    #[test]
+    fn hex_looking_subject_does_not_leak_the_body() {
+        let input = "\
+commit 1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Author: A <a@x.com>
+Date:   Mon Mar 20 10:00:00 2026 +0700
+
+    abc1234 refactor the parser
+
+    this body line must not survive";
+        let out = distill_log(&one_segment(input), input);
+
+        assert!(out.contains("refactor the parser"), "subject lost: {out:?}");
+        assert!(
+            !out.contains("this body line must not survive"),
+            "body leaked as subject: {out:?}"
         );
     }
 }

@@ -83,7 +83,11 @@ pub fn is_enumeration_command(command: &str) -> bool {
     matches!(
         base,
         "ls" | "tree" | "find" | "ps" | "df" | "du" | "stat" | "wc"
-    ) || (base.is_empty() && command.split_whitespace().next() == Some("env"))
+    )
+        // `extract_base_executable` strips a leading `env`/`command` wrapper, so
+        // bare `env` and `command env` both leave base empty — match on any `env`
+        // token in that case rather than only the first word (review of #203).
+        || (base.is_empty() && command.split_whitespace().any(|t| t == "env"))
 }
 
 fn looks_like_env_assignment(token: &str) -> bool {
@@ -753,13 +757,26 @@ mod tests {
             }
         };
     }
-    passthrough_test!(test_systemops_ls_passthrough, "ls_la_output.txt", "ls -l");
+    passthrough_test!(ls_passes_through_verbatim, "ls_la_output.txt", "ls -l");
     passthrough_test!(
-        test_systemops_find_passthrough,
+        find_passes_through_verbatim,
         "find_project_output.txt",
         "find ."
     );
-    passthrough_test!(test_systemops_env_passthrough, "env_output.txt", "env");
+    passthrough_test!(env_passes_through_verbatim, "env_output.txt", "env");
+
+    /// Review of #205: bare `env` and `command env` both leave `base` empty (the
+    /// wrapper is stripped), so the guard matches on any `env` token. Locks that
+    /// in — a narrowing back to "first word only" would silently drop `command
+    /// env` passthrough.
+    #[test]
+    fn treats_bare_and_wrapped_env_as_enumeration() {
+        assert!(is_enumeration_command("env"));
+        assert!(is_enumeration_command("command env"));
+        assert!(is_enumeration_command("ls -la"));
+        assert!(!is_enumeration_command("grep -r foo"));
+        assert!(!is_enumeration_command("echo hi"));
+    }
 
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
