@@ -1057,12 +1057,16 @@ mod tests {
 
     #[test]
     fn orders_filters_by_priority_with_deterministic_ties() {
+        // `aaa_low` is named so BTreeMap's alphabetical load order
+        // (aaa_low, high_a, high_b) is NOT already priority-sorted: the sort must
+        // move the low-priority filter from first to last. A no-op
+        // `sort_filters_by_priority` leaves it first and fails this test.
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
             file,
             r#"
         schema_version = 1
-        [filters.low]
+        [filters.aaa_low]
         match_command = "^tool"
         priority = 50
         [filters.high_b]
@@ -1078,15 +1082,9 @@ mod tests {
         let mut filters = load_from_file(file.path()).unwrap().filters;
         sort_filters_by_priority(&mut filters);
 
+        // Descending priority; the two 200s keep their alphabetical (stable) order.
         let names: Vec<_> = filters.iter().map(|filter| filter.name.as_str()).collect();
-        assert_eq!(names, ["high_a", "high_b", "low"]);
-        assert_eq!(
-            filters
-                .iter()
-                .map(|filter| filter.priority)
-                .collect::<Vec<_>>(),
-            [200, 200, 50]
-        );
+        assert_eq!(names, ["high_a", "high_b", "aaa_low"]);
     }
 
     #[test]
