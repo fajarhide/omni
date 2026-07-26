@@ -157,10 +157,17 @@ fn distill_diff(segments: &[OutputSegment], _input: &str) -> String {
     format!("{}\n{}", summary, out.trim())
 }
 
-fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
+fn distill_log(segments: &[OutputSegment], input: &str) -> String {
     let mut out = String::new();
+    // After a `commit <sha>` line, the first non-metadata line is the subject.
+    // Keeping every commit's full body reduced little on a verbose multi-commit
+    // log, missed the size guardrail, and the pipe's collapse fallback then
+    // dropped whole commits (#199): `git log -12` came back with 2 of 12. Keep
+    // one compact line per commit — hash + subject, the `--oneline` view — so
+    // every commit and its subject survive while the body and the
+    // Author/Date/Merge metadata go.
+    let mut awaiting_subject = false;
     for seg in segments {
-        // Look for common commit hash patterns
         for line in seg.content.lines() {
             let line = line.trim();
             if line.is_empty() {
@@ -169,37 +176,45 @@ fn distill_log(segments: &[OutputSegment], _input: &str) -> String {
 
             if line.starts_with("commit ") {
                 let hash: String = line.replace("commit ", "").chars().take(7).collect();
+                // If the previous commit had no subject line, close its line off
+                // so hashes never run together.
+                if awaiting_subject {
+                    out.push('\n');
+                }
                 out.push_str(&hash);
                 out.push(' ');
+                awaiting_subject = true;
             } else if crate::distillers::git::RE_GIT_LOG_HASH.is_match(line) {
                 // `--oneline`: the hash and the subject share one line. Taking
                 // `chars().take(7)` kept the hash and threw the subject away —
                 // the only part a reader wanted — and `push(' ')` then joined
                 // every commit into a wall of hashes reported as an ~89% saving
                 // (#107). The hash is the cheap part; the subject is the signal.
-                // Keep the line whole. (The `commit <sha>` branch above still
-                // handles verbose logs, so this only ever fires on oneline.)
+                // Keep the line whole.
                 out.push_str(line);
                 out.push('\n');
-            } else if !line.starts_with("Author:")
-                && !line.starts_with("Date:")
-                && !line.starts_with("Merge:")
+            } else if line.starts_with("Author:")
+                || line.starts_with("Date:")
+                || line.starts_with("Merge:")
             {
+                // Metadata — drop.
+            } else if awaiting_subject {
+                // First content line after `commit <sha>` is the subject.
                 out.push_str(line);
                 out.push('\n');
+                awaiting_subject = false;
             }
+            // Any further body lines before the next `commit` are dropped (#199).
         }
     }
 
     let result = out.trim().to_string();
-    if result.is_empty() && !segments.is_empty() {
-        // Last resort: take first 5 lines
-        segments[0]
-            .content
-            .lines()
-            .take(5)
-            .collect::<Vec<_>>()
-            .join("\n")
+    if result.is_empty() {
+        // Nothing matched a commit or a `--oneline` entry — this input is not a
+        // git log we can parse (the fixture harness even feeds non-log text here).
+        // Fail open: return it verbatim rather than a lossy guess or empty output
+        // (#143). Real logs always produce a compact result above.
+        input.to_string()
     } else {
         result
     }
@@ -271,5 +286,56 @@ Date:   Mon Mar 20 10:30:00 2026 +0700
             "subject dropped: {out:?}"
         );
         assert!(!out.contains("Author:"), "kept noise: {out:?}");
+    }
+
+    /// #199: a verbose multi-commit log must keep *every* commit as one compact
+    /// `hash subject` line. Before this the git_log TOML filter kept each commit's
+    /// body, blew past its `max_lines = 20`, and truncated the older commits away
+    /// with no marker (`git log -12` returned 2 of 12). The body is dropped, the
+    /// commits are not.
+    #[test]
+    fn verbose_log_keeps_every_commit_and_drops_the_body() {
+        let input = "\
+commit aaaaaaa1111111111111111111111111111111111
+Author: A <a@x.com>
+Date:   Mon Mar 20 10:00:00 2026 +0700
+
+    first subject
+
+    a body line that is not the subject
+    another body line
+
+commit bbbbbbb2222222222222222222222222222222222
+Author: B <b@x.com>
+Date:   Sun Mar 19 10:00:00 2026 +0700
+
+    second subject
+
+commit ccccccc3333333333333333333333333333333333
+Author: C <c@x.com>
+Date:   Sat Mar 18 10:00:00 2026 +0700
+
+    third subject";
+        let out = distill_log(&one_segment(input), input);
+
+        assert!(
+            out.contains("aaaaaaa first subject"),
+            "commit 1 lost: {out:?}"
+        );
+        assert!(
+            out.contains("bbbbbbb second subject"),
+            "commit 2 lost: {out:?}"
+        );
+        assert!(
+            out.contains("ccccccc third subject"),
+            "commit 3 lost: {out:?}"
+        );
+        assert!(!out.contains("a body line"), "body kept: {out:?}");
+        assert!(!out.contains("Author:"), "metadata kept: {out:?}");
+        assert_eq!(
+            out.lines().count(),
+            3,
+            "one line per commit expected: {out:?}"
+        );
     }
 }
