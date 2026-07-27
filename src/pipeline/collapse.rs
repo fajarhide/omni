@@ -392,18 +392,70 @@ fn collapse_inner(input: &str, mode: &CollapseMode) -> CollapseResult {
         }
     }
 
-    // Phase 2: Group by normalized pattern (BTreeMap for determinism)
-    let mut pattern_groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    // Phase 2: Group by pattern within segments bounded by surviving lines.
+    //
+    // Grouping across the whole output lets one marker absorb rows that a
+    // section header stands between: the count goes global while the marker
+    // sits in the first section, and the later sections come back empty (#220).
+    //
+    // A line survives when its pattern occurs fewer than MIN_GROUP_SIZE times
+    // inside its own segment, and a surviving line is itself a boundary — so
+    // the split runs to a fixpoint. What holds at the end: no surviving line
+    // lies between the first and last row of any group, which makes every count
+    // equal to the rows standing under its marker. Rows collapsed into *another*
+    // marker are not boundaries, so interleaved patterns (docker's Step /
+    // Using cache / ---> cycle) still collapse.
+    //
+    // ponytail: re-scans every round; rounds are bounded by the number of
+    // distinct patterns and settle in one or two passes on real output.
+    let mut collapsible: Vec<bool> = (0..original_count)
+        .map(|idx| {
+            !normals[idx].is_empty() && !is_critical[idx] && !raw_lines[idx].trim().is_empty()
+        })
+        .collect();
 
-    for (idx, norm) in normals.iter().enumerate() {
-        if norm.is_empty() || is_critical[idx] {
-            continue;
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+
+    loop {
+        runs.clear();
+        let mut changed = false;
+        let mut start = 0;
+
+        while start < original_count {
+            if !collapsible[start] {
+                start += 1;
+                continue;
+            }
+            let mut end = start;
+            while end < original_count && collapsible[end] {
+                end += 1;
+            }
+
+            // BTreeMap keeps the segment's own grouping deterministic.
+            let mut by_pattern: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+            for (idx, norm) in normals.iter().enumerate().take(end).skip(start) {
+                by_pattern.entry(norm.as_str()).or_default().push(idx);
+            }
+            for indices in by_pattern.into_values() {
+                if indices.len() >= MIN_GROUP_SIZE {
+                    runs.push(indices);
+                } else {
+                    for idx in indices {
+                        collapsible[idx] = false;
+                        changed = true;
+                    }
+                }
+            }
+
+            start = end;
         }
-        if raw_lines[idx].trim().is_empty() {
-            continue;
+
+        if !changed {
+            break;
         }
-        pattern_groups.entry(norm.as_str()).or_default().push(idx);
     }
+
+    runs.sort_by_key(|indices| indices[0]);
 
     // Phase 3: Determine which groups to collapse
     let has_specific_handler = matches!(
@@ -411,11 +463,7 @@ fn collapse_inner(input: &str, mode: &CollapseMode) -> CollapseResult {
         CollapseMode::Test | CollapseMode::Build | CollapseMode::Infra | CollapseMode::Log
     );
 
-    let collapsable_count: usize = pattern_groups
-        .values()
-        .filter(|v| v.len() >= MIN_GROUP_SIZE)
-        .map(|v| v.len())
-        .sum();
+    let collapsable_count: usize = runs.iter().map(|r| r.len()).sum();
 
     let repetition_ratio = collapsable_count as f32 / original_count.max(1) as f32;
     let should_collapse = has_specific_handler || repetition_ratio > GENERIC_REPETITION_THRESHOLD;
@@ -435,16 +483,12 @@ fn collapse_inner(input: &str, mode: &CollapseMode) -> CollapseResult {
     let mut groups: Vec<CollapseGroup> = Vec::new();
     let mut summary_at: BTreeMap<usize, String> = BTreeMap::new();
 
-    for (pattern, indices) in &pattern_groups {
-        if indices.len() < MIN_GROUP_SIZE {
-            continue;
-        }
-
+    for indices in &runs {
         let first = indices[0];
         let last = *indices.last().unwrap();
 
         let group = CollapseGroup {
-            pattern: pattern.to_string(),
+            pattern: normals[first].clone(),
             count: indices.len(),
             sample_line: raw_lines[first].to_string(),
             first_line: first + 1,
@@ -674,6 +718,39 @@ mod tests {
 
         let result = collapse(&input, &CollapseMode::Generic);
         assert_eq!(result.collapsed_to, result.original_lines);
+    }
+
+    /// #220: pattern grouping used to pool matches across the whole output, so
+    /// the rows of the second section were counted into the first section's
+    /// marker and deleted from where they belonged.
+    #[test]
+    fn keeps_groups_inside_their_own_section() {
+        let input = "S 1:\n\
+                     alice 2026-07-27t01:00:00z\n\
+                     alice 2026-07-27t01:00:01z\n\
+                     alice 2026-07-27t01:00:02z\n\
+                     bob 2026-07-27t02:00:00z\n\
+                     bob 2026-07-27t02:00:01z\n\
+                     bob 2026-07-27t02:00:02z\n\
+                     S 2:\n\
+                     alice 2026-07-27t03:00:00z\n\
+                     bob 2026-07-27t03:00:01z";
+
+        let result = collapse(input, &CollapseMode::Generic);
+        let output = result.collapsed_lines.join("\n");
+
+        // Each marker counts only the rows standing under it.
+        assert!(
+            result.groups.iter().all(|g| g.count == 3),
+            "counts must be per-section, got {:?}",
+            result.groups.iter().map(|g| g.count).collect::<Vec<_>>()
+        );
+        // Section 2 keeps its own rows instead of being emptied into section 1.
+        assert!(
+            output.contains("2026-07-27t03:00:00z") && output.contains("2026-07-27t03:00:01z"),
+            "section 2 rows were absorbed by section 1:\n{output}"
+        );
+        assert!(output.contains("S 2:"), "section header lost:\n{output}");
     }
 
     // ── Collapse: Empty Input ───────────────────────────
