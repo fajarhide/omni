@@ -820,7 +820,7 @@ mod tests {
     // never read. With no error segment and nothing tabular parsed it must hand
     // the DDL back verbatim.
     snapshot_test!(
-        test_database_sqlite_schema,
+        database_sqlite_schema_passes_through_verbatim,
         "sql_create.txt",
         "sqlite3 app.db .schema"
     );
