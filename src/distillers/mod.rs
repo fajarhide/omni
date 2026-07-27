@@ -794,6 +794,22 @@ mod tests {
         assert!(!passes_through_verbatim("echo hi"));
     }
 
+    /// #214 moved the interpreters into this predicate and deleted their own
+    /// routing arm, so the predicate is now the only thing keeping them out of
+    /// `BuildDistiller` *and* out of the hooks' collapse fallback. Dropping one
+    /// entry costs both at once, which is worth catching here rather than in the
+    /// integration test, where it only shows up after it has propagated.
+    #[test]
+    fn treats_bare_script_interpreters_as_passthrough() {
+        assert!(passes_through_verbatim("python3 -c \"print('x')\""));
+        assert!(passes_through_verbatim("python audit.py"));
+        assert!(passes_through_verbatim("ruby /proj/contest/verify.rb"));
+        assert!(passes_through_verbatim("/usr/bin/python3 gen.py"));
+        // `pip` and `rake` stay on the build path: their output is task oriented.
+        assert!(!passes_through_verbatim("pip install requests"));
+        assert!(!passes_through_verbatim("rake db:migrate"));
+    }
+
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
     // #106: a composite `npm run <script>` (an `&&` chain) must NOT be claimed by a
