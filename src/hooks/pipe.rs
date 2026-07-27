@@ -430,7 +430,7 @@ fn distill(
             // never fall back to collapse for them (#200).
             let collapse_savings_data =
                 if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
-                    || crate::distillers::is_enumeration_command(cmd)
+                    || crate::distillers::passes_through_verbatim(cmd)
                 {
                     None
                 } else {
