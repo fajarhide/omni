@@ -330,7 +330,7 @@ pub fn process_payload(
         // verbatim; collapsing them drops rows that are the answer, so skip the
         // fallback for them (#200).
         let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
-            && !crate::distillers::is_enumeration_command(clean_command)
+            && !crate::distillers::passes_through_verbatim(clean_command)
         {
             let collapse_result = collapse::collapse(&content, &profile.collapse);
             collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to

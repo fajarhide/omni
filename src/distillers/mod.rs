@@ -67,14 +67,27 @@ fn extract_base_executable(command: &str) -> String {
     String::new()
 }
 
-/// Enumeration commands (`ls`, `find`, `ps`, `wc`, `df`, `du`, `stat`, `tree`,
-/// and bare `env`) list distinct data one datum per line — the items *are* the
-/// answer, there is no noise to drop. They must pass through verbatim, and the
-/// hooks must also skip the collapse fallback for them (#198/#200): collapsing a
-/// process or path list into `[N similar lines collapsed]` drops rows exactly the
-/// way truncation does. `grep`/`rg` are deliberately excluded — their distiller
-/// hoists the repeated path losslessly and keeps every match.
-pub fn is_enumeration_command(command: &str) -> bool {
+/// Commands whose output `distill_with_command` hands back byte-for-byte, and
+/// which the hooks must therefore also exempt from the collapse fallback.
+///
+/// The two halves reach the same rule for different reasons:
+///
+/// * **Enumeration** (`ls`, `find`, `ps`, `wc`, `df`, `du`, `stat`, `tree`, bare
+///   `env`) lists distinct data one datum per line. The items *are* the answer
+///   and there is no noise to drop (#198/#200).
+/// * **Bare interpreters** (`python`, `python3`, `ruby`) run an arbitrary
+///   program whose stdout is the answer, not a build log (#190).
+///
+/// The single list is the point. A passthrough returns its input, so it can
+/// never beat `beats_guardrail`, so the hooks treat it as a distiller that
+/// punted and collapse it anyway — which put 40 distinct data rows behind one
+/// `[N similar lines collapsed]` marker and reported 95.7% saved (#214). Adding
+/// a passthrough arm without adding it here is that bug, so both live in one
+/// predicate rather than in a routing arm and a guard that can drift apart.
+///
+/// `grep`/`rg` are deliberately excluded: their distiller hoists the repeated
+/// path losslessly and keeps every match.
+pub fn passes_through_verbatim(command: &str) -> bool {
     let base_exec = extract_base_executable(command);
     let base = std::path::Path::new(&base_exec)
         .file_name()
@@ -82,7 +95,16 @@ pub fn is_enumeration_command(command: &str) -> bool {
         .unwrap_or(base_exec.as_str());
     matches!(
         base,
-        "ls" | "tree" | "find" | "ps" | "df" | "du" | "stat" | "wc"
+        "ls" | "tree"
+            | "find"
+            | "ps"
+            | "df"
+            | "du"
+            | "stat"
+            | "wc"
+            | "python"
+            | "python3"
+            | "ruby"
     )
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty — match on any `env`
@@ -282,22 +304,6 @@ pub fn distill_with_command(
         return build::BuildDistiller.distill(segments, input, session);
     }
 
-    // Bare script interpreters run arbitrary programs whose stdout IS the
-    // answer — not a build log. Routing `python3 -c "..."` to BuildDistiller
-    // fabricated `Build: ok` for any script that printed no error/warning line
-    // (#190) — the same class as `cargo tree` → `Build: ok` (#170). They always
-    // pass through verbatim, so we never invent a success verdict for output we
-    // cannot parse. No `contains("test")` shortcut to TestDistiller: it matched
-    // inside a `-c` code arg or a path segment (`ruby /projects/contest/x.rb`)
-    // and TestDistiller fabricates too — `Tests: 1 passed` for a script that
-    // ran no tests — which is #190 wearing a different distiller's name. Real
-    // test runners are handled upstream: `signals/tools/pytest.toml` and
-    // `mypy.toml` are TOML-first and shadow this arm for `python -m pytest|mypy`.
-    // (`pip`, `rake` stay in the build path below: their output is task oriented.)
-    if matches!(base.as_str(), "python" | "python3" | "ruby") {
-        return input.to_string();
-    }
-
     // Build tools → BuildDistiller
     if matches!(
         base.as_str(),
@@ -402,7 +408,17 @@ pub fn distill_with_command(
     // back verbatim rather than truncate it to a shorter, plausible, incomplete
     // list (#200). `grep`/`rg` are NOT here: their distiller hoists the repeated
     // path losslessly and keeps every match.
-    if is_enumeration_command(command) {
+    //
+    // The bare interpreters ride the same predicate: `python3 -c "..."` handed to
+    // BuildDistiller fabricated `Build: ok` for any script that printed no
+    // error line (#190). They sit here rather than in an arm of their own so the
+    // hooks' collapse exemption cannot drift away from the routing (#214). No
+    // `contains("test")` shortcut to TestDistiller for them, either: it matched
+    // inside a `-c` code argument or a path segment (`ruby /proj/contest/x.rb`),
+    // and TestDistiller fabricates too, which is #190 wearing another distiller's
+    // name. Real runners are handled upstream, where `signals/tools/pytest.toml`
+    // and `mypy.toml` are TOML-first and shadow this path for `python -m pytest`.
+    if passes_through_verbatim(command) {
         return input.to_string();
     }
 
@@ -771,11 +787,27 @@ mod tests {
     /// env` passthrough.
     #[test]
     fn treats_bare_and_wrapped_env_as_enumeration() {
-        assert!(is_enumeration_command("env"));
-        assert!(is_enumeration_command("command env"));
-        assert!(is_enumeration_command("ls -la"));
-        assert!(!is_enumeration_command("grep -r foo"));
-        assert!(!is_enumeration_command("echo hi"));
+        assert!(passes_through_verbatim("env"));
+        assert!(passes_through_verbatim("command env"));
+        assert!(passes_through_verbatim("ls -la"));
+        assert!(!passes_through_verbatim("grep -r foo"));
+        assert!(!passes_through_verbatim("echo hi"));
+    }
+
+    /// #214 moved the interpreters into this predicate and deleted their own
+    /// routing arm, so the predicate is now the only thing keeping them out of
+    /// `BuildDistiller` *and* out of the hooks' collapse fallback. Dropping one
+    /// entry costs both at once, which is worth catching here rather than in the
+    /// integration test, where it only shows up after it has propagated.
+    #[test]
+    fn treats_bare_script_interpreters_as_passthrough() {
+        assert!(passes_through_verbatim("python3 -c \"print('x')\""));
+        assert!(passes_through_verbatim("python audit.py"));
+        assert!(passes_through_verbatim("ruby /proj/contest/verify.rb"));
+        assert!(passes_through_verbatim("/usr/bin/python3 gen.py"));
+        // `pip` and `rake` stay on the build path: their output is task oriented.
+        assert!(!passes_through_verbatim("pip install requests"));
+        assert!(!passes_through_verbatim("rake db:migrate"));
     }
 
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
