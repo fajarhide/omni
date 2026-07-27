@@ -112,14 +112,17 @@ fn distill_query_result(input: &str) -> String {
     out.trim().to_string()
 }
 
-fn distill_db_generic(segments: &[OutputSegment], _input: &str) -> String {
+fn distill_db_generic(segments: &[OutputSegment], input: &str) -> String {
     let errors: Vec<&str> = segments
         .iter()
         .filter(|s| s.tier == SignalTier::Critical)
         .map(|s| s.content.as_str())
         .collect();
     if errors.is_empty() {
-        format!("DB: ok ({} lines output)", segments.len())
+        // Nothing was parsed. `.schema`, `.tables`, `PRAGMA` and every other
+        // non-tabular result is itself the answer, so fail open instead of
+        // asserting a health verdict the input never stated (#216).
+        input.to_string()
     } else {
         format!(
             "DB errors: {}\n{}",

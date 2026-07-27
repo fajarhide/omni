@@ -815,6 +815,15 @@ mod tests {
         "psql_error.txt",
         "psql -U postgres mydb"
     );
+    // #216: the generic arm answered a schema dump with `DB: ok (N lines
+    // output)` — a verdict invented in the success direction over a payload it
+    // never read. With no error segment and nothing tabular parsed it must hand
+    // the DDL back verbatim.
+    snapshot_test!(
+        database_sqlite_schema_passes_through_verbatim,
+        "sql_create.txt",
+        "sqlite3 app.db .schema"
+    );
     snapshot_test!(
         test_security_trivy_scan,
         "trivy_output.txt",
