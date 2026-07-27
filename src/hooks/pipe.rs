@@ -10,10 +10,7 @@ use std::time::Instant;
 
 /// Guardrail: only emit distilled output if it's at least this much smaller than
 /// input. Shared with `hooks::post_tool` via `guard::limits` (CLAUDE.md SSOT).
-use crate::guard::limits::MIN_REDUCTION_PCT;
-
-/// Maximum output size before truncation to prevent overwhelming context windows
-pub const MAX_OUTPUT_BYTES: usize = 50_000;
+use crate::guard::limits::{MAX_OUTPUT_BYTES, MIN_REDUCTION_PCT};
 
 use crate::pipeline::{Route, SessionState, collapse, scorer, toml_filter};
 use crate::store::sqlite::Store;
@@ -503,11 +500,10 @@ fn distill(
                 out.push_str("\n[Partial signal - omni learn recommended]\n");
             }
 
-            // Safety truncation
-            if out.len() > MAX_OUTPUT_BYTES {
-                crate::util::text::safe_truncate(&mut out, MAX_OUTPUT_BYTES);
-                out.push_str("\n[OMNI: output truncated]\n");
-            }
+            // Safety truncation. The marker carries the line count: `ps aux` lost
+            // 416 of 556 rows here behind a bare `[OMNI: output truncated]` while
+            // the footer reported it as a 62.2% saving (#219).
+            crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES);
 
             (
                 out,

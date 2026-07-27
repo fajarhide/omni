@@ -596,12 +596,9 @@ pub fn process_payload(
         }
     }
 
-    // Safety Truncation
-    let max_chars = 50_000;
-    if final_out.len() > max_chars {
-        crate::util::text::safe_truncate(&mut final_out, max_chars);
-        final_out.push_str("\n[OMNI: output truncated]");
-    }
+    // Safety truncation, shared with `hooks::pipe` so the cap and its marker
+    // cannot drift apart — this path spelled the limit `50_000` inline (#219).
+    crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
 
     // Build additionalContext with token savings stats
     let additional_context =
