@@ -278,14 +278,27 @@ impl TomlFilter {
             LineFilter::None => {}
         }
 
-        // 5. max_lines
-        if let Some(max) = self.max_lines
-            && lines.len() > max
-        {
-            lines.truncate(max);
-        }
+        // 5. max_lines. The cut has to say what it removed: a bare `truncate`
+        // hands back a short, well-formed, incomplete output that no reader can
+        // tell from a complete one (#111). `signals/tools/kubectl.toml` caps at
+        // 100 and shadows the Rust distiller (#110), so `kubectl get pods -A` on
+        // a 250-pod cluster returned a syntactically perfect table with 150 pods
+        // missing and nothing to say so.
+        let truncation = match self.max_lines {
+            Some(max) if lines.len() > max => {
+                let dropped = lines.len() - max;
+                lines.truncate(max);
+                Some((dropped, max))
+            }
+            _ => None,
+        };
 
-        let result = lines.join("\n");
+        let mut result = lines.join("\n");
+        if let Some((dropped, max)) = truncation {
+            result.push_str(&format!(
+                "\n[OMNI: {dropped} lines omitted by max_lines={max}]"
+            ));
+        }
 
         // 6. on_empty
         if result.trim().is_empty()
@@ -943,6 +956,65 @@ mod tests {
         let report = load_from_file(file.path()).unwrap();
         assert_eq!(report.filters.len(), 0); // Di-skip
         assert!(!report.warnings.is_empty());
+    }
+
+    /// A filter that keeps `max_lines` and nothing else, for the #111 cases.
+    fn capped_filter(max: usize) -> TomlFilter {
+        TomlFilter {
+            name: "capped".to_string(),
+            description: None,
+            confidence: 0.8,
+            match_regex: Regex::new("").unwrap(),
+            strip_ansi: false,
+            replace_rules: vec![],
+            match_output: vec![],
+            line_filter: LineFilter::None,
+            max_lines: Some(max),
+            on_empty: None,
+            project_types: None,
+            inline_tests: vec![],
+            semantic_tier: None,
+            agent_hint: None,
+            compress_ratio_target: None,
+            tool_family: None,
+            priority: 100,
+            stream_mode: false,
+        }
+    }
+
+    /// #111: `max_lines` cut the tail with a bare `truncate`, so the caller got a
+    /// short, well-formed, incomplete output with nothing to say so. On
+    /// `kubectl.toml`'s cap of 100 that is 150 pods missing from a table that
+    /// still parses.
+    #[test]
+    fn max_lines_states_how_many_lines_it_dropped() {
+        let input: String = (0..250)
+            .map(|i| format!("pod-{i} Running\n"))
+            .collect::<String>();
+
+        let out = capped_filter(100).apply(&input);
+
+        assert_eq!(
+            out.lines().filter(|l| l.starts_with("pod-")).count(),
+            100,
+            "the cap itself must still apply"
+        );
+        assert!(
+            out.contains("[OMNI: 150 lines omitted by max_lines=100]"),
+            "the cut must name what it removed: {out}"
+        );
+    }
+
+    /// The other direction: output that fits the cap is untouched, so the marker
+    /// is a report of a real loss rather than decoration on every filtered call.
+    #[test]
+    fn max_lines_leaves_output_under_the_cap_alone() {
+        let input = "pod-0 Running\npod-1 Running\n";
+
+        let out = capped_filter(100).apply(input);
+
+        assert_eq!(out, "pod-0 Running\npod-1 Running");
+        assert!(!out.contains("omitted"), "nothing was dropped: {out}");
     }
 
     #[test]
