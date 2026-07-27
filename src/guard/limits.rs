@@ -1,6 +1,15 @@
 pub const MAX_INPUT: usize = 16 * 1024 * 1024; // 16MB
 pub const WARN_INPUT: usize = 1024 * 1024; // 1MB
 
+/// Hard ceiling on what either hook path hands back once distillation is done.
+///
+/// It lives here rather than in one hook because both paths cut at it and
+/// `hooks::post_tool` used to spell it `50_000` inline, so raising the cap
+/// raised half the product (#219). Cut with `util::text::truncate_with_marker`,
+/// never a bare `safe_truncate`: this is the last thing that happens to the
+/// payload, so it has to say what it removed.
+pub const MAX_OUTPUT_BYTES: usize = 50_000;
+
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking — e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that
