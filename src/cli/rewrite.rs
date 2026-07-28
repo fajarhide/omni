@@ -2,6 +2,51 @@
 // deleted in #164 (zero invocations on record). The module stays because
 // `hooks::pre_tool` calls it on every command — see #157.
 
+/// True when the command carries its own downstream stages — a pipe, a
+/// redirect, or a chain operator standing outside quotes.
+///
+/// The rewrite wraps the **whole** command string, so `bash tidy.sh 2>&1 | tail -3`
+/// ran as `omni exec bash tidy.sh 2>&1 | tail -3`: distillation landed upstream
+/// of a pipeline the caller wrote deliberately, and `tail` returned OMNI's
+/// markers instead of the script's last three lines — the summary line the pipe
+/// existed to read (#157). A redirect is the same defect with a file on the end:
+/// `npm run build > build.log 2>&1` wrote a truncated log **plus OMNI's banner**
+/// into the file on disk, so the documented escape hatch from distillation
+/// returned less than the terminal did (#170 for cargo, #207 for npm).
+///
+/// A caller that wrote its own stages has already said how it wants the output
+/// shaped, so passing the command through untouched is the fail-open read. The
+/// PostToolUse hook still distills whatever the pipeline finally produces, so
+/// this costs no coverage on the path the agent actually reads.
+fn has_downstream_stage(cmd: &str) -> bool {
+    let mut quote: Option<char> = None;
+    let mut chars = cmd.chars();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            // Inside single quotes bash treats every byte literally, so only a
+            // double-quoted or backticked context honours the escape.
+            Some(q) => {
+                if c == '\\' && q != '\'' {
+                    chars.next();
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                '\\' => {
+                    chars.next();
+                }
+                '\'' | '"' | '`' => quote = Some(c),
+                '|' | '>' | '<' | ';' | '&' => return true,
+                _ => {}
+            },
+        }
+    }
+
+    false
+}
+
 pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
     let allow_list = [
         "git ",
@@ -19,7 +64,8 @@ pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
         "sh ",
     ];
 
-    let wants_rewrite = allow_list.iter().any(|&p| cmd_str.starts_with(p));
+    let wants_rewrite =
+        allow_list.iter().any(|&p| cmd_str.starts_with(p)) && !has_downstream_stage(cmd_str);
 
     if wants_rewrite {
         // We always try to rewrite recognized tools to capture them.
@@ -41,8 +87,58 @@ pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use super::rewrite_logic;
+
+    #[test]
+    fn rewrites_a_plain_command() {
+        assert_eq!(
+            rewrite_logic("git status")
+                .expect("git should rewrite")
+                .split(" exec ")
+                .nth(1),
+            Some("git status")
+        );
+    }
+
+    /// #157: the rewrite wrapped the whole string, so distillation sat upstream
+    /// of the caller's `tail` and the script's summary line was deleted before
+    /// `tail` ever saw it.
+    #[test]
+    fn leaves_a_command_that_pipes_into_its_own_stage() {
+        assert_eq!(rewrite_logic("bash tidy.sh 2>&1 | tail -3"), None);
+        assert_eq!(rewrite_logic("git log | head -5"), None);
+    }
+
+    /// #170 / #207: `npm run build > build.log 2>&1` wrote a truncated log plus
+    /// OMNI's banner into the file the shell was told to write.
+    #[test]
+    fn leaves_a_command_that_redirects_to_a_file() {
+        assert_eq!(rewrite_logic("npm run build > build.log 2>&1"), None);
+        assert_eq!(rewrite_logic("cargo tree > tree.log"), None);
+        assert_eq!(rewrite_logic("make ci >> ci.log"), None);
+    }
+
+    #[test]
+    fn leaves_a_chained_command() {
+        assert_eq!(rewrite_logic("npm ci && npm test"), None);
+        assert_eq!(rewrite_logic("git fetch; git status"), None);
+    }
+
+    /// An operator inside quotes is data, not a stage — blocking on it would
+    /// give up coverage for nothing.
+    #[test]
+    fn still_rewrites_when_the_operator_is_quoted() {
+        for cmd in [
+            "git commit -m \"fix: a | b\"",
+            "git log --grep 'a > b'",
+            "git commit -m \"escaped \\\" quote; still one arg\"",
+        ] {
+            assert!(
+                rewrite_logic(cmd).is_some(),
+                "quoted operator should not block the rewrite: {cmd}"
+            );
+        }
+    }
 
     #[test]
     #[cfg(windows)]

@@ -371,7 +371,11 @@ impl SqliteBackend {
                 rewind_hash  TEXT DEFAULT '',
                 command      TEXT DEFAULT '',
                 project_path TEXT DEFAULT '',
-                agent_id     TEXT DEFAULT 'unknown'
+                agent_id     TEXT DEFAULT 'unknown',
+                -- Bytes that reached a model, as against `output_bytes`, which is
+                -- only what the distiller returned. -1 means "recorded before the
+                -- column existed", never "nothing was delivered" (#212).
+                delivered_bytes INTEGER DEFAULT -1
             );
             CREATE INDEX IF NOT EXISTS idx_dist_ts ON distillations(ts);
             CREATE INDEX IF NOT EXISTS idx_dist_session ON distillations(session_id);
@@ -694,6 +698,15 @@ impl SqliteBackend {
             "ALTER TABLE distillations ADD COLUMN filtered_tokens INTEGER DEFAULT 0",
             [],
         );
+        // #212: `output_bytes` is what the distiller returned, which is not the
+        // same as what a model read. Rows written before this column exists keep
+        // the default of -1, which `omni stats` reads as "unknown" rather than as
+        // "nothing was delivered" — backfilling them from `output_bytes` would
+        // restate the old assumption as if it had been measured.
+        let _ = conn.execute(
+            "ALTER TABLE distillations ADD COLUMN delivered_bytes INTEGER DEFAULT -1",
+            [],
+        );
 
         // One-time data migration:
         // Older builds could attribute Cursor sessions as "vscode" because TERM_PROGRAM
@@ -770,8 +783,8 @@ impl SqliteBackend {
         let (col_orig, col_to) = result.collapse_savings.unwrap_or((0, 0));
         let res = conn.execute(
             "INSERT INTO distillations 
-             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path, agent_id, raw_tokens, filtered_tokens)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+             (session_id, ts, filter_name, input_bytes, output_bytes, route, score, context_score, latency_ms, rewind_hash, command, collapse_original, collapse_to, project_path, agent_id, raw_tokens, filtered_tokens, delivered_bytes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 session_id,
                 ts,
@@ -790,6 +803,7 @@ impl SqliteBackend {
                 agent_id,
                 result.raw_tokens as i64,
                 result.filtered_tokens as i64,
+                result.delivered_bytes as i64,
             ],
         );
 
@@ -1139,9 +1153,11 @@ impl SqliteBackend {
     ///
     /// `calls` / `input_bytes` / `output_bytes` cover only rows that reached an
     /// agent. `unverified` counts the ones excluded — pre-#158 Claude Code rows
-    /// whose savings the host discarded. They are reported rather than dropped
-    /// so a shrinking call count reads as the correction it is, instead of
-    /// looking like OMNI stopped working.
+    /// whose savings the host discarded, and rows whose result no model read
+    /// (#212). They are reported rather than dropped so a shrinking call count
+    /// reads as the correction it is, instead of looking like OMNI stopped
+    /// working. It is `SUM(NOT (applied))` against the same predicate, so a new
+    /// exclusion is surfaced by construction rather than by remembering to.
     pub fn get_agent_breakdown(&self, since: i64) -> Result<Vec<AgentRow>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         let applied = applied_only();
@@ -1882,11 +1898,24 @@ pub struct AgentRow {
 /// would destroy true history to remove a false column, which is what the
 /// never-drop invariant argues against.
 ///
+/// The second clause is #212, and it is the larger of the two. `omni exec` and
+/// the shell pipe write to a TTY: a human reads the result, no context holds it,
+/// nothing is billed. Compressing it may still help readability, but counting it
+/// as *tokens saved* and folding it into one headline makes the headline
+/// meaningless — those rows were **73.4% of every byte OMNI claimed to have
+/// saved all-time**, and stripping them took the figure from 66.3% to the 29.3%
+/// that Claude Code actually saw. Rows written since `delivered_bytes` exists say
+/// so themselves; older `terminal` rows are excluded by name, because the column
+/// is `-1` there and `-1` means "recorded before this was known", never "nothing
+/// was delivered".
+///
 /// Interpolated rather than bound because `POST_HOOK_FIX_TS` is a compile-time
 /// `i64` constant, never user input.
 pub(crate) fn applied_only() -> String {
     format!(
-        "NOT (agent_id = 'claude_code' AND ts < {})",
+        "NOT (agent_id = 'claude_code' AND ts < {}) \
+         AND delivered_bytes != 0 \
+         AND NOT (delivered_bytes = -1 AND agent_id = 'terminal')",
         crate::pipeline::POST_HOOK_FIX_TS
     )
 }
@@ -2302,6 +2331,44 @@ mod tests {
         assert!(tables.contains(&"execution_traces".to_string()));
     }
 
+    /// #212: `terminal` rows were 73.4% of every byte OMNI claimed to have
+    /// saved. That path writes to a TTY — a human reads it, no context holds it,
+    /// nothing is billed — so folding it into a *token* headline made the
+    /// headline describe nothing. Stripping it took the all-time figure from
+    /// 66.3% to the 29.3% Claude Code actually saw.
+    #[test]
+    fn excludes_bytes_no_model_read_from_the_savings_sum() {
+        let (store, _dir) = get_temp_store();
+
+        let row = |delivered: usize| DistillResult {
+            output: String::new(),
+            route: crate::pipeline::Route::Keep,
+            filter_name: "cat".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 1_000,
+            output_bytes: 100,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 250,
+            filtered_tokens: 25,
+            delivered_bytes: delivered,
+        };
+
+        // One call a model read, one written to a terminal.
+        store.record_distillation("s1", &row(100), "cat a.txt", "", "claude_code");
+        store.record_distillation("s1", &row(0), "cat b.txt", "", "terminal");
+
+        let (count, input, output, ..) = store.aggregate_stats(0).expect("stats");
+
+        assert_eq!(count, 1, "only the delivered call counts");
+        assert_eq!(input, 1_000);
+        assert_eq!(output, 100);
+    }
+
     #[test]
     fn record_distillation_does_not_panic() {
         let (store, _dir) = get_temp_store();
@@ -2320,6 +2387,7 @@ mod tests {
             collapse_savings: None,
             raw_tokens: 20,
             filtered_tokens: 5,
+            delivered_bytes: 10,
         };
         // Should not panic
         store.record_distillation("sess_123", &res, "npm start", "", "claude_code");
@@ -2749,19 +2817,35 @@ mod tests {
         assert_eq!((count, input, output), (1, 1000, 500));
     }
 
-    /// The `omni exec` and pipe paths wrote stdout directly and were always
-    /// genuine — the cutoff must not touch them at any timestamp.
+    /// The #158 cutoff is about a hook whose output the host ignored, so it must
+    /// not touch an agent that never used that hook, at any timestamp.
     #[test]
     fn counts_other_agents_savings_regardless_of_when_they_were_recorded() {
         let (store, _dir) = get_temp_store();
         insert_as(&store, "s1", BEFORE_FIX, "git", "git log", "Keep", "aider");
+
+        let (count, ..) = store.aggregate_stats(0).unwrap();
+
+        assert_eq!(count, 1);
+    }
+
+    /// `terminal` used to be counted here on the grounds that `omni exec` and the
+    /// pipe "wrote stdout directly and were always genuine". The compression is
+    /// genuine and it is still not a *token* saving: that output goes to a TTY,
+    /// no context holds it and nothing is billed. Those rows were 73.4% of every
+    /// byte OMNI claimed all-time, which is what made the headline describe
+    /// nothing (#212). Split from the timestamp case above because the two
+    /// exclusions have nothing to do with each other.
+    #[test]
+    fn excludes_terminal_rows_from_the_token_headline() {
+        let (store, _dir) = get_temp_store();
         insert_as(
             &store, "s1", BEFORE_FIX, "git", "git diff", "Keep", "terminal",
         );
 
         let (count, ..) = store.aggregate_stats(0).unwrap();
 
-        assert_eq!(count, 2);
+        assert_eq!(count, 0, "TTY bytes are not tokens anyone was billed for");
     }
 
     /// Excluded rows are reported, not silently missing: a call count that

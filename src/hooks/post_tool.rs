@@ -165,6 +165,38 @@ pub fn process_payload(
         return None;
     }
 
+    // The host capped this payload, which means the command produced more than
+    // arrived here — and above that size Claude Code persists the **raw** output
+    // to a file, previews the **raw** first 2 KB, and drops whatever the hook
+    // returns. Distilling it is work nobody reads, and booking the result is a
+    // saving that never happened: one such row claimed 93% compression and 6,194
+    // tokens for a 2,129-byte distillation that appears nowhere in the transcript
+    // (#212). Emit nothing, and record it as the passthrough it really is.
+    //
+    // Measured on `tool_response.stdout`, the field the host actually caps, and
+    // deliberately **not** on `normalized.content`: `normalize` folds a non-empty
+    // stderr into that string, so a 25 KB stdout beside a 6 KB stderr would clear
+    // the cap on a result the host never truncated, and this guard would decline
+    // to distil perfectly ordinary output. Found by self-review before merge;
+    // the wrong reading loses compression silently, which is the failure mode
+    // that does not announce itself.
+    let host_capped_stdout = normalized
+        .raw_response
+        .as_ref()
+        .and_then(|r| r.get("stdout"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|s| s.len() >= crate::guard::limits::HOST_OUTPUT_CAP);
+
+    if normalized.agent_id == "claude_code" && host_capped_stdout {
+        if let Some(ref s) = store {
+            s.record_passthrough(
+                &format!("{} [host output cap]", normalized.command),
+                normalized.content.len(),
+            );
+        }
+        return None;
+    }
+
     // L1-03: Streaming Distillation Support (Buffer warning & chunked processing)
     // Prevent OMNI from blocking memory if output is extremely large (> 2MB)
     let content = if normalized.content.len() > 2_000_000 {
@@ -479,7 +511,7 @@ pub fn process_payload(
         }
     }
 
-    let route = if !rewind_hash.is_empty() {
+    let mut route = if !rewind_hash.is_empty() {
         Route::Rewind
     } else if ratio >= keep_threshold {
         Route::Keep
@@ -499,6 +531,16 @@ pub fn process_payload(
         if let Some(ref s) = store {
             s.record_passthrough(clean_command, content.len());
         }
+
+        // Take the route the banner names. Prefixing `Passthrough` onto
+        // `final_out` announced "OMNI changed nothing" over bytes a distiller
+        // had already deleted lines from: four data rows of a markdown table
+        // went, the header and separator stayed, so the table read as present
+        // and empty, and the banner told the agent not to re-run (#229). Under
+        // a tenth saved there is nothing here worth a deletion, so hand back
+        // what the command produced.
+        final_out = content.clone();
+        route = Route::Passthrough;
 
         if final_out.len() < 1000 {
             // F-07: Label small passthrough output instead of silent drop
@@ -540,6 +582,12 @@ pub fn process_payload(
         collapse_savings: collapse_savings_data,
         raw_tokens,
         filtered_tokens,
+        // The hook hands this string to the host as the replacement tool result,
+        // and since #187 the host accepts it. The one path where it did not —
+        // output above the host's own cap, where the raw output is persisted and
+        // the hook's reply dropped — now returns before reaching here, so this
+        // is what the model receives (#212).
+        delivered_bytes: final_out.len(),
     };
 
     if let Some(ref s) = store {
@@ -628,8 +676,7 @@ pub fn process_payload(
     crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
 
     // Build additionalContext with token savings stats
-    let additional_context =
-        build_additional_context(&result, &session, &normalized.tool_name, &command);
+    let additional_context = build_additional_context(&result, &session);
 
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
@@ -645,15 +692,15 @@ pub fn process_payload(
 fn build_additional_context(
     result: &crate::pipeline::DistillResult,
     session: &Option<Arc<Mutex<crate::pipeline::SessionState>>>,
-    tool_name: &str,
-    command: &str,
 ) -> Option<String> {
-    let saved_this_call = if result.input_bytes > result.output_bytes {
-        let hint = crate::util::token_estimate::detect_content_hint(tool_name, command);
-        crate::util::token_estimate::estimate_tokens(result.input_bytes - result.output_bytes, hint)
-    } else {
-        0
-    };
+    // The banner and the `distillations` row describe the same call, so they
+    // must not disagree about it. They did: this read a bytes-per-token heuristic
+    // over the byte delta while the row ran a real tokenizer over each string,
+    // and on the reported call the banner said 6,194 tokens where the row said
+    // 16,983 - 1,209 = 15,774. Two live estimators, neither reconciled, one of
+    // them printed into the agent's context (#212). `raw_tokens` and
+    // `filtered_tokens` are already counted for this result — use them.
+    let saved_this_call = result.raw_tokens.saturating_sub(result.filtered_tokens);
 
     let mut session_total = 0;
     let mut command_count = 0;
@@ -858,6 +905,190 @@ mod tests {
         assert!(
             !json.contains("updatedResponse"),
             "the ignored key is back: {json}"
+        );
+    }
+
+    /// #229: `Passthrough` names a route, and the route is what the caller acts
+    /// on. The banner was prefixed onto the *distilled* string, so it announced
+    /// "OMNI changed nothing" over bytes that had already lost lines — four data
+    /// rows of a markdown table, with the header and separator left standing so
+    /// the table read as present and empty. An agent that trusts the label does
+    /// not re-run the command.
+    ///
+    /// The assertion is on the bytes under the banner, not on the banner text:
+    /// checking that the label is spelled correctly is what let this through.
+    #[test]
+    fn passthrough_returns_the_bytes_it_says_it_left_alone() {
+        let mut content = String::from("| Workload | Before | After | Savings |\n");
+        content.push_str("|-------------------|-------:|-------:|--------:|\n");
+        for i in 0..8 {
+            content.push_str(&format!("| workload-{i} | {i}00 KB | {i}0 KB | 9{i}% |\n"));
+        }
+        for i in 0..40 {
+            content.push_str(&format!(
+                "Paragraph {i} of the methodology, describing how each workload was measured.\n"
+            ));
+        }
+
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "benchreport --summary"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("hook returns output");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        assert!(
+            stdout.starts_with("[OMNI: Passthrough"),
+            "this input must take the low-compression branch, or the test guards \
+             nothing:\n{stdout}"
+        );
+        let body = stdout
+            .split_once('\n')
+            .map(|(_banner, rest)| rest)
+            .unwrap_or("");
+        assert_eq!(
+            body, content,
+            "bytes under a Passthrough banner must be what the command produced"
+        );
+    }
+
+    /// #212: Claude Code caps the hook payload, and above roughly the same size
+    /// it persists the **raw** output to a file, previews the **raw** first 2 KB,
+    /// and drops whatever the hook returns. A payload arriving at the cap is
+    /// therefore work nobody will read, and booking it is a saving that never
+    /// happened — the reported row claimed 93% compression and 6,194 tokens for
+    /// 2,129 bytes that appear nowhere in the transcript.
+    #[test]
+    fn declines_a_payload_the_host_already_capped() {
+        let capped = "x".repeat(crate::guard::limits::HOST_OUTPUT_CAP);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat /tmp/uniq.txt"},
+            "tool_response": bash_response(&capped),
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&payload, None, None).is_none(),
+            "a capped payload must be left to the host, not distilled and booked"
+        );
+    }
+
+    /// The counter-case, with size as the only variable: the same command and
+    /// the same kind of content, just under the cap, must still be distilled.
+    /// Otherwise the fix reads as "stop working above 30 KB" rather than "stop
+    /// booking what the host discards".
+    #[test]
+    fn still_distills_just_under_the_host_cap() {
+        let noisy = |len: usize| {
+            let mut s = String::new();
+            let mut i = 0;
+            while s.len() < len {
+                s.push_str(&format!("Downloading package-{i} from the registry\n"));
+                i += 1;
+            }
+            s.truncate(len);
+            s
+        };
+        let cap = crate::guard::limits::HOST_OUTPUT_CAP;
+        let cmd = "somebuildtool --verbose";
+
+        let under = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+            "tool_response": bash_response(&noisy(cap - 1)),
+        })
+        .to_string();
+        let at = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+            "tool_response": bash_response(&noisy(cap)),
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&under, None, None).is_some(),
+            "output under the cap is applied by the host and must still be distilled"
+        );
+        assert!(
+            process_payload(&at, None, None).is_none(),
+            "the same content at the cap must be left to the host"
+        );
+    }
+
+    /// Found by self-review before merge. `normalize` folds a non-empty stderr
+    /// into `content`, so measuring the cap there would decline an *uncapped*
+    /// result whose stdout and stderr merely add up past 30 KB — losing
+    /// compression on ordinary output, silently. The host caps `stdout`, so
+    /// that is the field the guard reads.
+    #[test]
+    fn does_not_mistake_stdout_plus_stderr_for_a_capped_payload() {
+        let cap = crate::guard::limits::HOST_OUTPUT_CAP;
+        let line = "Downloading a package from the registry, please wait...\n";
+        let stdout: String = line.repeat(cap * 3 / 4 / line.len());
+        let stderr: String = line.repeat(cap / 2 / line.len());
+
+        assert!(stdout.len() < cap, "stdout alone is under the cap");
+        assert!(
+            stdout.len() + stderr.len() > cap,
+            "together they clear it, which is the trap"
+        );
+
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "somebuildtool --verbose"},
+            "tool_response": {
+                "stdout": stdout,
+                "stderr": stderr,
+                "interrupted": false,
+                "isImage": false,
+            },
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&payload, None, None).is_some(),
+            "an uncapped result must still be distilled, however its streams add up"
+        );
+    }
+
+    /// #212: the banner and the `distillations` row describe the same call and
+    /// disagreed about it — the banner ran a bytes-per-token heuristic over the
+    /// byte delta while the row ran a real tokenizer over each string. On the
+    /// reported call the banner said 6,194 tokens and the row said
+    /// 16,983 - 1,209 = 15,774. The banner is the copy that enters the agent's
+    /// context, so it is the one that has to match the record.
+    #[test]
+    fn the_banner_and_the_recorded_row_agree_about_the_same_call() {
+        let result = crate::pipeline::DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "cat".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 30_000,
+            output_bytes: 2_129,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 16_983,
+            filtered_tokens: 1_209,
+            delivered_bytes: 2_129,
+        };
+
+        let banner = build_additional_context(&result, &None).expect("banner for a large saving");
+
+        assert!(
+            banner.contains("-15774tok this call"),
+            "banner must report raw_tokens - filtered_tokens, got: {banner}"
         );
     }
 

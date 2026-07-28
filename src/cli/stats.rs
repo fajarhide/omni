@@ -495,6 +495,18 @@ fn run_default(store: &Store) -> Result<()> {
         println!("{}", line);
     }
 
+    // #212: say what the number is a number *of*. It counts only calls whose
+    // result reached a model's context; `omni exec` and pipe output read at a
+    // terminal is compression a human sees, not tokens anyone was billed for,
+    // and folding the two together is what made the all-time headline 66.3%
+    // when the model-facing figure was 29.3%.
+    println!(
+        "  {}",
+        "Counts calls whose result reached a model. Terminal output is excluded — no context holds it."
+            .bright_black()
+            .italic()
+    );
+
     let top_commands = get_top_commands(store, 0, 8);
 
     if !top_commands.is_empty() {
@@ -933,7 +945,8 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                     "   {:<16} {:>5}x  {}",
                     "".bright_black(),
                     u,
-                    "unverified — recorded before #158, never applied".bright_black()
+                    "not counted — never applied (#158), or read at a terminal (#212)"
+                        .bright_black()
                 );
             }
         }
