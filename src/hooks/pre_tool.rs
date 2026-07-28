@@ -307,8 +307,11 @@ mod tests {
         assert!(output.is_none());
     }
 
+    /// #157: wrapping the whole string put distillation upstream of the pipe the
+    /// caller wrote, so `grep`/`tail` read OMNI's markers instead of the command's
+    /// output. The pipeline is left alone; the post-hook still distills the result.
     #[test]
-    fn pre_hook_handles_shell_pipes() {
+    fn pre_hook_leaves_a_command_with_its_own_pipe() {
         let input = json!({
             "tool_input": {
                 "command": "git status | grep foo"
@@ -316,7 +319,6 @@ mod tests {
         })
         .to_string();
 
-        let output = process_payload(&input, None, None).expect("Should rewrite");
-        assert!(output.contains("exec git status | grep foo"));
+        assert!(process_payload(&input, None, None).is_none());
     }
 }
