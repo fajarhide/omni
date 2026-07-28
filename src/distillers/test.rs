@@ -33,6 +33,12 @@ fn runner_summaries(input: &str) -> Vec<&str> {
 /// cargo prints one line per test and ends a passing one `... ok`. A test *named*
 /// after failure (`preserves_failed_lines ... ok`) carries the word without being
 /// one, so the name must not decide this either (#210).
+///
+/// This is also what the pass counter must use. `contains("ok")` over a whole
+/// segment matched the `ok` inside `token`, `broken` and `lookup`, so a `wc -l`
+/// line naming a log under `token-efficient/` counted as a passing test — enough
+/// to push `passed` off zero and defeat the #195 fail-open guard below, which
+/// then reported a run that exited 101 as `Tests: 1 passed, 0 failed` (#228).
 fn is_passing_test_line(line: &str) -> bool {
     line.starts_with("test ") && (line.ends_with(" ... ok") || line.ends_with(" ... ignored"))
 }
@@ -90,7 +96,7 @@ impl Distiller for TestDistiller {
             } else if seg.tier == SignalTier::Important
                 || seg.content.contains("PASS")
                 || seg.content.contains('✓')
-                || seg.content.contains("ok")
+                || seg.content.lines().map(str::trim).any(is_passing_test_line)
             {
                 passed += 1;
             }
@@ -238,6 +244,31 @@ mod tests {
         assert_eq!(
             output, input,
             "no parsed test signal must fail open, not fabricate a tally"
+        );
+    }
+
+    /// #228: the same fail-open guard, defeated by the pass counter rather than
+    /// bypassed. These are the two stdout lines a redirected `cargo test` leaves
+    /// behind; the path holds `token`, which holds `ok`, which was counted as a
+    /// passing test. A run that exited 101 arrived as `Tests: 1 passed, 0 failed`.
+    #[test]
+    fn does_not_count_the_ok_inside_a_word_as_a_passing_test() {
+        // Arrange
+        let input = "rc=101\n      24 /work/token-efficient/omni/x.log\n";
+        let segments = scorer::score_segments(
+            input,
+            registry::resolve_profile("cargo test").segmentation,
+            None,
+            "cargo test",
+        );
+
+        // Act
+        let output = TestDistiller.distill(&segments, input, None);
+
+        // Assert
+        assert_eq!(
+            output, input,
+            "a path containing `ok` is not a test result: fail open"
         );
     }
 
