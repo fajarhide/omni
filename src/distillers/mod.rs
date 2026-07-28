@@ -70,13 +70,16 @@ fn extract_base_executable(command: &str) -> String {
 /// Commands whose output `distill_with_command` hands back byte-for-byte, and
 /// which the hooks must therefore also exempt from the collapse fallback.
 ///
-/// The two halves reach the same rule for different reasons:
+/// The three halves reach the same rule for different reasons:
 ///
 /// * **Enumeration** (`ls`, `find`, `ps`, `wc`, `df`, `du`, `stat`, `tree`, bare
 ///   `env`) lists distinct data one datum per line. The items *are* the answer
 ///   and there is no noise to drop (#198/#200).
 /// * **Bare interpreters** (`python`, `python3`, `ruby`) run an arbitrary
 ///   program whose stdout is the answer, not a build log (#190).
+/// * **File readers** (`cat`, `head`, `tail`, `sed`, `awk`) emit whatever the
+///   file holds, so any shape a summariser recognises in it is a coincidence
+///   (#235/#236).
 ///
 /// The single list is the point. A passthrough returns its input, so it can
 /// never beat `beats_guardrail`, so the hooks treat it as a distiller that
@@ -105,6 +108,18 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "python"
             | "python3"
             | "ruby"
+            // File readers. Their stdout is whatever the file holds, so there is
+            // no grammar to distil and every shape a summariser recognises in it
+            // is a coincidence. `cat docs/DEVELOPMENT.md` — 127 lines of prose —
+            // came back as `tree: 127 entries` because one code block inside the
+            // document drew a directory layout (#236), and `sed -n '285,340p'` of
+            // a Swift file lost 37 of 56 lines to the enumeration cut (#235).
+            // Same reasoning as the interpreters above: an arbitrary payload.
+            | "cat"
+            | "head"
+            | "tail"
+            | "sed"
+            | "awk"
     )
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty — match on any `env`
@@ -201,36 +216,20 @@ fn shell_split_tokens(input: &str, max_tokens: usize) -> Vec<String> {
     tokens
 }
 
-fn should_passthrough_config_output(command: &str, input: &str) -> bool {
-    let line_count = input.lines().count();
-    if line_count > 500 {
-        return false;
-    }
-
-    let tokens = shell_split_tokens(command, 32);
-    if tokens.is_empty() {
-        return false;
-    }
-
-    let candidate_path = tokens
-        .iter()
-        .rev()
-        .find(|t| {
-            let s = t.as_str();
-            !s.is_empty() && s != "cat" && s != "--" && !s.starts_with('-')
-        })
-        .map(|s| s.to_string());
-
-    let Some(path) = candidate_path else {
-        return false;
-    };
-
-    let lower = path.to_lowercase();
-    lower.ends_with(".env")
-        || lower.ends_with(".toml")
-        || lower.ends_with(".yaml")
-        || lower.ends_with(".yml")
-        || lower.ends_with(".json")
+/// `gh` and `glab` are wrappers: `gh pr list` prints the enumeration
+/// `VcsDistiller` was written to summarise, and `gh api …` prints whatever the
+/// endpoint returned. The distiller cuts to the first 10 lines on size alone,
+/// with no grammar check, so a Swift file fetched through
+/// `gh api … | base64 -d | sed -n '285,340p'` lost 37 of its 56 lines under
+/// `... [37 more items — use --limit to see more]` — a flag neither `gh api`
+/// nor `sed` has, so the suggested recovery could not be run (#235). The same
+/// cut took a Homebrew cask down to 10 lines and stripped its blank lines on
+/// the way (#226).
+///
+/// `--limit` is the tell: it belongs to the `list` subcommands and nothing else,
+/// so those are the only outputs this distiller can honestly claim.
+fn is_vcs_list_command(command: &str) -> bool {
+    command.split_whitespace().any(|t| t == "list")
 }
 
 /// `--stat`, `--numstat`, `--name-only` and `--name-status` exist only to make
@@ -315,6 +314,9 @@ pub fn distill_with_command(
 
     // GitHub/VCS CLIs
     if matches!(base.as_str(), "gh" | "hub" | "glab") {
+        if !is_vcs_list_command(command) {
+            return input.to_string();
+        }
         return vcs::VcsDistiller.distill(segments, input, session);
     }
 
@@ -427,11 +429,6 @@ pub fn distill_with_command(
         return cloud::CloudDistiller { tool: &base }.distill(segments, input, session);
     }
 
-    // Config file protection: avoid over-distilling small configs
-    if base == "cat" && should_passthrough_config_output(command, input) {
-        return input.to_string();
-    }
-
     // Enumeration commands list distinct data, one datum per line, with no noise
     // to drop — the paths, filenames, processes and mounts *are* the answer. A
     // command audit (docs/COMMAND_AUDIT.md) measured every one of these either
@@ -460,15 +457,10 @@ pub fn distill_with_command(
         base.as_str(),
         "grep"
             | "rg"
-            | "cat"
-            | "head"
-            | "tail"
             | "curl"
             | "wget"
             | "sort"
             | "uniq"
-            | "awk"
-            | "sed"
             | "tar"
             | "zip"
             | "unzip"
@@ -843,6 +835,45 @@ mod tests {
         assert!(!passes_through_verbatim("rake db:migrate"));
     }
 
+    /// #236: a prose document that happens to quote a directory layout was
+    /// classified by the one line holding a box-drawing character and delivered
+    /// as `tree: N entries` — a different *kind* of thing, asserted with no
+    /// marker. Reading a file is not a grammar, so the readers pass through.
+    #[test]
+    fn hands_back_a_document_that_quotes_a_directory_tree() {
+        let doc = "# Development Guide\n\
+                   \n\
+                   Guide for contributors working on the OMNI codebase.\n\
+                   \n\
+                   ## Layout\n\
+                   \n\
+                   ```\n\
+                   src/\n\
+                   ├── main.rs\n\
+                   ├── pipeline/\n\
+                   └── distillers/\n\
+                   ```\n\
+                   \n\
+                   ## Verification — run these yourself, CI does not\n\
+                   \n\
+                   Run `yamllint` and `kubeconform` before committing manifests.\n\
+                   CI validates changed files individually and never builds an overlay.\n";
+
+        for cmd in [
+            "cat docs/DEVELOPMENT.md",
+            "head -80 docs/DEVELOPMENT.md",
+            "tail -60 CLAUDE.md",
+            "awk 'NR>10' docs/DEVELOPMENT.md",
+        ] {
+            let segments = scorer::score_with_command(doc, cmd, None);
+            assert_eq!(
+                distill_with_command(&segments, doc, cmd, None),
+                doc,
+                "`{cmd}` must hand the document back verbatim (#236)"
+            );
+        }
+    }
+
     /// #231: `--stat` exists only to produce the file list, and `distill_log`
     /// dropped every row of it while keeping the `--oneline` subject — so the
     /// output stayed well-formed, got shorter, and read as a complete answer to
@@ -871,6 +902,56 @@ mod tests {
                 "`{cmd}` asked for the file list; it must survive (#231)"
             );
         }
+    }
+
+    /// #235: a contiguous line range of source code is what the caller already
+    /// chose, so there is nothing to cut. The reported loss was 37 of 56 lines,
+    /// under a marker suggesting a `--limit` flag neither command has.
+    ///
+    /// The reported pipeline leads with `gh`, so `VcsDistiller` claimed it — the
+    /// bare `sed` form goes through the reader arm. Both are covered here
+    /// because either alone leaves the reproduction broken.
+    #[test]
+    fn hands_back_a_source_line_range_however_it_was_fetched() {
+        let mut src = String::new();
+        for i in 0..56 {
+            src.push_str(&format!(
+                "    self.frame.origin.x = offset + {i}.0 * spacing\n"
+            ));
+        }
+
+        for cmd in [
+            "sed -n '285,340p' Kit/module/module.swift",
+            "gh api repos/o/r/contents/Kit/module.swift --jq '.content' | base64 -d | sed -n '285,340p'",
+            "gh api repos/fajarhide/homebrew-tap/contents/Casks/bubo.rb --jq '.content' | base64 -d",
+        ] {
+            let segments = scorer::score_with_command(&src, cmd, None);
+            assert_eq!(
+                distill_with_command(&segments, &src, cmd, None),
+                src,
+                "`{cmd}` must not be cut to an enumeration (#235, #226)"
+            );
+        }
+    }
+
+    /// The gate must not disarm the distiller it guards: a real `gh pr list` is
+    /// still an enumeration `--limit` can re-fetch, so it still summarises.
+    #[test]
+    fn still_summarises_a_real_gh_list() {
+        let mut listing = String::new();
+        for i in 1..=25 {
+            listing.push_str(&format!(
+                "#{i}\tSome pull request title\tbranch-{i}\tOPEN\n"
+            ));
+        }
+
+        let cmd = "gh pr list --limit 25";
+        let segments = scorer::score_with_command(&listing, cmd, None);
+        let out = distill_with_command(&segments, &listing, cmd, None);
+        assert!(
+            out.contains("more items"),
+            "a gh list should still be summarised:\n{out}"
+        );
     }
 
     /// The gate must not disarm the distiller it guards: a plain `git log` is
