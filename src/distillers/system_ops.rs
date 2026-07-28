@@ -131,12 +131,34 @@ fn is_find_output(lines: &[&str]) -> bool {
     count >= 3
 }
 
+/// A fingerprint must be a token no sibling format also prints. Box-drawing
+/// connectors fail that test: `tree` prints them, and so does every document
+/// that describes a file layout — 25 markdown files in this repository alone,
+/// `CLAUDE.md` among them. Matching on `any` connector meant one such line
+/// classified the whole payload, and `distill_tree_output` replaced a 127-line
+/// prose guide with `tree: 127 entries` (#236). The `directories`/`files` half
+/// was looser still: it fired on a *comment* in this very file that names both
+/// words, which is how a 3 KB source listing came back as one line.
+///
+/// What `tree` prints that a document quoting one does not is the closing
+/// report, `N directories, M files`, on its own last line. Without it
+/// (`tree --noreport`) the connectors have to be the shape of the output rather
+/// than a passage inside it.
 fn is_tree_output(lines: &[&str]) -> bool {
-    lines.iter().any(|l| l.contains("├──") || l.contains("└──"))
-        || lines.iter().any(|l| {
-            let t = l.trim();
-            t.contains("directories") && t.contains("files")
-        })
+    let has_report = lines.iter().rev().take(3).any(|l| {
+        let t = l.trim();
+        t.starts_with(|c: char| c.is_ascii_digit()) && t.contains("director") && t.contains("file")
+    });
+    if has_report {
+        return true;
+    }
+
+    let connectors = lines
+        .iter()
+        .filter(|l| l.contains("├── ") || l.contains("└── "))
+        .count();
+    let non_empty = lines.iter().filter(|l| !l.trim().is_empty()).count();
+    connectors >= 3 && connectors * 2 > non_empty
 }
 
 fn is_env_output(lines: &[&str]) -> bool {
@@ -510,6 +532,45 @@ fn distill_fallback(segments: &[OutputSegment]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #236: the old fingerprint was `any` connector, so one quoted layout
+    /// classified a whole document, and the `directories`/`files` half fired on
+    /// a source comment naming both words. `tree`'s closing report is the token
+    /// no sibling format prints.
+    #[test]
+    fn detects_tree_output_only_by_what_tree_alone_prints() {
+        let real: Vec<&str> = vec![
+            "src",
+            "├── main.rs",
+            "├── pipeline",
+            "└── distillers",
+            "",
+            "2 directories, 2 files",
+        ];
+        assert!(is_tree_output(&real));
+
+        // `tree --noreport`: no closing line, so the connectors have to be the
+        // shape of the output rather than a passage inside it.
+        let noreport: Vec<&str> = vec!["src", "├── main.rs", "├── pipeline", "└── distillers"];
+        assert!(is_tree_output(&noreport));
+
+        // A document that quotes a layout in one code block.
+        let mut doc: Vec<&str> = vec!["# Development Guide", "", "Guide for contributors.", ""];
+        doc.extend(["```", "src/", "├── main.rs", "└── pipeline/", "```", ""]);
+        doc.extend(std::iter::repeat_n("Prose line about the pipeline.", 20));
+        assert!(!is_tree_output(&doc));
+
+        // A source listing whose comment happens to name both words.
+        let source: Vec<&str> = vec![
+            "fn distill_tree_output(input: &str) -> String {",
+            "    // Look for summary line \"N directories, M files\"",
+            "    let summary_line = input.lines().find(|l| {",
+            "        t.contains(\"director\") && t.contains(\"file\")",
+            "    });",
+            "}",
+        ];
+        assert!(!is_tree_output(&source));
+    }
 
     #[test]
     fn test_env_redaction_removes_secrets() {

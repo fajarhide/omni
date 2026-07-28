@@ -452,7 +452,7 @@ pub fn process_payload(
         }
     }
 
-    let route = if !rewind_hash.is_empty() {
+    let mut route = if !rewind_hash.is_empty() {
         Route::Rewind
     } else if ratio >= keep_threshold {
         Route::Keep
@@ -472,6 +472,16 @@ pub fn process_payload(
         if let Some(ref s) = store {
             s.record_passthrough(clean_command, content.len());
         }
+
+        // Take the route the banner names. Prefixing `Passthrough` onto
+        // `final_out` announced "OMNI changed nothing" over bytes a distiller
+        // had already deleted lines from: four data rows of a markdown table
+        // went, the header and separator stayed, so the table read as present
+        // and empty, and the banner told the agent not to re-run (#229). Under
+        // a tenth saved there is nothing here worth a deletion, so hand back
+        // what the command produced.
+        final_out = content.clone();
+        route = Route::Passthrough;
 
         if final_out.len() < 1000 {
             // F-07: Label small passthrough output instead of silent drop
@@ -831,6 +841,56 @@ mod tests {
         assert!(
             !json.contains("updatedResponse"),
             "the ignored key is back: {json}"
+        );
+    }
+
+    /// #229: `Passthrough` names a route, and the route is what the caller acts
+    /// on. The banner was prefixed onto the *distilled* string, so it announced
+    /// "OMNI changed nothing" over bytes that had already lost lines — four data
+    /// rows of a markdown table, with the header and separator left standing so
+    /// the table read as present and empty. An agent that trusts the label does
+    /// not re-run the command.
+    ///
+    /// The assertion is on the bytes under the banner, not on the banner text:
+    /// checking that the label is spelled correctly is what let this through.
+    #[test]
+    fn passthrough_returns_the_bytes_it_says_it_left_alone() {
+        let mut content = String::from("| Workload | Before | After | Savings |\n");
+        content.push_str("|-------------------|-------:|-------:|--------:|\n");
+        for i in 0..8 {
+            content.push_str(&format!("| workload-{i} | {i}00 KB | {i}0 KB | 9{i}% |\n"));
+        }
+        for i in 0..40 {
+            content.push_str(&format!(
+                "Paragraph {i} of the methodology, describing how each workload was measured.\n"
+            ));
+        }
+
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "benchreport --summary"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("hook returns output");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        assert!(
+            stdout.starts_with("[OMNI: Passthrough"),
+            "this input must take the low-compression branch, or the test guards \
+             nothing:\n{stdout}"
+        );
+        let body = stdout
+            .split_once('\n')
+            .map(|(_banner, rest)| rest)
+            .unwrap_or("");
+        assert_eq!(
+            body, content,
+            "bytes under a Passthrough banner must be what the command produced"
         );
     }
 
