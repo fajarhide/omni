@@ -145,9 +145,22 @@ pub fn process_payload(
     // saving that never happened: one such row claimed 93% compression and 6,194
     // tokens for a 2,129-byte distillation that appears nowhere in the transcript
     // (#212). Emit nothing, and record it as the passthrough it really is.
-    if normalized.agent_id == "claude_code"
-        && normalized.content.len() >= crate::guard::limits::HOST_OUTPUT_CAP
-    {
+    //
+    // Measured on `tool_response.stdout`, the field the host actually caps, and
+    // deliberately **not** on `normalized.content`: `normalize` folds a non-empty
+    // stderr into that string, so a 25 KB stdout beside a 6 KB stderr would clear
+    // the cap on a result the host never truncated, and this guard would decline
+    // to distil perfectly ordinary output. Found by self-review before merge;
+    // the wrong reading loses compression silently, which is the failure mode
+    // that does not announce itself.
+    let host_capped_stdout = normalized
+        .raw_response
+        .as_ref()
+        .and_then(|r| r.get("stdout"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|s| s.len() >= crate::guard::limits::HOST_OUTPUT_CAP);
+
+    if normalized.agent_id == "claude_code" && host_capped_stdout {
         if let Some(ref s) = store {
             s.record_passthrough(
                 &format!("{} [host output cap]", normalized.command),
@@ -919,6 +932,42 @@ mod tests {
         assert!(
             process_payload(&at, None, None).is_none(),
             "the same content at the cap must be left to the host"
+        );
+    }
+
+    /// Found by self-review before merge. `normalize` folds a non-empty stderr
+    /// into `content`, so measuring the cap there would decline an *uncapped*
+    /// result whose stdout and stderr merely add up past 30 KB — losing
+    /// compression on ordinary output, silently. The host caps `stdout`, so
+    /// that is the field the guard reads.
+    #[test]
+    fn does_not_mistake_stdout_plus_stderr_for_a_capped_payload() {
+        let cap = crate::guard::limits::HOST_OUTPUT_CAP;
+        let line = "Downloading a package from the registry, please wait...\n";
+        let stdout: String = line.repeat(cap * 3 / 4 / line.len());
+        let stderr: String = line.repeat(cap / 2 / line.len());
+
+        assert!(stdout.len() < cap, "stdout alone is under the cap");
+        assert!(
+            stdout.len() + stderr.len() > cap,
+            "together they clear it, which is the trap"
+        );
+
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "somebuildtool --verbose"},
+            "tool_response": {
+                "stdout": stdout,
+                "stderr": stderr,
+                "interrupted": false,
+                "isImage": false,
+            },
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&payload, None, None).is_some(),
+            "an uncapped result must still be distilled, however its streams add up"
         );
     }
 
