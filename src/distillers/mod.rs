@@ -125,6 +125,11 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         // bare `env` and `command env` both leave base empty — match on any `env`
         // token in that case rather than only the first word (review of #203).
         || (base.is_empty() && command.split_whitespace().any(|t| t == "env"))
+        // A git command asked for a file list by flag rather than by name (#231).
+        // It belongs here and not only in the routing arm: a passthrough that the
+        // collapse fallback then folds up is #214, and the file rows of a
+        // `--stat` all share a shape.
+        || (base == "git" && git_enumerates_files(command))
 }
 
 fn looks_like_env_assignment(token: &str) -> bool {
@@ -227,6 +232,31 @@ fn is_vcs_list_command(command: &str) -> bool {
     command.split_whitespace().any(|t| t == "list")
 }
 
+/// `--stat`, `--numstat`, `--name-only` and `--name-status` exist only to make
+/// git emit a file list. The flag is a reliable signal in a way the subcommand
+/// is not: `git show` without one prints a diff and is legitimately distillable,
+/// and with one it prints the enumeration that *is* the answer.
+///
+/// `git show --stat` reached `distill_log`, because the input holds no
+/// `diff --git` and no `On branch`. There the `--oneline` subject matched
+/// `RE_GIT_LOG_HASH` and was kept, while the stat rows fell past every arm to
+/// the rule that drops body lines before the next commit (#199) — correct for
+/// `git log`, wrong for `git show`, where that position holds the payload. The
+/// fail-open guard below `distill_log` then did not fire, because `result` was
+/// non-empty: one line *had* been recognised. That is #228 again in a different
+/// distiller — a partial recognition disarming a guard whose condition is
+/// "recognised nothing" — and it published a 79.9% saving for a commit whose
+/// four files, three of them screenshots, had all vanished from the answer
+/// (#231).
+fn git_enumerates_files(command: &str) -> bool {
+    command.split_whitespace().any(|t| {
+        matches!(
+            t,
+            "--stat" | "--numstat" | "--shortstat" | "--name-only" | "--name-status"
+        )
+    })
+}
+
 /// Zero-state guard: a distiller may emit a success/clean summary only if it
 /// positively parsed a recognized signal. With no evidence anything was parsed,
 /// fail open by returning the raw input unchanged — never a synthesized
@@ -260,6 +290,9 @@ pub fn distill_with_command(
 
     // Git subcommand routing
     if base == "git" {
+        if git_enumerates_files(command) {
+            return input.to_string();
+        }
         return git::GitDistiller.distill(segments, input, session);
     }
 
@@ -841,6 +874,36 @@ mod tests {
         }
     }
 
+    /// #231: `--stat` exists only to produce the file list, and `distill_log`
+    /// dropped every row of it while keeping the `--oneline` subject — so the
+    /// output stayed well-formed, got shorter, and read as a complete answer to
+    /// a question it no longer answered. The reporter was checking whether
+    /// `git add -A` had swept three screenshots into a commit; it came back
+    /// naming no files.
+    #[test]
+    fn hands_back_the_file_rows_git_was_asked_to_enumerate() {
+        let stat = "9cd7a80 docs(changelog): record the #228 pass-counter fix\n \
+                    CHANGELOG.md | 1 +\n \
+                    media/shot-a.png | Bin 0 -> 12043 bytes\n \
+                    media/shot-b.png | Bin 0 -> 9981 bytes\n \
+                    media/shot-c.png | Bin 0 -> 11202 bytes\n \
+                    4 files changed, 1 insertion(+)\n";
+
+        for cmd in [
+            "git show --stat --oneline HEAD",
+            "git log --stat -3",
+            "git show --name-only HEAD",
+            "git diff --numstat main",
+        ] {
+            let segments = scorer::score_with_command(stat, cmd, None);
+            assert_eq!(
+                distill_with_command(&segments, stat, cmd, None),
+                stat,
+                "`{cmd}` asked for the file list; it must survive (#231)"
+            );
+        }
+    }
+
     /// #235: a contiguous line range of source code is what the caller already
     /// chose, so there is nothing to cut. The reported loss was 37 of 56 lines,
     /// under a marker suggesting a `--limit` flag neither command has.
@@ -888,6 +951,36 @@ mod tests {
         assert!(
             out.contains("more items"),
             "a gh list should still be summarised:\n{out}"
+        );
+    }
+
+    /// The gate must not disarm the distiller it guards: a plain `git log` is
+    /// still summarised, so the fix is not a blanket passthrough for `git`.
+    #[test]
+    fn still_distills_a_plain_git_log() {
+        let log = "commit a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\n\
+                   Author: Someone <someone@example.com>\n\
+                   Date:   Mon Jul 27 10:00:00 2026 +0700\n\
+                   \n\
+                       fix(collapse): keep a group inside its section\n\
+                   \n\
+                   commit b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1\n\
+                   Author: Someone <someone@example.com>\n\
+                   Date:   Mon Jul 27 09:00:00 2026 +0700\n\
+                   \n\
+                       test(perf): widen the latency budget\n";
+
+        let cmd = "git log -2";
+        let segments = scorer::score_with_command(log, cmd, None);
+        let out = distill_with_command(&segments, log, cmd, None);
+
+        assert!(
+            !out.contains("Author:"),
+            "plain `git log` must still drop metadata:\n{out}"
+        );
+        assert!(
+            out.contains("fix(collapse)") && out.contains("test(perf)"),
+            "every subject must survive:\n{out}"
         );
     }
 
