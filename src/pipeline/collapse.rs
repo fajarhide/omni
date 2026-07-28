@@ -149,6 +149,19 @@ fn is_git_hash_line(trimmed: &str) -> bool {
 
 /// Content-type aware normalization. For test/build output, use a more
 /// aggressive "template extraction" that groups lines with the same structure.
+///
+/// `Generic` groups on the **whole line**, and that asymmetry is the point.
+/// Skeleton grouping is only safe where something already established that the
+/// varying token is noise: a crate version in `Compiling serde v1.0.217`, a test
+/// name in `test foo::bar ... ok`, a layer hash after `--->`. `Generic` is the
+/// fallback for commands no distiller claimed, so nothing established anything —
+/// and `normalize_structural` rewrites every digit run to `#`, which made
+/// fourteen distinct issue numbers one pattern and deleted all fourteen behind
+/// `[14 similar lines collapsed] (pattern: "now\t##")` (#232). A count that
+/// identifies nothing leaves re-running with distillation bypassed as the only
+/// recovery, which is the token-negative outcome collapse exists to avoid.
+///
+/// Identical lines are still repetition by any reading, so they still collapse.
 fn normalize_for_content(clean: &str, mode: &CollapseMode) -> String {
     let trimmed = clean.trim();
 
@@ -157,7 +170,7 @@ fn normalize_for_content(clean: &str, mode: &CollapseMode) -> String {
         CollapseMode::Build => normalize_build_line(trimmed),
         CollapseMode::Infra => normalize_infra_line(trimmed),
         CollapseMode::Log => normalize_log_line(trimmed),
-        _ => normalize_structural(trimmed),
+        CollapseMode::Generic => trimmed.to_string(),
     }
 }
 
@@ -723,34 +736,128 @@ mod tests {
     /// #220: pattern grouping used to pool matches across the whole output, so
     /// the rows of the second section were counted into the first section's
     /// marker and deleted from where they belonged.
+    ///
+    /// The rows carried distinct timestamps when this was written, which only
+    /// grouped because `Generic` normalised digits away. #232 stopped that, and
+    /// leaving the old data here would have left the test passing over an empty
+    /// `groups` — green, and asserting nothing. The rows are now literally
+    /// repeated, which is what `Generic` still collapses, so the same invariant
+    /// is exercised rather than quietly retired.
     #[test]
     fn keeps_groups_inside_their_own_section() {
         let input = "S 1:\n\
-                     alice 2026-07-27t01:00:00z\n\
-                     alice 2026-07-27t01:00:01z\n\
-                     alice 2026-07-27t01:00:02z\n\
-                     bob 2026-07-27t02:00:00z\n\
-                     bob 2026-07-27t02:00:01z\n\
-                     bob 2026-07-27t02:00:02z\n\
+                     alice ok\n\
+                     alice ok\n\
+                     alice ok\n\
+                     bob ok\n\
+                     bob ok\n\
+                     bob ok\n\
                      S 2:\n\
-                     alice 2026-07-27t03:00:00z\n\
-                     bob 2026-07-27t03:00:01z";
+                     alice ok\n\
+                     bob ok";
 
         let result = collapse(input, &CollapseMode::Generic);
         let output = result.collapsed_lines.join("\n");
 
         // Each marker counts only the rows standing under it.
+        assert_eq!(result.groups.len(), 2, "expected one group per name");
         assert!(
             result.groups.iter().all(|g| g.count == 3),
             "counts must be per-section, got {:?}",
             result.groups.iter().map(|g| g.count).collect::<Vec<_>>()
         );
         // Section 2 keeps its own rows instead of being emptied into section 1.
-        assert!(
-            output.contains("2026-07-27t03:00:00z") && output.contains("2026-07-27t03:00:01z"),
-            "section 2 rows were absorbed by section 1:\n{output}"
+        assert_eq!(
+            output.lines().filter(|l| l.trim() == "alice ok").count(),
+            1,
+            "section 2's row was absorbed by section 1:\n{output}"
+        );
+        assert_eq!(
+            output.lines().filter(|l| l.trim() == "bob ok").count(),
+            1,
+            "section 2's row was absorbed by section 1:\n{output}"
         );
         assert!(output.contains("S 2:"), "section header lost:\n{output}");
+    }
+
+    /// #232: `normalize_structural` rewrites every digit run to `#`, so fourteen
+    /// distinct issue numbers became one pattern and all fourteen were deleted
+    /// behind a marker that identifies none of them. The count survives and the
+    /// data does not, which leaves re-running with distillation bypassed as the
+    /// only recovery — the token-negative outcome collapse exists to avoid.
+    #[test]
+    fn keeps_rows_that_share_a_shape_but_not_a_value() {
+        let mut input = String::from("Lane\tIssue\n");
+        for n in 224..238 {
+            input.push_str(&format!("Now\t#{n}\n"));
+        }
+
+        let result = collapse(&input, &CollapseMode::Generic);
+        let output = result.collapsed_lines.join("\n");
+
+        assert!(
+            !output.contains("similar lines collapsed"),
+            "distinct identifiers must not be folded into one marker:\n{output}"
+        );
+        for n in 224..238 {
+            assert!(
+                output.contains(&format!("#{n}")),
+                "issue #{n} was deleted:\n{output}"
+            );
+        }
+    }
+
+    /// The counter-case. Literally repeated lines are repetition under any
+    /// reading, so `Generic` must still collapse them — otherwise #232's fix is
+    /// just "stop collapsing", which is not a fix.
+    #[test]
+    fn still_collapses_literally_repeated_lines() {
+        let mut input = String::new();
+        for _ in 0..40 {
+            input.push_str("Processing item 1 of 100...\n");
+        }
+        for i in 0..10 {
+            input.push_str(&format!("Unique line number {}\n", i * 1000));
+        }
+
+        let result = collapse(&input, &CollapseMode::Generic);
+        assert!(
+            result.collapsed_to < result.original_lines,
+            "40 identical lines must still collapse: {} -> {}",
+            result.original_lines,
+            result.collapsed_to
+        );
+    }
+
+    /// #226: a Homebrew cask's four `end` lines were folded into one marker
+    /// dropped in the wrong position, so `on_intel`, `postflight` and the outer
+    /// `cask` block all lost their terminator and what reached the agent was
+    /// invalid Ruby that reads as a complete file. #227's per-section grouping
+    /// is what fixed it — the blank line between blocks is a boundary — and this
+    /// locks that in, since the reporter saw it on a released 0.6.7 that did not
+    /// yet carry #227.
+    #[test]
+    fn keeps_every_block_terminator_in_a_ruby_cask() {
+        let cask = "cask \"bubo\" do\n  version \"1.2\"\n\n  on_arm do\n    \
+                    sha256 \"1533b019\"\n    url \"https://example.com/a.dmg\"\n  end\n\n  \
+                    on_intel do\n    sha256 \"089055c6\"\n    url \"https://example.com/b.dmg\"\n  end\n\n  \
+                    name \"Bubo\"\n  desc \"A thing\"\n  homepage \"https://example.com\"\n\n  \
+                    app \"Bubo.app\"\n\n  postflight do\n    system_command \"/usr/bin/xattr\",\n                   \
+                    args: [\"-dr\", \"com.apple.quarantine\"]\n  end\n\n  \
+                    zap trash: \"~/Library/Preferences/local.bubo.plist\"\nend\n";
+
+        let result = collapse(cask, &CollapseMode::Generic);
+        let output = result.collapsed_lines.join("\n");
+
+        assert_eq!(
+            output.lines().filter(|l| l.trim() == "end").count(),
+            4,
+            "every block terminator must survive; `end` is syntax, not noise:\n{output}"
+        );
+        assert!(
+            !output.contains("similar lines collapsed"),
+            "no marker should stand in for a terminator:\n{output}"
+        );
     }
 
     // ── Collapse: Empty Input ───────────────────────────

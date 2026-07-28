@@ -50,7 +50,17 @@ impl Distiller for GenericDistiller {
                 if let Some(last) = last_idx
                     && i > last + 1
                 {
-                    out.push_str("... [omitted]\n");
+                    // A bare marker cannot be acted on: one dropped line and
+                    // forty read the same, so the caller cannot tell whether
+                    // re-running is worth it. Every other cut in this codebase
+                    // states a count (#111, #219, #188); this one did not, and
+                    // four rows of a markdown table went missing behind it while
+                    // the header and separator stayed (#229).
+                    let dropped: usize = segments[last + 1..i]
+                        .iter()
+                        .map(|s| s.content.lines().count().max(1))
+                        .sum();
+                    out.push_str(&format!("... [{} lines omitted]\n", dropped));
                 }
                 out.push_str(&seg.content);
                 out.push('\n');
@@ -81,6 +91,34 @@ impl Distiller for GenericDistiller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #229: the gap marker was a bare `... [omitted]`, so one dropped line and
+    /// forty read the same and the caller could not judge whether to re-run.
+    /// Every other cut in this codebase states a count (#111, #219, #188).
+    #[test]
+    fn gap_marker_states_how_many_lines_went() {
+        let segments: Vec<OutputSegment> = (0..10)
+            .map(|i| OutputSegment {
+                // Keep the ends and drop the middle six.
+                content: format!("row {i}"),
+                tier: if !(2..=7).contains(&i) {
+                    SignalTier::Important
+                } else {
+                    SignalTier::Noise
+                },
+                base_score: 0.0,
+                context_score: 0.0,
+                line_range: (i, i),
+            })
+            .collect();
+
+        let output = GenericDistiller.distill(&segments, "", None);
+
+        assert!(
+            output.contains("... [6 lines omitted]"),
+            "the gap marker must carry its count:\n{output}"
+        );
+    }
 
     #[test]
     fn test_generic_distiller_prioritizes_important() {
