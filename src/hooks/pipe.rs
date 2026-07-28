@@ -318,6 +318,7 @@ fn stream_distill<R: Read, W: Write, E: Write>(
             collapse_savings: None,
             raw_tokens: (raw_bytes / 4),
             filtered_tokens: (filtered_bytes / 4),
+            delivered_bytes: delivered_bytes(filtered_bytes),
         };
 
         s.record_distillation(&session_id, &distill_result, cmd, &project_path, &agent_id);
@@ -563,6 +564,7 @@ fn persist<E: Write>(
             collapse_savings: result.collapse_savings,
             raw_tokens,
             filtered_tokens,
+            delivered_bytes: delivered_bytes(result.best_output().len()),
         };
 
         let agent_id = resolve_pipe_agent_id();
@@ -648,6 +650,26 @@ fn resolve_pipe_agent_id() -> String {
     }
 
     crate::agents::multiagent::detect_agent_id()
+}
+
+/// Bytes from this run that reach a model's context.
+///
+/// On the exec and pipe paths OMNI writes to its own stdout, so whether anything
+/// that bills tokens is on the other end is decided by what stdout is attached
+/// to: a TTY means a human is reading and no context holds the result, while a
+/// pipe or a captured tool result means something downstream does. That
+/// distinction is the whole of #212's first finding — `agent_id='terminal'` rows
+/// were 73.4% of every byte OMNI claimed to have saved, folded into one headline
+/// with the rows that really are tokens.
+///
+/// `is_terminal()` is a property of the process, not a guess about the caller,
+/// which is what makes this measurable rather than aspirational.
+fn delivered_bytes(output_len: usize) -> usize {
+    if std::io::stdout().is_terminal() {
+        0
+    } else {
+        output_len
+    }
 }
 
 fn emit_output<W: Write, E: Write>(

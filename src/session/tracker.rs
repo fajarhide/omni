@@ -500,6 +500,7 @@ mod tests {
             collapse_savings: None,
             raw_tokens: 0,
             filtered_tokens: 0,
+            delivered_bytes: 0,
         };
 
         tracker.track_command("git status", "On branch main", &res);

@@ -7,62 +7,6 @@ pub enum ContentHint {
     Mixed,
 }
 
-pub fn detect_content_hint(tool_name: &str, command_or_path: &str) -> ContentHint {
-    let lower = command_or_path.to_lowercase();
-    match tool_name {
-        "Read" | "Edit" | "Write" | "Create" | "MultiEdit" => {
-            if lower.ends_with(".json")
-                || lower.ends_with(".toml")
-                || lower.ends_with(".yaml")
-                || lower.ends_with(".yml")
-            {
-                ContentHint::Json
-            } else if lower.ends_with(".rs")
-                || lower.ends_with(".py")
-                || lower.ends_with(".ts")
-                || lower.ends_with(".js")
-                || lower.ends_with(".go")
-                || lower.ends_with(".c")
-                || lower.ends_with(".cpp")
-                || lower.ends_with(".h")
-                || lower.ends_with(".java")
-                || lower.ends_with(".cs")
-            {
-                ContentHint::Code
-            } else if lower.ends_with(".md") || lower.ends_with(".txt") {
-                ContentHint::Prose
-            } else {
-                ContentHint::Mixed
-            }
-        }
-        "Bash" => {
-            if lower.contains("build")
-                || lower.contains("make")
-                || lower.contains("cargo")
-                || lower.contains("npm install")
-            {
-                ContentHint::BuildLog
-            } else if lower.contains("cat ")
-                && (lower.ends_with(".json")
-                    || lower.ends_with(".toml")
-                    || lower.ends_with(".yaml"))
-            {
-                ContentHint::Json
-            } else if lower.contains("cat ")
-                && (lower.ends_with(".rs") || lower.ends_with(".py") || lower.ends_with(".ts"))
-            {
-                ContentHint::Code
-            } else if lower.contains("cat ") && (lower.ends_with(".md") || lower.ends_with(".txt"))
-            {
-                ContentHint::Prose
-            } else {
-                ContentHint::Mixed
-            }
-        }
-        _ => ContentHint::Mixed,
-    }
-}
-
 use std::sync::OnceLock;
 use tiktoken_rs::CoreBPE;
 

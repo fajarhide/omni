@@ -138,6 +138,25 @@ pub fn process_payload(
         return None;
     }
 
+    // The host capped this payload, which means the command produced more than
+    // arrived here — and above that size Claude Code persists the **raw** output
+    // to a file, previews the **raw** first 2 KB, and drops whatever the hook
+    // returns. Distilling it is work nobody reads, and booking the result is a
+    // saving that never happened: one such row claimed 93% compression and 6,194
+    // tokens for a 2,129-byte distillation that appears nowhere in the transcript
+    // (#212). Emit nothing, and record it as the passthrough it really is.
+    if normalized.agent_id == "claude_code"
+        && normalized.content.len() >= crate::guard::limits::HOST_OUTPUT_CAP
+    {
+        if let Some(ref s) = store {
+            s.record_passthrough(
+                &format!("{} [host output cap]", normalized.command),
+                normalized.content.len(),
+            );
+        }
+        return None;
+    }
+
     // L1-03: Streaming Distillation Support (Buffer warning & chunked processing)
     // Prevent OMNI from blocking memory if output is extremely large (> 2MB)
     let content = if normalized.content.len() > 2_000_000 {
@@ -513,6 +532,12 @@ pub fn process_payload(
         collapse_savings: collapse_savings_data,
         raw_tokens,
         filtered_tokens,
+        // The hook hands this string to the host as the replacement tool result,
+        // and since #187 the host accepts it. The one path where it did not —
+        // output above the host's own cap, where the raw output is persisted and
+        // the hook's reply dropped — now returns before reaching here, so this
+        // is what the model receives (#212).
+        delivered_bytes: final_out.len(),
     };
 
     if let Some(ref s) = store {
@@ -601,8 +626,7 @@ pub fn process_payload(
     crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
 
     // Build additionalContext with token savings stats
-    let additional_context =
-        build_additional_context(&result, &session, &normalized.tool_name, &command);
+    let additional_context = build_additional_context(&result, &session);
 
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
@@ -618,15 +642,15 @@ pub fn process_payload(
 fn build_additional_context(
     result: &crate::pipeline::DistillResult,
     session: &Option<Arc<Mutex<crate::pipeline::SessionState>>>,
-    tool_name: &str,
-    command: &str,
 ) -> Option<String> {
-    let saved_this_call = if result.input_bytes > result.output_bytes {
-        let hint = crate::util::token_estimate::detect_content_hint(tool_name, command);
-        crate::util::token_estimate::estimate_tokens(result.input_bytes - result.output_bytes, hint)
-    } else {
-        0
-    };
+    // The banner and the `distillations` row describe the same call, so they
+    // must not disagree about it. They did: this read a bytes-per-token heuristic
+    // over the byte delta while the row ran a real tokenizer over each string,
+    // and on the reported call the banner said 6,194 tokens where the row said
+    // 16,983 - 1,209 = 15,774. Two live estimators, neither reconciled, one of
+    // them printed into the agent's context (#212). `raw_tokens` and
+    // `filtered_tokens` are already counted for this result — use them.
+    let saved_this_call = result.raw_tokens.saturating_sub(result.filtered_tokens);
 
     let mut session_total = 0;
     let mut command_count = 0;
@@ -831,6 +855,104 @@ mod tests {
         assert!(
             !json.contains("updatedResponse"),
             "the ignored key is back: {json}"
+        );
+    }
+
+    /// #212: Claude Code caps the hook payload, and above roughly the same size
+    /// it persists the **raw** output to a file, previews the **raw** first 2 KB,
+    /// and drops whatever the hook returns. A payload arriving at the cap is
+    /// therefore work nobody will read, and booking it is a saving that never
+    /// happened — the reported row claimed 93% compression and 6,194 tokens for
+    /// 2,129 bytes that appear nowhere in the transcript.
+    #[test]
+    fn declines_a_payload_the_host_already_capped() {
+        let capped = "x".repeat(crate::guard::limits::HOST_OUTPUT_CAP);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat /tmp/uniq.txt"},
+            "tool_response": bash_response(&capped),
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&payload, None, None).is_none(),
+            "a capped payload must be left to the host, not distilled and booked"
+        );
+    }
+
+    /// The counter-case, with size as the only variable: the same command and
+    /// the same kind of content, just under the cap, must still be distilled.
+    /// Otherwise the fix reads as "stop working above 30 KB" rather than "stop
+    /// booking what the host discards".
+    #[test]
+    fn still_distills_just_under_the_host_cap() {
+        let noisy = |len: usize| {
+            let mut s = String::new();
+            let mut i = 0;
+            while s.len() < len {
+                s.push_str(&format!("Downloading package-{i} from the registry\n"));
+                i += 1;
+            }
+            s.truncate(len);
+            s
+        };
+        let cap = crate::guard::limits::HOST_OUTPUT_CAP;
+        let cmd = "somebuildtool --verbose";
+
+        let under = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+            "tool_response": bash_response(&noisy(cap - 1)),
+        })
+        .to_string();
+        let at = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+            "tool_response": bash_response(&noisy(cap)),
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&under, None, None).is_some(),
+            "output under the cap is applied by the host and must still be distilled"
+        );
+        assert!(
+            process_payload(&at, None, None).is_none(),
+            "the same content at the cap must be left to the host"
+        );
+    }
+
+    /// #212: the banner and the `distillations` row describe the same call and
+    /// disagreed about it — the banner ran a bytes-per-token heuristic over the
+    /// byte delta while the row ran a real tokenizer over each string. On the
+    /// reported call the banner said 6,194 tokens and the row said
+    /// 16,983 - 1,209 = 15,774. The banner is the copy that enters the agent's
+    /// context, so it is the one that has to match the record.
+    #[test]
+    fn the_banner_and_the_recorded_row_agree_about_the_same_call() {
+        let result = crate::pipeline::DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "cat".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 30_000,
+            output_bytes: 2_129,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 16_983,
+            filtered_tokens: 1_209,
+            delivered_bytes: 2_129,
+        };
+
+        let banner = build_additional_context(&result, &None).expect("banner for a large saving");
+
+        assert!(
+            banner.contains("-15774tok this call"),
+            "banner must report raw_tokens - filtered_tokens, got: {banner}"
         );
     }
 

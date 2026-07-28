@@ -10,6 +10,23 @@ pub const WARN_INPUT: usize = 1024 * 1024; // 1MB
 /// payload, so it has to say what it removed.
 pub const MAX_OUTPUT_BYTES: usize = 50_000;
 
+/// The size at which Claude Code stops passing a Bash result to the hook whole.
+///
+/// The host truncates the payload at this many bytes, so a distillation measured
+/// against it is measured against a number the host already chose, not against
+/// what the command produced. Above roughly the same threshold the host also
+/// writes the **raw** output to a file, previews the **raw** first 2 KB, and
+/// discards whatever the hook returns — so on that path OMNI's work is thrown
+/// away and the saving it booked never happened. 43 rows in the maintainer's DB
+/// sit at exactly this size, from 2026-07-08 onward, one of them booked as
+/// 93% compression and 6,194 tokens for a distillation the model never saw
+/// (#212).
+///
+/// Detection is `>=` rather than `==` because `hooks::normalize` folds a
+/// non-empty stderr into the content, which can carry a capped payload past the
+/// cap by a few bytes. Nothing legitimate arrives above it on this path.
+pub const HOST_OUTPUT_CAP: usize = 30_000;
+
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking — e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that
