@@ -277,6 +277,23 @@ pub struct DistillResult {
     pub collapse_savings: Option<(usize, usize)>, // (original_lines, collapsed_to)
     pub raw_tokens: usize,
     pub filtered_tokens: usize,
+    /// Bytes that reach a model's context, as against `output_bytes`, which is
+    /// only what the distiller returned.
+    ///
+    /// The two are not the same thing and the difference is what made the
+    /// headline untrue: on Claude Code's large-output path the host discarded
+    /// OMNI's result and persisted the raw output, while `output_bytes` recorded
+    /// a 93% saving for it (#212). It is 0 where no model reads the path at all —
+    /// `omni exec` and the shell pipe write to a TTY, and those rows were 73% of
+    /// every byte OMNI claimed to have saved, in a unit where "tokens" means
+    /// nothing.
+    ///
+    /// **This is derived, not acknowledged.** No host tells a hook whether it
+    /// applied the replacement, so this records what OMNI handed over. With the
+    /// host-cap path detected above, that is the same value on every route this
+    /// table books — which is the point: the number now comes from what was
+    /// delivered rather than from what a distiller intended.
+    pub delivered_bytes: usize,
 }
 
 impl DistillResult {
@@ -628,6 +645,7 @@ mod tests {
             collapse_savings: None,
             raw_tokens: 0,
             filtered_tokens: 0,
+            delivered_bytes: 25,
         };
         assert_eq!(res.savings_pct(), 75.0);
 
@@ -656,6 +674,7 @@ mod tests {
             collapse_savings: None,
             raw_tokens: 0,
             filtered_tokens: 0,
+            delivered_bytes: 89,
         };
         assert!(res.is_meaningful());
 

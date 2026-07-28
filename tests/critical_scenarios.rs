@@ -56,6 +56,7 @@ async fn test_maker_checker_full_flow() {
         filtered_tokens: 10,
         segments_kept: 1,
         segments_dropped: 0,
+        delivered_bytes: 50,
     };
     store.record_distillation(session_id, &result, "cargo test", "/tmp", "agent");
 

@@ -201,6 +201,7 @@ fn test_omni_stats_shows_command_not_content_type() {
         collapse_savings: None,
         raw_tokens: 250,
         filtered_tokens: 25,
+        delivered_bytes: 100,
     };
 
     store.record_distillation(
