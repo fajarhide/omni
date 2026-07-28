@@ -156,6 +156,10 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
     struct ClaudeToolInput {
         command: Option<String>,
         path: Option<String>,
+        /// What Claude Code's `Read` tool actually names its argument. Without
+        /// it the `Read` arm sees `"unknown"` as the path, so `readfile`'s
+        /// per-language distillation cannot pick a language (#172).
+        file_path: Option<String>,
     }
 
     let parsed: ClaudeInput = serde_json::from_str(input).ok()?;
@@ -164,6 +168,22 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
     let response = parsed.tool_response.as_ref()?;
     let content = if let Some(c) = response.get("content") {
         extract_value_content(c)?
+    } else if let Some(file_content) = response
+        .get("file")
+        .and_then(|f| f.get("content"))
+        .and_then(Value::as_str)
+    {
+        // Claude Code's `Read` result carries its text at `file.content`, beside
+        // `numLines` / `startLine` / `totalLines`. Neither arm around this one
+        // matches that shape, so a `Read` payload normalised to `None` and the
+        // hook emitted nothing. That is the *second* reason the `Read` distiller
+        // has never run: #172 found the matcher naming only `Bash`, and widening
+        // it alone would have produced silence rather than distillation — no
+        // output, no error, and a feature that looks shipped.
+        if file_content.is_empty() {
+            return None;
+        }
+        file_content.to_string()
     } else {
         let stdout = response.get("stdout").and_then(Value::as_str)?;
         if stdout.is_empty() {
@@ -182,7 +202,12 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
     let command = parsed
         .tool_input
         .as_ref()
-        .and_then(|i| i.command.as_deref().or(i.path.as_deref()))
+        .and_then(|i| {
+            i.command
+                .as_deref()
+                .or(i.path.as_deref())
+                .or(i.file_path.as_deref())
+        })
         .unwrap_or("")
         .to_string();
 

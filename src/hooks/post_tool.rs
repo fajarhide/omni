@@ -78,6 +78,33 @@ enum ToolOutput {
 /// instead of asserting one. The rule is "reply in the shape you were spoken
 /// to in", and it needs no table of per-tool schemas to stay correct.
 fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -> ToolOutput {
+    // The `Read` result carries its text at `file.content`, beside numbers that
+    // describe it. Captured from a live Claude Code transcript rather than
+    // assumed:
+    //
+    //   {"type":"text","file":{"filePath":…,"content":…,
+    //                          "numLines":420,"startLine":1,"totalLines":420}}
+    //
+    // `numLines` counts the lines *in this payload*, so swapping the content and
+    // leaving it alone would have the host report 420 lines for a shorter one —
+    // a fabricated number, which is the defect this project exists to stop
+    // emitting. `totalLines` and `startLine` describe the file and the request,
+    // not the payload, so they stay (#172).
+    if let Some(obj) = raw_response.and_then(|v| v.as_object())
+        && obj
+            .get("file")
+            .and_then(|f| f.get("content"))
+            .is_some_and(serde_json::Value::is_string)
+    {
+        let mut echoed = obj.clone();
+        let line_count = distilled.lines().count();
+        if let Some(file) = echoed.get_mut("file").and_then(|f| f.as_object_mut()) {
+            file.insert("content".into(), serde_json::Value::String(distilled));
+            file.insert("numLines".into(), serde_json::Value::from(line_count));
+        }
+        return ToolOutput::Host(serde_json::Value::Object(echoed));
+    }
+
     // Only an object carrying `stdout` is known to be echoable: that is the
     // Bash-family result, the one shape #187 measured against a live host.
     // Anything else keeps the MCP shape rather than inventing a schema.
@@ -832,6 +859,53 @@ mod tests {
             !json.contains("updatedResponse"),
             "the ignored key is back: {json}"
         );
+    }
+
+    /// #172: the `Read` arm had never run on Claude Code, because the hook was
+    /// registered for `Bash` alone. Enabling it means replying in `Read`'s own
+    /// result shape — captured from a live transcript, not assumed — and the
+    /// captured shape carries `numLines` *beside* the content it describes.
+    ///
+    /// Swapping the content and leaving that number is the defect this project
+    /// exists to stop emitting: the host would report 420 lines for a payload
+    /// that has 2. `totalLines` describes the file rather than the payload, so it
+    /// must survive untouched — asserting both directions is what makes this a
+    /// test rather than a restatement of the code.
+    #[test]
+    fn replies_in_the_hosts_read_result_shape() {
+        let raw = json!({
+            "type": "text",
+            "file": {
+                "filePath": "/repo/src/main.rs",
+                "content": "line one\nline two\nline three\nline four\n",
+                "numLines": 4,
+                "startLine": 1,
+                "totalLines": 420,
+            }
+        });
+
+        let out = shape_for_host(Some(&raw), "distilled one\ndistilled two".into());
+        let v = serde_json::to_value(&out).expect("serialises");
+
+        assert_eq!(
+            v["file"]["content"].as_str(),
+            Some("distilled one\ndistilled two")
+        );
+        assert_eq!(
+            v["file"]["numLines"].as_u64(),
+            Some(2),
+            "numLines counts this payload; leaving it at 4 fabricates a count: {v}"
+        );
+        assert_eq!(
+            v["file"]["totalLines"].as_u64(),
+            Some(420),
+            "totalLines describes the file, not the payload: {v}"
+        );
+        assert_eq!(v["file"]["filePath"].as_str(), Some("/repo/src/main.rs"));
+
+        // The shape #187 was rejected for. Its absence is the regression guard.
+        assert!(v.get("status").is_none(), "MCP shape is back: {v}");
+        assert!(v.get("result").is_none(), "MCP shape is back: {v}");
     }
 
     /// A Bash payload as Claude Code actually sends one.

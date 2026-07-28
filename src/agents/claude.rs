@@ -423,6 +423,31 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         "Bash",
         &pre_cmd,
     );
+    // Still `Bash` only, and #172 is why that is now a measured decision rather
+    // than an oversight.
+    //
+    // The `Read`/`Grep`/`WebFetch` arms in `hooks::post_tool` have been written,
+    // gated and tested since the Rust rewrite and have **never executed on
+    // Claude Code**, because this matcher names one tool. Widening it is one
+    // line. What that line does was measured before taking it, and the answer
+    // was not a token win: driven through the built binary's `--post-hook` with
+    // a real payload, `src/pipeline/collapse.rs` — 878 lines — comes back as
+    // **20**, an import list, three signatures and a marker. Every function
+    // body goes. `readfile.rs`'s only floor is `MIN_DISTILL_TOKENS = 2000`,
+    // which nearly every real source file clears, so flipping this would change
+    // what "read a file" means for a whole session, on the tool an agent edits
+    // from.
+    //
+    // The prerequisites landed anyway, because they are bugs on their own terms
+    // and each would have made the flip fail silently rather than loudly:
+    // `normalize` could not reach a `Read` payload's text at all (`file.content`
+    // matched no arm, so the hook emitted nothing), `tool_input.file_path` was
+    // never read (so the distiller saw `"unknown"` and could not pick a
+    // language), and `shape_for_host` had no `Read` shape (so the reply would
+    // have been the `{status, result}` object #187 was rejected for).
+    //
+    // What is left is the maintainer's call on the floor, with numbers now in
+    // hand rather than in the abstract.
     ensure_hook(
         hooks.entry("PostToolUse").or_insert_with(|| json!([])),
         "Bash",
