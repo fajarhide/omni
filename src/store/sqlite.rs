@@ -99,6 +99,22 @@ impl SqliteBackend {
         Ok((sessions, rewinds))
     }
 
+    /// How many distillations the database holds.
+    ///
+    /// `stats` counts sessions and rewinds, and `doctor` printed the session
+    /// count under the label "records" — so a database holding 8,260
+    /// distillations announced itself as "24 records" (#118).
+    pub fn distillation_count(&self) -> usize {
+        self.pool
+            .get()
+            .ok()
+            .and_then(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM distillations", [], |row| row.get(0))
+                    .ok()
+            })
+            .unwrap_or(0)
+    }
+
     pub fn latest_activity_timestamps(&self) -> Result<(Option<u64>, Option<u64>)> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         let s_ts: Option<i64> = conn
@@ -109,15 +125,23 @@ impl SqliteBackend {
             )
             .ok()
             .flatten();
-        let r_ts: Option<i64> = conn
+        // Read from `distillations`, not `rewind_store`. The rewind table only
+        // gains a row when a distillation had content worth storing for
+        // retrieval, which on a real installation is rare — 0 rows beside 8,260
+        // distillations on the reporting machine. `doctor` uses this for its
+        // "Last distill" line, so it read `None` forever and printed
+        // "never [IDLE]" two seconds after a distilled command (#118). That is
+        // the exact line someone reads while checking whether hooks fire, and
+        // it was telling them the opposite of the truth.
+        let d_ts: Option<i64> = conn
             .query_row(
-                "SELECT ts FROM rewind_store ORDER BY ts DESC LIMIT 1",
+                "SELECT ts FROM distillations ORDER BY ts DESC LIMIT 1",
                 [],
                 |row| row.get(0),
             )
             .ok()
             .flatten();
-        Ok((s_ts.map(|v| v as u64), r_ts.map(|v| v as u64)))
+        Ok((s_ts.map(|v| v as u64), d_ts.map(|v| v as u64)))
     }
 
     pub fn check_fts5(&self) -> bool {
@@ -2367,6 +2391,70 @@ mod tests {
         assert_eq!(count, 1, "only the delivered call counts");
         assert_eq!(input, 1_000);
         assert_eq!(output, 100);
+    }
+
+    /// A row for these two tests; the values are irrelevant, only that it lands.
+    fn any_distillation() -> DistillResult {
+        DistillResult {
+            output: String::new(),
+            route: crate::pipeline::Route::Keep,
+            filter_name: "git".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 1_000,
+            output_bytes: 100,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 250,
+            filtered_tokens: 25,
+            delivered_bytes: 100,
+        }
+    }
+
+    /// #118: the "Last distill" reading came from `rewind_store`, which only
+    /// gains a row when a distillation had content worth storing for later
+    /// retrieval. On a real installation that table was empty beside 8,260
+    /// distillations, so `doctor` printed "never [IDLE]" seconds after
+    /// distilling — the wrong answer to the one question it is asked.
+    #[test]
+    fn reports_the_last_distillation_not_the_last_rewind() {
+        // Arrange
+        let (store, _dir) = get_temp_store();
+        store.record_distillation("s1", &any_distillation(), "git status", "", "claude_code");
+
+        // Act
+        let (_sessions, last_distill) = store
+            .latest_activity_timestamps()
+            .expect("timestamps readable");
+
+        // Assert
+        assert!(
+            last_distill.is_some(),
+            "a recorded distillation must set the last-distill reading, \
+             even with an empty rewind_store"
+        );
+    }
+
+    /// #118: `doctor` printed the session count under the label "records", so a
+    /// database holding thousands of distillations announced a two-digit number.
+    #[test]
+    fn counts_distillations_apart_from_sessions() {
+        let (store, _dir) = get_temp_store();
+        for cmd in ["git status", "git diff", "git log"] {
+            store.record_distillation("s1", &any_distillation(), cmd, "", "claude_code");
+        }
+
+        let (sessions, _rewinds) = store.stats().expect("stats");
+
+        assert_eq!(store.distillation_count(), 3);
+        assert_ne!(
+            store.distillation_count(),
+            sessions,
+            "the two numbers must not be interchangeable"
+        );
     }
 
     #[test]

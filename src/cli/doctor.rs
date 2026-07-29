@@ -369,9 +369,12 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     match Store::open() {
         Ok(store) => {
             let (sessions, rewinds) = store.stats().unwrap_or_default();
+            // Name both numbers. "{sessions} records" read as a row count, so a
+            // 112 MB database holding 5,730 distillations reported 17 (#118).
             println!(
-                "  {:<15} ~/.omni/omni.db ({} records) {}",
+                "  {:<15} ~/.omni/omni.db ({} distillations, {} sessions) {}",
                 "Database:".bright_black(),
+                store.distillation_count().to_string().yellow(),
                 sessions.to_string().yellow(),
                 "[OK]".green().bold()
             );
@@ -421,10 +424,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 rewinds.to_string().magenta()
             );
 
-            let (_s_ts, r_ts) = store.latest_activity_timestamps().unwrap_or_default();
+            let (_s_ts, d_ts) = store.latest_activity_timestamps().unwrap_or_default();
 
             // Last distillation check: warn if no distillation in last 10 min
-            if let Some(rt) = r_ts {
+            if let Some(rt) = d_ts {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
