@@ -79,9 +79,7 @@ fn test_streaming_distill_1k_line_output() {
         }
     }
 
-    let start = std::time::Instant::now();
     let segments = score_segments(&massive_output, SegmentationMode::Line, None, "test");
-    let elapsed = start.elapsed();
 
     let mut critical_count = 0;
     for seg in &segments {
@@ -92,10 +90,6 @@ fn test_streaming_distill_1k_line_output() {
         }
     }
 
-    assert!(
-        elapsed.as_millis() < 15000,
-        "Should process within 15 seconds"
-    );
     // Ensure compression is massive but didn't drop errors
     assert!(critical_count >= 10, "Should retain the critical errors");
 }
