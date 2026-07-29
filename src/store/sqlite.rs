@@ -787,6 +787,59 @@ impl SqliteBackend {
             tx.commit()?;
         }
 
+        // One-time data migration: collapse distillations that were recorded
+        // twice for one command (#118).
+        //
+        // On the reporting installation 1,231 of 8,272 rows are second copies —
+        // 15% of the table, inflating every count and every top-command tally
+        // `omni stats` publishes. They stop at 2026-07-17 and 1,229 of them are
+        // `aider`, so whatever produced them is long closed; feeding one payload
+        // through the post-hook on this build yields exactly one row. This
+        // migration is therefore about the history, not about the write path.
+        //
+        // The key is every column except `id` and `latency_ms`. Measured on that
+        // data, `latency_ms` is the *only* column that ever varies inside a
+        // duplicate group — `session_id`, `project_path` and the byte counts
+        // never do — which is the fingerprint of the same input distilled twice
+        // rather than of two separate commands. Grouping on it as well would
+        // leave 947 of the 1,231 in place.
+        //
+        // A user really could run one command twice inside the same second and
+        // get byte-identical input and output. Collapsing that pair costs one
+        // under-counted row, and under-counting is the direction this project
+        // errs in when it has to choose.
+        //
+        // Deliberately no UNIQUE index behind this. The write that produced the
+        // duplicates no longer happens, and an index over these columns would
+        // reject the legitimate case above from then on — trading a closed bug
+        // for a permanent silent under-count.
+        let migration_id3 = "2026_07_dedupe_double_recorded_distillations";
+        let already_applied3: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_id3],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if already_applied3.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM distillations WHERE id NOT IN (
+                     SELECT MIN(id) FROM distillations
+                     GROUP BY session_id, ts, filter_name, input_bytes, output_bytes,
+                              route, score, context_score, rewind_hash, command,
+                              project_path, agent_id, collapse_original, collapse_to,
+                              raw_tokens, filtered_tokens, delivered_bytes
+                 )",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_id3, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         Ok(())
     }
 
@@ -2454,6 +2507,116 @@ mod tests {
             store.distillation_count(),
             sessions,
             "the two numbers must not be interchangeable"
+    /// Puts rows straight into an existing database and re-arms the dedupe
+    /// migration, so the next `open_path` runs it over them. Going through
+    /// `record_distillation` would stamp `ts` from the clock, and two calls
+    /// landing in the same second is not something a test should depend on.
+    fn seed_rows_and_rearm_migration(db: &std::path::Path, rows: &[(&str, i64, i64, i64)]) {
+        let conn = rusqlite::Connection::open(db).expect("open seed db");
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE id = '2026_07_dedupe_double_recorded_distillations'",
+            [],
+        )
+        .expect("re-arm migration");
+        for (command, ts, output_bytes, latency_ms) in rows {
+            conn.execute(
+                "INSERT INTO distillations
+                   (session_id, ts, filter_name, input_bytes, output_bytes, route, latency_ms, command)
+                 VALUES ('s1', ?1, 'git', 1000, ?2, 'Keep', ?3, ?4)",
+                params![ts, output_bytes, latency_ms, command],
+            )
+            .expect("seed row");
+        }
+    }
+
+    fn row_count(db: &std::path::Path) -> i64 {
+        rusqlite::Connection::open(db)
+            .expect("open count db")
+            .query_row("SELECT COUNT(*) FROM distillations", [], |r| r.get(0))
+            .expect("count")
+    }
+
+    /// #118: 1,231 of 8,272 rows on the reporting installation are a second
+    /// copy of one command, inflating every count `omni stats` publishes by 15%.
+    /// Inside a duplicate group `latency_ms` is the only column that ever
+    /// differs, which is what distinguishes one input distilled twice from two
+    /// separate commands.
+    #[test]
+    fn collapses_a_distillation_recorded_twice() {
+        // Arrange
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        drop(Store::open_path(&db).expect("first open builds the schema"));
+        seed_rows_and_rearm_migration(
+            &db,
+            &[
+                ("git status", 1_700_000_000, 100, 3),
+                ("git status", 1_700_000_000, 100, 5),
+            ],
+        );
+
+        // Act
+        drop(Store::open_path(&db).expect("second open runs the migration"));
+
+        // Assert
+        assert_eq!(row_count(&db), 1, "the second copy must be collapsed");
+    }
+
+    /// The counter-case. Two rows that differ in something a reader can act on
+    /// are two events, and deleting one would under-report a real command.
+    #[test]
+    fn keeps_rows_that_differ_in_more_than_latency() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        drop(Store::open_path(&db).expect("first open"));
+        seed_rows_and_rearm_migration(
+            &db,
+            &[
+                ("git status", 1_700_000_000, 100, 3),
+                ("git status", 1_700_000_000, 250, 3), // different output_bytes
+                ("git diff", 1_700_000_000, 100, 3),   // different command
+                ("git status", 1_700_000_042, 100, 3), // different second
+            ],
+        );
+
+        drop(Store::open_path(&db).expect("second open"));
+
+        assert_eq!(row_count(&db), 4, "distinguishable rows must survive");
+    }
+
+    /// The migration is recorded, so a later open must not touch rows written
+    /// after it ran. Without the marker every open would re-collapse history.
+    #[test]
+    fn does_not_run_the_dedupe_a_second_time() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        drop(Store::open_path(&db).expect("first open"));
+        seed_rows_and_rearm_migration(
+            &db,
+            &[
+                ("git status", 1_700_000_000, 100, 3),
+                ("git status", 1_700_000_000, 100, 5),
+            ],
+        );
+        drop(Store::open_path(&db).expect("second open runs the migration"));
+
+        // A genuine repeat arriving later, which the migration must now ignore.
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        conn.execute(
+            "INSERT INTO distillations
+               (session_id, ts, filter_name, input_bytes, output_bytes, route, latency_ms, command)
+             VALUES ('s1', 1700000000, 'git', 1000, 100, 'Keep', 9, 'git status')",
+            [],
+        )
+        .expect("late row");
+        drop(conn);
+
+        drop(Store::open_path(&db).expect("third open"));
+
+        assert_eq!(
+            row_count(&db),
+            2,
+            "the migration ran again and ate a new row"
         );
     }
 
