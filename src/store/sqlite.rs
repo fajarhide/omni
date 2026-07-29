@@ -2507,6 +2507,9 @@ mod tests {
             store.distillation_count(),
             sessions,
             "the two numbers must not be interchangeable"
+        );
+    }
+
     /// Puts rows straight into an existing database and re-arms the dedupe
     /// migration, so the next `open_path` runs it over them. Going through
     /// `record_distillation` would stamp `ts` from the clock, and two calls
