@@ -606,10 +606,22 @@ pub fn process_payload(
     };
 
     if let Some(ref s) = store {
-        let session_id = session
-            .as_ref()
-            .and_then(|lock| lock.lock().ok())
-            .map(|s| s.session_id.clone())
+        // The host's id wins when it sent one. `SessionState::session_id` is a
+        // wall-clock stamp on a globally persisted state, so it groups by
+        // "whenever OMNI last started" rather than by session: one such id
+        // covered 16 project paths and 3,739 commands, which is what makes the
+        // banner and every per-session slice of `omni stats` wrong (#118).
+        // Fall back to it rather than dropping the row — pipe mode and hosts
+        // that send no id still have to be recorded.
+        let session_id = normalized
+            .host_session_id
+            .clone()
+            .or_else(|| {
+                session
+                    .as_ref()
+                    .and_then(|lock| lock.lock().ok())
+                    .map(|s| s.session_id.clone())
+            })
             .unwrap_or_else(|| "unknown".to_string());
         s.record_distillation(
             &session_id,
@@ -1208,6 +1220,71 @@ mod tests {
         // The shape #187 was rejected for. Its absence is the regression guard.
         assert!(v.get("status").is_none(), "MCP shape is back: {v}");
         assert!(v.get("result").is_none(), "MCP shape is back: {v}");
+    }
+
+    /// Reads back the `session_id` every `distillations` row was filed under.
+    fn recorded_session_ids(db: &std::path::Path) -> Vec<String> {
+        let conn = rusqlite::Connection::open(db).expect("open recorded db");
+        let mut stmt = conn
+            .prepare("SELECT session_id FROM distillations ORDER BY id")
+            .expect("prepare");
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .expect("query")
+            .filter_map(Result::ok)
+            .collect()
+    }
+
+    /// #118: a distillation was filed under `SessionState::session_id`, a wall
+    /// clock stamp on globally persisted state, so one id collected 16 project
+    /// paths and 3,739 commands. The host sends its own id on every payload.
+    #[test]
+    fn files_a_distillation_under_the_host_session_id() {
+        // Arrange
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+        let payload = json!({
+            "session_id": "4ba52c00-c43f-46ed-9e0e-9069d5294302",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status"},
+            "tool_response": bash_response(&"modified: src/main.rs\n".repeat(40)),
+        })
+        .to_string();
+
+        // Act
+        process_payload(&payload, Some(store), None);
+
+        // Assert
+        assert_eq!(
+            recorded_session_ids(&db),
+            vec!["4ba52c00-c43f-46ed-9e0e-9069d5294302".to_string()],
+            "the row was filed under OMNI's own id, not the host's"
+        );
+    }
+
+    /// Pipe mode and hosts that send no id still have to be recorded. Failing
+    /// open to the local id keeps the row; dropping it would trade one
+    /// accounting bug for a worse one.
+    #[test]
+    fn falls_back_to_a_local_id_when_the_host_sends_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status"},
+            "tool_response": bash_response(&"modified: src/main.rs\n".repeat(40)),
+        })
+        .to_string();
+
+        process_payload(&payload, Some(store), None);
+
+        let ids = recorded_session_ids(&db);
+        assert_eq!(ids.len(), 1, "the row must still be recorded: {ids:?}");
+        assert!(
+            !ids[0].is_empty(),
+            "a blank id groups every such row together"
+        );
     }
 
     /// A Bash payload as Claude Code actually sends one.
