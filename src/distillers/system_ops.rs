@@ -204,36 +204,77 @@ fn split_grep_line(line: &str) -> Option<(&str, &str)> {
 /// exactly. The match text is the whole point of grep — summarising it to
 /// `foo.rs: 12 matches` (what this used to emit) answers a question nobody
 /// asked and forces the agent to grep again.
+///
+/// Close the run of match lines accumulated so far, writing its count directly
+/// above the rows it counts.
+///
+/// The count used to be global and printed once at position 0, which made it a
+/// claim about output it had never seen. One Bash call holding two greps, the
+/// first matching nothing, was delivered as `grep: 20 matches in 10 files` above
+/// a `---sep---` — so a search that found **nothing** read as one that found
+/// twenty hits in ten files, and the reporter acted on it while asking whether a
+/// Cloudflare API token was on disk (#247). A non-match line is already kept
+/// verbatim, so the boundary was visible in the output and simply not consulted.
+/// Same invariant #227 established for `collapse`: no summary may span a
+/// surviving line that separates the rows it counts.
+fn flush_grep_section(
+    out: &mut String,
+    section: &mut String,
+    matches: &mut usize,
+    files: &mut usize,
+) {
+    if *matches > 0 {
+        out.push_str(&format!("grep: {} matches in {} files\n", matches, files));
+        out.push_str(section);
+    }
+    section.clear();
+    *matches = 0;
+    *files = 0;
+}
+
 fn distill_grep_output(input: &str) -> String {
-    let mut body = String::with_capacity(input.len());
+    let mut out = String::with_capacity(input.len());
+    let mut section = String::with_capacity(input.len());
     let mut current: Option<&str> = None;
     let (mut matches, mut files) = (0usize, 0usize);
+    let mut parsed_any = false;
 
     for line in input.lines() {
         let Some((path, rest)) = split_grep_line(line.trim_end()) else {
-            // Not a match line (grep's own warnings, blank separators) — keep verbatim.
+            // Not a match line (grep's own warnings, a shell `echo`, blank
+            // separators). It ends the run, so the count lands above its own
+            // rows rather than above whatever follows.
+            flush_grep_section(&mut out, &mut section, &mut matches, &mut files);
             current = None;
-            body.push_str(line);
-            body.push('\n');
+            out.push_str(line);
+            out.push('\n');
             continue;
         };
+        parsed_any = true;
         if current != Some(path) {
-            body.push_str(path);
-            body.push('\n');
+            section.push_str(path);
+            section.push('\n');
             current = Some(path);
             files += 1;
         }
-        body.push_str("  ");
-        body.push_str(rest);
-        body.push('\n');
+        section.push_str("  ");
+        section.push_str(rest);
+        section.push('\n');
         matches += 1;
     }
+    flush_grep_section(&mut out, &mut section, &mut matches, &mut files);
 
-    if matches == 0 {
-        return "grep: no matches".to_string();
+    if !parsed_any {
+        // Nothing in this payload parsed as a match line, so there is no grep
+        // result to report. This used to return the string `grep: no matches`,
+        // which discarded the body and asserted an outcome for a command whose
+        // output was never recognised — the `require_parsed` prohibition. It is
+        // near-unreachable, because `is_grep_output` routes here only once three
+        // lines already parse, but a latent false claim is not worth keeping for
+        // the two lines it saves (#247).
+        return input.to_string();
     }
 
-    let out = format!("grep: {} matches in {} files\n{}", matches, files, body);
     // Hoisting costs a header line per file; on output that is one match per file
     // it can lose. Never hand back something longer than we were given.
     if out.len() < input.len() {
@@ -532,6 +573,64 @@ fn distill_fallback(segments: &[OutputSegment]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #247: the match count was global and printed once at position 0, so it
+    /// described output it had never seen. One Bash call holding two greps, the
+    /// first matching nothing, came back as `grep: 20 matches in 10 files` above
+    /// the separator — a search that found nothing reading as one that found
+    /// twenty hits in ten files, with no marker to detect it by.
+    ///
+    /// The assertion is on **what stands above the separator**, not on the total:
+    /// a count that happens to be right about the payload can still be in the
+    /// wrong place, and the wrong place is the whole defect.
+    #[test]
+    fn counts_grep_matches_per_section_not_per_payload() {
+        // First command found nothing; only the separator marks its place.
+        let mut input = String::from("---sep---\n");
+        for i in 0..6 {
+            input.push_str(&format!("/mem/note{i}.md:1:cloudflare token notes\n"));
+            input.push_str(&format!("/mem/note{i}.md:2:more cloudflare config here\n"));
+        }
+
+        let out = distill_grep_output(&input);
+
+        // What the agent reads first *is* the first command's answer. The old
+        // code put the count here, so an empty result read as twelve hits.
+        assert!(
+            out.starts_with("---sep---"),
+            "the first command found nothing, so the separator must come first:\n{out}"
+        );
+
+        let (before, after) = out.split_once("---sep---").expect("separator survives");
+        assert!(
+            !before.contains("grep:"),
+            "no count may stand above output it does not describe:\n{out}"
+        );
+        assert!(
+            after.starts_with("\ngrep: 12 matches in 6 files"),
+            "the count belongs immediately above the rows it counts:\n{out}"
+        );
+    }
+
+    /// The counter-case: a single grep is one section, so it still gets exactly
+    /// one count and it still sits at the top. Without this the fix reads as
+    /// "stop counting", which is not the fix.
+    #[test]
+    fn still_counts_a_single_grep_once_at_the_top() {
+        let mut input = String::new();
+        for i in 0..6 {
+            input.push_str(&format!("/src/mod{i}.rs:1:fn handler() {{\n"));
+            input.push_str(&format!("/src/mod{i}.rs:2:    let handler = 1;\n"));
+        }
+
+        let out = distill_grep_output(&input);
+
+        assert!(
+            out.starts_with("grep: 12 matches in 6 files"),
+            "one command is one section:\n{out}"
+        );
+        assert_eq!(out.matches("grep:").count(), 1, "exactly one count:\n{out}");
+    }
 
     /// #236: the old fingerprint was `any` connector, so one quoted layout
     /// classified a whole document, and the `directories`/`files` half fired on
