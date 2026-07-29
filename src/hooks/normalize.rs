@@ -39,6 +39,21 @@ pub struct NormalizedInput {
     /// `None` for agents whose payload has no `tool_response` object; those keep
     /// the MCP shape, since their host contracts were not investigated.
     pub raw_response: Option<Value>,
+    /// The host's own session identifier, read from the payload's top-level
+    /// `session_id` (or `sessionId`).
+    ///
+    /// `SessionState::session_id` is minted from the wall clock in
+    /// `SessionState::new`, and the persisted state is global rather than
+    /// per-host-session, so one OMNI "session" collected 16 project paths and
+    /// 3,739 commands (#118). Every per-session number is computed off that
+    /// grouping: the PostToolUse banner, the `omni stats` slices, and the
+    /// turns-since-insertion a cumulative saving would multiply by (#173).
+    ///
+    /// The host has always sent this — `hooks::session_start` parses the same
+    /// key and uses it for one log line before discarding it. `None` when the
+    /// payload carries no such key (pipe mode, Aider, older hosts), and the
+    /// caller falls back to the local id rather than losing the row.
+    pub host_session_id: Option<String>,
 }
 
 /// Detect agent format dari raw JSON string
@@ -106,7 +121,7 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
     let agent = detect_agent(input);
     let agent_id = detect_agent_id(&agent);
 
-    match agent {
+    let mut normalized = match agent {
         AgentFormat::ClaudeCode | AgentFormat::Unknown => normalize_claude_code(input, agent_id),
         AgentFormat::CursorWindsurf => {
             // Cursor punya content array — tangani itu dulu, lalu delegate ke Claude Code parser
@@ -118,7 +133,28 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
         AgentFormat::Aider => normalize_aider(input, agent_id),
         AgentFormat::GenericMCP => normalize_generic_mcp(input, agent_id),
         AgentFormat::Pi => normalize_pi(input, agent_id),
-    }
+    }?;
+
+    // Read once here rather than in each of the eight per-agent parsers: the key
+    // is top-level metadata beside `tool_name`, so it does not vary with the
+    // tool-payload shape those functions exist to tell apart.
+    normalized.host_session_id = extract_host_session_id(input);
+    Some(normalized)
+}
+
+/// Pull the host's session identifier out of a raw hook payload.
+///
+/// Both spellings are accepted for the same reason `hooks::session_start` accepts
+/// both: the hosts disagree, and guessing one costs the grouping silently.
+fn extract_host_session_id(input: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(input).ok()?;
+    let obj = value.as_object()?;
+    obj.get("session_id")
+        .or_else(|| obj.get("sessionId"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// Detect agent ID untuk session isolation
@@ -229,6 +265,8 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         // command_payload` locks the behaviour, not the mechanism.
         failed: false,
         raw_response: parsed.tool_response,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -301,6 +339,8 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
         failed: response.is_error,
         // Host contract not investigated (#187) — keeps the MCP shape.
         raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -361,6 +401,8 @@ fn normalize_opencode(input: &str, agent_id: String) -> Option<NormalizedInput> 
         failed: false, // OpenCode payload carries no exit/error signal
         // Host contract not investigated (#187) — keeps the MCP shape.
         raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -433,6 +475,8 @@ fn normalize_vscode_continue(input: &str, agent_id: String) -> Option<Normalized
         failed: false, // Continue.dev payload carries no exit/error signal
         // Host contract not investigated (#187) — keeps the MCP shape.
         raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -475,6 +519,8 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         failed: parsed.exit_code.is_some_and(|c| c != 0),
         // Host contract not investigated (#187) — keeps the MCP shape.
         raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -495,6 +541,8 @@ fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
         failed: false, // Aider pipes raw stdout only; no exit signal available
         // Host contract not investigated (#187) — keeps the MCP shape.
         raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -535,6 +583,8 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         failed,
         // Host contract not investigated (#187) — keeps the MCP shape.
         raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
     })
 }
 
@@ -587,6 +637,61 @@ mod tests {
     fn test_detect_claude_code() {
         let input = r#"{"tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"file.txt"}}"#;
         assert_eq!(detect_agent(input), AgentFormat::ClaudeCode);
+    }
+
+    /// #118: the host sends its own session id and OMNI dropped it, grouping
+    /// every project under one wall-clock stamp instead.
+    #[test]
+    fn carries_the_host_session_id_through_normalisation() {
+        // Arrange
+        let input = r#"{"session_id":"4ba52c00-c43f-46ed-9e0e-9069d5294302",
+            "hook_event_name":"PostToolUse","tool_name":"Bash",
+            "tool_input":{"command":"ls"},"tool_response":{"stdout":"file.txt"}}"#;
+
+        // Act
+        let normalized = normalize(input).expect("claude payload normalises");
+
+        // Assert
+        assert_eq!(
+            normalized.host_session_id.as_deref(),
+            Some("4ba52c00-c43f-46ed-9e0e-9069d5294302")
+        );
+    }
+
+    /// camelCase is accepted for the same reason `session_start` accepts it:
+    /// the hosts disagree, and guessing one spelling loses the grouping quietly.
+    #[test]
+    fn accepts_the_camel_case_spelling_of_the_host_session_id() {
+        let input = r#"{"sessionId":"abc-123","tool_name":"Bash",
+            "tool_input":{"command":"ls"},"tool_response":{"stdout":"file.txt"}}"#;
+
+        let normalized = normalize(input).expect("claude payload normalises");
+
+        assert_eq!(normalized.host_session_id.as_deref(), Some("abc-123"));
+    }
+
+    /// A payload without the key must normalise as before, so the caller can
+    /// fall back to the local id rather than lose the row.
+    #[test]
+    fn reports_no_host_session_id_when_the_payload_omits_it() {
+        let input = r#"{"tool_name":"Bash","tool_input":{"command":"ls"},
+            "tool_response":{"stdout":"file.txt"}}"#;
+
+        let normalized = normalize(input).expect("claude payload normalises");
+
+        assert!(normalized.host_session_id.is_none());
+    }
+
+    /// An empty string would group every such payload together under `""`,
+    /// which is the #118 defect with a different key.
+    #[test]
+    fn treats_a_blank_host_session_id_as_absent() {
+        let input = r#"{"session_id":"   ","tool_name":"Bash",
+            "tool_input":{"command":"ls"},"tool_response":{"stdout":"file.txt"}}"#;
+
+        let normalized = normalize(input).expect("claude payload normalises");
+
+        assert!(normalized.host_session_id.is_none());
     }
 
     #[test]
