@@ -149,6 +149,12 @@ pub struct TomlFilter {
     pub stream_mode: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum BatchFilterOutcome {
+    Filtered(String),
+    Passthrough,
+}
+
 #[derive(Clone)]
 pub enum LineFilter {
     Strip(Vec<Regex>),
@@ -231,6 +237,22 @@ impl TomlFilter {
         let sample = self.apply(input);
         let ratio = 1.0 - (sample.len() as f32 / input.len().max(1) as f32);
         (ratio * self.confidence).clamp(0.0, 1.0)
+    }
+
+    /// Apply a filter to a complete command result.
+    ///
+    /// `apply` also serves stream-mode filters one line at a time, where an
+    /// empty string deliberately means "drop this noise line". At the batch
+    /// boundary the same empty string has different semantics: if the filter
+    /// has no explicit fallback, it recognised no usable zero-state and the
+    /// host must keep the original result (#224).
+    pub(crate) fn apply_batch(&self, input: &str) -> BatchFilterOutcome {
+        let output = self.apply(input);
+        if !input.is_empty() && output.trim().is_empty() && self.on_empty.is_none() {
+            BatchFilterOutcome::Passthrough
+        } else {
+            BatchFilterOutcome::Filtered(output)
+        }
     }
 
     pub fn apply(&self, input: &str) -> String {
@@ -958,10 +980,9 @@ mod tests {
         assert!(!report.warnings.is_empty());
     }
 
-    /// A filter that keeps `max_lines` and nothing else, for the #111 cases.
-    fn capped_filter(max: usize) -> TomlFilter {
+    fn test_filter() -> TomlFilter {
         TomlFilter {
-            name: "capped".to_string(),
+            name: "test".to_string(),
             description: None,
             confidence: 0.8,
             match_regex: Regex::new("").unwrap(),
@@ -969,7 +990,7 @@ mod tests {
             replace_rules: vec![],
             match_output: vec![],
             line_filter: LineFilter::None,
-            max_lines: Some(max),
+            max_lines: None,
             on_empty: None,
             project_types: None,
             inline_tests: vec![],
@@ -979,6 +1000,15 @@ mod tests {
             tool_family: None,
             priority: 100,
             stream_mode: false,
+        }
+    }
+
+    /// A filter that keeps `max_lines` and nothing else, for the #111 cases.
+    fn capped_filter(max: usize) -> TomlFilter {
+        TomlFilter {
+            name: "capped".to_string(),
+            max_lines: Some(max),
+            ..test_filter()
         }
     }
 
@@ -1015,6 +1045,81 @@ mod tests {
 
         assert_eq!(out, "pod-0 Running\npod-1 Running");
         assert!(!out.contains("omitted"), "nothing was dropped: {out}");
+    }
+
+    fn black_noise_filter(on_empty: Option<&str>) -> TomlFilter {
+        TomlFilter {
+            name: "black".to_string(),
+            line_filter: LineFilter::Strip(vec![
+                Regex::new(r"^would reformat ").unwrap(),
+                Regex::new(r"^reformatted ").unwrap(),
+            ]),
+            on_empty: on_empty.map(str::to_string),
+            ..test_filter()
+        }
+    }
+
+    /// #224: a filter that stripped every line returned an empty string when it
+    /// had no `fallback_message`, so the hook replaced non-empty tool output
+    /// with empty stdout and reported the deletion as 100% compression.
+    #[test]
+    fn requests_passthrough_when_line_filter_removes_every_line() {
+        // Arrange
+        let input = "would reformat src/main.py\nwould reformat src/lib.py\n";
+
+        // Act
+        let outcome = black_noise_filter(None).apply_batch(input);
+
+        // Assert
+        assert_eq!(
+            outcome,
+            BatchFilterOutcome::Passthrough,
+            "an unrecognised zero-state must fail open"
+        );
+    }
+
+    /// A `fallback_message` is an explicit zero-state chosen by the filter
+    /// author, so it still wins when every input line is filtered out.
+    #[test]
+    fn returns_configured_fallback_when_line_filter_removes_every_line() {
+        // Arrange
+        let input = "reformatted src/main.py\nreformatted src/lib.py\n";
+
+        // Act
+        let outcome = black_noise_filter(Some("black: files reformatted")).apply_batch(input);
+
+        // Assert
+        assert_eq!(
+            outcome,
+            BatchFilterOutcome::Filtered("black: files reformatted".to_string())
+        );
+    }
+
+    /// The guard is not a blanket passthrough: when a signal line survives, the
+    /// filter still removes its configured noise and returns the distilled text.
+    #[test]
+    fn keeps_filtered_output_when_a_signal_line_survives() {
+        // Arrange
+        let input = "would reformat src/main.py\nOh no! 1 file would be reformatted.\n";
+
+        // Act
+        let outcome = black_noise_filter(None).apply_batch(input);
+
+        // Assert
+        assert_eq!(
+            outcome,
+            BatchFilterOutcome::Filtered("Oh no! 1 file would be reformatted.".to_string())
+        );
+    }
+
+    /// Stream-mode filters call `apply` once per line, where an empty result is
+    /// the instruction to suppress that one noise line. The batch guard must not
+    /// turn streaming suppression into an echo.
+    #[test]
+    fn still_removes_a_noise_line_when_applied_in_stream_mode() {
+        let out = black_noise_filter(None).apply("would reformat src/main.py");
+
+        assert_eq!(out, "");
     }
 
     #[test]

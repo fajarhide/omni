@@ -345,11 +345,26 @@ pub fn process_payload(
     // for cargo, npm, docker, kubectl and terraform while stripping only a few
     // lines, shadowing the distiller that would have summarised the same input
     // (#110). Weak filter, fall through; a filter that earns its match still wins.
-    let toml_hit = toml_match.and_then(|f| {
-        let out = f.apply(&content);
-        crate::guard::limits::beats_guardrail(out.len(), content.len())
-            .then(|| (out, f.name.clone()))
-    });
+    let toml_hit = match toml_match {
+        Some(f) => match f.apply_batch(&content) {
+            toml_filter::BatchFilterOutcome::Passthrough => {
+                // The filter matched but produced no explicit zero-state.
+                // Returning `None` is the hook protocol's fail-open path: the
+                // host keeps its original bytes. Falling through here would
+                // hand the same payload to another distiller — `black` turned
+                // 200 all-stripped rows into the fabricated `Build: ok` (#224).
+                if let Some(ref s) = store {
+                    s.record_passthrough(clean_command, content.len());
+                }
+                return None;
+            }
+            toml_filter::BatchFilterOutcome::Filtered(out) => {
+                crate::guard::limits::beats_guardrail(out.len(), content.len())
+                    .then(|| (out, f.name.clone()))
+            }
+        },
+        None => None,
+    };
 
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
@@ -955,6 +970,62 @@ mod tests {
         assert_eq!(
             body, content,
             "bytes under a Passthrough banner must be what the command produced"
+        );
+    }
+
+    /// #224: the Black TOML filter stripped every row and returned an empty
+    /// string. The hook accepted it as 100% compression and replaced non-empty
+    /// stdout with nothing. A batch zero-state with no explicit fallback must
+    /// decline the rewrite so the host retains its original result.
+    #[test]
+    fn declines_a_batch_filter_that_removes_every_line() {
+        let content = (0..200)
+            .map(|i| format!("would reformat src/module_{i}.py"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "black --check ."},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&payload, None, None).is_none(),
+            "the hook must decline instead of replacing stdout with an empty or fabricated result"
+        );
+    }
+
+    /// The counter-case: a Black summary is a real signal that survives the
+    /// line filter, so the TOML filter must still win rather than turning every
+    /// matching command into passthrough.
+    #[test]
+    fn still_applies_a_batch_filter_when_a_signal_survives() {
+        let mut content = String::new();
+        for i in 0..20 {
+            content.push_str(&format!("would reformat src/module_{i}.py\n"));
+        }
+        content.push_str("Oh no! 20 files would be reformatted.");
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "black --check ."},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("signal should be distilled");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        assert!(
+            stdout.contains("Oh no! 20 files would be reformatted."),
+            "the surviving signal was lost: {stdout}"
+        );
+        assert!(
+            !stdout.contains("would reformat src/module_"),
+            "configured noise rows survived: {stdout}"
         );
     }
 
