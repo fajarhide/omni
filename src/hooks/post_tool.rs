@@ -1228,12 +1228,10 @@ mod tests {
         let mut stmt = conn
             .prepare("SELECT session_id FROM distillations ORDER BY id")
             .expect("prepare");
-        let ids = stmt
-            .query_map([], |row| row.get::<_, String>(0))
+        stmt.query_map([], |row| row.get::<_, String>(0))
             .expect("query")
             .filter_map(Result::ok)
-            .collect();
-        ids
+            .collect()
     }
 
     /// #118: a distillation was filed under `SessionState::session_id`, a wall
