@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A TOML filter could replace non-empty tool output with an empty string when its line rules removed every row (#224)**: `TomlFilter::apply` only handled an empty filtered result when the signal declared a `fallback_message`. Without one it returned `""`, so the post-hook wrote empty `stdout` over the host's real bytes and recorded the deletion as 100% compression. The mechanism is current but the reported trigger is deliberately synthetic: 200 `black --check` file rows reproduce it, while real Black output also prints a summary that survives the filter. Batch filtering now carries an explicit passthrough outcome: the post-hook declines its rewrite so the host keeps the original result, and the pipe path emits the input byte-for-byte; a configured fallback still wins. The distinction from `apply` is intentional because stream-mode filters call it once per line, where empty means "drop this noise line" rather than "drop the command result." Hook-level review caught that merely returning the input from `apply` was not enough: it failed the TOML size guard and fell through to `BuildDistiller`, changing the 200 rows into the fabricated `Build: ok`. Regression tests cover both hook paths, the all-stripped and configured-fallback outcomes, a surviving-signal counter-case, and unchanged stream suppression.
+
 ## [0.6.8] - 2026-07-29
 
 ### Fixed

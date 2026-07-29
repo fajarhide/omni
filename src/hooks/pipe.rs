@@ -384,14 +384,20 @@ fn distill(
     // shadowed TestDistiller, cut 1%, and had that cut thrown away by best_output()
     // — reporting 0% on output the distiller reduces by 94%. Weak filter, fall
     // through; a filter that earns its match still wins, user filters included.
-    let toml_hit = matched_toml.and_then(|f| {
-        let out = f.apply(&input_text);
-        crate::guard::limits::beats_guardrail(out.len(), input_text.len()).then_some((out, f.name))
+    let toml_hit = matched_toml.and_then(|f| match f.apply_batch(&input_text) {
+        toml_filter::BatchFilterOutcome::Passthrough => {
+            Some((input_text.clone(), f.name, Route::Passthrough))
+        }
+        toml_filter::BatchFilterOutcome::Filtered(out) => crate::guard::limits::beats_guardrail(
+            out.len(),
+            input_text.len(),
+        )
+        .then_some((out, f.name, Route::Keep)),
     });
 
     let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
-        if let Some((out, name)) = toml_hit {
-            (out, name, None, 0, 0, None, Route::Keep)
+        if let Some((out, name, route)) = toml_hit {
+            (out, name, None, 0, 0, None, route)
         } else {
             let cmd = command_name.unwrap_or("");
 
@@ -895,6 +901,30 @@ mod tests {
         let out_str = String::from_utf8(out).expect("must succeed");
 
         assert_eq!(out_str, input);
+    }
+
+    /// The pipe path shares batch TOML filtering with PostToolUse. When every
+    /// row is stripped and there is no explicit fallback, it must emit the
+    /// original bytes rather than falling through to another distiller.
+    #[test]
+    fn passes_through_a_batch_filter_that_removes_every_line() {
+        let input = "would reformat src/main.py\n\
+                     would reformat src/lib.py\n\
+                     would reformat tests/test_main.py\n";
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some("black --check ."),
+        )
+        .expect("must succeed");
+
+        assert_eq!(String::from_utf8(out).expect("valid UTF-8"), input);
     }
 
     #[test]
