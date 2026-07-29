@@ -197,14 +197,24 @@ fn space_aligned_table_still_compresses_through_pipe() {
     );
 }
 
+/// A text build log must not be claimed by the format gate — that gate exists
+/// for payloads a later step parses, and gating this one would take every build
+/// log off the lossy path.
+///
+/// This asserted `process_payload(...).is_some()` until #118 item 5. That could
+/// not fail: a passthrough used to return the input under a banner, so *any*
+/// payload over the 50-byte floor made the hook return something, whether it had
+/// been distilled or not. The fixture is 317 bytes of error blocks, which
+/// `BuildDistiller` keeps by design, so it was never distilled and the test
+/// never said so. Assert the gate directly instead.
 #[test]
-fn post_tool_hook_still_distills_text_build_log() {
+fn a_text_build_log_is_not_claimed_by_the_format_gate() {
     let raw = fixture("cargo_build_errors.txt");
-    let payload = bash_payload("cargo build", &raw);
 
     assert!(
-        post_tool::process_payload(&payload, None, None).is_some(),
-        "text build log must still be distilled"
+        omni::pipeline::format::sniff(&raw).is_none(),
+        "a build log is free text; gating it as structured would take every \
+         build log off the lossy path"
     );
 }
 

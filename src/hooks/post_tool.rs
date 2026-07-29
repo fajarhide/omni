@@ -556,20 +556,6 @@ pub fn process_payload(
         // what the command produced.
         final_out = content.clone();
         route = Route::Passthrough;
-
-        if final_out.len() < 1000 {
-            // F-07: Label small passthrough output instead of silent drop
-            return Some(wrap_hook_output(
-                normalized.raw_response.as_ref(),
-                format!(
-                    "[OMNI: Passthrough — output too small for meaningful compression ({} bytes)]\n{}",
-                    content.len(),
-                    final_out
-                ),
-            ));
-        } else {
-            final_out.insert_str(0, "[OMNI: Passthrough (low compression)]\n");
-        }
     }
 
     let latency_ms = start.elapsed().as_millis() as u32;
@@ -701,6 +687,21 @@ pub fn process_payload(
     // Safety truncation, shared with `hooks::pipe` so the cap and its marker
     // cannot drift apart — this path spelled the limit `50_000` inline (#219).
     crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
+
+    // A passthrough hands back exactly what the command produced, so there is
+    // nothing to replace. Emitting those identical bytes with a marker on top
+    // made every no-op *cost* tokens to announce that OMNI had changed nothing:
+    // 33,762 across the reporting database and 604 in a single day, at a modal
+    // 10 tokens a call (#118 item 5). Emitting nothing leaves the host's own
+    // bytes in place at zero marker cost, which is what the format-sniff,
+    // host-cap and TOML zero-state gates earlier in this function already do.
+    //
+    // The row is still recorded above, at its honest 0%. What is dropped here
+    // is only the reply, and with it the savings footer — which had nothing to
+    // report on a call that saved nothing.
+    if result.route == Route::Passthrough {
+        return None;
+    }
 
     // Build additionalContext with token savings stats
     let additional_context = build_additional_context(&result, &session);
@@ -942,10 +943,18 @@ mod tests {
     /// the table read as present and empty. An agent that trusts the label does
     /// not re-run the command.
     ///
-    /// The assertion is on the bytes under the banner, not on the banner text:
-    /// checking that the label is spelled correctly is what let this through.
+    /// The assertion is on what the agent ends up holding, not on the banner
+    /// text: checking that the label is spelled correctly is what let this
+    /// through.
+    ///
+    /// Since #118 item 5 there is no banner. A passthrough declines, the host
+    /// keeps its own bytes, and the guarantee is stronger than it was — the
+    /// agent cannot receive altered bytes under a "changed nothing" label
+    /// because it receives nothing from OMNI at all. The recorded
+    /// `passthrough_events` row is what proves this input really reached that
+    /// branch rather than an earlier return.
     #[test]
-    fn passthrough_returns_the_bytes_it_says_it_left_alone() {
+    fn passthrough_leaves_the_agent_holding_the_original_bytes() {
         let mut content = String::from("| Workload | Before | After | Savings |\n");
         content.push_str("|-------------------|-------:|-------:|--------:|\n");
         for i in 0..8 {
@@ -964,24 +973,26 @@ mod tests {
         })
         .to_string();
 
-        let out = process_payload(&payload, None, None).expect("hook returns output");
-        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
-        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
-            .as_str()
-            .expect("stdout is a string");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+
+        let out = process_payload(&payload, Some(store), None);
 
         assert!(
-            stdout.starts_with("[OMNI: Passthrough"),
-            "this input must take the low-compression branch, or the test guards \
-             nothing:\n{stdout}"
+            out.is_none(),
+            "a passthrough must hand back nothing, so the host keeps its own \
+             bytes: {}",
+            out.unwrap_or_default()
         );
-        let body = stdout
-            .split_once('\n')
-            .map(|(_banner, rest)| rest)
-            .unwrap_or("");
+        let passthroughs: i64 = rusqlite::Connection::open(&db)
+            .expect("open recorded db")
+            .query_row("SELECT COUNT(*) FROM passthrough_events", [], |r| r.get(0))
+            .expect("count");
         assert_eq!(
-            body, content,
-            "bytes under a Passthrough banner must be what the command produced"
+            passthroughs, 1,
+            "this input must reach the low-compression branch, or the test \
+             guards nothing"
         );
     }
 
@@ -1284,6 +1295,64 @@ mod tests {
         assert!(
             !ids[0].is_empty(),
             "a blank id groups every such row together"
+        );
+    }
+
+    /// #118 item 5: a passthrough replaced the host's output with the same
+    /// bytes plus a marker, so every no-op *cost* tokens to announce that
+    /// nothing had changed — 33,762 across the reporting database, at a modal
+    /// 10 tokens a call. The hook must decline instead.
+    #[test]
+    fn adds_no_bytes_when_it_changes_nothing() {
+        // Arrange: prose no distiller reduces, so the ratio gate calls it a
+        // passthrough.
+        let content = (0..60)
+            .map(|i| format!("ordinary line {i} of a note that nothing summarises"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat notes.txt"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        // Act
+        let out = process_payload(&payload, None, None);
+
+        // Assert
+        assert!(
+            out.is_none(),
+            "a passthrough must leave the host's bytes alone, got: {}",
+            out.unwrap_or_default()
+        );
+    }
+
+    /// The counter-case, so the fix is not "decline everything": output a
+    /// distiller really does reduce must still be replaced.
+    #[test]
+    fn still_replaces_output_a_distiller_reduces() {
+        let mut content = String::new();
+        for i in 0..200 {
+            content.push_str(&format!("test module_{i} ... ok\n"));
+        }
+        content.push_str("test result: ok. 200 passed; 0 failed\n");
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo test"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("a reduced result is delivered");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        assert!(
+            stdout.len() < content.len(),
+            "the replacement must be smaller than the input"
         );
     }
 
@@ -1635,8 +1704,12 @@ mod tests {
         }
     }
 
+    /// Was `labels_passthrough_for_large_output_without_reduction`, asserting
+    /// the reply contained "OMNI: Passthrough". That label is what #118 item 5
+    /// removed: it made every no-op cost tokens to say nothing happened. The
+    /// behaviour worth guarding is that unreducible output is not replaced.
     #[test]
-    fn labels_passthrough_for_large_output_without_reduction() {
+    fn declines_large_output_it_cannot_reduce() {
         // Create 20 lines of exactly 60 chars each (total 1200+ chars)
         let noise = (0..30)
             .map(|i| {
@@ -1655,10 +1728,11 @@ mod tests {
             }
         });
         let out = process_payload(&input.to_string(), None, None);
-        assert!(out.is_some());
-        let res = out.expect("Output exists");
-        println!("PASSTHROUGH RES: {}", res);
-        assert!(res.contains("OMNI: Passthrough"));
+        assert!(
+            out.is_none(),
+            "output nothing reduces must be left alone, not returned larger: {}",
+            out.unwrap_or_default()
+        );
     }
 
     #[test]
@@ -1687,20 +1761,21 @@ mod tests {
         assert!(norm.content.ends_with("!"));
     }
 
+    /// The payload shape under test is `{stdout, stderr, interrupted}` rather
+    /// than `{content}`. The command was `ls -la`, which OMNI passes through
+    /// verbatim by design (#200), so once a passthrough stopped emitting a
+    /// banner the test had nothing left to assert. A reducible command keeps
+    /// the original intent — this payload shape is parsed and distilled.
     #[test]
     fn processes_claude_code_stdout_format() {
-        let mut big_output =
-            "total 42\ndrwxr-xr-x  15 user  staff  480 Apr 10 10:00 .\n".to_string();
-        for i in 0..80 {
-            big_output.push_str(&format!(
-                "-rw-r--r--   1 user  staff  {} Apr 10 10:00 file{}.rs\n",
-                i * 100,
-                i
-            ));
+        let mut big_output = String::new();
+        for i in 0..200 {
+            big_output.push_str(&format!("test module_{i} ... ok\n"));
         }
+        big_output.push_str("test result: ok. 200 passed; 0 failed\n");
         let input = json!({
             "tool_name": "Bash",
-            "tool_input": { "command": "ls -la" },
+            "tool_input": { "command": "cargo test" },
             "tool_response": {
                 "stdout": big_output,
                 "stderr": "",
@@ -1803,12 +1878,21 @@ mod tests {
     #[test]
     fn test_claude_code_still_works_after_refactor() {
         // REGRESSION TEST — CRITICAL
+        //
+        // The input was 50 repeated `error[E0382]` lines. `BuildDistiller`
+        // keeps error blocks by design, so that output was never reduced and
+        // the assertion below was satisfied by the passthrough banner rather
+        // than by distillation. With the banner gone (#118 item 5) the payload
+        // has to be one OMNI really does distil for this to test anything.
+        let mut stdout = String::new();
+        for i in 0..200 {
+            stdout.push_str(&format!("   Compiling crate_{i} v0.1.0\n"));
+        }
+        stdout.push_str("    Finished dev profile in 12.3s\n");
         let input = serde_json::json!({
             "tool_name": "Bash",
             "tool_input": {"command": "cargo build"},
-            "tool_response": {
-                "stdout": "error[E0382]: borrow of moved value\n  --> src/main.rs:47\n".repeat(50)
-            }
+            "tool_response": { "stdout": stdout }
         });
         let out = process_payload(&input.to_string(), None, None);
         assert!(
