@@ -2,7 +2,25 @@ use anyhow::Result;
 use colored::*;
 use std::fs;
 
-pub fn run_diff(_args: &[String]) -> Result<()> {
+/// Read by both `print_help` and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[];
+
+fn print_help() {
+    println!("\nomni diff — Show the last distillation side by side\n");
+    println!("USAGE:\n  omni diff\n");
+    super::print_flags(FLAGS);
+}
+
+pub fn run_diff(args: &[String]) -> Result<()> {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        print_help();
+        return Ok(());
+    }
+    super::check_flags("diff", args, FLAGS)?;
+
     let cache_dir = dirs::home_dir()
         .unwrap_or_default()
         .join(".omni")

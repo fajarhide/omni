@@ -8,7 +8,26 @@ pub struct VersionJson {
     pub features: Vec<String>,
 }
 
+/// Read by both the help text and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[("--json", "Machine-readable JSON output")];
+
 pub fn run_version(args: &[String]) {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
+        println!("\nomni version — Build and feature information\n");
+        println!("USAGE:\n  omni version [FLAGS]\n");
+        crate::cli::print_flags(FLAGS);
+        return;
+    }
+    // `run_version` returns `()`, so an unknown flag is reported and the process
+    // stops here rather than printing a version nobody asked for (#151).
+    if let Err(e) = crate::cli::check_flags("version", args, FLAGS) {
+        eprintln!("[omni] {e}");
+        std::process::exit(1);
+    }
+
     let json_flag = args.iter().any(|a| a == "--json");
     let version_str = env!("CARGO_PKG_VERSION").to_string();
 

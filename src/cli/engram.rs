@@ -23,14 +23,20 @@ pub struct EngramJson {
     pub age_seconds: u64,
 }
 
+/// Read by both the help text and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[("--json", "Machine-readable JSON output")];
+
 pub fn run_engram(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     if args
         .iter()
         .any(|a| a == "--help" || a == "-h" || a == "help")
     {
-        println!("omni engram — View engrams (subtask digests)");
+        println!("\nomni engram — View engrams (subtask digests)\n");
+        println!("USAGE:\n  omni engram [list] [FLAGS]\n");
+        super::print_flags(FLAGS);
         return Ok(());
     }
+    super::check_flags("engram", args, FLAGS)?;
 
     let is_json = args.iter().any(|a| a == "--json");
     let is_list = args.iter().any(|a| a == "list");
