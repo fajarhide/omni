@@ -129,6 +129,73 @@ fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -
     ToolOutput::Host(serde_json::Value::Object(echoed))
 }
 #[tracing::instrument(skip_all)]
+/// The rewind rule from #271, in one function because several paths need it and
+/// a copy of it drifts.
+///
+/// Returns the marker to append and the hash it archived under, empty when the
+/// content was too large for `MAX_REWIND_BYTES` or there is no store. The caller
+/// decides whether the marker is affordable, because only the caller knows what
+/// it will hand back if it is not.
+fn rewind_marker(store: Option<&Arc<Store>>, content: &str, output: &str) -> (String, String) {
+    let omitted_lines = content
+        .lines()
+        .count()
+        .saturating_sub(output.lines().count());
+    // Lines are what a reader can act on, but a distillation can also shorten
+    // lines in place and leave the count alone. Report the unit that is true for
+    // this call rather than printing "0 lines omitted" over missing bytes.
+    let lost = if omitted_lines > 0 {
+        format!("{omitted_lines} lines")
+    } else {
+        format!("{} bytes", content.len().saturating_sub(output.len()))
+    };
+
+    if content.len() > crate::guard::limits::MAX_REWIND_BYTES {
+        return (
+            format!(
+                "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
+                content.len(),
+                crate::guard::limits::MAX_REWIND_BYTES
+            ),
+            String::new(),
+        );
+    }
+    match store {
+        Some(s) => {
+            let hash = s.store_rewind(content);
+            (
+                format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n"),
+                hash,
+            )
+        }
+        None => (
+            format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n"),
+            String::new(),
+        ),
+    }
+}
+
+/// What a non-Bash tool arm hands back once the rewind rule has been applied.
+///
+/// `None` declines the rewrite, which leaves the host holding its own bytes.
+/// That is the right answer when the marker would cost more than the cut saved:
+/// the agent would be paying tokens for fewer facts, which is the #268 and #269
+/// shape on small payloads.
+///
+/// These arms return before the Bash pipeline's own rewind block, so without
+/// this they drop bytes with no marker and nothing to retrieve (#273).
+fn archive_tool_reply(
+    store: Option<&Arc<Store>>,
+    content: &str,
+    distilled: String,
+) -> Option<String> {
+    if distilled.len() >= content.len() {
+        return Some(distilled);
+    }
+    let (marker, _hash) = rewind_marker(store, content, &distilled);
+    (distilled.len() + marker.len() < content.len()).then(|| distilled + &marker)
+}
+
 pub fn process_payload(
     input_str: &str,
     store: Option<Arc<Store>>,
@@ -234,7 +301,13 @@ pub fn process_payload(
     let config = crate::guard::config::load_config();
     let agent_config = config.for_agent(&normalized.agent_id);
 
-    // Route based on tool_name: handle non-Bash tools with specialized distillation
+    // Route based on tool_name: handle non-Bash tools with specialized distillation.
+    //
+    // Every arm below returns before the Bash pipeline's rewind block, so each one
+    // that shortens its reply has to apply the same rule itself, through
+    // `archive_tool_reply`. Without it these paths drop bytes with no marker and
+    // no recoverable copy, which is the guarantee #271 closed for `Bash` and
+    // #273 found still open here.
     match normalized.tool_name.as_str() {
         "Bash" => { /* fall through to existing pipeline below */ }
         "Read" => {
@@ -258,11 +331,13 @@ pub fn process_payload(
                     filepath,
                     imported_by_count,
                 )
+                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
                 .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
             }
 
             // Fallback if graph fails
             return crate::distillers::readfile::distill_readfile(&content, filepath)
+                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
                 .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "Grep" => {
@@ -270,6 +345,7 @@ pub fn process_payload(
                 return None;
             }
             return distill_grep(&content)
+                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
                 .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "WebFetch" => {
@@ -277,6 +353,7 @@ pub fn process_payload(
                 return None;
             }
             return process_web_content(&content)
+                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
                 .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "Edit" | "Write" | "Create" | "Move" | "Delete" | "Replace" => return None,
@@ -291,7 +368,8 @@ pub fn process_payload(
                 lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
             );
             if summary.len() < content.len() * 8 / 10 {
-                return Some(wrap_hook_output(normalized.raw_response.as_ref(), summary));
+                return archive_tool_reply(store.as_ref(), &content, summary)
+                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
             }
             return None;
         }
@@ -307,7 +385,8 @@ pub fn process_payload(
                     lines.len(),
                     lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
                 );
-                return Some(wrap_hook_output(normalized.raw_response.as_ref(), summary));
+                return archive_tool_reply(store.as_ref(), &content, summary)
+                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
             }
             return None;
         }
@@ -547,31 +626,8 @@ pub fn process_payload(
     // agent had never lost. A passthrough returns `None` below and the host keeps
     // its own bytes; there is nothing to recover and nothing to record.
     if route != Route::Passthrough && final_out.len() < content.len() {
-        let omitted_lines = content
-            .lines()
-            .count()
-            .saturating_sub(final_out.lines().count());
-        // Lines are what a reader can act on, but a distillation can also shorten
-        // lines in place and leave the count alone. Report the unit that is true
-        // for this call rather than printing "0 lines omitted" over missing bytes.
-        let lost = if omitted_lines > 0 {
-            format!("{omitted_lines} lines")
-        } else {
-            format!("{} bytes", content.len() - final_out.len())
-        };
-
-        let marker = if content.len() > crate::guard::limits::MAX_REWIND_BYTES {
-            format!(
-                "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
-                content.len(),
-                crate::guard::limits::MAX_REWIND_BYTES
-            )
-        } else if let Some(ref s) = store {
-            rewind_hash = s.store_rewind(&content);
-            format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{rewind_hash}\") for full output]\n")
-        } else {
-            format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n")
-        };
+        let (marker, hash) = rewind_marker(store.as_ref(), &content, &final_out);
+        rewind_hash = hash;
 
         // The marker is not free. One that costs more than the cut saved is a
         // reply with fewer facts and more tokens, which is #268 and #269 on 102
@@ -1698,6 +1754,51 @@ mod tests {
                  than the cut saved",
                 stdout.len(),
                 content.len()
+            );
+        }
+    }
+
+    /// #273. Every non-Bash arm returns before the Bash pipeline's rewind block,
+    /// so each one dropped bytes with no marker and no recoverable copy: exactly
+    /// the guarantee #271 closed, still open one match arm away. `MultiEdit` and
+    /// the unknown-tool fallback are the clearest, since both keep 30 lines of
+    /// the payload and label the result with the count of the input.
+    #[test]
+    fn archives_what_the_non_bash_arms_cut() {
+        let content: String = (0..400)
+            .map(|i| format!("pub fn handler_{i}(req: Request) -> Response {{ todo!() }}\n"))
+            .collect();
+
+        for (tool, response) in [
+            (
+                "Read",
+                json!({"file": {"filePath": "a.rs", "content": content}}),
+            ),
+            ("MultiEdit", json!({"content": content})),
+            ("Notebook", json!({"content": content})),
+        ] {
+            let payload = json!({
+                "tool_name": tool,
+                "tool_input": {"file_path": "a.rs"},
+                "tool_response": response,
+            })
+            .to_string();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let db = dir.path().join("omni.db");
+            let store = Arc::new(Store::open_path(&db).expect("store"));
+
+            let Some(out) = process_payload(&payload, Some(store), None) else {
+                continue; // declined: the host keeps its own bytes, nothing was lost
+            };
+
+            assert!(
+                out.contains("omitted"),
+                "{tool} dropped lines without saying so: {out}"
+            );
+            assert_eq!(
+                count(&db, "SELECT COUNT(*) FROM rewind_store"),
+                1,
+                "{tool} must leave the raw payload recoverable"
             );
         }
     }
