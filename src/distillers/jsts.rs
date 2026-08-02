@@ -522,19 +522,6 @@ struct EslintProblem {
     is_error: bool,
 }
 
-/// `7:14` and nothing else. Deliberately stricter than "contains a colon" so a
-/// path like `src/index.ts:10:15` falls to the inline branch instead, and a
-/// message mentioning a ratio does not become a location.
-fn is_line_col(token: &str) -> bool {
-    let Some((line, col)) = token.split_once(':') else {
-        return false;
-    };
-    !line.is_empty()
-        && !col.is_empty()
-        && line.bytes().all(|b| b.is_ascii_digit())
-        && col.bytes().all(|b| b.is_ascii_digit())
-}
-
 /// Groups locations under their file, errors first, capped. Returns an empty
 /// string when nothing was located, so a summary that parsed only counts is
 /// unchanged.
@@ -658,10 +645,12 @@ fn distill_eslint(input: &str) -> String {
             }
         }
 
-        // Stanza formatter: the problem line opens with a bare `line:col`, and
-        // the file it belongs to was printed above it.
-        if let Some(at) = t.split_whitespace().next()
-            && is_line_col(at)
+        // Stanza formatter: the problem line opens with a bare `line:col` and a
+        // severity, and the file it belongs to was printed above it. Reuses the
+        // detector rather than re-deriving it, so the shape that decides this is
+        // eslint output and the shape a location is parsed from cannot drift.
+        if is_eslint_finding_line(t)
+            && let Some(at) = t.split_whitespace().next()
             && let Some(file) = current_file.as_ref()
         {
             problems.push(EslintProblem {
@@ -948,12 +937,16 @@ mod tests {
     }
 
     #[test]
-    fn does_not_read_a_ratio_in_a_message_as_a_location() {
-        // `is_line_col` is stricter than "contains a colon" on purpose.
-        assert!(is_line_col("7:14"));
-        assert!(!is_line_col("src/index.ts:10:15"));
-        assert!(!is_line_col("ratio:high"));
-        assert!(!is_line_col(":14"));
+    fn does_not_read_a_colon_in_a_message_as_a_location() {
+        // Stricter than "contains a colon" on purpose: the inline formatter's
+        // `path:line:col` must fall to its own branch so no problem is counted
+        // twice, and prose with a colon must not become a location.
+        assert!(is_eslint_finding_line("  7:14  warning  msg  some-rule"));
+        assert!(!is_eslint_finding_line(
+            "  src/index.ts:10:15 error msg rule"
+        ));
+        assert!(!is_eslint_finding_line("  ratio:high  warning  msg  rule"));
+        assert!(!is_eslint_finding_line("  7:14  note  msg  rule"));
     }
 
     /// One `Important` segment per line, which is what the scorer produces for a
