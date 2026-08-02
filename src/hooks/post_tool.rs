@@ -331,12 +331,17 @@ pub fn process_payload(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
+    // Which single command produced this stdout, if any. `None` means a chain
+    // whose output belongs to several programs, and every routing decision below
+    // has to stand down for it: a TOML filter keyed on `^git\b` claims
+    // `git status && find .` exactly as the git distiller did (#264).
+    let output_command = crate::pipeline::registry::sole_output_command(clean_command);
+
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
-    let toml_match = if clean_command.is_empty() {
-        None
-    } else {
-        toml_filters.iter().find(|f| f.matches(clean_command))
+    let toml_match = match output_command {
+        Some(cmd) if !cmd.is_empty() => toml_filters.iter().find(|f| f.matches(cmd)),
+        _ => None,
     };
 
     // A TOML filter only gets to short-circuit the distiller if it actually beat
@@ -403,8 +408,13 @@ pub fn process_payload(
         // Enumeration commands (`ls`/`find`/`ps`/…) deliberately pass through
         // verbatim; collapsing them drops rows that are the answer, so skip the
         // fallback for them (#200).
+        // The verbatim check has to ask the resolved command, not the string the
+        // user typed. Reading the whole string sees `kubectl` in
+        // `kubectl get pods -o json | jq -r '...'` and lets collapse rewrite a
+        // payload the next step parses, and it sees `cd` in `cd x && cat file`
+        // and collapses a file read the same way (#269, #235).
         let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
-            && !crate::distillers::passes_through_verbatim(clean_command)
+            && output_command.is_some_and(|c| !crate::distillers::passes_through_verbatim(c))
         {
             let collapse_result = collapse::collapse(&content, &profile.collapse);
             collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to
@@ -1375,6 +1385,134 @@ mod tests {
             stdout.len() < content.len(),
             "the replacement must be smaller than the input"
         );
+    }
+
+    /// #264, end to end. `git status` leading a chain routed the whole of stdout
+    /// to the git distiller, whose summary is a fixed one-liner, so everything
+    /// the later commands printed was replaced with no marker, no count and no
+    /// rewind hash. The agent was told the command succeeded and shown none of
+    /// what it ran the command for.
+    ///
+    /// The assertion is on what the agent ends up holding. Checking that the
+    /// output "contains find results" would pass on a summary that happened to
+    /// quote one path.
+    #[test]
+    fn refuses_to_summarise_a_chain_several_commands_wrote_to() {
+        // Arrange: exactly the reported shape, git status first.
+        let mut content = String::from(
+            "On branch main\nYour branch is up to date with 'origin/main'.\n\n\
+             nothing to commit, working tree clean\n=== tree ===\n",
+        );
+        for i in 0..40 {
+            content.push_str(&format!("./src/module_{i}.rs\n"));
+        }
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status && echo '=== tree ===' && find . -type f"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        // Act
+        let out = process_payload(&payload, None, None);
+
+        // Assert
+        assert!(
+            out.is_none(),
+            "the chain must be handed back untouched, got: {}",
+            out.unwrap_or_default()
+        );
+    }
+
+    /// The counter-case, so the fix is not "decline every chain": a leading `cd`
+    /// prints nothing, so the output still came from one command and is still
+    /// worth distilling.
+    #[test]
+    fn still_distills_a_chain_led_by_a_silent_builtin() {
+        let content = lossy_content(200);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd /project && cargo test"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("a reduced result is delivered");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        assert!(
+            stdout.len() < content.len(),
+            "a single-producer chain must still be reduced"
+        );
+    }
+
+    /// #269, end to end. `kubectl get pod -o json | jq -r '...'` was routed to
+    /// `kubectl`, so the cloud distiller took four `key: value` lines and kept
+    /// one. Nothing chose the survivor for being signal: the three it dropped
+    /// were the pod phase, the node and the zone, which is what the command was
+    /// run to check, and the one it kept was the timestamp.
+    ///
+    /// Filed against `jq` missing from the passthrough allowlist. It is not that:
+    /// `jq -r '...' pod.json` on its own is declined and always was. The routing
+    /// is what deleted the lines, so this test drives the piped form.
+    #[test]
+    fn does_not_let_the_upstream_command_claim_a_reshaped_payload() {
+        let content = "phase: Running\nnode: aks-stateful-9kf4v\n\
+                       zoneSel: uaenorth-1\ncreated: 2026-08-02T03:43:16Z\n";
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pod jenkins-0 -o json | jq -r '.status.phase'"},
+            "tool_response": bash_response(content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None);
+
+        assert!(
+            out.is_none(),
+            "four lines of jq output must reach the agent whole, got: {}",
+            out.unwrap_or_default()
+        );
+    }
+
+    /// The other half of #269, and the reason `jq` and `yq` are verbatim rather
+    /// than merely unrouted. Their output exists to be parsed by a later step, so
+    /// a `[N similar lines collapsed]` marker in the middle of it is not a
+    /// summary, it is a syntax error. Routing alone does not cover this: with the
+    /// distiller declining, the collapse fallback still gets the payload.
+    #[test]
+    fn never_collapses_output_a_later_step_has_to_parse() {
+        let mut content = String::new();
+        for i in 0..60 {
+            content.push_str(&format!("pod-{i}: Running\n"));
+        }
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pods -o json | jq -r '.items[] | \"\\(.metadata.name): \\(.status.phase)\"'"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let delivered = match process_payload(&payload, None, None) {
+            None => content.clone(), // declined: the host keeps its own bytes
+            Some(out) => {
+                let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+                v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                    .as_str()
+                    .expect("stdout is a string")
+                    .to_string()
+            }
+        };
+
+        for i in 0..60 {
+            assert!(
+                delivered.contains(&format!("pod-{i}: Running")),
+                "row {i} is missing from a payload a later step parses: {delivered}"
+            );
+        }
     }
 
     /// 200 green test lines and a tally: output a distiller reduces hard, so the

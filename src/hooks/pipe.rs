@@ -370,8 +370,14 @@ fn distill(
     let session_id = with_session(session, |g| g.session_id.clone())
         .unwrap_or_else(|| "pipe_session".to_string());
 
+    // The single command this stdout came from, or `None` for a chain that
+    // several programs wrote to. Routing anything by the first name in a chain
+    // hands one distiller output it never produced (#264), and a TOML filter
+    // keyed on that name does it just as readily as a Rust distiller.
+    let output_command = command_name.and_then(crate::pipeline::registry::sole_output_command);
+
     let mut matched_toml = None;
-    if let Some(cmd) = command_name {
+    if let Some(cmd) = output_command {
         let filters = toml_filter::load_all_filters();
         if let Some(f) = filters.iter().find(|filter| filter.matches(cmd)) {
             matched_toml = Some(f.clone());
@@ -432,9 +438,14 @@ fn distill(
             // Enumeration commands (`ls`/`find`/`ps`/…) return the input verbatim
             // by design; collapsing them would drop rows that are the answer, so
             // never fall back to collapse for them (#200).
+            // The verbatim check asks the resolved command, not the string the
+            // user typed: the whole of `kubectl get pods -o json | jq -r '...'`
+            // reads as `kubectl` and lets collapse rewrite a payload the next
+            // step parses (#269).
             let collapse_savings_data =
                 if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
-                    || crate::distillers::passes_through_verbatim(cmd)
+                    || !output_command
+                        .is_some_and(|c| !crate::distillers::passes_through_verbatim(c))
                 {
                     None
                 } else {
