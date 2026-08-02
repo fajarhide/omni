@@ -443,14 +443,6 @@ pub fn process_payload(
         .iter()
         .filter(|s| s.final_score() < 0.3)
         .count();
-    let should_store =
-        noise_count as f32 / check_segments.len().max(1) as f32 > 0.4 && check_segments.len() > 20;
-
-    let dropped_lines: usize = check_segments
-        .iter()
-        .filter(|s| s.final_score() < 0.3)
-        .map(|s| s.content.lines().count())
-        .sum();
 
     // Auto-learn trigger
     if !clean_command.is_empty() && content.len() > 100 {
@@ -459,36 +451,6 @@ pub fn process_payload(
         let poor = total > 5 && (dropped as f32 / total.max(1) as f32) < 0.3;
         if poor {
             crate::session::learn::queue_for_learn(&content, clean_command);
-        }
-    }
-
-    if should_store {
-        if let Some(ref s) = store {
-            let hash = s.store_rewind(&content);
-            final_out.push_str(&format!(
-                "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
-                dropped_lines, hash
-            ));
-            rewind_hash = hash;
-        } else {
-            // Phase 6: factual guard — heavy compression but no rewind store available
-            final_out.push_str(&format!(
-                "\n[OMNI: {} lines omitted — WARNING: full output not saved (no store), recovery impossible]\n",
-                dropped_lines
-            ));
-        }
-    } else {
-        // Phase 6: heavy noise detected but not stored — warn if compression is significant
-        let noise_ratio = if !check_segments.is_empty() {
-            noise_count as f32 / check_segments.len() as f32
-        } else {
-            0.0
-        };
-        if noise_ratio > 0.6 && content.len() > 2000 {
-            final_out.push_str(&format!(
-                "\n[OMNI Guard: {:.0}% noise dropped, but full output not archived — recovery unavailable]\n",
-                noise_ratio * 100.0
-            ));
         }
     }
 
@@ -526,9 +488,7 @@ pub fn process_payload(
         }
     }
 
-    let mut route = if !rewind_hash.is_empty() {
-        Route::Rewind
-    } else if ratio >= keep_threshold {
+    let mut route = if ratio >= keep_threshold {
         Route::Keep
     } else if ratio >= soft_threshold {
         Route::Soft
@@ -556,6 +516,67 @@ pub fn process_payload(
         // what the command produced.
         final_out = content.clone();
         route = Route::Passthrough;
+    }
+
+    // The rewind decision, and it asks one question: is this reply, the one about
+    // to be delivered, missing bytes the command produced?
+    //
+    // The old gate asked the scorer for a noise ratio and wanted more than 40%
+    // noise across more than 20 segments. No real payload had that shape: 0 of
+    // 8,968 recorded distillations carried a hash and `rewind_store` held
+    // nothing, so "everything cut is archived" (`README.md:81`) had never been
+    // true for a single row (#271). It also asked the wrong question. A re-scored
+    // noise ratio says what the scorer thought of the input, not what the agent
+    // is about to lose, and the two disagree on every path where a TOML filter or
+    // a distiller produced the output.
+    //
+    // It runs after the route is settled, and that placement is load-bearing. An
+    // earlier draft archived before routing: measured on the real binary,
+    // `git log --oneline -80` archived on 15 runs out of 15 and then handed the
+    // raw output back anyway, so every one of those writes stored content the
+    // agent had never lost. A passthrough returns `None` below and the host keeps
+    // its own bytes; there is nothing to recover and nothing to record.
+    if route != Route::Passthrough && final_out.len() < content.len() {
+        let omitted_lines = content
+            .lines()
+            .count()
+            .saturating_sub(final_out.lines().count());
+        // Lines are what a reader can act on, but a distillation can also shorten
+        // lines in place and leave the count alone. Report the unit that is true
+        // for this call rather than printing "0 lines omitted" over missing bytes.
+        let lost = if omitted_lines > 0 {
+            format!("{omitted_lines} lines")
+        } else {
+            format!("{} bytes", content.len() - final_out.len())
+        };
+
+        let marker = if content.len() > crate::guard::limits::MAX_REWIND_BYTES {
+            format!(
+                "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
+                content.len(),
+                crate::guard::limits::MAX_REWIND_BYTES
+            )
+        } else if let Some(ref s) = store {
+            rewind_hash = s.store_rewind(&content);
+            format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{rewind_hash}\") for full output]\n")
+        } else {
+            format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n")
+        };
+
+        // The marker is not free. One that costs more than the cut saved is a
+        // reply with fewer facts and more tokens, which is #268 and #269 on 102
+        // and 90 byte payloads. Below that floor, hand back what the command
+        // produced instead.
+        if final_out.len() + marker.len() < content.len() {
+            final_out.push_str(&marker);
+            if !rewind_hash.is_empty() {
+                route = Route::Rewind;
+            }
+        } else {
+            final_out = content.clone();
+            route = Route::Passthrough;
+            rewind_hash.clear();
+        }
     }
 
     let latency_ms = start.elapsed().as_millis() as u32;
@@ -1354,6 +1375,193 @@ mod tests {
             stdout.len() < content.len(),
             "the replacement must be smaller than the input"
         );
+    }
+
+    /// 200 green test lines and a tally: output a distiller reduces hard, so the
+    /// reply is unambiguously lossy.
+    fn lossy_content(lines: usize) -> String {
+        let mut content = String::new();
+        for i in 0..lines {
+            content.push_str(&format!("test module_{i} ... ok\n"));
+        }
+        content.push_str(&format!("test result: ok. {lines} passed; 0 failed\n"));
+        content
+    }
+
+    fn count(db: &std::path::Path, sql: &str) -> i64 {
+        rusqlite::Connection::open(db)
+            .expect("open recorded db")
+            .query_row(sql, [], |r| r.get(0))
+            .expect("count")
+    }
+
+    /// #271. `README.md:81` promises "everything cut is archived". The gate meant
+    /// to deliver it asked the scorer for a noise ratio and wanted more than 40%
+    /// noise across more than 20 segments, which no real payload had: 0 of 8,968
+    /// recorded distillations carried a rewind hash and `rewind_store` was empty,
+    /// so the archive had never held a single row.
+    ///
+    /// The assertions are on the stored rows rather than on the marker text. A
+    /// test that only greps the reply passes while the insert quietly fails, and
+    /// a confident string over an empty table is the defect being fixed.
+    #[test]
+    fn archives_the_raw_output_it_shortens() {
+        // Arrange
+        let content = lossy_content(200);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo test"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+
+        // Act
+        let out = process_payload(&payload, Some(store), None).expect("a reduced result is sent");
+
+        // Assert
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM rewind_store"),
+            1,
+            "the raw output must be recoverable, or the guarantee is a sentence"
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM distillations \
+                 WHERE rewind_hash IS NOT NULL AND rewind_hash <> ''"
+            ),
+            1,
+            "the recorded row must name the archive it belongs to"
+        );
+        assert!(
+            out.contains("omni_retrieve("),
+            "the agent cannot call what it was not told: {out}"
+        );
+    }
+
+    /// The bound is stated, not implied. Above the cap the content is not
+    /// archived, and the reply has to say so rather than leaving the agent to
+    /// infer that `omni_retrieve` exists for it.
+    ///
+    /// The payload carries its text at `tool_response.content` on purpose. The
+    /// host-cap gate reads `tool_response.stdout`, so a Bash-shaped response
+    /// would be declined at 30 KB and this branch could never be reached. A bare
+    /// string does not work either: `normalize` has no extraction arm for one and
+    /// returns `None`.
+    #[test]
+    fn states_the_bound_when_the_input_is_over_the_rewind_cap() {
+        // Arrange: comfortably over MAX_REWIND_BYTES.
+        let content = lossy_content(6_000);
+        assert!(content.len() > crate::guard::limits::MAX_REWIND_BYTES);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo test"},
+            "tool_response": {"content": content},
+        })
+        .to_string();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+
+        // Act
+        let out = process_payload(&payload, Some(store), None).expect("a reduced result is sent");
+
+        // Assert
+        assert!(
+            out.contains("not archived"),
+            "an unarchived cut must say so: {out}"
+        );
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM rewind_store"),
+            0,
+            "the cap has to hold, or it is not a cap"
+        );
+    }
+
+    /// A passthrough declines, so the host keeps its own bytes and nothing was
+    /// lost. An archive written on the way to that decision would sit in
+    /// `rewind_store` naming content the agent still holds, and `omni stats`
+    /// would count a rewind that never applied.
+    ///
+    /// Same fixture as `passthrough_leaves_the_agent_holding_the_original_bytes`,
+    /// which proves this input really reaches the low-compression branch.
+    #[test]
+    fn archives_nothing_on_a_call_it_declines() {
+        // Arrange
+        let mut content = String::from("| Workload | Before | After | Savings |\n");
+        content.push_str("|-------------------|-------:|-------:|--------:|\n");
+        for i in 0..8 {
+            content.push_str(&format!("| workload-{i} | {i}00 KB | {i}0 KB | 9{i}% |\n"));
+        }
+        for i in 0..40 {
+            content.push_str(&format!(
+                "Paragraph {i} of the methodology, describing how each workload was measured.\n"
+            ));
+        }
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "benchreport --summary"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+
+        // Act
+        let out = process_payload(&payload, Some(store), None);
+
+        // Assert
+        assert!(out.is_none(), "the fixture must still be declined");
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM distillations \
+                 WHERE rewind_hash IS NOT NULL AND rewind_hash <> ''"
+            ),
+            0,
+            "a declined call must not book a rewind"
+        );
+    }
+
+    /// The marker is not free. #268 and #269 are 102 and 90 byte payloads where
+    /// the markers cost more than the cut saved, so the agent paid tokens for
+    /// fewer facts. Whatever the route, a reply that replaces the command's own
+    /// bytes must be smaller than them.
+    ///
+    /// Written as a sweep rather than one fixture because the branch that fires
+    /// changes with size, and the invariant is what has to hold across all of
+    /// them.
+    #[test]
+    fn never_hands_back_more_bytes_than_the_command_produced() {
+        for lines in [3usize, 6, 12, 25, 60, 200] {
+            let content = lossy_content(lines);
+            let payload = json!({
+                "tool_name": "Bash",
+                "tool_input": {"command": "cargo test"},
+                "tool_response": bash_response(&content),
+            })
+            .to_string();
+
+            let Some(out) = process_payload(&payload, None, None) else {
+                continue; // declined: the host keeps its own bytes, nothing to check
+            };
+            let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+            let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                .as_str()
+                .expect("stdout is a string");
+
+            assert!(
+                stdout.len() < content.len(),
+                "{lines} lines in, {} bytes back for {} raw: markers cost more \
+                 than the cut saved",
+                stdout.len(),
+                content.len()
+            );
+        }
     }
 
     /// A Bash payload as Claude Code actually sends one.

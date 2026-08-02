@@ -27,6 +27,22 @@ pub const MAX_OUTPUT_BYTES: usize = 50_000;
 /// cap by a few bytes. Nothing legitimate arrives above it on this path.
 pub const HOST_OUTPUT_CAP: usize = 30_000;
 
+/// Largest input either hook archives in the RewindStore when it drops bytes.
+///
+/// `README.md:81` promises that "everything cut is archived", and it had never
+/// once been true: the old gate asked the scorer for more than 40% noise
+/// segments across more than 20 segments, and 0 of 8,968 distillations in the
+/// maintainer's database had ever recorded a rewind hash, leaving `rewind_store`
+/// empty (#271). Archiving on
+/// every lossy distillation is what makes that sentence true. A cap is what keeps
+/// it affordable: the same 30 days of history is 13.3 MB of raw content at 64 KB
+/// and 83.1 MB uncapped, because 53 outliers up to 5 MB carry six times the bytes
+/// of the 3,604 rows below the cap.
+///
+/// Above it the output says the content was not archived, so the bound reaches
+/// the agent instead of being implied.
+pub const MAX_REWIND_BYTES: usize = 64 * 1024;
+
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking — e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that
