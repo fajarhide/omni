@@ -139,6 +139,48 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         || (base == "git" && git_enumerates_files(command))
         // A container listing, for the same reason (#233).
         || lists_containers(command)
+        // A wrapper whose stdout belongs to whatever it ran inside (#234).
+        || wraps_another_command(command)
+}
+
+/// Commands whose stdout is some other program's, not their own.
+///
+/// `az aks command invoke` does not produce `az` output: it runs an arbitrary
+/// shell command inside a cluster and hands back that program's stdout. Routing
+/// on the first executable sent it to a cloud distiller with no grammar for
+/// whatever ran, and a four-section run came back as nine rows of the first
+/// section plus `[Partial signal]`, with the TLS probe that was the whole point
+/// of the call discarded. It cost a 40 second round trip against a private
+/// cluster to find that out (#234). `kubectl exec` has form here too: #112 was
+/// its output summarised as `docker logs: 9 lines, no errors detected`.
+///
+/// Same rule as `python`, `python3` and `ruby` in #190: a thing that runs an
+/// arbitrary program has no grammar of its own, so the honest answer is the
+/// input.
+///
+/// The alternative was parsing the inner command and routing on that, which
+/// keeps the distillation on `ssh host 'cargo build'`. Measured before choosing:
+/// 59 of 8,032 recorded commands are wrappers, 0.7%, so that parser and its
+/// failure modes would be bought for less than one call in a hundred. If the
+/// share grows, revisit it with the same query.
+fn wraps_another_command(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().map(|t| t.trim_matches('"'));
+    let base = tokens
+        .next()
+        .and_then(|w| std::path::Path::new(w).file_name()?.to_str());
+
+    match base {
+        // `ssh host '<cmd>'`, but not `ssh host` alone, which is interactive and
+        // produces nothing to distil either way.
+        Some("ssh") => true,
+        // `kubectl exec … -- <cmd>`, `docker exec … <cmd>`, `podman exec …`.
+        Some("kubectl") | Some("docker") | Some("podman") => {
+            command.split_whitespace().any(|t| t == "exec")
+        }
+        // `az aks command invoke -c '<cmd>'`.
+        Some("az") => command.contains("command invoke"),
+        _ => false,
+    }
 }
 
 /// `docker ps`, `podman ps` and `docker container ls` list containers one per
@@ -754,6 +796,46 @@ mod tests {
                 "{cmd} must hand back every row; each one is a distinct datum"
             );
         }
+    }
+
+    /// #234. `az aks command invoke` runs an arbitrary command inside a cluster
+    /// and returns that program's stdout, so routing on `az` handed a four
+    /// section run to a cloud distiller with no grammar for it. Nine rows of the
+    /// first section came back and the TLS probe that was the point of the call
+    /// went with the rest, after a 40 second round trip against a private
+    /// cluster. `kubectl exec` had already done this once as #112.
+    #[test]
+    fn hands_back_what_a_wrapper_ran_inside() {
+        let inner = "=== ENV names ===\nBE_LIVEKIT_SERVICE_PORT_RTC_UDP\n\
+                     === probe ===\nTLS handshake ok\n=== versions ===\nv1.2.3\n";
+
+        for cmd in [
+            "az aks command invoke -g rg -n cluster -c 'sh -c ...'",
+            "kubectl exec -n prod pod-1 -- sh -c 'env'",
+            "docker exec api sh -c 'env'",
+            "ssh build-host 'env'",
+        ] {
+            let segments = scorer::score_with_command(inner, cmd, None);
+            let out = distill_with_command(&segments, inner, cmd, None);
+
+            assert_eq!(
+                out, inner,
+                "{cmd} produces the inner program's stdout, which OMNI has no grammar for"
+            );
+        }
+    }
+
+    /// The wrapper rule must not swallow the tools themselves.
+    #[test]
+    fn claims_only_the_wrapping_subcommands() {
+        assert!(wraps_another_command("kubectl exec pod -- ls"));
+        assert!(wraps_another_command("az aks command invoke -c 'ls'"));
+        assert!(wraps_another_command("ssh host 'ls'"));
+
+        assert!(!wraps_another_command("kubectl get pods"));
+        assert!(!wraps_another_command("az aks show -n cluster"));
+        assert!(!wraps_another_command("docker build ."));
+        assert!(!wraps_another_command("cargo test"));
     }
 
     /// The counter-case, so this is not "never distil docker". A build log and a
