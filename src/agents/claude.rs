@@ -4,6 +4,14 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 
+/// Which tool results Claude Code hands to the PostToolUse hook.
+///
+/// Claude Code matches this as a regex, so alternation is how one registration
+/// covers several tools. It is a constant because `install_omni_hooks` writes it
+/// and the tests assert on it, and a widened matcher that only half the code
+/// knows about is worse than a narrow one (#172).
+const POST_TOOL_MATCHER: &str = "Bash|Read|Grep|WebFetch";
+
 pub struct ClaudeIntegration;
 
 impl AgentIntegration for ClaudeIntegration {
@@ -369,13 +377,24 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
 
     let ensure_hook = |arr_val: &mut serde_json::Value, matcher: &str, hook_cmd: &str| {
         let arr = arr_val.as_array_mut().unwrap();
-        for v in arr.iter() {
-            if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
-                for h in inner {
-                    if h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd) {
-                        return;
-                    }
+        for v in arr.iter_mut() {
+            let installed = v
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .is_some_and(|inner| {
+                    inner
+                        .iter()
+                        .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd))
+                });
+            if installed {
+                // Already installed, but the matcher still has to be brought up to
+                // date. Returning here unconditionally is why widening it in #172
+                // would have reached new installs only: every existing settings
+                // file names `Bash` and nothing would have rewritten it.
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert("matcher".to_string(), json!(matcher));
                 }
+                return;
             }
         }
 
@@ -423,34 +442,29 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         "Bash",
         &pre_cmd,
     );
-    // Still `Bash` only, and #172 is why that is now a measured decision rather
-    // than an oversight.
+    // `Bash|Read|Grep|WebFetch`, widened on the maintainer's call (#172).
     //
-    // The `Read`/`Grep`/`WebFetch` arms in `hooks::post_tool` have been written,
-    // gated and tested since the Rust rewrite and have **never executed on
-    // Claude Code**, because this matcher names one tool. Widening it is one
-    // line. What that line does was measured before taking it, and the answer
-    // was not a token win: driven through the built binary's `--post-hook` with
-    // a real payload, `src/pipeline/collapse.rs` — 878 lines — comes back as
-    // **20**, an import list, three signatures and a marker. Every function
-    // body goes. `readfile.rs`'s only floor is `MIN_DISTILL_TOKENS = 2000`,
-    // which nearly every real source file clears, so flipping this would change
-    // what "read a file" means for a whole session, on the tool an agent edits
-    // from.
+    // The `Read`/`Grep`/`WebFetch` arms in `hooks::post_tool` had been written,
+    // gated and tested since the Rust rewrite and had **never executed on Claude
+    // Code**, because this matcher named one tool. What that widening does was
+    // measured before it was taken, and it is not free: driven through the built
+    // binary's `--post-hook` with a real payload, `src/pipeline/collapse.rs`, 878
+    // lines, comes back as **20** of them, an import list, three signatures and a
+    // marker. `readfile.rs`'s only floor is `MIN_DISTILL_TOKENS = 2000`, which
+    // nearly every real source file clears, so this changes what "read a file"
+    // means for a whole session, on the tool an agent edits from. The maintainer
+    // chose that trade with those numbers in front of them.
     //
-    // The prerequisites landed anyway, because they are bugs on their own terms
-    // and each would have made the flip fail silently rather than loudly:
-    // `normalize` could not reach a `Read` payload's text at all (`file.content`
-    // matched no arm, so the hook emitted nothing), `tool_input.file_path` was
+    // Three prerequisites landed first, each of which would have made this fail
+    // silently rather than loudly: `normalize` could not reach a `Read` payload's
+    // text at all (`file.content` matched no arm), `tool_input.file_path` was
     // never read (so the distiller saw `"unknown"` and could not pick a
-    // language), and `shape_for_host` had no `Read` shape (so the reply would
-    // have been the `{status, result}` object #187 was rejected for).
-    //
-    // What is left is the maintainer's call on the floor, with numbers now in
-    // hand rather than in the abstract.
+    // language), and `shape_for_host` had no `Read` shape. #246 stopped the
+    // `readfile` path reporting a document as a clean log, and #273 made these
+    // arms archive and mark what they cut, so nothing they drop is unrecoverable.
     ensure_hook(
         hooks.entry("PostToolUse").or_insert_with(|| json!([])),
-        "Bash",
+        POST_TOOL_MATCHER,
         &post_cmd,
     );
     ensure_hook(
@@ -599,6 +613,55 @@ mod tests {
 
         install_omni_hooks(&mut val, "/usr/bin/omni");
         assert_eq!(get_count(&val), 1, "Should be idempotent");
+    }
+
+    /// #172. The `Read`, `Grep` and `WebFetch` arms in `hooks::post_tool` had
+    /// been written, gated and tested since the Rust rewrite and had never once
+    /// executed on Claude Code, because this matcher named a single tool.
+    #[test]
+    fn registers_post_tool_for_the_tools_it_can_distil() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/usr/bin/omni");
+
+        let matcher = val["hooks"]["PostToolUse"][0]["matcher"]
+            .as_str()
+            .expect("a string matcher");
+
+        for tool in ["Bash", "Read", "Grep", "WebFetch"] {
+            assert!(
+                matcher.contains(tool),
+                "{tool} results never reach the hook: matcher is {matcher:?}"
+            );
+        }
+    }
+
+    /// An install from before #172 names `Bash` and would never be rewritten,
+    /// because `ensure_hook` returned as soon as it recognised the command. Every
+    /// existing user would have kept the narrow matcher and seen no change at
+    /// all, which is the quietest way for a fix to not ship.
+    #[test]
+    fn brings_an_existing_narrow_matcher_up_to_date() {
+        let mut val = json!({
+            "hooks": {
+                "PostToolUse": [{
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "/usr/bin/omni --post-hook"}]
+                }]
+            }
+        });
+
+        install_omni_hooks(&mut val, "/usr/bin/omni");
+
+        assert_eq!(
+            val["hooks"]["PostToolUse"][0]["matcher"].as_str(),
+            Some(POST_TOOL_MATCHER),
+            "an existing install must be migrated, not left behind"
+        );
+        assert_eq!(
+            val["hooks"]["PostToolUse"].as_array().unwrap().len(),
+            1,
+            "migrating must not duplicate the registration"
+        );
     }
 
     #[test]
