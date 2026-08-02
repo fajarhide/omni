@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum LearnAction {
@@ -20,6 +21,35 @@ pub struct PatternCandidate {
     pub suggested_action: LearnAction,
 }
 
+/// Lines that are never noise, however often they repeat.
+///
+/// A suggestion from here is framed as configuration to paste into
+/// `~/.omni/signals/user.toml`, so a bad one outlives the session that produced
+/// it and applies to every future command. Two classes have to be excluded by
+/// construction rather than by frequency (#266):
+///
+/// * **OMNI's own channel markers.** Stripping `[stderr]` hides that a command
+///   wrote to the error channel at all, which is worse than dropping output: the
+///   reader gets no signal that anything was hidden.
+/// * **Structural keys.** `spec:`, a lone brace, a markdown fence and a YAML
+///   document separator are the shape of the document, not decoration. A filter
+///   that removes them corrupts the manifest instead of tidying it.
+fn is_never_noise(line: &str) -> bool {
+    static BARE_KEY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[A-Za-z_][A-Za-z0-9_.\-]*:$").expect("the bare-key regex is a literal")
+    });
+
+    let t = line.trim();
+
+    if t.starts_with("[stderr]") || t.starts_with("[stdout]") || t.starts_with("[OMNI") {
+        return true;
+    }
+
+    matches!(t, "{" | "}" | "[" | "]" | "---" | "...")
+        || t.starts_with("```")
+        || BARE_KEY.is_match(t)
+}
+
 pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
     let mut frequency: HashMap<String, (usize, String)> = HashMap::new();
     let ansi_re = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
@@ -29,7 +59,7 @@ pub fn detect_patterns(input: &str) -> Vec<PatternCandidate> {
     for line in input.lines() {
         let text = ansi_re.replace_all(line, "").to_string();
         let trimmed = text.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || is_never_noise(trimmed) {
             continue;
         }
 
@@ -288,6 +318,57 @@ pub fn queue_for_learn(input: &str, command: &str) {
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn never_suggests_stripping_the_stderr_marker() {
+        // A filter that hides the error channel is worse than one that drops
+        // output: the reader has no signal that anything was hidden (#266).
+        // Three of each distinct line. At two the prefix never clears
+        // `count >= 3`, so the test would pass with the guard removed and prove
+        // nothing.
+        let input =
+            "[stderr] warning one\n[stderr] warning two\n[stderr] warning three\n".repeat(3);
+
+        let patterns = detect_patterns(&input);
+
+        assert!(
+            !patterns.iter().any(|p| p.trigger_prefix.contains("stderr")),
+            "the error channel marker must never be offered as noise: {:?}",
+            patterns
+                .iter()
+                .map(|p| &p.trigger_prefix)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn never_suggests_stripping_a_documents_structure() {
+        // `spec:` and a lone brace are the shape of the manifest, not decoration.
+        let input = "spec:\nspec:\nspec:\n}\n}\n}\n```\n```\n```\n---\n---\n---\n";
+
+        let patterns = detect_patterns(input);
+
+        assert!(
+            patterns.is_empty(),
+            "structural keys must never be offered as noise: {:?}",
+            patterns
+                .iter()
+                .map(|p| &p.trigger_prefix)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn still_detects_real_repetition_around_the_structure() {
+        // The guard must not swallow the thing it sits next to.
+        let input = "spec:\nWaiting for connection\nspec:\nWaiting for connection\n\
+                     spec:\nWaiting for connection\n";
+
+        let patterns = detect_patterns(input);
+
+        assert_eq!(patterns.len(), 1, "got {patterns:?}");
+        assert_eq!(patterns[0].trigger_prefix, "Waiting for connection");
+    }
 
     #[test]
     fn detects_patterns_for_repetitive_build_output() {
