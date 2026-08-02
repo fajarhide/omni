@@ -10,7 +10,13 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+/// How many distinct commands must have produced a pattern before it is offered
+/// as a persistent strip rule. Recurring noise is what more than one command
+/// emits; anything below this is that command's content (#266).
+const MIN_COMMANDS_FOR_NOISE: usize = 2;
 
 #[derive(Clone)]
 pub struct OmniServer {
@@ -915,14 +921,39 @@ impl OmniServer {
         if traces.is_empty() {
             return "No recent traces found.".to_string();
         }
-        let mut concatenated_raw = String::new();
+        // Detect per trace, then keep only what several commands produced.
+        //
+        // Concatenating every trace and counting once made "four times inside one
+        // command" indistinguishable from "once in each of four commands", so a
+        // `gh issue list` row and a Terraform variable description were suggested
+        // as permanent strip patterns at confidence 0.85 (#266). Recurring noise
+        // is by definition what more than one command emits; a string seen only
+        // within a single output is that command's content.
+        let mut seen_in: HashMap<String, (usize, crate::session::learn::PatternCandidate)> =
+            HashMap::new();
         for (_, _, raw, _) in &traces {
-            concatenated_raw.push_str(raw);
-            concatenated_raw.push('\n');
+            for p in crate::session::learn::detect_patterns(raw) {
+                let entry = seen_in
+                    .entry(p.trigger_prefix.clone())
+                    .or_insert_with(|| (0, p.clone()));
+                entry.0 += 1;
+                entry.1.count = entry.1.count.max(p.count);
+            }
         }
-        let patterns = crate::session::learn::detect_patterns(&concatenated_raw);
+
+        let mut patterns: Vec<crate::session::learn::PatternCandidate> = seen_in
+            .into_values()
+            .filter(|(commands, _)| *commands >= MIN_COMMANDS_FOR_NOISE)
+            .map(|(_, p)| p)
+            .collect();
+        patterns.sort_by_key(|p| std::cmp::Reverse(p.count));
+
         if patterns.is_empty() {
-            return "No dominant noisy patterns detected in recent traces.".to_string();
+            return format!(
+                "No pattern appeared in {MIN_COMMANDS_FOR_NOISE} or more of the {} recent traces, \
+                 so nothing here is recurring noise rather than one command's content.",
+                traces.len()
+            );
         }
         let toml_snippet = crate::session::learn::generate_toml(&patterns, "omni_auto_noise", None);
         let mut out = format!(
