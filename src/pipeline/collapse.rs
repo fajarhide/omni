@@ -5,7 +5,6 @@ use crate::pipeline::scorer::classify_line;
 use crate::pipeline::{CollapseMode, SignalTier};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::sync::{LazyLock, Mutex};
 
 // ─── Data Structures ────────────────────────────────────
 
@@ -60,92 +59,11 @@ fn strip_ansi(line: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Shared normalize cache — works correctly across tokio's multi-thread runtime.
-static NORMALIZE_CACHE: LazyLock<Mutex<lru::LruCache<String, String>>> = LazyLock::new(|| {
-    Mutex::new(lru::LruCache::new(
-        std::num::NonZeroUsize::new(2048).unwrap(),
-    ))
-});
-
-/// Fast structural normalization for pattern grouping.
-/// Produces a "skeleton" of the line:
-/// - Replace contiguous digits with "#"
-/// - Replace identifiers between delimiters with "_" (to group test names etc.)
-///
-/// Strategy: extract the "structural template" — the fixed parts of the line.
-/// Input `trimmed` is assumed to be stripped of ANSI codes and whitespace trimmed.
-fn normalize_structural(trimmed: &str) -> String {
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    if is_git_hash_line(trimmed) {
-        return trimmed.to_lowercase(); // preserve as-is, hanya lowercase
-    }
-
-    if trimmed.len() < 1000
-        && let Ok(mut cache) = NORMALIZE_CACHE.lock()
-        && let Some(cached) = cache.get(trimmed).cloned()
-    {
-        return cached;
-    }
-
-    use unicode_segmentation::UnicodeSegmentation;
-
-    let mut out = String::with_capacity(trimmed.len());
-    let mut in_digits = false;
-
-    for g in trimmed.graphemes(true) {
-        if g.len() == 1 && g.chars().next().unwrap().is_ascii_digit() {
-            if !in_digits {
-                out.push('#');
-                in_digits = true;
-            }
-        } else {
-            in_digits = false;
-            // lowercase if the grapheme is ascii, otherwise push as is
-            if g.len() == 1 && g.is_ascii() {
-                out.push(g.chars().next().unwrap().to_ascii_lowercase());
-            } else {
-                out.push_str(g);
-            }
-        }
-    }
-
-    if trimmed.len() < 1000
-        && let Ok(mut cache) = NORMALIZE_CACHE.lock()
-    {
-        cache.put(trimmed.to_string(), out.clone());
-    }
-
-    out
-}
-
-fn is_git_hash_line(trimmed: &str) -> bool {
-    let lower = trimmed.to_lowercase();
-
-    // a. Starts with "commit " followed by 7-40 hex chars
-    if let Some(rest) = lower.strip_prefix("commit ")
-        && rest.len() >= 7
-        && rest.len() <= 40
-        && rest.chars().all(|c| c.is_ascii_hexdigit())
-    {
-        return true;
-    }
-
-    // b. Starts with 7-40 hex chars followed by space
-    if let Some(space_idx) = trimmed.find(' ') {
-        let first_word = &trimmed[..space_idx];
-        if first_word.len() >= 7
-            && first_word.len() <= 40
-            && first_word.chars().all(|c| c.is_ascii_hexdigit())
-        {
-            return true;
-        }
-    }
-
-    false
-}
+// `normalize_structural`, its LRU cache and `is_git_hash_line` lived here until
+// #267. They built a skeleton of each line by rewriting every digit run to `#`,
+// which is what the four content modes fell through to and what deleted nine
+// distinct paths behind one count. Nothing calls them now, so they are gone
+// rather than kept warm for a rule the project has twice decided against.
 
 /// Content-type aware normalization. For test/build output, use a more
 /// aggressive "template extraction" that groups lines with the same structure.
@@ -187,7 +105,14 @@ fn normalize_test_line(trimmed: &str) -> String {
     if trimmed.starts_with("running ") && trimmed.contains(" test") {
         return "running # tests".to_string();
     }
-    normalize_structural(trimmed)
+    // The fallthrough that #241 removed from `Generic`, removed here for the
+    // same reason. `normalize_structural` rewrote every digit run to `#`, so
+    // nine distinct Portainer stack paths became one pattern and all nine were
+    // deleted behind a count that identifies none of them (#267). The special
+    // cases above are safe because each one names a shape where something
+    // established the varying token is noise; anything they miss established
+    // nothing. Identical lines are still repetition, so they still collapse.
+    trimmed.to_string()
 }
 
 /// For build output: "   Compiling serde v1.0.217 (...)" → "compiling _"
@@ -211,7 +136,7 @@ fn normalize_build_line(trimmed: &str) -> String {
     if lower.starts_with("unpacking ") {
         return "unpacking _".to_string();
     }
-    normalize_structural(trimmed)
+    trimmed.to_string()
 }
 
 /// For infra output: various kubectl/docker patterns
@@ -228,7 +153,7 @@ fn normalize_infra_line(trimmed: &str) -> String {
     if lower.starts_with("step ") && lower.contains('/') {
         return "step #/# : _".to_string();
     }
-    normalize_structural(trimmed)
+    trimmed.to_string()
 }
 
 /// For log output: normalize timestamps and severity
@@ -245,7 +170,7 @@ fn normalize_log_line(trimmed: &str) -> String {
     {
         return "debug: _".to_string();
     }
-    normalize_structural(trimmed)
+    trimmed.to_string()
 }
 
 // ─── Content-Type Specific Summaries ────────────────────
@@ -971,14 +896,49 @@ mod tests {
         assert_eq!(result.collapsed_lines.len(), 4);
     }
 
+    /// #267, the remainder of #232. `cat`, `grep`, `tail` and `curl` resolve to
+    /// `Log`, `kubectl` and `docker` to `Infra`, and all four content modes fell
+    /// through to the skeleton that #241 removed from `Generic` alone. Nine
+    /// distinct Portainer stack paths came back as
+    /// `[9 similar lines collapsed] (pattern: ".../#/v#")`, a count that
+    /// identifies none of them, with the whole payload reported as 93% saved.
     #[test]
-    fn detects_git_hashes_accurately() {
-        assert!(is_git_hash_line("abc1234 Fix bug"));
-        assert!(is_git_hash_line(
-            "commit abc1234def5678abc1234def5678abc1234def5"
-        ));
-        assert!(!is_git_hash_line("1.2.3 version")); // contains dots
-        assert!(!is_git_hash_line("cafe Fix")); // too short (4 chars)
-        assert!(!is_git_hash_line("192.168.1.1 ip")); // contains dots
+    fn keeps_rows_that_differ_only_in_a_number() {
+        // Past MIN_LINES_FOR_COLLAPSE, or collapse returns early and the test
+        // passes without reaching the grouping it is meant to guard.
+        const ROWS: usize = 14;
+        let rows: String = (1..=ROWS)
+            .map(|i| format!("/var/lib/docker/volumes/portainer/_data/compose/{i}/v{i}\n"))
+            .collect();
+
+        for mode in [
+            CollapseMode::Log,
+            CollapseMode::Infra,
+            CollapseMode::Build,
+            CollapseMode::Test,
+            CollapseMode::Generic,
+        ] {
+            let out = collapse(&rows, &mode).collapsed_lines.join("\n");
+            for i in 1..=ROWS {
+                assert!(
+                    out.contains(&format!("/compose/{i}/v{i}")),
+                    "{mode:?} deleted row {i}, which is data rather than repetition:\n{out}"
+                );
+            }
+        }
+    }
+
+    /// The counter-case, so this is not "never collapse": identical lines are
+    /// repetition by any reading and still fold.
+    #[test]
+    fn still_collapses_identical_lines() {
+        let rows = "npm WARN deprecated pkg\n".repeat(30);
+
+        let out = collapse(&rows, &CollapseMode::Log)
+            .collapsed_lines
+            .join("\n");
+
+        assert!(out.contains("collapsed"), "{out}");
+        assert!(out.lines().count() < 30, "{out}");
     }
 }
