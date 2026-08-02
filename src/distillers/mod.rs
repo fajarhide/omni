@@ -137,6 +137,86 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         // collapse fallback then folds up is #214, and the file rows of a
         // `--stat` all share a shape.
         || (base == "git" && git_enumerates_files(command))
+        // A container listing, for the same reason (#233).
+        || lists_containers(command)
+        // A wrapper whose stdout belongs to whatever it ran inside (#234).
+        || wraps_another_command(command)
+}
+
+/// Commands whose stdout is some other program's, not their own.
+///
+/// `az aks command invoke` does not produce `az` output: it runs an arbitrary
+/// shell command inside a cluster and hands back that program's stdout. Routing
+/// on the first executable sent it to a cloud distiller with no grammar for
+/// whatever ran, and a four-section run came back as nine rows of the first
+/// section plus `[Partial signal]`, with the TLS probe that was the whole point
+/// of the call discarded. It cost a 40 second round trip against a private
+/// cluster to find that out (#234). `kubectl exec` has form here too: #112 was
+/// its output summarised as `docker logs: 9 lines, no errors detected`.
+///
+/// Same rule as `python`, `python3` and `ruby` in #190: a thing that runs an
+/// arbitrary program has no grammar of its own, so the honest answer is the
+/// input.
+///
+/// The alternative was parsing the inner command and routing on that, which
+/// keeps the distillation on `ssh host 'cargo build'`. Measured before choosing:
+/// 59 of 8,032 recorded commands are wrappers, 0.7%, so that parser and its
+/// failure modes would be bought for less than one call in a hundred. If the
+/// share grows, revisit it with the same query.
+fn wraps_another_command(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().map(|t| t.trim_matches('"'));
+    let base = tokens
+        .next()
+        .and_then(|w| std::path::Path::new(w).file_name()?.to_str());
+
+    match base {
+        // `ssh host '<cmd>'`, but not `ssh host` alone, which is interactive and
+        // produces nothing to distil either way.
+        Some("ssh") => true,
+        // `kubectl exec … -- <cmd>`, `docker exec … <cmd>`, `podman exec …`.
+        Some("kubectl") | Some("docker") | Some("podman") => {
+            command.split_whitespace().any(|t| t == "exec")
+        }
+        // `az aks command invoke -c '<cmd>'`.
+        Some("az") => command.contains("command invoke"),
+        _ => false,
+    }
+}
+
+/// `docker ps`, `podman ps` and `docker container ls` list containers one per
+/// row, and every column on that row is the answer: name, image, port mapping,
+/// uptime.
+///
+/// The summariser kept the wrong half. `docker: 5 containers | 3 running, 2
+/// exited` names only the exited ones by construction, so a fixture with three
+/// running containers lost every name, image and port it had, at a reported 91.3%
+/// saving and with no marker, because nothing thought anything was lost (#233).
+/// An agent runs `docker ps` to find a running container's port far more often
+/// than to find a dead one.
+///
+/// Same reasoning that put `ls`, `find`, `ps`, `df`, `du`, `stat` and `wc` on the
+/// list above, and `ps` is the closest relative: a busy machine's process table
+/// dwarfs any container list and has been verbatim since 0.6.6. The `-a` case on
+/// a host with hundreds of dead containers is the one with real noise, and it
+/// stays bounded by `MAX_OUTPUT_BYTES`, which cuts with a marker that says what
+/// it removed.
+///
+/// Deliberately narrow. `docker build` and `docker logs` are logs with real
+/// noise and keep their summarisers, and `docker compose ps` is a different
+/// command whose output shape has not been measured here.
+fn lists_containers(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().map(|t| t.trim_matches('"'));
+    let base = tokens
+        .next()
+        .and_then(|w| std::path::Path::new(w).file_name()?.to_str());
+    if !matches!(base, Some("docker") | Some("podman")) {
+        return false;
+    }
+    match tokens.next() {
+        Some("ps") => true,
+        Some("container") => matches!(tokens.next(), Some("ls") | Some("ps")),
+        _ => false,
+    }
 }
 
 fn looks_like_env_assignment(token: &str) -> bool {
@@ -428,6 +508,10 @@ pub fn distill_with_command(
         return jsts::JsTsDistiller.distill(segments, input, session);
     }
 
+    if passes_through_verbatim(command) {
+        return input.to_string();
+    }
+
     // Cloud & infra → CloudDistiller
     if matches!(
         base.as_str(),
@@ -464,10 +548,6 @@ pub fn distill_with_command(
     // and TestDistiller fabricates too, which is #190 wearing another distiller's
     // name. Real runners are handled upstream, where `signals/tools/pytest.toml`
     // and `mypy.toml` are TOML-first and shadow this path for `python -m pytest`.
-    if passes_through_verbatim(command) {
-        return input.to_string();
-    }
-
     // System ops → SystemOpsDistiller
     if matches!(
         base.as_str(),
@@ -690,6 +770,87 @@ mod tests {
             output.contains("database up to date"),
             "dropped: {output:?}"
         );
+    }
+
+    /// #233. `docker ps` came back as `docker: 5 containers | 3 running, 2
+    /// exited` plus the names of the exited two. Every running container, with
+    /// its image, ports and uptime, was counted and discarded by construction:
+    /// 862 bytes to 75, reported as a 91.3% saving, with no marker because
+    /// nothing thought anything was lost.
+    #[test]
+    fn keeps_every_row_of_a_container_listing() {
+        let input = std::fs::read_to_string("tests/fixtures/docker_ps_mixed.txt")
+            .expect("fixture must exist");
+
+        for cmd in [
+            "docker ps",
+            "docker ps -a",
+            "podman ps",
+            "docker container ls",
+        ] {
+            let segments = scorer::score_with_command(&input, cmd, None);
+            let out = distill_with_command(&segments, &input, cmd, None);
+
+            assert_eq!(
+                out, input,
+                "{cmd} must hand back every row; each one is a distinct datum"
+            );
+        }
+    }
+
+    /// #234. `az aks command invoke` runs an arbitrary command inside a cluster
+    /// and returns that program's stdout, so routing on `az` handed a four
+    /// section run to a cloud distiller with no grammar for it. Nine rows of the
+    /// first section came back and the TLS probe that was the point of the call
+    /// went with the rest, after a 40 second round trip against a private
+    /// cluster. `kubectl exec` had already done this once as #112.
+    #[test]
+    fn hands_back_what_a_wrapper_ran_inside() {
+        let inner = "=== ENV names ===\nBE_LIVEKIT_SERVICE_PORT_RTC_UDP\n\
+                     === probe ===\nTLS handshake ok\n=== versions ===\nv1.2.3\n";
+
+        for cmd in [
+            "az aks command invoke -g rg -n cluster -c 'sh -c ...'",
+            "kubectl exec -n prod pod-1 -- sh -c 'env'",
+            "docker exec api sh -c 'env'",
+            "ssh build-host 'env'",
+        ] {
+            let segments = scorer::score_with_command(inner, cmd, None);
+            let out = distill_with_command(&segments, inner, cmd, None);
+
+            assert_eq!(
+                out, inner,
+                "{cmd} produces the inner program's stdout, which OMNI has no grammar for"
+            );
+        }
+    }
+
+    /// The wrapper rule must not swallow the tools themselves.
+    #[test]
+    fn claims_only_the_wrapping_subcommands() {
+        assert!(wraps_another_command("kubectl exec pod -- ls"));
+        assert!(wraps_another_command("az aks command invoke -c 'ls'"));
+        assert!(wraps_another_command("ssh host 'ls'"));
+
+        assert!(!wraps_another_command("kubectl get pods"));
+        assert!(!wraps_another_command("az aks show -n cluster"));
+        assert!(!wraps_another_command("docker build ."));
+        assert!(!wraps_another_command("cargo test"));
+    }
+
+    /// The counter-case, so this is not "never distil docker". A build log and a
+    /// container log both have real noise and keep their summarisers.
+    #[test]
+    fn claims_only_the_container_listing_subcommands() {
+        assert!(lists_containers("docker ps"));
+        assert!(lists_containers("/usr/local/bin/docker ps -a"));
+        assert!(lists_containers("podman container ls"));
+
+        assert!(!lists_containers("docker build ."));
+        assert!(!lists_containers("docker logs app"));
+        assert!(!lists_containers("docker compose ps"));
+        assert!(!lists_containers("kubectl get pods"));
+        assert!(!lists_containers("ps aux"));
     }
 
     #[test]

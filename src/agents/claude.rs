@@ -450,10 +450,15 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
     // measured before it was taken, and it is not free: driven through the built
     // binary's `--post-hook` with a real payload, `src/pipeline/collapse.rs`, 878
     // lines, comes back as **20** of them, an import list, three signatures and a
-    // marker. `readfile.rs`'s only floor is `MIN_DISTILL_TOKENS = 2000`, which
-    // nearly every real source file clears, so this changes what "read a file"
-    // means for a whole session, on the tool an agent edits from. The maintainer
-    // chose that trade with those numbers in front of them.
+    // marker. `readfile.rs`'s only floor is `MIN_DISTILL_TOKENS = 2000`, and 7.6%
+    // of 1,770 real `Read` calls clear it, `.rs` only 3.1%. An earlier version of
+    // this comment said "nearly every real source file", which is a
+    // generalisation from one example that the 0.6.8 changelog had already
+    // measured and withdrawn (#284). The figure that carries the decision is the
+    // other half of the same measurement: those 7.6% of calls hold 44% of all
+    // `Read` bytes, so this changes what "read a file" means on exactly the reads
+    // that matter, on the tool an agent edits from. The maintainer chose that
+    // trade with those numbers in front of them.
     //
     // Three prerequisites landed first, each of which would have made this fail
     // silently rather than loudly: `normalize` could not reach a `Read` payload's
