@@ -967,6 +967,11 @@ impl SqliteBackend {
         );
     }
 
+    /// Every passthrough gate tags its reason onto the end of `command`, because
+    /// `passthrough_events` has no reason column and this table is read by hand
+    /// to decide what to build next. An untagged row is ambiguous between a
+    /// signal file that stripped its whole input and a distiller too weak to
+    /// keep, and those two call for opposite work (#254).
     pub fn record_passthrough(&self, command: &str, bytes: usize) {
         let conn = match self.pool.get() {
             Ok(c) => c,
@@ -977,6 +982,22 @@ impl SqliteBackend {
             "INSERT INTO passthrough_events (command, bytes, ts) VALUES (?1, ?2, ?3)",
             params![command, bytes as i64, now],
         );
+    }
+
+    /// Newest first. Exists so the tag above can be asserted; nothing in the
+    /// shipped binary reads this table yet.
+    pub fn recent_passthroughs(&self, limit: usize) -> Vec<String> {
+        let Ok(conn) = self.pool.get() else {
+            return Vec::new();
+        };
+        let Ok(mut stmt) =
+            conn.prepare("SELECT command FROM passthrough_events ORDER BY id DESC LIMIT ?1")
+        else {
+            return Vec::new();
+        };
+        stmt.query_map(params![limit as i64], |r| r.get::<_, String>(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
     }
 
     /// Archives `content` under its own hash and returns the key.
