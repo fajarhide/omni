@@ -380,8 +380,12 @@ fn build_summary_with_context(state: &SessionState, now: i64, store: &Store, cwd
         out.push_str(&peer_ctx);
     }
 
-    // Inject cross-session project knowledge
+    // Inject cross-session project knowledge. This is the largest memory read in
+    // the product by a distance, it happens without anyone asking for it, and it
+    // recorded nothing, so an injection that fires every continued session and
+    // one that never fires produced identical databases (#272).
     if let Some(knowledge_ctx) = multiagent::build_knowledge_context(store, cwd) {
+        store.record_memory_read("session_start", cwd);
         out.push_str(&knowledge_ctx);
     }
 
@@ -458,6 +462,51 @@ mod tests {
 
         let out = process_payload(&input.to_string(), store, default_config());
         assert!(out.is_none());
+    }
+
+    /// #272. `retrieve_events` counted one path out of five, and the biggest
+    /// memory read in the product was not among them: project knowledge is
+    /// injected into every continued session without anyone asking, and recorded
+    /// nothing. So "memory has never been read" and "memory is read constantly
+    /// and never counted" produced the same database, and they point at opposite
+    /// conclusions.
+    ///
+    /// The assertion is on the recorded row rather than on the injected text,
+    /// because the text was already observable and the count was not.
+    #[test]
+    fn counts_the_knowledge_it_injects_at_session_start() {
+        // Arrange: a project with something to inject, above the 0.7 confidence
+        // bar `build_knowledge_context` applies.
+        let (store, dir) = get_store();
+        let cwd = dir.path().to_string_lossy().to_string();
+        let mut state = SessionState::new();
+        state.add_command("cargo test");
+        store.upsert_session(&state);
+        let project_hash = crate::agents::multiagent::project_hash(&cwd);
+        store.upsert_project_knowledge(&project_hash, "toolchain_rust", "1.97.0", 0.95);
+
+        let input = json!({
+            "hookEventName": "SessionStart",
+            "sessionId": "counts-1",
+            "workingDirectory": cwd,
+        });
+        let mut cfg = default_config();
+        cfg.force_continue = true;
+
+        // Act
+        let out = process_payload(&input.to_string(), store.clone(), cfg);
+
+        // Assert
+        assert!(
+            out.expect("a continued session emits a summary")
+                .contains("toolchain_rust"),
+            "the knowledge must actually be injected, or the count means nothing"
+        );
+        assert_eq!(
+            store.count_memory_reads("session_start"),
+            1,
+            "an injection nobody can count is indistinguishable from one that never happened"
+        );
     }
 
     #[test]
