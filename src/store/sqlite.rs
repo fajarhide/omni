@@ -43,6 +43,15 @@ impl std::ops::Deref for Store {
     }
 }
 
+/// How long a verbatim execution trace is worth keeping.
+///
+/// Shorter than everything else on purpose. `execution_traces` stores `raw_input`
+/// and `distilled_output` in full, so a row is two orders of magnitude heavier
+/// than a `distillations` row, and it was in no cleanup at all: 160.1 MB of a
+/// 187 MB database, against 6.0 MB for the last seven days. Its only reader is
+/// `get_recent_traces`, which asks for the newest N (#165).
+pub const TRACE_RETENTION_DAYS: u32 = 7;
+
 impl Store {
     pub fn open() -> Result<Self> {
         Ok(Self {
@@ -515,17 +524,6 @@ impl SqliteBackend {
                 applied_at   INTEGER NOT NULL
             );
 
-            -- 13. Maker-Checker Verification Results (L2-01)
-            CREATE TABLE IF NOT EXISTS verification_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                checker_agent TEXT NOT NULL,
-                maker_session TEXT NOT NULL,
-                criteria TEXT NOT NULL,
-                passed INTEGER NOT NULL,
-                issues TEXT,
-                timestamp INTEGER NOT NULL
-            );
 
             -- 14. Loop Memory — cross-session persistent knowledge (L2-02)
             CREATE TABLE IF NOT EXISTS loop_memory (
@@ -752,6 +750,26 @@ impl SqliteBackend {
         // latency and disk for a reader that never existed (#270). The in-memory
         // `SessionState::current_turn` it was built from is still read, by
         // `omni_context_breakdown` and `omni stats`; only the table is gone.
+        // `verification_results` had no writer and no reader anywhere in the
+        // tree, which is as dead as a table gets (#165).
+        let migration_drop_ver = "2026_08_drop_unused_verification_results";
+        let ver_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_drop_ver],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if ver_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("DROP TABLE IF EXISTS verification_results", [])?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_drop_ver, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         let migration_drop_ctx = "2026_08_drop_write_only_context_turns";
         let ctx_applied: Option<i64> = conn
             .query_row(
@@ -1433,6 +1451,22 @@ impl SqliteBackend {
         let _ = conn.execute(
             "DELETE FROM session_events WHERE ts < ?1",
             params![ts_threshold],
+        );
+
+        // `execution_traces` was in no cleanup at all, which is why it alone grew
+        // to 160 MB of a 187 MB database while every other table stayed bounded:
+        // it stores `raw_input` and `distilled_output` verbatim, so it is two
+        // orders of magnitude heavier per row than anything else here (#165).
+        //
+        // It gets its own, shorter window. Its only reader is `get_recent_traces`,
+        // which asks for the newest N, so a trace older than a week answers no
+        // question anyone is posing. Measured on the maintainer's database: 160.1
+        // MB in total, 6.0 MB within seven days.
+        let traces_threshold =
+            chrono::Utc::now().timestamp() - (TRACE_RETENTION_DAYS as i64 * 86400);
+        let _ = conn.execute(
+            "DELETE FROM execution_traces WHERE ts < ?1",
+            params![traces_threshold],
         );
     }
 
@@ -2774,6 +2808,71 @@ mod tests {
             cumulative, 258,
             "session a contributes 60, session b contributes 198"
         );
+    }
+
+    /// #165. `execution_traces` stores `raw_input` and `distilled_output`
+    /// verbatim and was in no cleanup at all, which is why it alone reached 160.1
+    /// MB of a 187 MB database while every other table stayed bounded. Its only
+    /// reader asks for the newest N, so a trace older than the window answers no
+    /// question anyone is posing.
+    #[test]
+    fn prunes_execution_traces_on_their_own_shorter_window() {
+        let (store, _dir) = get_temp_store();
+        let now = chrono::Utc::now().timestamp();
+        let conn = store.pool.get().expect("conn");
+        for (id, age_days) in [("fresh", 1i64), ("stale", 30)] {
+            conn.execute(
+                "INSERT INTO execution_traces (session_id, command, agent_id, project_path, raw_input, distilled_output, ts)
+                 VALUES (?1, 'cargo test', 'claude_code', '.', 'raw', 'out', ?2)",
+                params![id, now - age_days * 86400],
+            )
+            .expect("seed");
+        }
+        drop(conn);
+
+        // The general retention is far longer than the trace window, so anything
+        // pruned here was pruned by the trace rule and not by the shared one.
+        store.cleanup_old(365);
+
+        let conn = store.pool.get().expect("conn");
+        let remaining: Vec<String> = conn
+            .prepare("SELECT session_id FROM execution_traces")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert_eq!(
+            remaining,
+            vec!["fresh".to_string()],
+            "a trace older than {} days must go even when the shared retention keeps it",
+            TRACE_RETENTION_DAYS
+        );
+    }
+
+    /// `verification_results` had no writer and no reader anywhere in the tree.
+    #[test]
+    fn drops_the_table_with_neither_a_writer_nor_a_reader() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open");
+            conn.execute_batch("CREATE TABLE verification_results (id INTEGER PRIMARY KEY);")
+                .expect("seed");
+        }
+
+        let _store = Store::open_path(&db).expect("store");
+
+        let left: i64 = rusqlite::Connection::open(&db)
+            .expect("reopen")
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'verification_results'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(left, 0);
     }
 
     /// #270. `context_turns` was written on every hooked command, carried an
