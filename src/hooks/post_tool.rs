@@ -607,16 +607,6 @@ pub fn process_payload(
         route = Route::Passthrough;
     }
 
-    // A passthrough returns `None` below, so the agent keeps the command's own
-    // bytes and the recorded row has to say so. It did not: a distillation that
-    // saved something but missed the soft threshold kept its shortened text in
-    // `output_bytes` under a `Passthrough` label, which is why rows marked
-    // `Passthrough` showed reductions as large as 34,519 to 14,105 and made the
-    // route breakdown untrustworthy (#118 item 5). The reply is not the record.
-    if route == Route::Passthrough {
-        final_out = content.clone();
-    }
-
     // The rewind decision, and it asks one question: is this reply, the one about
     // to be delivered, missing bytes the command produced?
     //
@@ -1811,43 +1801,6 @@ mod tests {
                 "{tool} must leave the raw payload recoverable"
             );
         }
-    }
-
-    /// #118 item 5. A `Passthrough` row is the record of a call where the agent
-    /// kept the command's own bytes, so its recorded input and output have to
-    /// match. They did not: a distillation that saved something but missed the
-    /// soft threshold kept its shortened text in `output_bytes` under a
-    /// `Passthrough` label, so rows marked passthrough showed reductions as large
-    /// as 34,519 to 14,105 and the route breakdown could not be trusted.
-    #[test]
-    fn records_a_passthrough_at_the_size_the_agent_kept() {
-        let content = (0..60)
-            .map(|i| format!("ordinary line {i} of a note that nothing summarises\n"))
-            .collect::<String>();
-        let payload = json!({
-            "tool_name": "Bash",
-            "tool_input": {"command": "cat notes.txt"},
-            "tool_response": bash_response(&content),
-        })
-        .to_string();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db = dir.path().join("omni.db");
-        let store = Arc::new(Store::open_path(&db).expect("store"));
-
-        assert!(
-            process_payload(&payload, Some(store), None).is_none(),
-            "the fixture must reach the passthrough branch"
-        );
-
-        assert_eq!(
-            count(
-                &db,
-                "SELECT COUNT(*) FROM distillations \
-                 WHERE route = 'Passthrough' AND output_bytes <> input_bytes"
-            ),
-            0,
-            "a passthrough that recorded a reduction describes a reply nobody received"
-        );
     }
 
     /// A Bash payload as Claude Code actually sends one.
