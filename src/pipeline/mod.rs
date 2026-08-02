@@ -296,6 +296,24 @@ pub struct DistillResult {
     pub delivered_bytes: usize,
 }
 
+/// What a re-sent tool result is billed at, as a fraction of fresh input.
+///
+/// A tool result is not read once. It enters the transcript and is re-sent on
+/// every later turn of the session, so distilling 20 KB to 2 KB at turn 5 of a
+/// 40-turn session saves those bytes on turn 5 and again on every turn after it.
+/// OMNI counted the first and discarded the rest (#173).
+///
+/// The multiplier is not full price, and publishing it as though it were would
+/// be the bigger-but-not-truer number this tracker exists to fight. With prompt
+/// caching the re-sent prefix is billed at the cache-read rate, roughly a tenth
+/// of fresh input, so the compounding is real and discounted.
+///
+/// **This is an assumption, not an observation.** A hook cannot see whether a
+/// turn was a cache hit, so anything derived from it is labelled `est.` and
+/// prints this rate beside it. An unlabelled assumption here would recreate the
+/// `est_cost_usd` figure that 0.6.2 had no data to compute.
+pub const CACHE_READ_RATE: f64 = 0.10;
+
 impl DistillResult {
     pub fn savings_pct(&self) -> f64 {
         if self.input_bytes == 0 {
