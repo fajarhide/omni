@@ -147,10 +147,38 @@ fn is_prettier_output(lines: &[&str]) -> bool {
 
 /// prettier `--write` prints one line per file: `<path> <n>ms`, with ` (unchanged)`
 /// appended to files it left alone.
+///
+/// The whole line has to match, not a token anywhere in it. Asking only whether
+/// some token ended in `ms` matched every build tool that prints a duration:
+/// `astro build` emits `16:55:35 [types] Generated 25ms`, so an entire Astro
+/// build log was classified as prettier output and delivered as
+/// `prettier --write: 2 reformatted, 0 unchanged` over four bare timestamps
+/// (#242). A fingerprint has to be something no sibling format also prints, and
+/// a duration is the opposite of that.
 fn is_prettier_write_line(l: &str) -> bool {
-    l.split_whitespace().any(|t| {
-        t.len() > 2 && t.ends_with("ms") && t[..t.len() - 2].bytes().all(|b| b.is_ascii_digit())
-    })
+    let mut tokens = l.split_whitespace();
+    let (Some(path), Some(duration)) = (tokens.next(), tokens.next()) else {
+        return false;
+    };
+    // Nothing after the duration except prettier's own ` (unchanged)`.
+    let tail_ok = match tokens.next() {
+        None => true,
+        Some(t) => t == "(unchanged)" && tokens.next().is_none(),
+    };
+    tail_ok && is_duration(duration) && looks_like_a_written_file(path)
+}
+
+fn is_duration(t: &str) -> bool {
+    t.len() > 2 && t.ends_with("ms") && t.trim_end_matches("ms").bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A path prettier rewrote, as opposed to a clock or a bracketed log tag.
+fn looks_like_a_written_file(t: &str) -> bool {
+    !t.starts_with('[')
+        && !t.contains(':') // `16:55:35`
+        && std::path::Path::new(t)
+            .extension()
+            .is_some_and(|e| !e.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -782,6 +810,45 @@ mod tests {
                 line_range: (i + 1, i + 1),
             })
             .collect()
+    }
+
+    /// #242. `is_prettier_write_line` asked whether *any* token on the line
+    /// ended in `ms`, so every build tool that prints a duration looked like
+    /// prettier. An `astro build` log came back as
+    /// `prettier --write: 2 reformatted, 0 unchanged` over four bare timestamps:
+    /// no prettier ran, no file was rewritten, and both facts the agent needed
+    /// (did the build pass, what did it produce) were gone.
+    #[test]
+    fn does_not_mistake_a_build_log_for_prettier() {
+        let astro = "\n> site@1.0.0 build\n> astro build\n\n\
+             16:55:35 [types] Generated 25ms\n\
+             16:55:35 [build] output: \"static\"\n\
+             16:55:36 [vite] \u{2713} 12 modules transformed.\n\
+             16:55:36 \u{25b6} src/pages/index.astro\n\
+             16:55:36   \u{2514}\u{2500} /index.html (+5ms)\n\
+             16:55:36 [build] 2 page(s) built in 565ms\n\
+             16:55:36 [build] Complete!\n";
+
+        assert!(
+            !is_prettier_output(&astro.lines().collect::<Vec<_>>()),
+            "a duration is printed by every build tool; it cannot be prettier's fingerprint"
+        );
+    }
+
+    /// The counter-case, so the fingerprint is tightened rather than deleted:
+    /// prettier's own `--write` output must still be recognised, in both the
+    /// rewritten and the untouched form.
+    #[test]
+    fn still_recognises_prettier_write_output() {
+        let prettier = "src/index.ts 41ms\nsrc/app.css 12ms (unchanged)\n";
+
+        assert!(is_prettier_output(&prettier.lines().collect::<Vec<_>>()));
+        assert!(is_prettier_write_line("src/index.ts 41ms"));
+        assert!(is_prettier_write_line("src/app.css 12ms (unchanged)"));
+        assert!(!is_prettier_write_line("16:55:35 [types] Generated 25ms"));
+        assert!(!is_prettier_write_line(
+            "16:55:36 [build] 2 page(s) built in 565ms"
+        ));
     }
 
     fn npm_warnings(n: usize) -> Vec<String> {

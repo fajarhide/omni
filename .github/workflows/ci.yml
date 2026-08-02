@@ -23,23 +23,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned rather than `stable`. `rust-toolchain.toml` pins 1.97.0, so asking
+      # for `stable` made rustup fetch a second toolchain that was then never
+      # used. Keep this in step with the pin, the way `release.yml` has to (#179).
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.97.0"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install CI cargo tools
-        run: |
-          cargo install --locked cargo-insta
-          cargo install --locked cargo-audit
+      # Prebuilt binaries. `cargo install --locked` compiled both of these from
+      # source on every run, minutes of a 13 minute job spent rebuilding tools
+      # that publish releases (#179).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-insta,cargo-audit
 
       - name: Run canonical CI pipeline
         run: make ci
 
   test-matrix:
     name: cargo test (${{ matrix.os }})
-    needs: ci
+    # Deliberately not `needs: ci`. Serialising behind ubuntu made the wall clock
+    # the sum of the two jobs, 13 minutes plus 10, for work that is independent:
+    # the matrix compiles and tests on macOS and Windows and shares nothing with
+    # the lint, audit and smoke checks on ubuntu. It costs more runner minutes on
+    # a red build and returns the answer in roughly half the time (#179).
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -48,7 +58,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
 
       - uses: Swatinem/rust-cache@v2
 
