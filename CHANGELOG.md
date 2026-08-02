@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The hook spent 52 ms classifying an 80-line payload and 0.1 ms distilling it, because a regex was compiled once per line (#283)**: `is_context` built its path pattern with `Regex::new` on every call and `classify_block` calls it for every line, so a single 64-character line cost 660 microseconds. `AGENTS.md` budgets the whole hook at 10 ms. Hoisting it into a `LazyLock`, which `CLAUDE.md` already names as the standard and which `semantic.rs` used nowhere, takes `classify_block` from 660.6 microseconds to 800 nanoseconds and `score_segments` on 80 lines from 52.40 ms to 98.7 microseconds, measured warm on a release build. That is the scoring stage, which is most of what a hooked command pays for. A regression guard runs a thousand classifications under a 200 ms bound: two orders of magnitude above the fixed cost and three times under the broken one, so it cannot flake the way the collapse throughput gate does (#245) while still failing the moment the compile moves back inside the call.
+
 ## [0.6.9] - 2026-08-02
 
 ### Fixed

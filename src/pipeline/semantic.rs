@@ -1,5 +1,16 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
+
+/// `src/main.rs:10:5`, the file-and-line shape that marks a context line.
+///
+/// Compiled once. It used to be built inside `is_context`, which `classify_block`
+/// calls for every line, so a single 64-character line cost 660 µs and an 80-line
+/// payload spent 52 ms deciding what it was. That is five times the whole hook
+/// budget in `AGENTS.md`, spent compiling the same pattern eighty times (#283).
+static PATH_WITH_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[\w\./\-]+\.\w+:\d+(:\d+)?").expect("the path regex is a literal and must compile")
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SemanticClass {
@@ -243,8 +254,7 @@ fn is_diagnostic(lower_text: &str, tool_family: Option<&str>) -> bool {
 
 fn is_context(text: &str) -> bool {
     // Look for file paths (e.g., src/main.rs:10:5)
-    let path_regex = Regex::new(r"[\w\./\-]+\.\w+:\d+(:\d+)?").unwrap();
-    if path_regex.is_match(text) {
+    if PATH_WITH_LINE.is_match(text) {
         return true;
     }
 
@@ -351,5 +361,32 @@ mod tests {
     fn test_is_data_json() {
         assert!(is_data(r#"{"key": "value"}"#));
         assert!(is_data("[\n  1,\n  2\n]"));
+    }
+
+    /// #283. `is_context` built its path regex with `Regex::new` on every call,
+    /// and `classify_block` calls it once per line, so a single 64-character
+    /// line cost 660 microseconds and an 80-line payload spent 52 ms being
+    /// classified. `AGENTS.md` budgets the whole hook at 10 ms.
+    ///
+    /// The bound is deliberately loose. Fixed, a thousand calls take under a
+    /// millisecond in release and a few milliseconds in a debug test build; the
+    /// broken version needed 660 ms for the same thousand. 200 ms sits two
+    /// orders of magnitude above the fixed cost and three times under the broken
+    /// one, so it cannot flake the way the collapse throughput gate does (#245)
+    /// while still failing the moment the compile moves back inside the call.
+    #[test]
+    fn classifies_a_line_without_recompiling_its_regex() {
+        let lines = vec!["6d47f1a Point sign-in at our own page, not Clerk's hosted portal"];
+
+        let start = std::time::Instant::now();
+        for _ in 0..1_000 {
+            let _ = classify_block(&lines, Some("git"));
+        }
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(200),
+            "1,000 classifications took {elapsed:?}; a regex is being compiled per call again"
+        );
     }
 }
