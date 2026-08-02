@@ -25,3 +25,5 @@ target/
 /filters_compiled/
 *.html
 .agents
+# insta writes these when a snapshot fails; only the accepted .snap is reviewed
+*.snap.new
