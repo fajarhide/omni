@@ -955,17 +955,23 @@ impl SqliteBackend {
         );
     }
 
+    /// Archives `content` under its own hash and returns the key.
+    ///
+    /// The key is the content address and nothing else. It used to carry a
+    /// nanosecond prefix, `{ts_ns}_{hash}`, which made every key unique and so
+    /// made the `INSERT OR IGNORE` beneath it decoration: the same output stored
+    /// a fresh copy on every run. That was invisible while the archive never
+    /// fired, and became a live disk cost the moment #271 started archiving on
+    /// every lossy call (#274).
+    ///
+    /// A repeat refreshes `ts` rather than being ignored, so content that is
+    /// still being produced does not age out of the retention window on the
+    /// strength of when it was first seen. `retrieved` is left alone.
     pub fn store_rewind(&self, content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
-        let hash_result = hasher.finalize();
-        let full_hash = hex::encode(hash_result);
-        let short_hash = full_hash[..16].to_string();
-        let ts_ns = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let rewind_key = format!("{}_{}", ts_ns, short_hash);
+        let rewind_key =
+            crate::util::text::safe_slice(&hex::encode(hasher.finalize()), 16).to_string();
 
         let conn = match self.pool.get() {
             Ok(c) => c,
@@ -976,8 +982,9 @@ impl SqliteBackend {
         let original_len = content.len() as i64;
 
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO rewind_store (hash, content, ts, original_len, retrieved)
-             VALUES (?1, ?2, ?3, ?4, 0)",
+            "INSERT INTO rewind_store (hash, content, ts, original_len, retrieved)
+             VALUES (?1, ?2, ?3, ?4, 0)
+             ON CONFLICT(hash) DO UPDATE SET ts = excluded.ts",
             params![rewind_key, content, ts, original_len],
         );
 
@@ -2797,13 +2804,54 @@ mod tests {
         );
     }
 
+    /// #274. The key carried a nanosecond prefix, so every key was unique and
+    /// the `INSERT OR IGNORE` under it could never fire: the same output was
+    /// archived again on every run. Harmless while the archive never fired at
+    /// all, a live disk cost from #271 onward.
+    #[test]
+    fn archives_identical_content_once() {
+        let (store, _dir) = get_temp_store();
+        let content = "the same 200 lines of output";
+
+        let first = store.store_rewind(content);
+        let second = store.store_rewind(content);
+
+        assert_eq!(first, second, "the key is the content, so it cannot differ");
+        assert_eq!(
+            store.rewind_metrics().expect("metrics").0,
+            1,
+            "identical content must occupy one row"
+        );
+        assert_eq!(store.retrieve_rewind(&first), Some(content.to_string()));
+    }
+
+    /// Different content still gets its own row, so the deduplication is by
+    /// identity rather than by collapsing everything into one key.
+    #[test]
+    fn keeps_distinct_content_apart() {
+        let (store, _dir) = get_temp_store();
+
+        let a = store.store_rewind("output of the first command");
+        let b = store.store_rewind("output of the second command");
+
+        assert_ne!(a, b);
+        assert_eq!(store.rewind_metrics().expect("metrics").0, 2);
+        assert_eq!(
+            store.retrieve_rewind(&b),
+            Some("output of the second command".to_string())
+        );
+    }
+
     #[test]
     fn rewinds_and_retrieves_content() {
         let (store, _dir) = get_temp_store();
         let content = "this is some compressed content";
         let hash = store.store_rewind(content);
 
-        assert!(hash.contains('_'));
+        // A content address and nothing else. The nanosecond prefix this used to
+        // carry is what made `INSERT OR IGNORE` decoration (#274).
+        assert_eq!(hash.len(), 16);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
 
         let retrieved = store.retrieve_rewind(&hash);
         assert_eq!(retrieved, Some(content.to_string()));
@@ -2820,14 +2868,20 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    /// Was `duplicate_rewind_hashes_are_unique`, which asserted `hash1 != hash2`
+    /// for identical content. That was the defect written down as a requirement:
+    /// the keys differed only because of a nanosecond prefix, and the prefix is
+    /// what stopped the archive from ever deduplicating (#274). The half of it
+    /// that stated a real guarantee, that a returned key resolves to its content,
+    /// is kept here and in `archives_identical_content_once`.
     #[test]
-    fn duplicate_rewind_hashes_are_unique() {
+    fn every_returned_key_resolves_to_its_content() {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
-        let hash1 = store.store_rewind(content);
-        let hash2 = store.store_rewind(content); // duplicate
 
-        assert_ne!(hash1, hash2);
+        let hash1 = store.store_rewind(content);
+        let hash2 = store.store_rewind(content);
+
         assert_eq!(store.retrieve_rewind(&hash1), Some(content.to_string()));
         assert_eq!(store.retrieve_rewind(&hash2), Some(content.to_string()));
     }
