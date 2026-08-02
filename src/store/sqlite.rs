@@ -1597,6 +1597,40 @@ impl SqliteBackend {
         self.record_retrieve_event(tool, crate::util::text::safe_slice(subject, 60), &agent_id);
     }
 
+    /// Tokens saved at insertion, and the same saving compounded over the turns
+    /// each distilled result was re-sent.
+    ///
+    /// Returns `(at_insertion, cumulative)`. The second is
+    /// `delta × (1 + turns_after × CACHE_READ_RATE)` summed over every row that
+    /// actually reduced something, where `turns_after` is how many later
+    /// distillations share the row's session. That is the closest a hook can get
+    /// to "how many times was this text re-sent", and it is why the figure is an
+    /// estimate rather than a measurement (#173).
+    ///
+    /// `cumulative >= at_insertion` always, and the two are equal for a session
+    /// of one call, because a one-shot command earns no multiplier.
+    pub fn token_savings_with_reuse(&self, cache_read_rate: f64) -> Result<(u64, u64)> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        conn.query_row(
+            "SELECT COALESCE(SUM(delta), 0), COALESCE(SUM(delta * (1.0 + turns_after * ?1)), 0)
+             FROM (
+               SELECT raw_tokens - filtered_tokens AS delta,
+                      COUNT(*) OVER (PARTITION BY session_id)
+                        - ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY ts, id)
+                        AS turns_after
+               FROM distillations
+               WHERE raw_tokens > filtered_tokens
+             )",
+            params![cache_read_rate],
+            |r| {
+                let at_insertion: f64 = r.get(0)?;
+                let cumulative: f64 = r.get(1)?;
+                Ok((at_insertion as u64, cumulative as u64))
+            },
+        )
+        .context("summing token savings with reuse")
+    }
+
     /// How many times `tool` handed memory back, all time.
     ///
     /// The point of #272 is that this is a query rather than an inference, so it
@@ -2683,6 +2717,84 @@ mod tests {
         };
         // Should not panic
         store.record_distillation("sess_123", &res, "npm start", "", "claude_code");
+    }
+
+    fn saving(raw: usize, filtered: usize) -> DistillResult {
+        DistillResult {
+            output: String::new(),
+            route: crate::pipeline::Route::Keep,
+            filter_name: "f".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: raw,
+            output_bytes: filtered,
+            latency_ms: 0,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: raw,
+            filtered_tokens: filtered,
+            delivered_bytes: filtered,
+        }
+    }
+
+    /// #173. A one-shot command earns no multiplier: nothing is re-sent after
+    /// it, so the compounded figure must equal the at-insertion one. Anything
+    /// else is a free multiplier, which is the bigger-but-not-truer number this
+    /// tracker exists to fight.
+    #[test]
+    fn gives_a_single_call_session_no_reuse_credit() {
+        let (store, _dir) = get_temp_store();
+        store.record_distillation("solo", &saving(100, 40), "cargo test", "", "claude_code");
+
+        let (at_insertion, cumulative) = store
+            .token_savings_with_reuse(crate::pipeline::CACHE_READ_RATE)
+            .expect("query");
+
+        assert_eq!(at_insertion, 60);
+        assert_eq!(
+            cumulative, 60,
+            "a call with no later turns compounds nothing"
+        );
+    }
+
+    /// The first result of a three-call session is re-sent twice, the second
+    /// once, the third never. At a 10% cache-read rate that is
+    /// 60×1.2 + 60×1.1 + 60×1.0, and never 60×3.
+    #[test]
+    fn discounts_reuse_instead_of_multiplying_it() {
+        let (store, _dir) = get_temp_store();
+        for _ in 0..3 {
+            store.record_distillation("multi", &saving(100, 40), "cargo test", "", "claude_code");
+        }
+
+        let (at_insertion, cumulative) = store.token_savings_with_reuse(0.10).expect("query");
+
+        assert_eq!(at_insertion, 180);
+        assert_eq!(
+            cumulative, 198,
+            "60*1.2 + 60*1.1 + 60*1.0; a full-price multiplier would be 360"
+        );
+        assert!(cumulative >= at_insertion);
+    }
+
+    /// Sessions are independent: a long one must not lend its turn count to a
+    /// short one, which is what a global row ordering would do.
+    #[test]
+    fn counts_reuse_within_a_session_only() {
+        let (store, _dir) = get_temp_store();
+        store.record_distillation("a", &saving(100, 40), "cargo test", "", "claude_code");
+        for _ in 0..3 {
+            store.record_distillation("b", &saving(100, 40), "cargo test", "", "claude_code");
+        }
+
+        let (_, cumulative) = store.token_savings_with_reuse(0.10).expect("query");
+
+        assert_eq!(
+            cumulative, 258,
+            "session a contributes 60, session b contributes 198"
+        );
     }
 
     #[test]

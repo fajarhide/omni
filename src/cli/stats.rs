@@ -507,6 +507,22 @@ fn run_default(store: &Store) -> Result<()> {
             .italic()
     );
 
+    // #173 asked for a second, cache-discounted figure beside this one, because a
+    // distilled tool result is re-sent on every later turn and OMNI counts the
+    // saving once. `Store::token_savings_with_reuse` computes it and is tested,
+    // and it is deliberately not printed yet.
+    //
+    // Run against the maintainer's database it reports 17.0M at insertion and
+    // 469.3M with re-use, a 27.6x multiplier. The multiplier is wrong, and it is
+    // wrong because of #118 item 1: until #259 every distillation was filed under
+    // a wall-clock id, so one "session" covers 3,739 commands across 16 project
+    // paths and hands its first row a 374x credit. The arithmetic is right and
+    // the input is not.
+    //
+    // Publishing it would be a bigger number that is less true, which is the
+    // defect this tracker exists to fight. It goes in once enough history exists
+    // under real host session ids to make `turns_after` mean what it says.
+
     let top_commands = get_top_commands(store, 0, 8);
 
     if !top_commands.is_empty() {
