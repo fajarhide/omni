@@ -723,7 +723,8 @@ pub fn process_payload(
                 // L1-02: Increment loop iteration budget
                 state.loop_context.budget_used += result.filtered_tokens as u64;
 
-                s.record_context_turn(&state.current_turn);
+                // `context_turns` had no reader and is gone (#270); the in-memory
+                // `current_turn` below is what `omni stats` and the MCP breakdown read.
             }
 
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());

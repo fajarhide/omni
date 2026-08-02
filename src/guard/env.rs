@@ -70,15 +70,23 @@ pub fn is_quiet() -> bool {
 /// Returns true if OMNI_PASSTHROUGH is enabled (1/true/yes).
 /// When enabled, OMNI will bypass distillation and emit raw output.
 pub fn is_passthrough() -> bool {
-    env::vars().any(|(k, v)| {
-        if !k.eq_ignore_ascii_case("OMNI_PASSTHROUGH") {
-            return false;
-        }
-        matches!(
-            v.trim().to_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+    env::vars().any(|(k, v)| k.eq_ignore_ascii_case("OMNI_PASSTHROUGH") && means_enabled(&v))
+}
+
+/// Whether an environment value reads as "on".
+///
+/// Split out so the truth table can be tested without touching the process
+/// environment. The test used to set `OMNI_PASSTHROUGH=1` for real, under a
+/// comment claiming the suite is single-threaded. It is not: cargo runs tests in
+/// parallel, and `hooks::pipe::run_inner` reads this on entry, so any test
+/// distilling at that moment took the passthrough branch and archived nothing.
+/// That is what turned `archives_the_raw_output_it_shortens` red on CI while it
+/// passed on every local run.
+fn means_enabled(value: &str) -> bool {
+    matches!(
+        value.trim().to_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 #[derive(Debug, PartialEq)]
@@ -167,23 +175,19 @@ mod tests {
         assert!(has_normal);
     }
 
+    /// Drives the predicate rather than the process environment. Setting
+    /// `OMNI_PASSTHROUGH` for real made every concurrently running test that
+    /// distils take the passthrough branch, because `hooks::pipe::run_inner`
+    /// reads it on entry. The comment that used to sit here said the suite was
+    /// single-threaded; cargo runs tests in parallel, so it was an assumption
+    /// stated as a fact, and it cost a red CI run that passed locally every time.
     #[test]
-    fn test_is_passthrough_enabled_by_value() {
-        // SAFETY: Test runs single-threaded; no concurrent env access.
-        unsafe {
-            std::env::set_var("OMNI_PASSTHROUGH", "1");
+    fn reads_the_usual_spellings_of_on_and_off() {
+        for on in ["1", "true", "TRUE", "yes", "on", " on "] {
+            assert!(means_enabled(on), "{on:?} should enable passthrough");
         }
-        assert!(is_passthrough());
-        unsafe {
-            std::env::set_var("OMNI_PASSTHROUGH", "true");
-        }
-        assert!(is_passthrough());
-        unsafe {
-            std::env::set_var("OMNI_PASSTHROUGH", "0");
-        }
-        assert!(!is_passthrough());
-        unsafe {
-            std::env::remove_var("OMNI_PASSTHROUGH");
+        for off in ["0", "false", "no", "off", "", "maybe"] {
+            assert!(!means_enabled(off), "{off:?} should not enable passthrough");
         }
     }
 

@@ -64,14 +64,14 @@ struct HookSpecificOutput {
     updated_input: ToolInput,
 }
 
-pub fn run(
-    store: Option<Arc<crate::store::sqlite::Store>>,
-    session: Option<Arc<Mutex<crate::pipeline::SessionState>>>,
-) -> Result<()> {
+/// The store parameter is gone with `context_turns` (#270). It was opened here
+/// only to persist a turn nothing ever read; the in-memory turn this hook builds
+/// is what `omni stats` and `omni_context_breakdown` consume.
+pub fn run(session: Option<Arc<Mutex<crate::pipeline::SessionState>>>) -> Result<()> {
     let mut buffer = String::new();
     std::io::stdin().read_to_string(&mut buffer)?;
 
-    if let Some(output_json) = process_payload(&buffer, store, session) {
+    if let Some(output_json) = process_payload(&buffer, session) {
         println!("{}", output_json);
         std::process::exit(0);
     }
@@ -82,7 +82,6 @@ pub fn run(
 
 fn process_payload(
     input_str: &str,
-    store: Option<Arc<crate::store::sqlite::Store>>,
     session: Option<Arc<Mutex<crate::pipeline::SessionState>>>,
 ) -> Option<String> {
     let parsed: PreHookInput = serde_json::from_str(input_str).ok()?;
@@ -132,9 +131,10 @@ fn process_payload(
                     state.current_turn.largest_single_read = (target_file.clone(), est_tokens);
                 }
 
-                if let Some(s) = &store {
-                    s.record_context_turn(&state.current_turn);
-                }
+                // The store was opened here only to persist `current_turn` into
+                // `context_turns`, which had no reader and is gone (#270). The
+                // in-memory turn built above is what `omni stats` and
+                // `omni_context_breakdown` actually read.
 
                 count
             } else {
@@ -273,7 +273,7 @@ mod tests {
         })
         .to_string();
 
-        let output = process_payload(&input, None, None).expect("Should rewrite");
+        let output = process_payload(&input, None).expect("Should rewrite");
         assert!(output.contains("exec git status"));
         assert!(output.contains("PreToolUse"));
         assert!(output.contains("allow"));
@@ -288,7 +288,7 @@ mod tests {
         })
         .to_string();
 
-        let output = process_payload(&input, None, None).expect("Should inject context");
+        let output = process_payload(&input, None).expect("Should inject context");
         assert!(output.contains("OMNI context available for src/main.rs"));
         assert!(output.contains("PreToolUse"));
         assert!(output.contains("allow"));
@@ -303,7 +303,7 @@ mod tests {
         })
         .to_string();
 
-        let output = process_payload(&input, None, None);
+        let output = process_payload(&input, None);
         assert!(output.is_none());
     }
 
@@ -319,6 +319,6 @@ mod tests {
         })
         .to_string();
 
-        assert!(process_payload(&input, None, None).is_none());
+        assert!(process_payload(&input, None).is_none());
     }
 }

@@ -43,6 +43,15 @@ impl std::ops::Deref for Store {
     }
 }
 
+/// How long a verbatim execution trace is worth keeping.
+///
+/// Shorter than everything else on purpose. `execution_traces` stores `raw_input`
+/// and `distilled_output` in full, so a row is two orders of magnitude heavier
+/// than a `distillations` row, and it was in no cleanup at all: 160.1 MB of a
+/// 187 MB database, against 6.0 MB for the last seven days. Its only reader is
+/// `get_recent_traces`, which asks for the newest N (#165).
+pub const TRACE_RETENTION_DAYS: u32 = 7;
+
 impl Store {
     pub fn open() -> Result<Self> {
         Ok(Self {
@@ -509,41 +518,12 @@ impl SqliteBackend {
             CREATE INDEX IF NOT EXISTS idx_pm_tool ON pattern_memory(tool_family);
             CREATE INDEX IF NOT EXISTS idx_pm_last ON pattern_memory(last_seen);
 
-            -- 12. Context Turns
-            CREATE TABLE IF NOT EXISTS context_turns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                turn_number INTEGER NOT NULL,
-                ts INTEGER NOT NULL,
-                estimated_total_tokens INTEGER DEFAULT 0,
-                file_read_tokens INTEGER DEFAULT 0,
-                tool_output_tokens INTEGER DEFAULT 0,
-                conversation_tokens INTEGER DEFAULT 0,
-                system_prompt_tokens INTEGER DEFAULT 0,
-                has_duplicate_reads INTEGER DEFAULT 0,
-                duplicate_files TEXT DEFAULT '[]',
-                largest_read_file TEXT DEFAULT '',
-                largest_read_tokens INTEGER DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_turns(session_id);
-
             -- 11. One-time data migrations tracker
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id           TEXT PRIMARY KEY,
                 applied_at   INTEGER NOT NULL
             );
 
-            -- 13. Maker-Checker Verification Results (L2-01)
-            CREATE TABLE IF NOT EXISTS verification_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                checker_agent TEXT NOT NULL,
-                maker_session TEXT NOT NULL,
-                criteria TEXT NOT NULL,
-                passed INTEGER NOT NULL,
-                issues TEXT,
-                timestamp INTEGER NOT NULL
-            );
 
             -- 14. Loop Memory — cross-session persistent knowledge (L2-02)
             CREATE TABLE IF NOT EXISTS loop_memory (
@@ -765,6 +745,50 @@ impl SqliteBackend {
             tx.commit()?;
         }
 
+        // `context_turns` was written on every hooked command, carried an index,
+        // and had no `SELECT` anywhere in the tree: 5,532 rows paying write
+        // latency and disk for a reader that never existed (#270). The in-memory
+        // `SessionState::current_turn` it was built from is still read, by
+        // `omni_context_breakdown` and `omni stats`; only the table is gone.
+        // `verification_results` had no writer and no reader anywhere in the
+        // tree, which is as dead as a table gets (#165).
+        let migration_drop_ver = "2026_08_drop_unused_verification_results";
+        let ver_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_drop_ver],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if ver_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("DROP TABLE IF EXISTS verification_results", [])?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_drop_ver, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
+        let migration_drop_ctx = "2026_08_drop_write_only_context_turns";
+        let ctx_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_drop_ctx],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if ctx_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("DROP INDEX IF EXISTS idx_ctx_session", [])?;
+            tx.execute("DROP TABLE IF EXISTS context_turns", [])?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_drop_ctx, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         let migration_id2 = "2026_05_token_backfill";
         let already_applied2: Option<i64> = conn
             .query_row(
@@ -955,17 +979,23 @@ impl SqliteBackend {
         );
     }
 
+    /// Archives `content` under its own hash and returns the key.
+    ///
+    /// The key is the content address and nothing else. It used to carry a
+    /// nanosecond prefix, `{ts_ns}_{hash}`, which made every key unique and so
+    /// made the `INSERT OR IGNORE` beneath it decoration: the same output stored
+    /// a fresh copy on every run. That was invisible while the archive never
+    /// fired, and became a live disk cost the moment #271 started archiving on
+    /// every lossy call (#274).
+    ///
+    /// A repeat refreshes `ts` rather than being ignored, so content that is
+    /// still being produced does not age out of the retention window on the
+    /// strength of when it was first seen. `retrieved` is left alone.
     pub fn store_rewind(&self, content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
-        let hash_result = hasher.finalize();
-        let full_hash = hex::encode(hash_result);
-        let short_hash = full_hash[..16].to_string();
-        let ts_ns = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let rewind_key = format!("{}_{}", ts_ns, short_hash);
+        let rewind_key =
+            crate::util::text::safe_slice(&hex::encode(hasher.finalize()), 16).to_string();
 
         let conn = match self.pool.get() {
             Ok(c) => c,
@@ -976,8 +1006,9 @@ impl SqliteBackend {
         let original_len = content.len() as i64;
 
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO rewind_store (hash, content, ts, original_len, retrieved)
-             VALUES (?1, ?2, ?3, ?4, 0)",
+            "INSERT INTO rewind_store (hash, content, ts, original_len, retrieved)
+             VALUES (?1, ?2, ?3, ?4, 0)
+             ON CONFLICT(hash) DO UPDATE SET ts = excluded.ts",
             params![rewind_key, content, ts, original_len],
         );
 
@@ -1103,40 +1134,6 @@ impl SqliteBackend {
             serde_json::from_str(&json).ok()
         } else {
             None
-        }
-    }
-
-    pub fn record_context_turn(&self, turn: &crate::analytics::context_composition::ContextTurn) {
-        let conn = match self.pool.get() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        let duplicate_files_json =
-            serde_json::to_string(&turn.duplicate_files).unwrap_or_else(|_| "[]".to_string());
-
-        let res = conn.execute(
-            "INSERT INTO context_turns 
-             (session_id, turn_number, ts, estimated_total_tokens, file_read_tokens, tool_output_tokens, conversation_tokens, system_prompt_tokens, has_duplicate_reads, duplicate_files, largest_read_file, largest_read_tokens)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                turn.session_id,
-                turn.turn_number,
-                turn.timestamp,
-                turn.estimated_total_tokens as i64,
-                turn.file_read_tokens as i64,
-                turn.tool_output_tokens as i64,
-                turn.conversation_tokens as i64,
-                turn.system_prompt_tokens as i64,
-                turn.has_duplicate_file_reads as i32,
-                duplicate_files_json,
-                turn.largest_single_read.0,
-                turn.largest_single_read.1 as i64,
-            ],
-        );
-
-        if let Err(e) = res {
-            eprintln!("[omni:error] failed to record context turn: {}", e);
         }
     }
 
@@ -1454,6 +1451,22 @@ impl SqliteBackend {
         let _ = conn.execute(
             "DELETE FROM session_events WHERE ts < ?1",
             params![ts_threshold],
+        );
+
+        // `execution_traces` was in no cleanup at all, which is why it alone grew
+        // to 160 MB of a 187 MB database while every other table stayed bounded:
+        // it stores `raw_input` and `distilled_output` verbatim, so it is two
+        // orders of magnitude heavier per row than anything else here (#165).
+        //
+        // It gets its own, shorter window. Its only reader is `get_recent_traces`,
+        // which asks for the newest N, so a trace older than a week answers no
+        // question anyone is posing. Measured on the maintainer's database: 160.1
+        // MB in total, 6.0 MB within seven days.
+        let traces_threshold =
+            chrono::Utc::now().timestamp() - (TRACE_RETENTION_DAYS as i64 * 86400);
+        let _ = conn.execute(
+            "DELETE FROM execution_traces WHERE ts < ?1",
+            params![traces_threshold],
         );
     }
 
@@ -2797,13 +2810,162 @@ mod tests {
         );
     }
 
+    /// #165. `execution_traces` stores `raw_input` and `distilled_output`
+    /// verbatim and was in no cleanup at all, which is why it alone reached 160.1
+    /// MB of a 187 MB database while every other table stayed bounded. Its only
+    /// reader asks for the newest N, so a trace older than the window answers no
+    /// question anyone is posing.
+    #[test]
+    fn prunes_execution_traces_on_their_own_shorter_window() {
+        let (store, _dir) = get_temp_store();
+        let now = chrono::Utc::now().timestamp();
+        let conn = store.pool.get().expect("conn");
+        for (id, age_days) in [("fresh", 1i64), ("stale", 30)] {
+            conn.execute(
+                "INSERT INTO execution_traces (session_id, command, agent_id, project_path, raw_input, distilled_output, ts)
+                 VALUES (?1, 'cargo test', 'claude_code', '.', 'raw', 'out', ?2)",
+                params![id, now - age_days * 86400],
+            )
+            .expect("seed");
+        }
+        drop(conn);
+
+        // The general retention is far longer than the trace window, so anything
+        // pruned here was pruned by the trace rule and not by the shared one.
+        store.cleanup_old(365);
+
+        let conn = store.pool.get().expect("conn");
+        let remaining: Vec<String> = conn
+            .prepare("SELECT session_id FROM execution_traces")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert_eq!(
+            remaining,
+            vec!["fresh".to_string()],
+            "a trace older than {} days must go even when the shared retention keeps it",
+            TRACE_RETENTION_DAYS
+        );
+    }
+
+    /// `verification_results` had no writer and no reader anywhere in the tree.
+    #[test]
+    fn drops_the_table_with_neither_a_writer_nor_a_reader() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open");
+            conn.execute_batch("CREATE TABLE verification_results (id INTEGER PRIMARY KEY);")
+                .expect("seed");
+        }
+
+        let _store = Store::open_path(&db).expect("store");
+
+        let left: i64 = rusqlite::Connection::open(&db)
+            .expect("reopen")
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'verification_results'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(left, 0);
+    }
+
+    /// #270. `context_turns` was written on every hooked command, carried an
+    /// index, and had no `SELECT` anywhere in the tree: 5,532 rows paying write
+    /// latency and disk for a reader that never existed. Opening a store that
+    /// still has it must remove it, or the rows keep their index and nothing
+    /// reclaims the space.
+    #[test]
+    fn drops_the_write_only_context_turns_table() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+
+        // A database from before the drop.
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open");
+            conn.execute_batch(
+                "CREATE TABLE context_turns (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL);
+                 CREATE INDEX idx_ctx_session ON context_turns(session_id);
+                 INSERT INTO context_turns (session_id) VALUES ('old');",
+            )
+            .expect("seed");
+        }
+
+        let _store = Store::open_path(&db).expect("store");
+
+        let conn = rusqlite::Connection::open(&db).expect("reopen");
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'context_turns'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(tables, 0, "the table and its rows must be gone");
+
+        let indexes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_ctx_session'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(indexes, 0, "its index costs write latency too");
+    }
+
+    /// #274. The key carried a nanosecond prefix, so every key was unique and
+    /// the `INSERT OR IGNORE` under it could never fire: the same output was
+    /// archived again on every run. Harmless while the archive never fired at
+    /// all, a live disk cost from #271 onward.
+    #[test]
+    fn archives_identical_content_once() {
+        let (store, _dir) = get_temp_store();
+        let content = "the same 200 lines of output";
+
+        let first = store.store_rewind(content);
+        let second = store.store_rewind(content);
+
+        assert_eq!(first, second, "the key is the content, so it cannot differ");
+        assert_eq!(
+            store.rewind_metrics().expect("metrics").0,
+            1,
+            "identical content must occupy one row"
+        );
+        assert_eq!(store.retrieve_rewind(&first), Some(content.to_string()));
+    }
+
+    /// Different content still gets its own row, so the deduplication is by
+    /// identity rather than by collapsing everything into one key.
+    #[test]
+    fn keeps_distinct_content_apart() {
+        let (store, _dir) = get_temp_store();
+
+        let a = store.store_rewind("output of the first command");
+        let b = store.store_rewind("output of the second command");
+
+        assert_ne!(a, b);
+        assert_eq!(store.rewind_metrics().expect("metrics").0, 2);
+        assert_eq!(
+            store.retrieve_rewind(&b),
+            Some("output of the second command".to_string())
+        );
+    }
+
     #[test]
     fn rewinds_and_retrieves_content() {
         let (store, _dir) = get_temp_store();
         let content = "this is some compressed content";
         let hash = store.store_rewind(content);
 
-        assert!(hash.contains('_'));
+        // A content address and nothing else. The nanosecond prefix this used to
+        // carry is what made `INSERT OR IGNORE` decoration (#274).
+        assert_eq!(hash.len(), 16);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
 
         let retrieved = store.retrieve_rewind(&hash);
         assert_eq!(retrieved, Some(content.to_string()));
@@ -2820,14 +2982,20 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    /// Was `duplicate_rewind_hashes_are_unique`, which asserted `hash1 != hash2`
+    /// for identical content. That was the defect written down as a requirement:
+    /// the keys differed only because of a nanosecond prefix, and the prefix is
+    /// what stopped the archive from ever deduplicating (#274). The half of it
+    /// that stated a real guarantee, that a returned key resolves to its content,
+    /// is kept here and in `archives_identical_content_once`.
     #[test]
-    fn duplicate_rewind_hashes_are_unique() {
+    fn every_returned_key_resolves_to_its_content() {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
-        let hash1 = store.store_rewind(content);
-        let hash2 = store.store_rewind(content); // duplicate
 
-        assert_ne!(hash1, hash2);
+        let hash1 = store.store_rewind(content);
+        let hash2 = store.store_rewind(content);
+
         assert_eq!(store.retrieve_rewind(&hash1), Some(content.to_string()));
         assert_eq!(store.retrieve_rewind(&hash2), Some(content.to_string()));
     }

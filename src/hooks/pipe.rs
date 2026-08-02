@@ -401,9 +401,14 @@ fn distill(
         .then_some((out, f.name, Route::Keep)),
     });
 
-    let (output, filter_name, rewind_hash, kept_count, dropped_count, collapse_savings, route) =
+    // A TOML filter used to return `None` for the rewind hash unconditionally, so
+    // a filter that shortened the output archived nothing and marked nothing:
+    // exactly the guarantee #271 closed for the distiller path, still open one
+    // branch over. The archive decision is shared now, below, and both arms hand
+    // it the same thing: the bytes about to be emitted.
+    let (mut output, filter_name, kept_count, dropped_count, collapse_savings, mut route) =
         if let Some((out, name, route)) = toml_hit {
-            (out, name, None, 0, 0, None, route)
+            (out, name, 0, 0, None, route)
         } else {
             let cmd = command_name.unwrap_or("");
 
@@ -472,7 +477,7 @@ fn distill(
 
             // Determine Route
             let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
-            let mut route = if ratio >= 0.7 {
+            let route = if ratio >= 0.7 {
                 Route::Keep
             } else if ratio >= 0.3 {
                 Route::Soft
@@ -482,75 +487,6 @@ fn distill(
 
             if route == Route::Soft {
                 out.push_str("\n[Partial signal - omni learn recommended]\n");
-            }
-
-            // Rewind decision, the same question `hooks::post_tool` asks and for
-            // the same reason: is the reply about to be emitted missing bytes the
-            // command produced? The old gate wanted more than 40% noise across
-            // more than 20 segments, a shape 0 of 8,968 recorded distillations
-            // ever had, so the archive behind "everything cut is archived" stayed
-            // empty (#271).
-            //
-            // The gate is `beats_guardrail` rather than the route, because a pipe
-            // always writes something: `best_output` hands back the raw input
-            // once the reply stops beating the guardrail, and only below it does
-            // the caller actually lose lines. Archiving anything else stores
-            // content nobody lost.
-            let mut r_hash = None;
-            if crate::guard::limits::beats_guardrail(out.len(), input_text.len()) {
-                let omitted_lines = input_text
-                    .lines()
-                    .count()
-                    .saturating_sub(out.lines().count());
-                let lost = if omitted_lines > 0 {
-                    format!("{omitted_lines} lines")
-                } else {
-                    format!("{} bytes", input_text.len() - out.len())
-                };
-
-                let marker = if input_text.len() > crate::guard::limits::MAX_REWIND_BYTES {
-                    format!(
-                        "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
-                        input_text.len(),
-                        crate::guard::limits::MAX_REWIND_BYTES
-                    )
-                } else if let Some(s) = store {
-                    let hash = s.store_rewind(&input_text);
-                    let marker = if std::io::stdout().is_terminal() {
-                        format!(
-                            "\n{} {} {} {}. The hash {} stores the full output in RewindStore for retrieval.\n",
-                            "⏺".cyan(),
-                            "OMNI".bold().bright_white(),
-                            "distilled".bright_green(),
-                            lost,
-                            hash.cyan().bold()
-                        )
-                    } else {
-                        format!(
-                            "\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n"
-                        )
-                    };
-                    r_hash = Some(hash);
-                    marker
-                } else {
-                    format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n")
-                };
-
-                // A marker that pushes the reply back over the guardrail costs
-                // more than the cut saved (#268, #269 are 102 and 90 byte
-                // payloads of that shape), and `best_output` would then emit the
-                // raw input while the recorded row claimed a rewind.
-                if crate::guard::limits::beats_guardrail(out.len() + marker.len(), input_text.len())
-                {
-                    out.push_str(&marker);
-                    if r_hash.is_some() {
-                        route = Route::Rewind;
-                    }
-                } else {
-                    out = input_text.clone();
-                    route = Route::Passthrough;
-                    r_hash = None;
-                }
             }
 
             // Safety truncation. The marker carries the line count: `ps aux` lost
@@ -564,7 +500,6 @@ fn distill(
                     .next()
                     .unwrap_or("[pipe]")
                     .to_string(),
-                r_hash,
                 k_count,
                 d_count,
                 collapse_savings_data,
@@ -572,11 +507,82 @@ fn distill(
             )
         };
 
+    // Rewind decision, the same question `hooks::post_tool` asks and for
+    // the same reason: is the reply about to be emitted missing bytes the
+    // command produced? The old gate wanted more than 40% noise across
+    // more than 20 segments, a shape 0 of 8,968 recorded distillations
+    // ever had, so the archive behind "everything cut is archived" stayed
+    // empty (#271).
+    //
+    // The gate is `beats_guardrail` rather than the route, because a pipe
+    // always writes something: `best_output` hands back the raw input
+    // once the reply stops beating the guardrail, and only below it does
+    // the caller actually lose lines. Archiving anything else stores
+    // content nobody lost.
+    let mut r_hash = None;
+    if crate::guard::limits::beats_guardrail(output.len(), input_text.len()) {
+        let omitted_lines = input_text
+            .lines()
+            .count()
+            .saturating_sub(output.lines().count());
+        let lost = if omitted_lines > 0 {
+            format!("{omitted_lines} lines")
+        } else {
+            format!("{} bytes", input_text.len() - output.len())
+        };
+
+        let marker = if input_text.len() > crate::guard::limits::MAX_REWIND_BYTES {
+            format!(
+                "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
+                input_text.len(),
+                crate::guard::limits::MAX_REWIND_BYTES
+            )
+        } else if let Some(s) = store {
+            let hash = s.store_rewind(&input_text);
+            let marker = if std::io::stdout().is_terminal() {
+                format!(
+                    "\n{} {} {} {}. The hash {} stores the full output in RewindStore for retrieval.\n",
+                    "⏺".cyan(),
+                    "OMNI".bold().bright_white(),
+                    "distilled".bright_green(),
+                    lost,
+                    hash.cyan().bold()
+                )
+            } else {
+                format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n")
+            };
+            r_hash = Some(hash);
+            marker
+        } else {
+            format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n")
+        };
+
+        // A marker that pushes the reply back over the guardrail costs
+        // more than the cut saved (#268, #269 are 102 and 90 byte
+        // payloads of that shape), and `best_output` would then emit the
+        // raw input while the recorded row claimed a rewind.
+        if crate::guard::limits::beats_guardrail(output.len() + marker.len(), input_text.len()) {
+            output.push_str(&marker);
+            if r_hash.is_some() {
+                route = Route::Rewind;
+            }
+        } else {
+            output = input_text.clone();
+            route = Route::Passthrough;
+            r_hash = None;
+        }
+    }
+
+    // Safety truncation. The marker carries the line count: `ps aux` lost 416 of
+    // 556 rows here behind a bare `[OMNI: output truncated]` while the footer
+    // reported it as a 62.2% saving (#219).
+    crate::util::text::truncate_with_marker(&mut output, MAX_OUTPUT_BYTES);
+
     PipelineResult {
         session_id,
         output,
         filter_name,
-        rewind_hash,
+        rewind_hash: r_hash,
         segments_kept: kept_count,
         segments_dropped: dropped_count,
         input_text,
