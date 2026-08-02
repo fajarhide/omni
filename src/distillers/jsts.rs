@@ -40,7 +40,7 @@ impl Distiller for JsTsDistiller {
         // generic collapse fold the repeated build noise while keeping every gate's
         // distinct verdict line.
         if is_composite_command(&lines) {
-            return filtered_input;
+            return fold_bundler_assets(&filtered_input);
         }
 
         // Dispatch based on content analysis
@@ -75,6 +75,52 @@ fn is_composite_command(lines: &[&str]) -> bool {
     lines
         .iter()
         .any(|l| l.trim_start().starts_with('>') && l.contains("&&"))
+}
+
+/// A bundler's per-asset size row:
+/// `.vercel/output/static/assets/index-Bw1.js   277.64 kB │ gzip: 87.03 kB`.
+///
+/// `kB │ gzip:` is the fingerprint. vite, rollup and nitro all print it, and
+/// nothing else in a composite buffer does: it is a box-drawing character next
+/// to a specific label, not a duration or a size on its own, so it cannot match
+/// a test line or a lint finding the way a bare `kB` would.
+fn is_bundler_asset_line(l: &str) -> bool {
+    l.contains(" kB │ gzip:")
+}
+
+/// Folds runs of bundler asset rows into one marker each and leaves every other
+/// line exactly as it was.
+///
+/// Declining a composite buffer (#106) keeps every gate's verdict, and it must
+/// stay that way, so this asserts nothing, summarises nothing and never claims a
+/// result: it removes rows that are a size table and says how many it removed.
+/// On the measured `npm run verify` trace those rows are 176 of 269 lines and
+/// 85.9% of the bytes, which is why a declined buffer saved 0.0% (#291). The
+/// noise in a composite is a table, not repetition, so collapse's similarity
+/// grouping had nothing to group.
+fn fold_bundler_assets(input: &str) -> String {
+    if !input.lines().any(is_bundler_asset_line) {
+        return input.to_string();
+    }
+
+    let mut out = String::with_capacity(input.len());
+    let mut run = 0usize;
+    for line in input.lines() {
+        if is_bundler_asset_line(line) {
+            run += 1;
+            continue;
+        }
+        if run > 0 {
+            out.push_str(&format!("[{run} asset size rows omitted]\n"));
+            run = 0;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if run > 0 {
+        out.push_str(&format!("[{run} asset size rows omitted]\n"));
+    }
+    out
 }
 
 fn is_vitest_output(lines: &[&str]) -> bool {
@@ -877,6 +923,55 @@ fn with_tail(items: &[&str], cap: usize) -> String {
 mod tests {
     use super::*;
     use crate::pipeline::{SessionState, SignalTier};
+
+    #[test]
+    fn keeps_every_gate_verdict_when_folding_a_composite_asset_table() {
+        // Arrange: the shape of a real `npm run verify` buffer, five gates with
+        // a bundler size table wedged between two of them.
+        let mut input = String::from("> verify\n> npm run build && npm run lint && npm test\n");
+        for i in 0..40 {
+            input.push_str(&format!(
+                "dist/assets/chunk-{i}.js   {i}.23 kB │ gzip: {i}.03 kB\n"
+            ));
+        }
+        input.push_str("✓ built in 815ms\n");
+        input.push_str("✖ 3 problems (0 errors, 3 warnings)\n");
+        input.push_str("all 9 checks passed\n");
+
+        // Act
+        let out = fold_bundler_assets(&input);
+
+        // Assert: every verdict survives, the table does not.
+        for verdict in ["✓ built in 815ms", "✖ 3 problems", "all 9 checks passed"] {
+            assert!(out.contains(verdict), "lost {verdict:?} in:\n{out}");
+        }
+        assert!(
+            !out.contains("chunk-7.js"),
+            "the size table should be folded:\n{out}"
+        );
+        assert!(out.len() < input.len() / 2, "expected a real saving");
+    }
+
+    #[test]
+    fn says_how_many_asset_rows_it_folded() {
+        let input = "a.js   1.0 kB │ gzip: 0.5 kB\nb.js   2.0 kB │ gzip: 0.9 kB\n✓ built\n";
+
+        let out = fold_bundler_assets(input);
+
+        assert!(
+            out.contains("[2 asset size rows omitted]"),
+            "dropped rows must leave a marker, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn leaves_a_buffer_without_an_asset_table_byte_for_byte() {
+        // The fold must be free when it finds nothing: a composite that is all
+        // verdicts is exactly what #106 declines to touch.
+        let input = "> verify\n> a && b\n✓ built in 815ms\nall 9 checks passed\n";
+
+        assert_eq!(fold_bundler_assets(input), input);
+    }
 
     #[test]
     fn keeps_the_location_of_each_eslint_problem() {
