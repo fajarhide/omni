@@ -182,18 +182,23 @@ fn git_diff_still_compresses_through_pipe() {
 }
 
 #[test]
-fn space_aligned_table_still_compresses_through_pipe() {
-    // `kubectl get pods` is column-aligned with spaces, not tabs — the delimited
-    // sniffer must not mistake it for TSV and gate it.
+fn space_aligned_table_is_not_mistaken_for_a_delimited_format() {
+    // `kubectl get pods` is column-aligned with spaces, not tabs. The delimited
+    // sniffer must not read it as TSV, because gating it would hand back 386
+    // bytes of pod table that a distiller summarises well.
+    //
+    // This asks the sniffer directly. It used to assert that the pipe's output
+    // was smaller than its input, which is a proxy, and the proxy broke for a
+    // reason that had nothing to do with sniffing: on a 386 byte fixture with no
+    // store, the omission marker costs more than the cut saves, so the pipe
+    // correctly hands the raw bytes back (#268, #269). Both outcomes look
+    // identical from outside, so the size test could no longer tell "the sniffer
+    // gated it" from "the marker was not worth it".
     let raw = fixture("kubectl_pods_mixed.txt");
 
-    let out = pipe_through(&raw, "kubectl get pods");
-
     assert!(
-        out.len() < raw.len(),
-        "space-aligned table must still compress: {} → {} bytes",
-        raw.len(),
-        out.len()
+        omni::pipeline::format::sniff(&raw).is_none(),
+        "a space-aligned table is not a delimited format"
     );
 }
 
