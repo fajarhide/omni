@@ -2,6 +2,9 @@ use crate::store::sqlite::Store;
 use anyhow::Result;
 use colored::*;
 
+/// Read by both `print_help` and `super::check_flags` (#151).
+const FLAGS: super::Flags = &[("--tool", "Scope to one tool family")];
+
 pub fn run_patterns(args: &[String], store: &Store) -> Result<()> {
     if args
         .iter()
@@ -10,6 +13,7 @@ pub fn run_patterns(args: &[String], store: &Store) -> Result<()> {
         print_help();
         return Ok(());
     }
+    super::check_flags("patterns", args, FLAGS)?;
 
     let mut tool_family = None;
     let mut i = 2;

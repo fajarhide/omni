@@ -18,6 +18,10 @@ pub fn print_help() {
     println!();
 }
 
+/// `omni update` takes no flags of its own; the guard is what stops a typo from
+/// running the real update anyway and reporting success (#151).
+const FLAGS: super::Flags = &[];
+
 pub fn run(args: &[String]) -> Result<(), String> {
     if args
         .iter()
@@ -26,6 +30,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         print_help();
         return Ok(());
     }
+    super::check_flags("update", args, FLAGS).map_err(|e| e.to_string())?;
 
     let status = crate::guard::update::get_status();
 

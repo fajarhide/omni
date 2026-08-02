@@ -251,6 +251,33 @@ TOTAL=$((TOTAL + 1))
 check "session json has context_pressure" "$SESSION_JSON" "context_pressure"
 
 
+# ─── #151: no subcommand may swallow a flag it does not know ──────
+#
+# Every subcommand is declared `trailing_var_arg` with a `Vec<String>` catch-all
+# and re-parses argv by hand, so clap is never told the valid set and cannot
+# reject a value outside it. Untouched, `omni stats --detial` ran the default
+# overview and exited 0: the user asked for one mode and got another, with
+# nothing in the output saying the flag was ignored. Worse on `omni goal`, whose
+# catch-all stored `--nonsense` as the goal text.
+#
+# This lives in the smoke test because it is a property of the shipped binary's
+# surface, and `cargo test` never runs this file.
+for SUB in diff doctor engram goal init learn patterns query remember reset session stats update version; do
+    # `&& RC=0 || RC=$?` rather than `$?` on the next line: this script runs
+    # under `set -e`, and a bare non-zero command would end the run here, which
+    # is the outcome the check is looking for.
+    OUT=$("$OMNI" "$SUB" --zzz-not-a-real-flag 2>&1) && RC=0 || RC=$?
+    TOTAL=$((TOTAL + 1))
+    if [ "$RC" -ne 0 ]; then
+        echo "  ✓ $SUB rejects an unknown flag"
+        PASS=$((PASS + 1))
+    else
+        echo "  ✗ $SUB rejects an unknown flag"
+        echo "    exited 0 and ran anyway: $(echo "$OUT" | head -2)"
+        FAIL=$((FAIL + 1))
+    fi
+done
+
 # ─── Results ─────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════"
