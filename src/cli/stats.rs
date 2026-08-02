@@ -2,7 +2,6 @@
 #![allow(clippy::string_slice)]
 
 use crate::store::sqlite::Store;
-use crate::util::token_estimate::{ContentHint, estimate_tokens};
 use anyhow::Result;
 use colored::*;
 use std::collections::HashMap;
@@ -18,18 +17,6 @@ pub fn format_bytes(n: u64) -> String {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.1} GB", n as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
-#[allow(dead_code)]
-pub fn format_tokens(bytes: u64) -> String {
-    let tokens = estimate_tokens(bytes as usize, ContentHint::Mixed) as u64;
-    if tokens < 1000 {
-        format!("{}", tokens)
-    } else if tokens < 1_000_000 {
-        format!("{:.0}K", tokens as f64 / 1_000.0)
-    } else {
-        format!("{:.1}M", tokens as f64 / 1_000_000.0)
     }
 }
 
@@ -1331,14 +1318,6 @@ mod tests {
         assert_eq!(format_bytes(1536), "1.5 KB");
         assert_eq!(format_bytes(1048576), "1.0 MB");
         assert_eq!(format_bytes(1073741824), "1.0 GB");
-    }
-
-    #[test]
-    fn test_format_tokens_ranges() {
-        assert_eq!(format_tokens(0), "0");
-        assert_eq!(format_tokens(380), "100"); // 380 bytes / 3.8 = 100 tokens
-        assert_eq!(format_tokens(38_000), "10K"); // 10K tokens
-        assert_eq!(format_tokens(3_800_000), "1.0M"); // 1M tokens
     }
 
     #[test]

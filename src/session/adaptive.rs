@@ -70,26 +70,6 @@ pub fn analyze(store: &Store, project_hash: &str) -> Vec<AdaptiveInsight> {
     insights
 }
 
-/// Format a Vec of insights into a human-readable MCP response string.
-#[allow(dead_code)]
-pub fn format_insights(insights: &[AdaptiveInsight]) -> String {
-    if insights.is_empty() {
-        return "No adaptive insights available yet. Keep using OMNI — patterns will emerge over time.".to_string();
-    }
-
-    let mut out = format!("## OMNI Adaptive Insights ({} found)\n\n", insights.len());
-    for (i, ins) in insights.iter().enumerate() {
-        let tag = match ins.insight_type {
-            InsightType::OverFiltered => "⚡ Over-Filtered",
-            InsightType::Underused => "📦 Underused",
-        };
-        out.push_str(&format!("{}. [{}]\n", i + 1, tag));
-        out.push_str(&format!("   {}\n", ins.description));
-        out.push_str(&format!("   → {}\n\n", ins.suggested_action));
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,33 +87,5 @@ mod tests {
         let (store, _dir) = get_store();
         let insights = analyze(&store, "abc123");
         assert!(insights.is_empty());
-    }
-
-    #[test]
-    fn format_empty_insights_returns_placeholder() {
-        let result = format_insights(&[]);
-        assert!(result.contains("No adaptive insights"));
-    }
-
-    #[test]
-    fn format_insights_renders_both_types() {
-        let insights = vec![
-            AdaptiveInsight {
-                insight_type: InsightType::OverFiltered,
-                description: "cargo test recalled 5x".to_string(),
-                affected_item: Some("cargo test".to_string()),
-                suggested_action: "omni learn --loosen cargo".to_string(),
-            },
-            AdaptiveInsight {
-                insight_type: InsightType::Underused,
-                description: "key 'old-fact' never recalled".to_string(),
-                affected_item: Some("old-fact".to_string()),
-                suggested_action: "Review or delete".to_string(),
-            },
-        ];
-        let out = format_insights(&insights);
-        assert!(out.contains("Over-Filtered"));
-        assert!(out.contains("Underused"));
-        assert!(out.contains("cargo test"));
     }
 }
