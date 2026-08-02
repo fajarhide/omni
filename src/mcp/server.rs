@@ -368,6 +368,7 @@ impl OmniServer {
     )]
     pub async fn omni_query(&self, params: Parameters<OmniQueryParams>) -> String {
         let query = params.0.query;
+        self.store.record_memory_read("omni_query", &query);
         match self.store.execute_omni_query(&query) {
             Ok(result) => serde_json::to_string_pretty(&result)
                 .unwrap_or_else(|e| format!("Serialization error: {}", e)),
@@ -381,6 +382,7 @@ impl OmniServer {
     )]
     pub async fn omni_recall(&self, params: Parameters<OmniRecallParams>) -> String {
         let query = params.0.query;
+        self.store.record_memory_read("omni_recall", &query);
         let limit = 5;
 
         let project_path = std::env::current_dir()
@@ -508,6 +510,7 @@ impl OmniServer {
         description = "Show the top recurring issues and error patterns across the entire project"
     )]
     pub async fn omni_insight(&self) -> String {
+        self.store.record_memory_read("omni_insight", "");
         let mut report = String::new();
 
         // Proactive: Context Pressure Notification (Item 10)
@@ -1088,6 +1091,7 @@ impl OmniServer {
     )]
     pub async fn omni_knowledge(&self, params: Parameters<OmniKnowledgeParams>) -> String {
         let action = params.0.action;
+        self.store.record_memory_read("omni_knowledge", &action);
         let key = params.0.key;
         let value = params.0.value;
         let project_path = std::env::current_dir()

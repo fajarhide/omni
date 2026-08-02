@@ -1576,6 +1576,44 @@ impl SqliteBackend {
         );
     }
 
+    /// Records that a memory tool was asked for something.
+    ///
+    /// Same table as the rewind counter, told apart by the tool name sitting in
+    /// `command_prefix`. Until now `retrieve_events` counted one path out of
+    /// five: `omni_retrieve` and nothing else, so "was memory read" was an
+    /// inference rather than a query. `session_start` injects project knowledge
+    /// into every continued session and recorded nothing, which means an
+    /// injection that fires every time and one that never fires produced
+    /// identical databases (#272).
+    ///
+    /// Every call is recorded, including the ones that come back empty. The
+    /// question this answers is whether anyone asks, and a query that found
+    /// nothing is still someone asking. `omni_retrieve` keeps its own rule of
+    /// recording only what it found, because its counter feeds the adaptive
+    /// compression rate rather than this one.
+    pub fn record_memory_read(&self, tool: &str, subject: &str) {
+        let agent_id = std::env::var("OMNI_AGENT_ID")
+            .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
+        self.record_retrieve_event(tool, crate::util::text::safe_slice(subject, 60), &agent_id);
+    }
+
+    /// How many times `tool` handed memory back, all time.
+    ///
+    /// The point of #272 is that this is a query rather than an inference, so it
+    /// belongs beside the insert instead of being re-derived in SQL by whoever
+    /// wants the number.
+    pub fn count_memory_reads(&self, tool: &str) -> i64 {
+        let Ok(conn) = self.pool.get() else {
+            return 0;
+        };
+        conn.query_row(
+            "SELECT COUNT(*) FROM retrieve_events WHERE command_prefix = ?1",
+            params![tool],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
     /// Returns retrieve_rate for a command prefix (0.0 – 1.0)
     /// High rate = OMNI too aggressive for this command type
     pub fn get_retrieve_rate(&self, command_prefix: &str, window_days: i64) -> f64 {
