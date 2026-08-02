@@ -408,9 +408,13 @@ pub fn process_payload(
         // Enumeration commands (`ls`/`find`/`ps`/…) deliberately pass through
         // verbatim; collapsing them drops rows that are the answer, so skip the
         // fallback for them (#200).
+        // The verbatim check has to ask the resolved command, not the string the
+        // user typed. Reading the whole string sees `kubectl` in
+        // `kubectl get pods -o json | jq -r '...'` and lets collapse rewrite a
+        // payload the next step parses, and it sees `cd` in `cd x && cat file`
+        // and collapses a file read the same way (#269, #235).
         let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
-            && !crate::distillers::passes_through_verbatim(clean_command)
-            && output_command.is_some()
+            && output_command.is_some_and(|c| !crate::distillers::passes_through_verbatim(c))
         {
             let collapse_result = collapse::collapse(&content, &profile.collapse);
             collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to
@@ -1451,6 +1455,43 @@ mod tests {
             "four lines of jq output must reach the agent whole, got: {}",
             out.unwrap_or_default()
         );
+    }
+
+    /// The other half of #269, and the reason `jq` and `yq` are verbatim rather
+    /// than merely unrouted. Their output exists to be parsed by a later step, so
+    /// a `[N similar lines collapsed]` marker in the middle of it is not a
+    /// summary, it is a syntax error. Routing alone does not cover this: with the
+    /// distiller declining, the collapse fallback still gets the payload.
+    #[test]
+    fn never_collapses_output_a_later_step_has_to_parse() {
+        let mut content = String::new();
+        for i in 0..60 {
+            content.push_str(&format!("pod-{i}: Running\n"));
+        }
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pods -o json | jq -r '.items[] | \"\\(.metadata.name): \\(.status.phase)\"'"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let delivered = match process_payload(&payload, None, None) {
+            None => content.clone(), // declined: the host keeps its own bytes
+            Some(out) => {
+                let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+                v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                    .as_str()
+                    .expect("stdout is a string")
+                    .to_string()
+            }
+        };
+
+        for i in 0..60 {
+            assert!(
+                delivered.contains(&format!("pod-{i}: Running")),
+                "row {i} is missing from a payload a later step parses: {delivered}"
+            );
+        }
     }
 
     /// 200 green test lines and a tally: output a distiller reduces hard.

@@ -438,10 +438,14 @@ fn distill(
             // Enumeration commands (`ls`/`find`/`ps`/…) return the input verbatim
             // by design; collapsing them would drop rows that are the answer, so
             // never fall back to collapse for them (#200).
+            // The verbatim check asks the resolved command, not the string the
+            // user typed: the whole of `kubectl get pods -o json | jq -r '...'`
+            // reads as `kubectl` and lets collapse rewrite a payload the next
+            // step parses (#269).
             let collapse_savings_data =
                 if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
-                    || crate::distillers::passes_through_verbatim(cmd)
-                    || output_command.is_none()
+                    || !output_command
+                        .is_some_and(|c| !crate::distillers::passes_through_verbatim(c))
                 {
                     None
                 } else {
