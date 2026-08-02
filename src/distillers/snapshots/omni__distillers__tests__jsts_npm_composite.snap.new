@@ -1,5 +1,6 @@
 ---
 source: src/distillers/mod.rs
+assertion_line: 1170
 expression: output
 ---
 > forgepod@0.0.0 verify
@@ -12,7 +13,10 @@ transforming...
 ✓ 342 modules transformed.
 rendering chunks...
 computing gzip size...
-[4 asset size rows omitted]
+dist/index.html                   1.23 kB │ gzip:  0.58 kB
+dist/assets/index-a1b2c3d4.css   12.44 kB │ gzip:  3.02 kB
+dist/assets/index-e5f6a7b8.js   184.19 kB │ gzip: 58.31 kB
+dist/assets/vendor-9c0d1e2f.js  512.77 kB │ gzip: 162.44 kB
 ✓ built in 3.42s
 
 > forgepod@0.0.0 eslint
