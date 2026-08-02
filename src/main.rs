@@ -418,8 +418,12 @@ fn main() {
         }
 
         Mode::PreHook => {
-            let (store, session) = init_globals();
-            if let Err(e) = hooks::pre_tool::run(store, session) {
+            // No store: the pre-hook rewrites a command and updates the in-memory
+            // turn. The only thing it used the database for was `context_turns`,
+            // which had no reader (#270). Not opening it also takes the SQLite
+            // connection off this hook's path entirely.
+            let (_, session) = init_globals();
+            if let Err(e) = hooks::pre_tool::run(session) {
                 eprintln!("[omni] Pre-Hook error: {}", e);
                 std::process::exit(1);
             }

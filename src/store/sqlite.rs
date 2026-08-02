@@ -509,24 +509,6 @@ impl SqliteBackend {
             CREATE INDEX IF NOT EXISTS idx_pm_tool ON pattern_memory(tool_family);
             CREATE INDEX IF NOT EXISTS idx_pm_last ON pattern_memory(last_seen);
 
-            -- 12. Context Turns
-            CREATE TABLE IF NOT EXISTS context_turns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                turn_number INTEGER NOT NULL,
-                ts INTEGER NOT NULL,
-                estimated_total_tokens INTEGER DEFAULT 0,
-                file_read_tokens INTEGER DEFAULT 0,
-                tool_output_tokens INTEGER DEFAULT 0,
-                conversation_tokens INTEGER DEFAULT 0,
-                system_prompt_tokens INTEGER DEFAULT 0,
-                has_duplicate_reads INTEGER DEFAULT 0,
-                duplicate_files TEXT DEFAULT '[]',
-                largest_read_file TEXT DEFAULT '',
-                largest_read_tokens INTEGER DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_turns(session_id);
-
             -- 11. One-time data migrations tracker
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id           TEXT PRIMARY KEY,
@@ -761,6 +743,30 @@ impl SqliteBackend {
             tx.execute(
                 "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
                 params![migration_id, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
+        // `context_turns` was written on every hooked command, carried an index,
+        // and had no `SELECT` anywhere in the tree: 5,532 rows paying write
+        // latency and disk for a reader that never existed (#270). The in-memory
+        // `SessionState::current_turn` it was built from is still read, by
+        // `omni_context_breakdown` and `omni stats`; only the table is gone.
+        let migration_drop_ctx = "2026_08_drop_write_only_context_turns";
+        let ctx_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_drop_ctx],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if ctx_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute("DROP INDEX IF EXISTS idx_ctx_session", [])?;
+            tx.execute("DROP TABLE IF EXISTS context_turns", [])?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_drop_ctx, chrono::Utc::now().timestamp()],
             )?;
             tx.commit()?;
         }
@@ -1110,40 +1116,6 @@ impl SqliteBackend {
             serde_json::from_str(&json).ok()
         } else {
             None
-        }
-    }
-
-    pub fn record_context_turn(&self, turn: &crate::analytics::context_composition::ContextTurn) {
-        let conn = match self.pool.get() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-
-        let duplicate_files_json =
-            serde_json::to_string(&turn.duplicate_files).unwrap_or_else(|_| "[]".to_string());
-
-        let res = conn.execute(
-            "INSERT INTO context_turns 
-             (session_id, turn_number, ts, estimated_total_tokens, file_read_tokens, tool_output_tokens, conversation_tokens, system_prompt_tokens, has_duplicate_reads, duplicate_files, largest_read_file, largest_read_tokens)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                turn.session_id,
-                turn.turn_number,
-                turn.timestamp,
-                turn.estimated_total_tokens as i64,
-                turn.file_read_tokens as i64,
-                turn.tool_output_tokens as i64,
-                turn.conversation_tokens as i64,
-                turn.system_prompt_tokens as i64,
-                turn.has_duplicate_file_reads as i32,
-                duplicate_files_json,
-                turn.largest_single_read.0,
-                turn.largest_single_read.1 as i64,
-            ],
-        );
-
-        if let Err(e) = res {
-            eprintln!("[omni:error] failed to record context turn: {}", e);
         }
     }
 
@@ -2802,6 +2774,49 @@ mod tests {
             cumulative, 258,
             "session a contributes 60, session b contributes 198"
         );
+    }
+
+    /// #270. `context_turns` was written on every hooked command, carried an
+    /// index, and had no `SELECT` anywhere in the tree: 5,532 rows paying write
+    /// latency and disk for a reader that never existed. Opening a store that
+    /// still has it must remove it, or the rows keep their index and nothing
+    /// reclaims the space.
+    #[test]
+    fn drops_the_write_only_context_turns_table() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+
+        // A database from before the drop.
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open");
+            conn.execute_batch(
+                "CREATE TABLE context_turns (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL);
+                 CREATE INDEX idx_ctx_session ON context_turns(session_id);
+                 INSERT INTO context_turns (session_id) VALUES ('old');",
+            )
+            .expect("seed");
+        }
+
+        let _store = Store::open_path(&db).expect("store");
+
+        let conn = rusqlite::Connection::open(&db).expect("reopen");
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'context_turns'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(tables, 0, "the table and its rows must be gone");
+
+        let indexes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_ctx_session'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(indexes, 0, "its index costs write latency too");
     }
 
     /// #274. The key carried a nanosecond prefix, so every key was unique and
