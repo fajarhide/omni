@@ -509,11 +509,67 @@ fn distill_playwright(input: &str) -> String {
 // ESLint
 // ---------------------------------------------------------------------------
 
+/// How many `file:line:col` locations the eslint summary carries before it
+/// starts counting instead. A lint run with hundreds of problems is a codebase
+/// state, not a work item, and the rewind hash still holds the full list.
+const MAX_ESLINT_LOCATIONS: usize = 20;
+
+/// One reported problem, kept in the order eslint printed it.
+struct EslintProblem {
+    file: String,
+    /// `line:col` exactly as eslint wrote it.
+    at: String,
+    is_error: bool,
+}
+
+/// Groups locations under their file, errors first, capped. Returns an empty
+/// string when nothing was located, so a summary that parsed only counts is
+/// unchanged.
+fn format_eslint_locations(problems: &[EslintProblem]) -> String {
+    if problems.is_empty() {
+        return String::new();
+    }
+
+    // Errors before warnings: when the cap bites, the blocking problems are the
+    // ones worth the bytes. `sort_by_key` is stable, so eslint's own order holds
+    // within each severity.
+    let mut ordered: Vec<&EslintProblem> = problems.iter().collect();
+    ordered.sort_by_key(|p| !p.is_error);
+
+    let shown = ordered.len().min(MAX_ESLINT_LOCATIONS);
+    let mut by_file: Vec<(&str, Vec<&str>)> = Vec::new();
+    for p in &ordered[..shown] {
+        match by_file.iter_mut().find(|(f, _)| *f == p.file) {
+            Some((_, ats)) => ats.push(&p.at),
+            None => by_file.push((&p.file, vec![&p.at])),
+        }
+    }
+
+    let mut out = String::new();
+    for (file, ats) in &by_file {
+        out.push_str(&format!("\n  {}: {}", file, ats.join(", ")));
+    }
+    if ordered.len() > shown {
+        out.push_str(&format!(
+            "\n  [{} more locations omitted]",
+            ordered.len() - shown
+        ));
+    }
+    out
+}
+
 fn distill_eslint(input: &str) -> String {
     let mut total_errors = 0;
     let mut total_warnings = 0;
     let mut by_rule: BTreeMap<String, u32> = BTreeMap::new();
     let mut files_affected: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // The counts alone are not actionable: an agent that learns three warnings
+    // exist still has to re-run eslint to find out where, which costs more
+    // tokens than the summary saved (#108).
+    let mut problems: Vec<EslintProblem> = Vec::new();
+    // The stanza formatter prints the path once and then indents its problems
+    // under it, so a location only knows its file from the line above.
+    let mut current_file: Option<String> = None;
     // Zero-state guard (#143): a bare file list (e.g. prettier output, #114) also
     // populates `files_affected`, so that is NOT proof this is eslint. Only an
     // eslint "problems (" summary or a parsed rule counts as a positive signal.
@@ -568,6 +624,7 @@ fn distill_eslint(input: &str) -> String {
             && !t.contains(' ')
         {
             files_affected.insert(t.to_string());
+            current_file = Some(t.to_string());
         }
 
         // Inline formatter (file:line:col error ...)
@@ -577,7 +634,30 @@ fn distill_eslint(input: &str) -> String {
             let file_path = &t[..colon_idx];
             if file_path.contains('/') || file_path.contains('.') || file_path.contains('\\') {
                 files_affected.insert(file_path.to_string());
+                // `path:line:col` — everything after the path is the location.
+                if let Some(at) = t[colon_idx + 1..].split_whitespace().next() {
+                    problems.push(EslintProblem {
+                        file: file_path.to_string(),
+                        at: at.to_string(),
+                        is_error: t.contains(" error "),
+                    });
+                }
             }
+        }
+
+        // Stanza formatter: the problem line opens with a bare `line:col` and a
+        // severity, and the file it belongs to was printed above it. Reuses the
+        // detector rather than re-deriving it, so the shape that decides this is
+        // eslint output and the shape a location is parsed from cannot drift.
+        if is_eslint_finding_line(t)
+            && let Some(at) = t.split_whitespace().next()
+            && let Some(file) = current_file.as_ref()
+        {
+            problems.push(EslintProblem {
+                file: file.clone(),
+                at: at.to_string(),
+                is_error: t.contains(" error "),
+            });
         }
 
         // Parse individual rules: "src/index.ts:10:15 error Unexpected console statement @typescript-eslint/no-console"
@@ -609,6 +689,8 @@ fn distill_eslint(input: &str) -> String {
         total_warnings,
         files_affected.len()
     );
+
+    out.push_str(&format_eslint_locations(&problems));
 
     if !by_rule.is_empty() {
         let mut sorted: Vec<(String, u32)> = by_rule.into_iter().collect();
@@ -795,6 +877,77 @@ fn with_tail(items: &[&str], cap: usize) -> String {
 mod tests {
     use super::*;
     use crate::pipeline::{SessionState, SignalTier};
+
+    #[test]
+    fn keeps_the_location_of_each_eslint_problem() {
+        // Arrange: the stanza formatter, which prints the path once and indents
+        // its problems beneath it. The counts alone sent an agent back to re-run
+        // eslint to find out where (#108).
+        let input = "/repo/src/lib/i18n.tsx\n\
+             \x20    7:14  warning  Fast refresh only works  react-refresh/only-export-components\n\
+             \x20 1081:17  warning  Fast refresh only works  react-refresh/only-export-components\n\
+             \n\
+             ✖ 2 problems (0 errors, 2 warnings)\n";
+
+        // Act
+        let out = distill_eslint(input);
+
+        // Assert
+        assert!(
+            out.contains("/repo/src/lib/i18n.tsx: 7:14, 1081:17"),
+            "locations must survive, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn reports_errors_before_warnings_when_locations_are_capped() {
+        // Arrange: more problems than the cap, with the sole error printed last
+        // so position cannot be what saves it.
+        let mut input = String::from("/repo/a.ts\n");
+        for i in 0..MAX_ESLINT_LOCATIONS + 5 {
+            input.push_str(&format!("  {}:1  warning  something  some-rule\n", i + 1));
+        }
+        input.push_str("  999:2  error  the blocking one  blocking-rule\n");
+        input.push_str("✖ 26 problems (1 errors, 25 warnings)\n");
+
+        // Act
+        let out = distill_eslint(&input);
+
+        // Assert
+        assert!(
+            out.contains("999:2"),
+            "the error must outrank warnings under the cap, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn says_how_many_locations_it_dropped() {
+        let mut input = String::from("/repo/a.ts\n");
+        for i in 0..MAX_ESLINT_LOCATIONS + 5 {
+            input.push_str(&format!("  {}:1  warning  something  some-rule\n", i + 1));
+        }
+        input.push_str("✖ 25 problems (0 errors, 25 warnings)\n");
+
+        let out = distill_eslint(&input);
+
+        assert!(
+            out.contains("[5 more locations omitted]"),
+            "dropped bytes must leave a marker, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn does_not_read_a_colon_in_a_message_as_a_location() {
+        // Stricter than "contains a colon" on purpose: the inline formatter's
+        // `path:line:col` must fall to its own branch so no problem is counted
+        // twice, and prose with a colon must not become a location.
+        assert!(is_eslint_finding_line("  7:14  warning  msg  some-rule"));
+        assert!(!is_eslint_finding_line(
+            "  src/index.ts:10:15 error msg rule"
+        ));
+        assert!(!is_eslint_finding_line("  ratio:high  warning  msg  rule"));
+        assert!(!is_eslint_finding_line("  7:14  note  msg  rule"));
+    }
 
     /// One `Important` segment per line, which is what the scorer produces for a
     /// wall of undifferentiated log output — the shape that hit #188.
