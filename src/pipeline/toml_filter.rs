@@ -167,9 +167,68 @@ pub(crate) enum BatchFilterOutcome {
 
 #[derive(Clone)]
 pub enum LineFilter {
-    Strip(Vec<Regex>),
-    Keep(Vec<Regex>),
+    Strip(LazyPatterns),
+    Keep(LazyPatterns),
     None,
+}
+
+/// Line patterns compiled the first time a filter actually reads them.
+///
+/// `match_command` decides whether a filter applies; these are consulted only by
+/// the one filter that matched. Compiling every filter's set at load meant 249
+/// regexes so that at most one set could be used, on a path each hooked command
+/// pays because every hook is its own process (#283).
+///
+/// The one thing eager compilation bought was a warning at load for a malformed
+/// pattern. That is why `validate` exists and why `omni doctor` calls it:
+/// deferring the cost must not defer the diagnosis.
+#[derive(Debug, Default)]
+pub struct LazyPatterns {
+    raw: Vec<String>,
+    compiled: OnceLock<Vec<Regex>>,
+}
+
+impl Clone for LazyPatterns {
+    /// The compiled cache is deliberately not carried over: a clone re-defers.
+    fn clone(&self) -> Self {
+        Self {
+            raw: self.raw.clone(),
+            compiled: OnceLock::new(),
+        }
+    }
+}
+
+impl LazyPatterns {
+    pub fn new(raw: Vec<String>) -> Self {
+        Self {
+            raw,
+            compiled: OnceLock::new(),
+        }
+    }
+
+    /// Compiles on first call. A pattern that will not compile is dropped rather
+    /// than panicking, which is what the eager path did too; `validate` reports it.
+    fn get(&self) -> &[Regex] {
+        self.compiled
+            .get_or_init(|| self.raw.iter().filter_map(|p| Regex::new(p).ok()).collect())
+    }
+
+    /// Forces compilation and returns one message per pattern that fails, so a
+    /// malformed regex is still caught by a human-run check rather than silently
+    /// skipped at match time.
+    pub fn validate(&self) -> Vec<String> {
+        self.raw
+            .iter()
+            .filter_map(|p| Regex::new(p).err().map(|e| format!("{p}: {e}")))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+impl From<Vec<&str>> for LazyPatterns {
+    fn from(v: Vec<&str>) -> Self {
+        Self::new(v.into_iter().map(str::to_string).collect())
+    }
 }
 
 #[derive(Clone)]
@@ -229,6 +288,25 @@ pub fn get_current_ecosystems() -> &'static [String] {
 }
 
 impl TomlFilter {
+    /// Force-compiles this filter's deferred line patterns and reports every one
+    /// that will not compile.
+    ///
+    /// Loading no longer checks these, because checking a regex means compiling
+    /// it and that is the cost being deferred (#283). `omni doctor` calls this
+    /// instead, so a malformed pattern is still caught before it can be silently
+    /// skipped at match time.
+    pub fn validate_line_patterns(&self) -> Vec<String> {
+        let patterns = match &self.line_filter {
+            LineFilter::Strip(p) | LineFilter::Keep(p) => p,
+            LineFilter::None => return Vec::new(),
+        };
+        patterns
+            .validate()
+            .into_iter()
+            .map(|problem| format!("invalid line pattern in signal '{}': {problem}", self.name))
+            .collect()
+    }
+
     pub fn matches(&self, input: &str) -> bool {
         if let Some(types) = self.project_types.as_ref().filter(|t| !t.is_empty()) {
             let current = get_current_ecosystems();
@@ -301,9 +379,11 @@ impl TomlFilter {
         let mut lines: Vec<&str> = text.lines().collect();
         match &self.line_filter {
             LineFilter::Strip(patterns) => {
+                let patterns = patterns.get();
                 lines.retain(|line| !patterns.iter().any(|p| p.is_match(line)));
             }
             LineFilter::Keep(patterns) => {
+                let patterns = patterns.get();
                 lines.retain(|line| patterns.iter().any(|p| p.is_match(line)));
             }
             LineFilter::None => {}
@@ -437,34 +517,18 @@ pub fn load_from_file(path: &Path) -> Result<LoadReport> {
                 continue;
             }
 
+            // Deferred. Only the filter whose `match_command` matched ever reads
+            // these, so compiling every filter's set here bought nothing but
+            // latency on a path every hooked command pays (#283).
+            //
+            // It must not validate here either: checking a pattern means
+            // compiling it, which is the cost being deferred. `omni doctor`
+            // calls `validate_line_patterns`, and that is where a malformed
+            // pattern is reported now.
             let line_filter = if let Some(strips) = config.noise_patterns {
-                let mut rules = Vec::new();
-                for s in strips {
-                    match Regex::new(&s) {
-                        Ok(r) => rules.push(r),
-                        Err(e) => {
-                            warnings.push(format!(
-                                "skip invalid noise_pattern in signal '{}': {}",
-                                name, e
-                            ));
-                        }
-                    }
-                }
-                LineFilter::Strip(rules)
+                LineFilter::Strip(LazyPatterns::new(strips))
             } else if let Some(keeps) = config.signal_patterns {
-                let mut rules = Vec::new();
-                for k in keeps {
-                    match Regex::new(&k) {
-                        Ok(r) => rules.push(r),
-                        Err(e) => {
-                            warnings.push(format!(
-                                "skip invalid signal_pattern in signal '{}': {}",
-                                name, e
-                            ));
-                        }
-                    }
-                }
-                LineFilter::Keep(rules)
+                LineFilter::Keep(LazyPatterns::new(keeps))
             } else {
                 LineFilter::None
             };
@@ -693,18 +757,14 @@ fn create_filter_from_config(
         });
     }
 
+    // Deferred, and deliberately not validated here either. This builder is what
+    // `load_embedded_filters` calls, so it is the hook's path for the 45 shipped
+    // signals: validating means compiling, which is the cost being deferred.
+    // `omni doctor` reports a malformed pattern via `validate_line_patterns`.
     let line_filter = if let Some(strips) = config.noise_patterns {
-        let mut rules = Vec::new();
-        for s in strips {
-            rules.push(Regex::new(&s)?);
-        }
-        LineFilter::Strip(rules)
+        LineFilter::Strip(LazyPatterns::new(strips))
     } else if let Some(keeps) = config.signal_patterns {
-        let mut rules = Vec::new();
-        for k in keeps {
-            rules.push(Regex::new(&k)?);
-        }
-        LineFilter::Keep(rules)
+        LineFilter::Keep(LazyPatterns::new(keeps))
     } else {
         LineFilter::None
     };
@@ -1059,10 +1119,7 @@ mod tests {
     fn black_noise_filter(on_empty: Option<&str>) -> TomlFilter {
         TomlFilter {
             name: "black".to_string(),
-            line_filter: LineFilter::Strip(vec![
-                Regex::new(r"^would reformat ").unwrap(),
-                Regex::new(r"^reformatted ").unwrap(),
-            ]),
+            line_filter: LineFilter::Strip(vec![r"^would reformat ", r"^reformatted "].into()),
             on_empty: on_empty.map(str::to_string),
             ..test_filter()
         }
@@ -1141,7 +1198,7 @@ mod tests {
             strip_ansi: false,
             replace_rules: vec![],
             match_output: vec![],
-            line_filter: LineFilter::Strip(vec![Regex::new("noisy").unwrap()]),
+            line_filter: LineFilter::Strip(vec!["noisy"].into()),
             max_lines: None,
             on_empty: None,
             project_types: None,
@@ -1168,7 +1225,7 @@ mod tests {
             strip_ansi: true,
             replace_rules: vec![],
             match_output: vec![],
-            line_filter: LineFilter::Strip(vec![Regex::new("noisy").unwrap()]),
+            line_filter: LineFilter::Strip(vec!["noisy"].into()),
             max_lines: None,
             on_empty: None,
             project_types: None,
@@ -1198,7 +1255,7 @@ mod tests {
                 message: "done".to_string(),
                 unless: None,
             }],
-            line_filter: LineFilter::Strip(vec![Regex::new("never reaches here").unwrap()]),
+            line_filter: LineFilter::Strip(vec!["never reaches here"].into()),
             max_lines: None,
             on_empty: None,
             project_types: None,
@@ -1338,5 +1395,37 @@ mod tests {
         // Remove project_types constraint; should match universally
         filter.project_types = None;
         assert!(filter.matches("anything"));
+    }
+    #[test]
+    fn reports_a_malformed_line_pattern_even_though_loading_no_longer_compiles_it() {
+        // Deferring the compile must not defer the diagnosis: `omni doctor`
+        // calls this, and it is the only thing left that catches a bad pattern
+        // before it is silently skipped at match time (#283).
+        let f = TomlFilter {
+            name: "broken".to_string(),
+            line_filter: LineFilter::Strip(vec!["^ok", "([unclosed"].into()),
+            ..test_filter()
+        };
+
+        let problems = f.validate_line_patterns();
+
+        assert_eq!(problems.len(), 1, "got {problems:?}");
+        assert!(problems[0].contains("broken"), "{problems:?}");
+        assert!(problems[0].contains("([unclosed"), "{problems:?}");
+    }
+
+    #[test]
+    fn a_malformed_pattern_is_skipped_rather_than_panicking_at_match_time() {
+        // The eager path dropped an uncompilable pattern and kept the rest; the
+        // lazy path must behave identically.
+        let f = TomlFilter {
+            name: "broken".to_string(),
+            line_filter: LineFilter::Strip(vec!["^drop me", "([unclosed"].into()),
+            ..test_filter()
+        };
+
+        let out = f.apply("drop me\nkeep me");
+
+        assert_eq!(out.trim(), "keep me");
     }
 }

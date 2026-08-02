@@ -649,6 +649,15 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     // --- Elegant Warning Display ---
     let mut all_filter_warnings = Vec::new();
+    // Line patterns compile on first use now, so loading no longer reports a
+    // malformed one (#283). `doctor` is where that check moved: it is run by a
+    // human asking whether the config is sound, not on the hook's path, so it
+    // can afford to compile every pattern.
+    for report in [&built_in, &user_report, &local_report] {
+        for filter in &report.filters {
+            all_filter_warnings.extend(filter.validate_line_patterns());
+        }
+    }
     all_filter_warnings.extend(built_in.warnings);
     all_filter_warnings.extend(user_report.warnings);
     all_filter_warnings.extend(local_report.warnings);
