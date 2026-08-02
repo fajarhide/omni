@@ -438,7 +438,10 @@ pub fn process_payload(
                 // hand the same payload to another distiller — `black` turned
                 // 200 all-stripped rows into the fabricated `Build: ok` (#224).
                 if let Some(ref s) = store {
-                    s.record_passthrough(clean_command, content.len());
+                    s.record_passthrough(
+                        &format!("{clean_command} [toml zero-state]"),
+                        content.len(),
+                    );
                 }
                 return None;
             }
@@ -593,7 +596,7 @@ pub fn process_payload(
     if final_out.len() >= content.len() * 9 / 10 {
         // Record passthrough metric regardless of size
         if let Some(ref s) = store {
-            s.record_passthrough(clean_command, content.len());
+            s.record_passthrough(&format!("{clean_command} [below guardrail]"), content.len());
         }
 
         // Take the route the banner names. Prefixing `Passthrough` onto
