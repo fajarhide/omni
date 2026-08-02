@@ -23,8 +23,24 @@ impl Default for ToolProfile {
 /// producer out costs a passthrough; letting one in costs the answer.
 const SILENT_BUILTINS: &[&str] = &[
     "cd", "export", "set", "unset", "source", ".", "true", "false", "pushd", "popd", "umask",
-    "alias", "shift", "local", "readonly",
+    "alias", "shift", "local", "readonly", "exit", "return", "break", "continue", "wait", "trap",
+    "shopt", "declare", "typeset", "let", "[", "[[", "test", ":",
+    // Control flow. `while [ $i -lt 60 ]; do echo x; i=$((i+1)); done` is one
+    // program whose stdout comes from `echo`, but the `;` between its clauses is
+    // the same character that separates two commands. Reading the clauses as
+    // producers made every shell loop a passthrough, which is what
+    // `exec_fail_passthrough` caught on CI.
+    "done", "fi", "esac", "then", "else",
 ];
+
+/// Keywords that introduce a clause rather than end one, so the command after
+/// them is what may write to stdout.
+const CLAUSE_PREFIXES: &[&str] = &["do", "then", "else", "elif", "while", "until", "if"];
+
+/// Keywords that open a loop or branch header. What follows is a variable name
+/// and a word list, not a command: `for f in *.yaml` printed nothing, but the
+/// `f` after the keyword reads as an executable to anything scanning for one.
+const HEADER_KEYWORDS: &[&str] = &["for", "select", "case"];
 
 /// The one command in `command` whose stdout is being distilled, or `None` when
 /// several produced it.
@@ -116,11 +132,33 @@ fn split_pipeline(segment: &str) -> Vec<&str> {
 }
 
 fn is_silent(segment: &str) -> bool {
-    segment
+    let mut words = segment
         .split_whitespace()
-        .next()
-        .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
-        .is_some_and(|base| SILENT_BUILTINS.contains(&base))
+        .map(|w| w.trim_matches(|c| c == '"' || c == '\''));
+    let Some(first) = words.next() else {
+        return true;
+    };
+    if HEADER_KEYWORDS.contains(&first) {
+        return true;
+    }
+    let mut rest = std::iter::once(first)
+        .chain(words)
+        .skip_while(|w| CLAUSE_PREFIXES.contains(w));
+    match rest.next() {
+        None => true,
+        Some(base) => SILENT_BUILTINS.contains(&base) || is_assignment(base),
+    }
+}
+
+/// `i=0` and `f=path/to.yaml` set a variable and print nothing. Distinguished
+/// from a command by the `=` before any `/`, so `./bin/x=y` is still a command.
+fn is_assignment(word: &str) -> bool {
+    match word.split_once('=') {
+        Some((name, _)) => {
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        None => false,
+    }
 }
 
 /// Splits on unquoted `&&`, `||`, `;` and newlines, the operators that run
@@ -638,6 +676,36 @@ mod tests {
         assert_eq!(sole_output_command(""), None);
         assert_eq!(sole_output_command("   "), None);
         assert_eq!(sole_output_command(" && ; "), None);
+    }
+
+    /// A shell one-liner is one program, and the `;` between its clauses is the
+    /// same character that separates two commands. Reading the clauses as
+    /// producers turned every loop into a passthrough, which `exec_fail_passthrough`
+    /// caught on CI: `while [ $i -lt 60 ]; do echo x; i=$((i+1)); done` writes
+    /// stdout from `echo` and from nothing else.
+    #[test]
+    fn reads_a_shell_loop_as_the_one_command_that_prints() {
+        assert_eq!(
+            sole_output_command(
+                "i=0; while [ $i -lt 60 ]; do echo noise; i=$((i+1)); done; exit 0"
+            ),
+            Some("do echo noise")
+        );
+        assert_eq!(
+            sole_output_command("for f in *.yaml; do cat $f; done"),
+            Some("do cat $f")
+        );
+    }
+
+    #[test]
+    fn treats_a_variable_assignment_as_printing_nothing() {
+        assert_eq!(
+            sole_output_command("f=deploy.yaml && cat $f"),
+            Some("cat $f")
+        );
+        assert!(!is_assignment("./bin/tool"));
+        assert!(!is_assignment("=leading"));
+        assert!(is_assignment("PATH=/usr/bin"));
     }
 
     #[test]
