@@ -81,7 +81,10 @@ fn every_recorded_passthrough_names_a_gate() {
     for payload in [
         bash_payload("date", &undistillable_prose()),
         bash_payload("az vm list -o json", r#"[{"name":"vm-1"}]"#),
-        bash_payload("kubectl get pods -o yaml", "apiVersion: v1\nkind: List\nitems: []\n"),
+        bash_payload(
+            "kubectl get pods -o yaml",
+            "apiVersion: v1\nkind: List\nitems: []\n",
+        ),
     ] {
         let _ = process_payload(&payload, Some(store.clone()), None);
     }
