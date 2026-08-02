@@ -157,10 +157,15 @@ mod tests {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 
-        // Buat input PostToolUse valid
+        // Buat input PostToolUse valid. The padding is large enough that the
+        // distillation still pays after its own rewind marker: since #271 a cut
+        // carries `omni_retrieve("<hash>")`, roughly 75 bytes, and on the old
+        // 50-line fixture that marker ate the saving and the hook correctly
+        // declined, so a routing test failed for a reason that had nothing to do
+        // with routing.
         let diff_str = "diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n".to_string();
         let mut big_diff = diff_str.clone();
-        for _ in 0..50 {
+        for _ in 0..400 {
             big_diff.push_str(" \n");
         }
 
@@ -236,8 +241,10 @@ mod tests {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 
+        // Padded past the rewind marker's cost, for the reason in
+        // `routes_post_tool_use_to_correct_handler`.
         let mut big_diff = "diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n".to_string();
-        for _ in 0..50 {
+        for _ in 0..400 {
             big_diff.push_str(" \n");
         }
 

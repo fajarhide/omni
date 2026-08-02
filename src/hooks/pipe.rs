@@ -458,19 +458,8 @@ fn distill(
                     }
                 };
 
-            // Rewind decision
-            let noise_count = segments.iter().filter(|s| s.final_score() < 0.3).count();
-            let should_store =
-                noise_count as f32 / segments.len().max(1) as f32 > 0.4 && segments.len() > 20;
-
-            let d_count = noise_count;
+            let d_count = segments.iter().filter(|s| s.final_score() < 0.3).count();
             let k_count = segments.len() - d_count;
-
-            let dropped_lines: usize = segments
-                .iter()
-                .filter(|s| s.final_score() < 0.3)
-                .map(|s| s.content.lines().count())
-                .sum();
 
             // Auto-learn trigger
             if !cmd.is_empty() && input_text.len() > 100 {
@@ -481,32 +470,9 @@ fn distill(
                 }
             }
 
-            let mut r_hash = None;
-            if should_store && let Some(s) = store {
-                let hash = s.store_rewind(&input_text);
-                if std::io::stdout().is_terminal() {
-                    out.push_str(&format!(
-                        "\n{} {} {} {} lines. The hash {} stores the full output in RewindStore for retrieval.\n",
-                        "⏺".cyan(),
-                        "OMNI".bold().bright_white(),
-                        "distilled".bright_green(),
-                        dropped_lines,
-                        hash.cyan().bold()
-                    ));
-                } else {
-                    out.push_str(&format!(
-                        "\n[OMNI: {} lines omitted — omni_retrieve(\"{}\") for full output]\n",
-                        dropped_lines, hash
-                    ));
-                }
-                r_hash = Some(hash);
-            }
-
             // Determine Route
             let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
-            let route = if r_hash.is_some() {
-                Route::Rewind
-            } else if ratio >= 0.7 {
+            let mut route = if ratio >= 0.7 {
                 Route::Keep
             } else if ratio >= 0.3 {
                 Route::Soft
@@ -516,6 +482,75 @@ fn distill(
 
             if route == Route::Soft {
                 out.push_str("\n[Partial signal - omni learn recommended]\n");
+            }
+
+            // Rewind decision, the same question `hooks::post_tool` asks and for
+            // the same reason: is the reply about to be emitted missing bytes the
+            // command produced? The old gate wanted more than 40% noise across
+            // more than 20 segments, a shape 0 of 8,968 recorded distillations
+            // ever had, so the archive behind "everything cut is archived" stayed
+            // empty (#271).
+            //
+            // The gate is `beats_guardrail` rather than the route, because a pipe
+            // always writes something: `best_output` hands back the raw input
+            // once the reply stops beating the guardrail, and only below it does
+            // the caller actually lose lines. Archiving anything else stores
+            // content nobody lost.
+            let mut r_hash = None;
+            if crate::guard::limits::beats_guardrail(out.len(), input_text.len()) {
+                let omitted_lines = input_text
+                    .lines()
+                    .count()
+                    .saturating_sub(out.lines().count());
+                let lost = if omitted_lines > 0 {
+                    format!("{omitted_lines} lines")
+                } else {
+                    format!("{} bytes", input_text.len() - out.len())
+                };
+
+                let marker = if input_text.len() > crate::guard::limits::MAX_REWIND_BYTES {
+                    format!(
+                        "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
+                        input_text.len(),
+                        crate::guard::limits::MAX_REWIND_BYTES
+                    )
+                } else if let Some(s) = store {
+                    let hash = s.store_rewind(&input_text);
+                    let marker = if std::io::stdout().is_terminal() {
+                        format!(
+                            "\n{} {} {} {}. The hash {} stores the full output in RewindStore for retrieval.\n",
+                            "⏺".cyan(),
+                            "OMNI".bold().bright_white(),
+                            "distilled".bright_green(),
+                            lost,
+                            hash.cyan().bold()
+                        )
+                    } else {
+                        format!(
+                            "\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n"
+                        )
+                    };
+                    r_hash = Some(hash);
+                    marker
+                } else {
+                    format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n")
+                };
+
+                // A marker that pushes the reply back over the guardrail costs
+                // more than the cut saved (#268, #269 are 102 and 90 byte
+                // payloads of that shape), and `best_output` would then emit the
+                // raw input while the recorded row claimed a rewind.
+                if crate::guard::limits::beats_guardrail(out.len() + marker.len(), input_text.len())
+                {
+                    out.push_str(&marker);
+                    if r_hash.is_some() {
+                        route = Route::Rewind;
+                    }
+                } else {
+                    out = input_text.clone();
+                    route = Route::Passthrough;
+                    r_hash = None;
+                }
             }
 
             // Safety truncation. The marker carries the line count: `ps aux` lost
@@ -888,6 +923,52 @@ mod tests {
         };
 
         assert_eq!(res.best_output(), input_text.as_str());
+    }
+
+    /// #271, on the other hook path. The pipe carried the same noise-ratio gate
+    /// and the same empty archive, so fixing only `hooks::post_tool` would leave
+    /// "everything cut is archived" false for every `omni exec` call.
+    #[test]
+    fn archives_the_raw_output_it_shortens() {
+        // Arrange
+        let mut input = String::new();
+        for i in 0..200 {
+            input.push_str(&format!("test module_{i} ... ok\n"));
+        }
+        input.push_str("test result: ok. 200 passed; 0 failed\n");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        // Act
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            Some(store),
+            None,
+            Some("cargo test"),
+        )
+        .expect("must succeed");
+
+        // Assert
+        let archived: i64 = rusqlite::Connection::open(&db)
+            .expect("open recorded db")
+            .query_row("SELECT COUNT(*) FROM rewind_store", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(archived, 1, "the raw output must be recoverable");
+
+        let delivered = String::from_utf8(out).expect("utf8");
+        assert!(
+            delivered.len() < input.len(),
+            "a lossy reply must be smaller than the bytes it replaces"
+        );
+        assert!(
+            delivered.contains("omni_retrieve("),
+            "the caller cannot call what it was not told: {delivered}"
+        );
     }
 
     #[test]
