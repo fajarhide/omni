@@ -10,7 +10,17 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, OnceLock};
+
+/// One ANSI escape sequence.
+///
+/// Compiled once. `TomlFilter::apply` built it per call, which is the same defect
+/// as #283 one module over: a filter with `strip_ansi` paid a regex compile for
+/// every payload it touched.
+static ANSI_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        .expect("the ANSI escape pattern is a literal and must compile")
+});
 
 #[derive(RustEmbed)]
 #[folder = "signals/"]
@@ -260,8 +270,7 @@ impl TomlFilter {
 
         // 1. strip_ansi
         if self.strip_ansi {
-            let ansi_re = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
-            text = ansi_re.replace_all(&text, "").to_string();
+            text = ANSI_ESCAPE.replace_all(&text, "").to_string();
         }
 
         // 2. replace_rules
