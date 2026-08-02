@@ -120,6 +120,13 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "tail"
             | "sed"
             | "awk"
+            // Format renderers. Their whole job is to emit something a later step
+            // parses, which is the format-safe contract stated in `AGENTS.md`,
+            // and the collapse fallback would leave that payload unparseable.
+            // `kubectl get pod -o json | jq -r '...'` lost three of four lines
+            // before this (#269).
+            | "jq"
+            | "yq"
     )
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty — match on any `env`
@@ -276,6 +283,15 @@ pub fn distill_with_command(
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
+    // A chain's stdout belongs to several programs and arrives as one stream, so
+    // there is no honest way to hand it to the distiller named by the first of
+    // them: `git status && echo === && find .` came back as the git one-liner
+    // with the `find` output deleted, unmarked (#264). One producer routes;
+    // several pass through.
+    let Some(command) = crate::pipeline::registry::sole_output_command(command) else {
+        return input.to_string();
+    };
+
     // 1. Resolve pipeline profile (though we match command here too)
     let _profile = crate::pipeline::registry::resolve_profile(command);
 
