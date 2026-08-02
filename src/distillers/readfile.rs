@@ -31,7 +31,12 @@ pub fn distill_readfile_with_context(
         "java" | "kt" => distill_java_file(content),
         "json" => distill_json_file(content),
         "toml" | "yaml" | "yml" => distill_config_file(content, ext),
-        "log" | "txt" => distill_log_file(content),
+        // `.txt` is not a log format. Sending it to a log summariser is the
+        // fingerprint problem from #105 and #112: a shape a sibling format also
+        // has. 12 of the 14 `.txt` files in the measured corpus came back as
+        // `Log: 0 errors, 0 warnings` with every line gone (#246). Head and tail
+        // with a count is what `.md` already gets, and it is true.
+        "log" => distill_log_file(content),
         _ => distill_unknown_file(content),
     };
 
@@ -328,10 +333,19 @@ fn distill_config_file(content: &str, ext: &str) -> String {
         }
     }
     if out.is_empty() {
-        distill_unknown_file(content)
-    } else {
-        format!("[Config structure — {} lines total]\n{}", total, out.trim())
+        return distill_unknown_file(content);
     }
+    // Keys only, values and nesting dropped. #176 gave every language path a
+    // count of what it removed and stopped here, which is why 13 of the 13
+    // measured `.yaml` reads came back as a key list with no way to tell a
+    // container spec had ever been below the fold (#246).
+    let kept = out.lines().count();
+    format!(
+        "[Config structure — {} lines total]\n{}{}",
+        total,
+        out.trim(),
+        omitted_note(total, kept)
+    )
 }
 
 fn distill_log_file(content: &str) -> String {
@@ -352,6 +366,7 @@ fn distill_log_file(content: &str) -> String {
         "Log: {} errors, {} warnings ({} total lines)\n",
         errors, warnings, total
     );
+    let shown = error_lines.len().min(10);
     for err in error_lines.iter().take(10) {
         out.push_str(err);
         out.push('\n');
@@ -359,7 +374,14 @@ fn distill_log_file(content: &str) -> String {
     if errors > 10 {
         out.push_str(&format!("... [{} more error lines]\n", errors - 10));
     }
-    out.trim().to_string()
+    out.push_str(&omitted_note(total, shown));
+
+    // A file with no error and no warning lines is not a clean log. It is a file
+    // this function could not read, and `Log: 0 errors, 0 warnings` over 362
+    // deleted lines of prose is the exact claim `require_parsed` exists to stop:
+    // a summary byte-identical to a real clean run, emitted with nothing parsed
+    // (#246, the same shape as #190, #195 and #216).
+    crate::distillers::require_parsed(errors + warnings > 0, content, out.trim().to_string())
 }
 
 fn distill_unknown_file(content: &str) -> String {
@@ -466,6 +488,73 @@ mod tests {
         assert!(
             out.contains(&format!("of {total} lines omitted")),
             "expected a count against {total} total, got:\n{out}"
+        );
+    }
+
+    /// #246. A prose `.txt` was routed to the log summariser, which counts lines
+    /// containing `error`/`warn` and emits the count as a finding. A notes file
+    /// has neither, so a 19 KB document came back as 103 bytes reading
+    /// `Log: 0 errors, 0 warnings (362 total lines)`, with all 362 lines gone and
+    /// nothing saying so. The reader is told a log was clean that was never a log.
+    #[test]
+    fn never_reports_a_prose_file_as_a_clean_log() {
+        let content = bulky("Active account: true, token scopes gist, project, repo\n");
+
+        let out = distill_readfile(&content, "notes.txt").expect("large enough to distill");
+
+        assert!(
+            !out.contains("Log: 0 errors"),
+            "a document that is not a log must not be summarised as one:\n{out}"
+        );
+        assert!(
+            out.contains("lines omitted"),
+            "and whatever it does drop has to be counted:\n{out}"
+        );
+    }
+
+    /// The same guard for a real `.log` that this function could not read. No
+    /// error and no warning line is not evidence of a clean run, it is evidence
+    /// that nothing was parsed, and `require_parsed` is the repo's existing
+    /// answer to that.
+    #[test]
+    fn declines_a_log_it_recognised_nothing_in() {
+        let content = bulky("2026-08-02T03:43:16Z request served in 12ms\n");
+
+        assert!(
+            distill_readfile(&content, "access.log").is_none(),
+            "a log with no recognised signal must fail open, not summarise"
+        );
+    }
+
+    /// The counter-case, so the guard is not "decline every log": a log with real
+    /// error lines is still worth summarising.
+    #[test]
+    fn still_summarises_a_log_that_has_errors() {
+        let mut content = bulky("2026-08-02T03:43:16Z request served in 12ms\n");
+        content.push_str("2026-08-02T03:44:01Z ERROR upstream timed out\n");
+
+        let out = distill_readfile(&content, "access.log").expect("large enough to distill");
+
+        assert!(out.contains("Log: 1 errors"), "{out}");
+        assert!(
+            out.contains("lines omitted"),
+            "the lines it did not show still have to be counted:\n{out}"
+        );
+    }
+
+    /// #176 gave every language path a count of what it removed and stopped
+    /// there. `distill_config_file` keeps top-level keys and drops values and
+    /// nesting, so 13 of the 13 measured `.yaml` reads came back as a key list
+    /// with no way to tell a container spec had ever been below the fold.
+    #[test]
+    fn states_what_a_config_skeleton_left_out() {
+        let content = bulky("top:\n  nested: value\n  other: value\n");
+
+        let out = distill_readfile(&content, "deployment.yaml").expect("large enough to distill");
+
+        assert!(
+            out.contains("lines omitted"),
+            "a key skeleton that drops values must say so:\n{out}"
         );
     }
 
