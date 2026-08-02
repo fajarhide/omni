@@ -1424,6 +1424,35 @@ mod tests {
         );
     }
 
+    /// #269, end to end. `kubectl get pod -o json | jq -r '...'` was routed to
+    /// `kubectl`, so the cloud distiller took four `key: value` lines and kept
+    /// one. Nothing chose the survivor for being signal: the three it dropped
+    /// were the pod phase, the node and the zone, which is what the command was
+    /// run to check, and the one it kept was the timestamp.
+    ///
+    /// Filed against `jq` missing from the passthrough allowlist. It is not that:
+    /// `jq -r '...' pod.json` on its own is declined and always was. The routing
+    /// is what deleted the lines, so this test drives the piped form.
+    #[test]
+    fn does_not_let_the_upstream_command_claim_a_reshaped_payload() {
+        let content = "phase: Running\nnode: aks-stateful-9kf4v\n\
+                       zoneSel: uaenorth-1\ncreated: 2026-08-02T03:43:16Z\n";
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pod jenkins-0 -o json | jq -r '.status.phase'"},
+            "tool_response": bash_response(content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None);
+
+        assert!(
+            out.is_none(),
+            "four lines of jq output must reach the agent whole, got: {}",
+            out.unwrap_or_default()
+        );
+    }
+
     /// 200 green test lines and a tally: output a distiller reduces hard.
     fn lossy_content(lines: usize) -> String {
         let mut content = String::new();

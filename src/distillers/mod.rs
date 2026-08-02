@@ -120,6 +120,13 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "tail"
             | "sed"
             | "awk"
+            // Format renderers. Their whole job is to emit something a later step
+            // parses, which is the format-safe contract stated in `AGENTS.md`,
+            // and the collapse fallback would leave that payload unparseable.
+            // `kubectl get pod -o json | jq -r '...'` lost three of four lines
+            // before this (#269).
+            | "jq"
+            | "yq"
     )
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty — match on any `env`

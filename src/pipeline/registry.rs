@@ -43,20 +43,76 @@ const SILENT_BUILTINS: &[&str] = &[
 /// One producer, route it. More than one, the caller passes the output through
 /// untouched.
 ///
-/// Only sequential operators split here. A pipeline is left whole because its
-/// stdout really does come from one program, and changing which end of a pipe is
-/// routed is a separate behaviour change with its own blast radius.
+/// A pipeline resolves to its first stage, with one exception. Most filters
+/// preserve the shape of what they are fed, so `kubectl get pods | head -20` is
+/// still a pod table and still belongs to `kubectl`. `jq` and `yq` do not: they
+/// rewrite the payload into something of their own, so the output is theirs.
+/// Routing it upstream is how `kubectl get pod -o json | jq -r '...'` reached the
+/// cloud distiller, which kept one arbitrary row of four and dropped the three
+/// that carried the answer (#269).
 pub fn sole_output_command(command: &str) -> Option<&str> {
     let segments = split_sequential(command);
-    match segments.len() {
-        0 => None,
-        1 => Some(segments[0]),
+    let producer = match segments.len() {
+        0 => return None,
+        1 => segments[0],
         _ => {
             let mut producers = segments.into_iter().filter(|seg| !is_silent(seg));
             let first = producers.next()?;
-            producers.next().is_none().then_some(first)
+            producers.next().is_none().then_some(first)?
         }
+    };
+    Some(reshaped_by(producer).unwrap_or(producer))
+}
+
+/// The trailing pipeline stage when it rewrites the payload rather than
+/// selecting from it, so the output stops belonging to whatever fed it.
+///
+/// Deliberately two names. Measured over 5,143 distinct recorded commands, 1,035
+/// are pipelines, and routing every one of them by its last stage would hand 871
+/// to `head`, `tail` or `sed` and stop distilling them at all. Those filters cut
+/// rows out of a shape they leave intact, which is the opposite of what `jq` and
+/// `yq` do. Where the general rule belongs is its own question, with its own
+/// measurement.
+fn reshaped_by(segment: &str) -> Option<&str> {
+    let last = split_pipeline(segment).pop()?;
+    let base = last
+        .split_whitespace()
+        .next()
+        .map(|w| w.trim_matches(|c| c == '"' || c == '\''))?;
+    matches!(base, "jq" | "yq").then_some(last)
+}
+
+/// Splits on unquoted single `|`, the pipe operator. `||` is a sequential
+/// operator and `split_sequential` has already dealt with it.
+fn split_pipeline(segment: &str) -> Vec<&str> {
+    let bytes = segment.as_bytes();
+    let mut stages = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let mut quote: Option<u8> = None;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                }
+            }
+            None => match b {
+                b'\'' | b'"' | b'`' => quote = Some(b),
+                b'\\' => i += 1,
+                b'|' => {
+                    push_segment(&mut stages, segment, start, i);
+                    start = i + 1;
+                }
+                _ => {}
+            },
+        }
+        i += 1;
     }
+    push_segment(&mut stages, segment, start, bytes.len());
+    stages
 }
 
 fn is_silent(segment: &str) -> bool {
@@ -511,13 +567,43 @@ mod tests {
         );
     }
 
-    /// A pipeline's stdout does come from one program, so it stays whole and
-    /// routes exactly as it did before this change.
+    /// A filter selects rows out of a shape it leaves intact, so the output
+    /// still belongs to whatever fed it and routing does not move.
     #[test]
     fn keeps_a_pipeline_intact() {
         assert_eq!(
             sole_output_command("cat app.log | grep ERROR"),
             Some("cat app.log | grep ERROR")
+        );
+        assert_eq!(
+            sole_output_command("kubectl get pods | head -20"),
+            Some("kubectl get pods | head -20")
+        );
+    }
+
+    /// #269. `jq` rewrites the payload rather than selecting from it, so the
+    /// output is its own. Routed upstream, `kubectl get pod -o json | jq -r '...'`
+    /// reached the cloud distiller, which kept `created:` and dropped the pod
+    /// phase, the node and the zone: the three fields the command was run to
+    /// check.
+    #[test]
+    fn hands_a_pipeline_to_the_stage_that_reshaped_it() {
+        assert_eq!(
+            sole_output_command("kubectl get pod x -o json | jq -r '.status.phase'"),
+            Some("jq -r '.status.phase'")
+        );
+        assert_eq!(
+            sole_output_command("kubectl kustomize . | yq '.spec'"),
+            Some("yq '.spec'")
+        );
+    }
+
+    /// A pipe inside a quoted argument is not a pipe.
+    #[test]
+    fn does_not_split_a_pipe_inside_quotes() {
+        assert_eq!(
+            sole_output_command("grep -E \"jenkins|atlantis\" values.yaml"),
+            Some("grep -E \"jenkins|atlantis\" values.yaml")
         );
     }
 
