@@ -276,6 +276,15 @@ pub fn distill_with_command(
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
+    // A chain's stdout belongs to several programs and arrives as one stream, so
+    // there is no honest way to hand it to the distiller named by the first of
+    // them: `git status && echo === && find .` came back as the git one-liner
+    // with the `find` output deleted, unmarked (#264). One producer routes;
+    // several pass through.
+    let Some(command) = crate::pipeline::registry::sole_output_command(command) else {
+        return input.to_string();
+    };
+
     // 1. Resolve pipeline profile (though we match command here too)
     let _profile = crate::pipeline::registry::resolve_profile(command);
 

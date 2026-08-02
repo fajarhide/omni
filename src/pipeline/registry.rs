@@ -14,6 +14,117 @@ impl Default for ToolProfile {
     }
 }
 
+/// Shell builtins that write nothing to stdout, so their presence in a chain
+/// says nothing about who produced the output being distilled.
+///
+/// Deliberately short. Every name here is silent by definition, not merely quiet
+/// in the common case: `mkdir`, `cp` and `rm` all print under `-v`, and putting
+/// them here would let a chain be routed to a single distiller again. Leaving a
+/// producer out costs a passthrough; letting one in costs the answer.
+const SILENT_BUILTINS: &[&str] = &[
+    "cd", "export", "set", "unset", "source", ".", "true", "false", "pushd", "popd", "umask",
+    "alias", "shift", "local", "readonly",
+];
+
+/// The one command in `command` whose stdout is being distilled, or `None` when
+/// several produced it.
+///
+/// `distill_with_command` reads the first executable of the command string and
+/// hands that distiller the whole of stdout. On a chain the rest of the output
+/// belongs to other programs: `git status && echo === && find .` came back as
+/// `git: on branch main | staged:0 mod:0 untracked:0`, so the 40 lines of `find`
+/// that the command was run for were deleted with no marker, no count and no
+/// rewind hash, and the ratio read as a 99% win on the bytes that held the answer
+/// (#264). `git status` is the worst case only because its distiller emits a
+/// fixed one-liner whatever the input, leaving no residue to notice.
+///
+/// Splitting stdout back onto the chain is not possible: it is one stream with
+/// nothing marking which program wrote which line. So the rule is the honest one.
+/// One producer, route it. More than one, the caller passes the output through
+/// untouched.
+///
+/// Only sequential operators split here. A pipeline is left whole because its
+/// stdout really does come from one program, and changing which end of a pipe is
+/// routed is a separate behaviour change with its own blast radius.
+pub fn sole_output_command(command: &str) -> Option<&str> {
+    let segments = split_sequential(command);
+    match segments.len() {
+        0 => None,
+        1 => Some(segments[0]),
+        _ => {
+            let mut producers = segments.into_iter().filter(|seg| !is_silent(seg));
+            let first = producers.next()?;
+            producers.next().is_none().then_some(first)
+        }
+    }
+}
+
+fn is_silent(segment: &str) -> bool {
+    segment
+        .split_whitespace()
+        .next()
+        .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
+        .is_some_and(|base| SILENT_BUILTINS.contains(&base))
+}
+
+/// Splits on unquoted `&&`, `||`, `;` and newlines, the operators that run
+/// commands one after another so each one can write to stdout.
+///
+/// Quote tracking is what stops `echo "a && b"` from reading as two commands. It
+/// is deliberately one-directional: an unbalanced quote leaves the scanner inside
+/// a string and yields one segment, which routes as it does today rather than
+/// inventing a split.
+fn split_sequential(command: &str) -> Vec<&str> {
+    let bytes = command.as_bytes();
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let mut quote: Option<u8> = None;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                } else if b == b'\\' && q == b'"' {
+                    i += 1;
+                }
+            }
+            None => match b {
+                b'\'' | b'"' | b'`' => quote = Some(b),
+                b'\\' => i += 1,
+                b'\n' | b';' => {
+                    push_segment(&mut segments, command, start, i);
+                    start = i + 1;
+                }
+                b'&' | b'|' if i + 1 < bytes.len() && bytes[i + 1] == b => {
+                    push_segment(&mut segments, command, start, i);
+                    i += 1;
+                    start = i + 1;
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    push_segment(&mut segments, command, start, bytes.len());
+    segments
+}
+
+// Safety: `start` and `end` only ever come from positions of `;`, `\n`, `&`, `|`
+// or the string's own length. Those are ASCII, and every byte inside a multi-byte
+// UTF-8 sequence is >= 0x80, so none of them can match. The escape skip can leave
+// the cursor mid-character, but a continuation byte matches no separator either,
+// so the recorded bounds stay on char boundaries.
+#[allow(clippy::string_slice)]
+fn push_segment<'a>(out: &mut Vec<&'a str>, command: &'a str, start: usize, end: usize) {
+    let seg = command[start..end].trim();
+    if !seg.is_empty() {
+        out.push(seg);
+    }
+}
+
 pub fn resolve_profile(command: &str) -> ToolProfile {
     if command.is_empty() {
         return ToolProfile::default();
@@ -366,6 +477,88 @@ fn command_specificity(base: &str, full_cmd: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #264. `git status && echo === && find .` was routed to the git distiller,
+    /// which emits a fixed one-liner whatever the input, so the 40 lines of
+    /// `find` the command was run for were deleted with no marker and the ratio
+    /// read as a 99% win.
+    #[test]
+    fn declines_a_chain_written_to_by_several_commands() {
+        assert_eq!(
+            sole_output_command("git status && echo '=== tree ===' && find . -type f"),
+            None
+        );
+        assert_eq!(sole_output_command("git log --oneline -12 && ls"), None);
+        assert_eq!(sole_output_command("npm run build; npm test"), None);
+    }
+
+    #[test]
+    fn routes_a_lone_command_to_itself() {
+        assert_eq!(sole_output_command("cargo test"), Some("cargo test"));
+    }
+
+    /// The whole reason this is not "any chain is a passthrough": `cd` writes
+    /// nothing, so the output still came from one program.
+    #[test]
+    fn looks_past_a_shell_builtin_that_prints_nothing() {
+        assert_eq!(
+            sole_output_command("cd /project && cargo test"),
+            Some("cargo test")
+        );
+        assert_eq!(
+            sole_output_command("export CI=1 && npm test"),
+            Some("npm test")
+        );
+    }
+
+    /// A pipeline's stdout does come from one program, so it stays whole and
+    /// routes exactly as it did before this change.
+    #[test]
+    fn keeps_a_pipeline_intact() {
+        assert_eq!(
+            sole_output_command("cat app.log | grep ERROR"),
+            Some("cat app.log | grep ERROR")
+        );
+    }
+
+    /// Measured on the maintainer's 5,143 distinct recorded commands: without
+    /// this, 202 of them stop being distilled because an operator inside a quoted
+    /// argument reads as a chain. Splitting too eagerly only costs savings, so
+    /// this is worth its lines and not more.
+    #[test]
+    fn does_not_split_on_an_operator_inside_quotes() {
+        assert_eq!(
+            sole_output_command("git commit -m \"fix: a && b\""),
+            Some("git commit -m \"fix: a && b\"")
+        );
+        assert_eq!(
+            sole_output_command("awk '/^kind:/{f=1} f && /^---/{f=0}' out.yaml"),
+            Some("awk '/^kind:/{f=1} f && /^---/{f=0}' out.yaml")
+        );
+    }
+
+    /// An unbalanced quote leaves the scanner inside a string. One segment out is
+    /// the safe answer: it routes as it does today rather than inventing a split.
+    #[test]
+    fn treats_an_unbalanced_quote_as_one_command() {
+        assert_eq!(
+            sole_output_command("echo \"oops && ls"),
+            Some("echo \"oops && ls")
+        );
+    }
+
+    #[test]
+    fn returns_none_for_an_empty_command() {
+        assert_eq!(sole_output_command(""), None);
+        assert_eq!(sole_output_command("   "), None);
+        assert_eq!(sole_output_command(" && ; "), None);
+    }
+
+    #[test]
+    fn splits_on_newlines_and_double_pipes_too() {
+        assert_eq!(sole_output_command("git status\nls -la"), None);
+        assert_eq!(sole_output_command("cargo build || cargo clean"), None);
+    }
 
     #[test]
     fn test_registry_flutter_test_gets_test_profile() {

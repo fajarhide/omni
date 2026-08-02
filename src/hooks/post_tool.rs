@@ -331,12 +331,17 @@ pub fn process_payload(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
+    // Which single command produced this stdout, if any. `None` means a chain
+    // whose output belongs to several programs, and every routing decision below
+    // has to stand down for it: a TOML filter keyed on `^git\b` claims
+    // `git status && find .` exactly as the git distiller did (#264).
+    let output_command = crate::pipeline::registry::sole_output_command(clean_command);
+
     // TOML-first: try matching command against TOML filters
     let toml_filters = toml_filter::load_all_filters();
-    let toml_match = if clean_command.is_empty() {
-        None
-    } else {
-        toml_filters.iter().find(|f| f.matches(clean_command))
+    let toml_match = match output_command {
+        Some(cmd) if !cmd.is_empty() => toml_filters.iter().find(|f| f.matches(cmd)),
+        _ => None,
     };
 
     // A TOML filter only gets to short-circuit the distiller if it actually beat
@@ -405,6 +410,7 @@ pub fn process_payload(
         // fallback for them (#200).
         let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
             && !crate::distillers::passes_through_verbatim(clean_command)
+            && output_command.is_some()
         {
             let collapse_result = collapse::collapse(&content, &profile.collapse);
             collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to
@@ -1354,6 +1360,78 @@ mod tests {
             stdout.len() < content.len(),
             "the replacement must be smaller than the input"
         );
+    }
+
+    /// #264, end to end. `git status` leading a chain routed the whole of stdout
+    /// to the git distiller, whose summary is a fixed one-liner, so everything
+    /// the later commands printed was replaced with no marker, no count and no
+    /// rewind hash. The agent was told the command succeeded and shown none of
+    /// what it ran the command for.
+    ///
+    /// The assertion is on what the agent ends up holding. Checking that the
+    /// output "contains find results" would pass on a summary that happened to
+    /// quote one path.
+    #[test]
+    fn refuses_to_summarise_a_chain_several_commands_wrote_to() {
+        // Arrange: exactly the reported shape, git status first.
+        let mut content = String::from(
+            "On branch main\nYour branch is up to date with 'origin/main'.\n\n\
+             nothing to commit, working tree clean\n=== tree ===\n",
+        );
+        for i in 0..40 {
+            content.push_str(&format!("./src/module_{i}.rs\n"));
+        }
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status && echo '=== tree ===' && find . -type f"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        // Act
+        let out = process_payload(&payload, None, None);
+
+        // Assert
+        assert!(
+            out.is_none(),
+            "the chain must be handed back untouched, got: {}",
+            out.unwrap_or_default()
+        );
+    }
+
+    /// The counter-case, so the fix is not "decline every chain": a leading `cd`
+    /// prints nothing, so the output still came from one command and is still
+    /// worth distilling.
+    #[test]
+    fn still_distills_a_chain_led_by_a_silent_builtin() {
+        let content = lossy_content(200);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd /project && cargo test"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("a reduced result is delivered");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        assert!(
+            stdout.len() < content.len(),
+            "a single-producer chain must still be reduced"
+        );
+    }
+
+    /// 200 green test lines and a tally: output a distiller reduces hard.
+    fn lossy_content(lines: usize) -> String {
+        let mut content = String::new();
+        for i in 0..lines {
+            content.push_str(&format!("test module_{i} ... ok\n"));
+        }
+        content.push_str(&format!("test result: ok. {lines} passed; 0 failed\n"));
+        content
     }
 
     /// A Bash payload as Claude Code actually sends one.
