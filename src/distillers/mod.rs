@@ -137,6 +137,44 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         // collapse fallback then folds up is #214, and the file rows of a
         // `--stat` all share a shape.
         || (base == "git" && git_enumerates_files(command))
+        // A container listing, for the same reason (#233).
+        || lists_containers(command)
+}
+
+/// `docker ps`, `podman ps` and `docker container ls` list containers one per
+/// row, and every column on that row is the answer: name, image, port mapping,
+/// uptime.
+///
+/// The summariser kept the wrong half. `docker: 5 containers | 3 running, 2
+/// exited` names only the exited ones by construction, so a fixture with three
+/// running containers lost every name, image and port it had, at a reported 91.3%
+/// saving and with no marker, because nothing thought anything was lost (#233).
+/// An agent runs `docker ps` to find a running container's port far more often
+/// than to find a dead one.
+///
+/// Same reasoning that put `ls`, `find`, `ps`, `df`, `du`, `stat` and `wc` on the
+/// list above, and `ps` is the closest relative: a busy machine's process table
+/// dwarfs any container list and has been verbatim since 0.6.6. The `-a` case on
+/// a host with hundreds of dead containers is the one with real noise, and it
+/// stays bounded by `MAX_OUTPUT_BYTES`, which cuts with a marker that says what
+/// it removed.
+///
+/// Deliberately narrow. `docker build` and `docker logs` are logs with real
+/// noise and keep their summarisers, and `docker compose ps` is a different
+/// command whose output shape has not been measured here.
+fn lists_containers(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().map(|t| t.trim_matches('"'));
+    let base = tokens
+        .next()
+        .and_then(|w| std::path::Path::new(w).file_name()?.to_str());
+    if !matches!(base, Some("docker") | Some("podman")) {
+        return false;
+    }
+    match tokens.next() {
+        Some("ps") => true,
+        Some("container") => matches!(tokens.next(), Some("ls") | Some("ps")),
+        _ => false,
+    }
 }
 
 fn looks_like_env_assignment(token: &str) -> bool {
@@ -428,6 +466,10 @@ pub fn distill_with_command(
         return jsts::JsTsDistiller.distill(segments, input, session);
     }
 
+    if passes_through_verbatim(command) {
+        return input.to_string();
+    }
+
     // Cloud & infra → CloudDistiller
     if matches!(
         base.as_str(),
@@ -464,10 +506,6 @@ pub fn distill_with_command(
     // and TestDistiller fabricates too, which is #190 wearing another distiller's
     // name. Real runners are handled upstream, where `signals/tools/pytest.toml`
     // and `mypy.toml` are TOML-first and shadow this path for `python -m pytest`.
-    if passes_through_verbatim(command) {
-        return input.to_string();
-    }
-
     // System ops → SystemOpsDistiller
     if matches!(
         base.as_str(),
@@ -690,6 +728,47 @@ mod tests {
             output.contains("database up to date"),
             "dropped: {output:?}"
         );
+    }
+
+    /// #233. `docker ps` came back as `docker: 5 containers | 3 running, 2
+    /// exited` plus the names of the exited two. Every running container, with
+    /// its image, ports and uptime, was counted and discarded by construction:
+    /// 862 bytes to 75, reported as a 91.3% saving, with no marker because
+    /// nothing thought anything was lost.
+    #[test]
+    fn keeps_every_row_of_a_container_listing() {
+        let input = std::fs::read_to_string("tests/fixtures/docker_ps_mixed.txt")
+            .expect("fixture must exist");
+
+        for cmd in [
+            "docker ps",
+            "docker ps -a",
+            "podman ps",
+            "docker container ls",
+        ] {
+            let segments = scorer::score_with_command(&input, cmd, None);
+            let out = distill_with_command(&segments, &input, cmd, None);
+
+            assert_eq!(
+                out, input,
+                "{cmd} must hand back every row; each one is a distinct datum"
+            );
+        }
+    }
+
+    /// The counter-case, so this is not "never distil docker". A build log and a
+    /// container log both have real noise and keep their summarisers.
+    #[test]
+    fn claims_only_the_container_listing_subcommands() {
+        assert!(lists_containers("docker ps"));
+        assert!(lists_containers("/usr/local/bin/docker ps -a"));
+        assert!(lists_containers("podman container ls"));
+
+        assert!(!lists_containers("docker build ."));
+        assert!(!lists_containers("docker logs app"));
+        assert!(!lists_containers("docker compose ps"));
+        assert!(!lists_containers("kubectl get pods"));
+        assert!(!lists_containers("ps aux"));
     }
 
     #[test]
