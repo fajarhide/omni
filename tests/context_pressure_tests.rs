@@ -1,4 +1,4 @@
-use omni::pipeline::{ContextPressure, GoalScoringModifier, SessionState, TokenConsumptionRate};
+use omni::pipeline::{ContextPressure, SessionState, TokenConsumptionRate};
 
 // ─── Unit Tests (20+) ────────────────────────────────────────────────────────
 macro_rules! generate_context_pressure_unit_tests {
@@ -42,31 +42,9 @@ generate_context_pressure_unit_tests!(
     test_context_pressure_unit_20
 );
 
-// ─── Integration Tests (5+) ──────────────────────────────────────────────────
-use omni::store::sqlite::Store;
-use tempfile::tempdir;
-
-macro_rules! generate_context_pressure_integration_tests {
-    ($($name:ident),*) => {
-        $(
-            #[test]
-            fn $name() {
-                let dir = tempdir().unwrap();
-                let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
-                let mut state = SessionState::new();
-                state.scoring_modifier = Some(GoalScoringModifier::default());
-                store.upsert_session(&state);
-                let restored = store.find_latest_session().unwrap();
-                assert!(restored.scoring_modifier.is_some());
-            }
-        )*
-    };
-}
-
-generate_context_pressure_integration_tests!(
-    test_context_pressure_integration_01,
-    test_context_pressure_integration_02,
-    test_context_pressure_integration_03,
-    test_context_pressure_integration_04,
-    test_context_pressure_integration_05
-);
+// The five macro-generated "integration" tests that stood here saved a session
+// with `scoring_modifier = Some(default())` and asserted it came back `Some`.
+// Nothing in the product ever set that field, so they were five identical
+// round-trips of a value only they produced, and they went with the feature
+// (#164). The twenty unit tests above exercise `recalculate_pressure` and
+// `TokenConsumptionRate`, which are live.

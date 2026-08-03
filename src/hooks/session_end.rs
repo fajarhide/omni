@@ -93,9 +93,7 @@ pub fn process_payload(
 }
 
 fn export_session_csv(state: &SessionState, project_path: &str) {
-    let exports_dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".omni/exports");
+    let exports_dir = crate::paths::exports_directory();
     let _ = std::fs::create_dir_all(&exports_dir);
 
     let filename = format!("session_{}.csv", state.session_id);

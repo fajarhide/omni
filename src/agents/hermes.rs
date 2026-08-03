@@ -10,13 +10,12 @@ fn plugin_dir() -> PathBuf {
 }
 
 fn omni_home_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".omni")
+    // Hermes' own tree stays where hermes puts it; OMNI's does not.
+    crate::paths::config_home()
 }
 
 fn omni_config_path() -> PathBuf {
-    omni_home_dir().join("config.toml")
+    crate::paths::config_file()
 }
 
 /// Comprehensive startup validation for Hermes integration.

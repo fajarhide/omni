@@ -650,10 +650,7 @@ fn persist<E: Write>(
             );
         }
 
-        let cache_dir = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".omni")
-            .join("cache");
+        let cache_dir = crate::paths::cache_directory();
         if let Err(e) = std::fs::create_dir_all(&cache_dir)
             && cfg!(debug_assertions)
         {

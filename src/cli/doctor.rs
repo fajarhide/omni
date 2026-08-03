@@ -113,9 +113,7 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     });
 
     // 2. Config Dir
-    let conf_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".omni");
+    let conf_dir = crate::paths::config_home();
     if conf_dir.exists() {
         let test_file = conf_dir.join(".write_test");
         if fs::write(&test_file, "ok").is_ok() {

@@ -398,22 +398,9 @@ pub struct SessionState {
     #[serde(default)]
     pub loop_context: LoopContext,
 
-    // L3-01: Adaptive Compression Threshold per Loop Goal
-    #[serde(default)]
-    pub scoring_modifier: Option<GoalScoringModifier>,
-
     // L3-02: Predictive Context Pressure Warning
     #[serde(default)]
     pub token_consumption_rate: TokenConsumptionRate,
-}
-
-// ─── L3-01: Adaptive Compression ─────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GoalScoringModifier {
-    pub goal_keywords: Vec<String>,
-    pub tool_family_multipliers: std::collections::HashMap<String, f32>,
-    pub signal_tier_overrides: std::collections::HashMap<String, SignalTier>,
 }
 
 // ─── L3-02: Predictive Context Pressure ──────────────────────────

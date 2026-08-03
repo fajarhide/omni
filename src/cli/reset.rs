@@ -192,9 +192,7 @@ fn perform_reset(is_all: bool, target_ids: Vec<&str>) -> anyhow::Result<()> {
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
         if input.trim().eq_ignore_ascii_case("y") {
-            let db_path = dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".omni/omni.db");
+            let db_path = crate::paths::database_path();
             if db_path.exists() {
                 std::fs::remove_file(&db_path).ok();
                 println!("  {} Omni database wiped.", "✓".green());

@@ -214,18 +214,11 @@ fn test_l3_token_consumption_rate() {
     assert!(state.token_consumption_rate.avg_tokens_per_command > 0.0);
 }
 
-#[test]
-fn test_l3_goal_scoring_modifier() {
-    let mut state = SessionState::new();
-    state.loop_context.goal = Some("fix the failing tests".to_string());
-
-    // GoalScoringModifier should adjust based on goal keywords
-    // For test, we just initialize it manually to simulate L3
-    let modifier = omni::pipeline::GoalScoringModifier::default();
-    state.scoring_modifier = Some(modifier);
-
-    assert!(state.scoring_modifier.is_some());
-}
+// `test_l3_goal_scoring_modifier` stood here. Its own comment said it
+// "initialize[d] it manually to simulate L3" and then asserted `is_some()` on
+// the value it had just assigned, so it could not fail. The feature it named
+// was never wired: `scoring_modifier` was read in two scorer branches and
+// assigned nowhere in the product (#164).
 
 // ─── L4: Security Hardening Tests ────────────────────────────
 

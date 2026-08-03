@@ -354,10 +354,7 @@ fn transcripts_dir() -> PathBuf {
     if let Ok(custom) = std::env::var("OMNI_TRANSCRIPT_DIR") {
         return PathBuf::from(custom);
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".omni")
-        .join("transcripts")
+    crate::paths::data_home().join("transcripts")
 }
 
 fn transcript_path(session_id: &str) -> PathBuf {
