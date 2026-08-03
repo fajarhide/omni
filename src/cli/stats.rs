@@ -255,6 +255,10 @@ const FLAGS: super::Flags = &[
         "List every command, not just the top ones",
     ),
     ("--json", "Machine-readable JSON output"),
+    (
+        "--share",
+        "A copy-pasteable summary of your own measured savings",
+    ),
     ("--project", "Display breakdown per project path"),
     ("--context", "Show context composition signals"),
     (
@@ -328,6 +332,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
     let detail_flag = args.iter().any(|a| a == "--detail");
     let json_flag = args.iter().any(|a| a == "--json");
+    let share_flag = args.iter().any(|a| a == "--share");
     let project_flag = args.iter().any(|a| a == "--project");
     let context_flag = args.iter().any(|a| a == "--context");
     let rerun_flag = args.iter().any(|a| a == "--rerun");
@@ -337,7 +342,9 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         || has(args, "--month", "-m")
         || args.iter().any(|a| a == "--all-commands");
 
-    let mode = if rerun_flag {
+    let mode = if share_flag {
+        "share"
+    } else if rerun_flag {
         "rerun"
     } else if context_flag {
         "context"
@@ -354,6 +361,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "share" => run_share(store),
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
@@ -431,6 +439,77 @@ fn run_context_stats(store: &Store) -> Result<()> {
 }
 
 // ─── Default Mode: Gain-Focused Multi-Period ────────────
+
+/// A copy-pasteable summary of what OMNI measured on *this* installation.
+///
+/// Deliberately plain text and deliberately not a marketing number. It reuses
+/// `multi_period_stats`, which is the same aggregation the default report reads,
+/// so the figure here is the figure `omni stats` shows and cannot drift from it.
+///
+/// Two things it prints that a growth card usually would not, because leaving
+/// them out is how a real number becomes a claim:
+///
+/// * the **net** all-time percentage, never a per-command peak. `kubectl
+///   kustomize` reports 99.8% here and quoting that would be the cherry-pick
+///   this project spends its changelog arguing against.
+/// * a line saying terminal output is excluded. That exclusion is #212's fix,
+///   and it is the difference between 64.5% and a headline that counted 86 MB
+///   of TTY bytes no model ever read.
+fn run_share(store: &Store) -> Result<()> {
+    let periods = store.multi_period_stats()?;
+    let Some((_, calls, input, output, raw_tok, filt_tok)) = periods
+        .iter()
+        .find(|(label, ..)| label == "All Time")
+        .cloned()
+    else {
+        println!("No data yet. Run a few commands and try again.");
+        return Ok(());
+    };
+
+    if calls == 0 {
+        println!("No data yet. Run a few commands and try again.");
+        return Ok(());
+    }
+
+    let (saved, total) = if raw_tok > 0 {
+        (raw_tok.saturating_sub(filt_tok), raw_tok)
+    } else {
+        (input.saturating_sub(output), input)
+    };
+    let pct = if total > 0 {
+        100.0 * saved as f64 / total as f64
+    } else {
+        0.0
+    };
+    let unit = if raw_tok > 0 { "tokens" } else { "bytes" };
+
+    let top = get_top_commands(store, 0, 3);
+
+    println!();
+    // The command count is written out, not abbreviated: `6K` is a rounder
+    // number than `6,253` and this card exists to show the real one.
+    println!(
+        "OMNI saved me {} {unit} ({pct:.1}%) across {} commands.",
+        format_exact_tokens(saved),
+        format_number(calls)
+    );
+    if !top.is_empty() {
+        println!();
+        let width = max_width(top.iter().map(|(cmd, ..)| cmd));
+        for (cmd, count, cmd_pct, _) in &top {
+            // One decimal, because `{:.0}` renders 99.8% as `100%` and a card
+            // arguing that the number is real should not round one up to a
+            // figure the tool never measured.
+            println!("  {cmd:<width$}  {cmd_pct:>5.1}%  ({count}x)");
+        }
+    }
+    println!();
+    println!("Measured, not estimated: net across every command, terminal output excluded.");
+    println!("https://github.com/fajarhide/omni");
+    println!();
+
+    Ok(())
+}
 
 fn run_default(store: &Store) -> Result<()> {
     let periods = store.multi_period_stats()?;
