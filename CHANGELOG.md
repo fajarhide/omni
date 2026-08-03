@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-08-03
+
 ### Changed
 - **The two lists that had to agree are one list (#194, in part)**: #277 added seven names to `registry::reshaped_by` and to `distillers::passes_through_verbatim`, in two files, and the only thing keeping them in step was a comment telling the next person to keep them in step. Getting the first without the second is not a style problem: on the first run of #277 it sent `gh api … --jq '.content' | base64 -d` to the generic distiller, and that decode produces a source file an enumeration cut would shred (#235). `RESHAPING_TAILS` is the list now and both sides read it. A test walking the list against the other side was written and then deleted, because once both sides read the same constant it asserts that every member of a list is in that list and cannot fail; the constant is the mechanism, which is the whole point of removing the comment that used to be. The rest of #194, moving nineteen `matches!` arms of command-to-distiller mapping out of `distillers/mod.rs`, stays open: it is roughly 600 lines of mechanical move with no user-visible change, and the part with a demonstrated cost is this one.
 
