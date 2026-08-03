@@ -602,10 +602,9 @@ fn persist<E: Write>(
 ) {
     if let Some(s) = store_opt {
         use crate::pipeline::DistillResult;
-        let raw_tokens =
-            crate::util::token_estimate::count_tokens(&result.input_text, "cl100k_base");
-        let filtered_tokens =
-            crate::util::token_estimate::count_tokens(result.best_output(), "cl100k_base");
+        use crate::util::token_estimate::{ContentHint, estimate_tokens};
+        let raw_tokens = estimate_tokens(result.input_text.len(), ContentHint::Mixed);
+        let filtered_tokens = estimate_tokens(result.best_output().len(), ContentHint::Mixed);
 
         let distill_result = DistillResult {
             output: result.best_output().to_string(), // use the best output for persistence

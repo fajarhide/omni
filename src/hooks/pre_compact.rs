@@ -279,7 +279,13 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
     );
 
     // ── Token Budget Enforcement ──
-    let current_tokens = crate::util::token_estimate::count_tokens(&out, "cl100k_base");
+    // A cap, not a report: `ContentHint::Json` is the conservative end of the
+    // measured bytes-per-token range, so this over-counts slightly and truncates
+    // early rather than overshooting the budget it advertises (#283).
+    let current_tokens = crate::util::token_estimate::estimate_tokens(
+        out.len(),
+        crate::util::token_estimate::ContentHint::Json,
+    );
     if current_tokens > 6000 {
         // Approximate character length for 6000 tokens
         let target_chars = ((6000.0 / current_tokens as f64) * out.len() as f64) as usize;
@@ -342,9 +348,9 @@ mod tests {
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
         let parsed: HookOutput = serde_json::from_str(&out_str).expect("must succeed");
-        let token_count = crate::util::token_estimate::count_tokens(
-            &parsed.hook_specific_output.system_prompt_addition,
-            "cl100k_base",
+        let token_count = crate::util::token_estimate::estimate_tokens(
+            parsed.hook_specific_output.system_prompt_addition.len(),
+            crate::util::token_estimate::ContentHint::Json,
         );
         assert!(token_count <= 6100, "Token count was {}", token_count);
     }

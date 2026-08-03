@@ -651,8 +651,12 @@ pub fn process_payload(
     let latency_ms = start.elapsed().as_millis() as u32;
 
     let kept = check_segments.len() - noise_count;
-    let raw_tokens = crate::util::token_estimate::count_tokens(&content, "cl100k_base");
-    let filtered_tokens = crate::util::token_estimate::count_tokens(&final_out, "cl100k_base");
+    // Reporting columns, so the calibrated central estimate. The exact counter
+    // that stood here cost 34.3 ms of every hooked command to be 4.9% closer,
+    // against GPT's vocabulary rather than Claude's (#283).
+    use crate::util::token_estimate::{ContentHint, estimate_tokens};
+    let raw_tokens = estimate_tokens(content.len(), ContentHint::Mixed);
+    let filtered_tokens = estimate_tokens(final_out.len(), ContentHint::Mixed);
 
     let result = DistillResult {
         output: final_out.clone(),
