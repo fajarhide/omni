@@ -156,6 +156,19 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             // before this (#269).
             | "jq"
             | "yq"
+            // The rest of the reshaping tails `registry::reshaped_by` routes to
+            // (#277). Naming a stage as the payload's owner only helps if that
+            // stage is then handled, and none of these has a grammar: `cut` and
+            // `column` project or lay out columns, `tr` and `base64` rewrite
+            // bytes, `xargs` runs some other program entirely. Declared here as
+            // well as there because a passthrough the collapse fallback then
+            // folds is #214, and because `gh api … | base64 -d` decodes to a
+            // source file, which an enumeration cut would shred (#235).
+            | "cut"
+            | "tr"
+            | "base64"
+            | "column"
+            | "xargs"
     )
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty — match on any `env`

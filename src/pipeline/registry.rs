@@ -83,19 +83,41 @@ pub fn sole_output_command(command: &str) -> Option<&str> {
 /// The trailing pipeline stage when it rewrites the payload rather than
 /// selecting from it, so the output stops belonging to whatever fed it.
 ///
-/// Deliberately two names. Measured over 5,143 distinct recorded commands, 1,035
-/// are pipelines, and routing every one of them by its last stage would hand 871
-/// to `head`, `tail` or `sed` and stop distilling them at all. Those filters cut
-/// rows out of a shape they leave intact, which is the opposite of what `jq` and
-/// `yq` do. Where the general rule belongs is its own question, with its own
-/// measurement.
+/// **A list of names, and that is the answer #277 asked for.** That issue
+/// proposed classifying every stage as selector or transformer and routing to
+/// the last transformer. Measured over **4,958 recorded pipelines**, the general
+/// rule is worse than the narrow one at both ends:
+///
+/// * Routing by the last stage regardless hands **69.1%** of them to `head`,
+///   `tail` or `grep`, all verbatim passthroughs, and stops distilling two
+///   thirds of every pipeline anyone runs.
+/// * Only **7.5%** end in a stage that reshapes at all, and of the residual the
+///   dominant first stages are `cd` (119), `echo` (32) and `for` (23), which
+///   have no distiller to claim the payload in the first place. The pipelines
+///   genuinely at risk, a real distiller upstream of a real reshaper, are about
+///   **1.3%**.
+///
+/// So the shape stays a name list; what changes is that it is now the measured
+/// list rather than the two names #269 needed. Every entry provably emits
+/// something that is not its input's grammar: `cut` and `awk` project columns,
+/// `tr` and `base64` rewrite bytes, `wc` and `column` replace the payload with a
+/// count or a layout, `xargs` runs a different program entirely.
+///
+/// `sed` and `sort` are deliberately **absent**. `sed 's/x/y/'` and `sort` leave
+/// the shape intact and are 334 of the recorded tails between them; treating
+/// them as reshapers would stop distilling a pod table because someone sorted
+/// it.
 fn reshaped_by(segment: &str) -> Option<&str> {
     let last = split_pipeline(segment).pop()?;
     let base = last
         .split_whitespace()
         .next()
         .map(|w| w.trim_matches(|c| c == '"' || c == '\''))?;
-    matches!(base, "jq" | "yq").then_some(last)
+    matches!(
+        base,
+        "jq" | "yq" | "cut" | "tr" | "awk" | "base64" | "wc" | "column" | "xargs"
+    )
+    .then_some(last)
 }
 
 /// Splits on unquoted single `|`, the pipe operator. `||` is a sequential
@@ -570,6 +592,51 @@ fn command_specificity(base: &str, full_cmd: &str) -> u8 {
 
 #[cfg(test)]
 mod tests {
+
+    /// #277: a reshaping tail owns the payload, and the list is the measured one
+    /// rather than the two names #269 needed. `sed` and `sort` stay out on
+    /// purpose: they leave the shape intact and are 334 of the recorded tails
+    /// between them, so treating them as reshapers would stop distilling a pod
+    /// table because somebody sorted it.
+    #[test]
+    fn a_reshaping_tail_owns_the_payload_and_a_selecting_one_does_not() {
+        for (cmd, expect) in [
+            (
+                "kubectl get pod -o json | jq -r '.items[].metadata.name'",
+                "jq -r '.items[].metadata.name'",
+            ),
+            ("kubectl get pods | cut -d' ' -f1", "cut -d' ' -f1"),
+            ("cat access.log | tr -d '\\r'", "tr -d '\\r'"),
+            (
+                "gh api repos/o/r/contents/f --jq '.content' | base64 -d",
+                "base64 -d",
+            ),
+            ("ps aux | wc -l", "wc -l"),
+        ] {
+            assert_eq!(
+                sole_output_command(cmd).map(str::trim),
+                Some(expect),
+                "`{cmd}` ends in a stage that rewrites the payload"
+            );
+        }
+
+        for cmd in [
+            "kubectl get pods | head -20",
+            "cargo test | tail -30",
+            "git log --oneline | grep fix",
+            "kubectl get pods | sort",
+            "kubectl get pods | sed 's/Running/UP/'",
+        ] {
+            let owner = sole_output_command(cmd).map(str::trim).unwrap_or("");
+            assert!(
+                owner.starts_with("kubectl")
+                    || owner.starts_with("cargo")
+                    || owner.starts_with("git"),
+                "`{cmd}` only selects from or rewrites within its input's shape, so the producer keeps it; got {owner:?}"
+            );
+        }
+    }
+
     use super::*;
 
     /// #264. `git status && echo === && find .` was routed to the git distiller,
