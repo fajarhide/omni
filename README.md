@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Noise-canceling context and long-term memory for your AI agent — <b>lossy, but always reversible, and it never fabricates a result.</b> Stop paying Claude to read 10,000 lines of terminal noise.</em>
+    <em><b>Stop paying Claude to read 10,000 lines of terminal noise.</b> OMNI cuts <code>git</code> by 89%, <code>cargo</code> by 91% and <code>kubectl</code> by 77% before your agent ever sees them. Everything else passes through untouched. Nothing is ever lost, and it never invents a result.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -16,9 +16,17 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-43.3% fewer bytes reaching the model, measured on 9,965 real commands &middot; Cross-Session Memory &middot; Format-safe &middot; Always reversible &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
+<code>git</code> 89% &middot; <code>cargo</code> 91% &middot; <code>kubectl</code> 77% &middot; 21 ms per command &middot; 0 of 9,965 calls ever grew the output &middot; every cut recoverable byte for byte &middot; cross-session memory </b>
 
 </br></br>
+
+```bash
+brew install fajarhide/tap/omni && omni init
+```
+
+Works with Claude Code, Cursor, Windsurf, Codex and Roo out of the box.
+
+</br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
 </div>
 
@@ -46,7 +54,7 @@ OMNI fixes both.
 **Problem 1: Your terminal drowns out the signal**
 
 The same `git log` side by side. Without OMNI, one commit's `Author` / `Date` /
-body already fills the screen. With OMNI, **every commit is kept** — as one
+body already fills the screen. With OMNI, **every commit is kept**, as one
 `hash subject` line, 94% smaller. Nothing is summarised away; the footer is
 measured from the real byte counts, not promised.
 
@@ -56,12 +64,12 @@ measured from the real byte counts, not promised.
 <td align="center"><b>With OMNI</b><br/><sub>every commit kept, 94% smaller</sub></td>
 </tr>
 <tr>
-<td valign="top"><img src="media/demo-git-without.gif" alt="a raw verbose git log -15 — one commit's Author, Date and body fill the screen" width="400" /></td>
+<td valign="top"><img src="media/demo-git-without.gif" alt="a raw verbose git log -15: one commit's Author, Date and body fill the screen" width="400" /></td>
 <td valign="top"><img src="media/demo-git-with.gif" alt="the same git log -15 through OMNI: every commit as a compact hash + subject line, 94% smaller" width="400" /></td>
 </tr>
 </table>
 
-Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirations:
+Real numbers, measured on `tests/fixtures/` and replayed traces, not aspirations:
 
 | Command | Without OMNI | With OMNI | Saved |
 |---|---|---|---|
@@ -81,11 +89,17 @@ cut reversible, so it belongs in the number.
 nothing at all, because a pod table is an enumeration where every row is a datum
 and there is no noise to drop. Losing that 9.3% was the fix.
 
-> **The honest caveat:** OMNI compresses *noisy successful* output. A command that **fails** is passed through **verbatim** — a hidden error is worse than an uncompressed one — and structured output (JSON/YAML/CSV) is never touched. It earns its keep on repetitive tool chatter and gets out of the way everywhere else.
+> **Where it does nothing, on purpose.** A command that fails is passed through verbatim, because a hidden error costs more than an uncompressed one. Structured output (JSON, YAML, CSV) is never touched, because the next step in your pipeline is going to parse it. OMNI earns its keep on repetitive tool chatter and gets out of the way everywhere else, which is what makes it safe to leave on for every command you run.
 
-### Why you can trust a lossy tool
+### Nothing is ever lost. It never makes something up.
 
-Every other compressor asks you to *trust* that what it cut didn't matter. OMNI doesn't ask — it guarantees, and each guarantee is backed by code you can read:
+Two promises, and both are in the code rather than in this paragraph.
+
+**Nothing is ever lost.** Every byte OMNI cuts is archived locally in the RewindStore, keyed by SHA-256. The agent gets a hash with the distilled output and can call `omni_retrieve` to pull the original back byte for byte, mid-conversation, without re-running your command.
+
+**It never makes something up.** A distiller that recognises nothing in its input returns the raw input. That is a type, not a convention: `distill` returns `Option<String>` and the routing layer falls back to the original whenever it gets `None`. There is no code path that produces a green "no errors" line OMNI did not read.
+
+Every other compressor asks you to *trust* that what it cut didn't matter. OMNI hands you the receipt:
 
 | Guarantee | How | Proof |
 |---|---|---|
@@ -117,7 +131,7 @@ That is the one thing a bigger compression number can't buy: **you can always re
 
 The code you *don't* send to the AI is just as important as the code you do.
 
-When you feed an AI megabytes of terminal noise, it suffers from context bloat—hallucinating fixes for the wrong warnings and burning your API budget on irrelevant output.
+When you feed an AI megabytes of terminal noise, it suffers from context bloat, hallucinating fixes for the wrong warnings and burning your API budget on irrelevant output.
 
 When you restart an agent and it has no memory, you lose hours re-establishing context that should have been preserved automatically.
 
@@ -132,27 +146,30 @@ OMNI solves both, invisibly:
 
 ## Benchmarks
 
-The honest headline, measured on the release binary by replaying **9,965 real
-command executions** from one developer's actual usage
-(`cargo test --release --test bench_replay -- --ignored`):
+Measured on the release binary by replaying **9,965 real command executions** from
+one developer's actual usage (`cargo test --release --test bench_replay -- --ignored`):
 
-* **43.3% fewer bytes** reaching the model across the whole mix (40.1 MB → 22.7 MB).
-* **90.0% of those calls saved nothing at all.** OMNI handed the output straight
-  back, adding **zero** bytes. Every byte of the saving comes from the other 10%,
-  where there was real noise to cut.
+* **On the commands that actually generate noise, 76 to 91%.** `cargo` 91.4%,
+  `git` 89.2%, `kubectl` 76.5%. That is where your context budget goes, and that
+  is where OMNI works.
+* **OMNI acts on 1 command in 10, and adds zero bytes to the other 9.** It is a
+  filter, not a summariser. When there is nothing to cut it gets out of the way
+  completely, which is why it is safe to leave on for everything.
 * **Not one call in 9,965 made the output larger.** That is the number worth
   checking in any tool of this kind, and it is printed by the same harness.
+* **43.3% fewer bytes** across the entire mix, noisy and quiet commands together
+  (40.1 MB → 22.7 MB).
 * **Structured output is never touched.** JSON, YAML, NDJSON and CSV pass through
   byte-for-byte, because a corrupted payload costs more than a missed compression.
 
 The corpus counts only calls whose result reached a model. Terminal output is
-excluded: it is 68% of the raw bytes on this installation, and including it reads
-as 79.1% instead of 43.3%. A number that large is measuring the wrong population,
-which is the mistake this section exists to avoid.
+excluded: it is 68% of the raw bytes on this installation, and including it would
+let us print 79.1% instead of 43.3%. We don't, because that number is measuring a
+population no model ever read.
 
-That second bullet is the number most tools in this category do not print. A tool
-that claims to save 90% of every command is telling you it summarises output you
-needed.
+Most tools in this category publish a single big percentage. We publish the share
+of calls where we did nothing, because a tool that claims 90% on every command is
+telling you it summarised something you needed.
 
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
@@ -191,8 +208,9 @@ Single fixtures from `tests/fixtures/`, if you want to reproduce one by hand:
 retrieval marker and these match the figures earlier releases published; the
 marker is counted here because the agent pays for it.
 
-**Latency is a real cost, not zero**, and it grows with your history. Median of
-12 runs each, release binary, measured end to end through the post-hook:
+**21 ms per command.** That is the whole pipeline end to end through the post-hook,
+and it grows with your history rather than with the payload. Median of 12 runs
+each, release binary:
 
 | | fresh database | 205 MB database |
 |---|---|---|
@@ -260,7 +278,7 @@ OMNI works seamlessly with the agentic tools you already use. It intercepts thei
 
 ## Adaptive Memory OS
 
-OMNI isn't just a terminal filter—it's a cure for AI amnesia.
+OMNI isn't just a terminal filter. It's a cure for AI amnesia.
 
 If you've ever worked with an AI agent for more than an hour, you know the pain of context loss. You restart the agent, and suddenly it forgets what you were working on. It forgets the project goal. It starts making the exact same mistakes it made yesterday because it forgot the repository's undocumented quirks.
 

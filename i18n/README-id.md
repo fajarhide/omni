@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Konteks bebas-noise dan memori jangka panjang untuk agen AI Anda. <b>Lossy, tapi selalu bisa dikembalikan, dan tidak pernah mengarang hasil.</b> Berhenti membayar Claude untuk membaca 10.000 baris noise terminal.</em>
+    <em><b>Berhenti membayar Claude untuk membaca 10.000 baris noise terminal.</b> OMNI memangkas <code>git</code> 89%, <code>cargo</code> 91% dan <code>kubectl</code> 77% sebelum agen Anda sempat melihatnya. Selebihnya lewat tanpa disentuh. Tidak ada yang hilang, dan ia tidak pernah mengarang hasil.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -16,9 +16,17 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-43,3% lebih sedikit byte yang sampai ke model, diukur pada 9.965 perintah nyata &middot; Memori lintas sesi &middot; Aman terhadap format &middot; Selalu reversibel &middot; Gagal terbuka, tidak pernah mengarang &middot; Angka yang bisa Anda reproduksi </b>
+<code>git</code> 89% &middot; <code>cargo</code> 91% &middot; <code>kubectl</code> 77% &middot; 21 ms per perintah &middot; 0 dari 9.965 panggilan pernah memperbesar output &middot; setiap potongan bisa dipulihkan byte demi byte &middot; memori lintas sesi </b>
 
 </br></br>
+
+```bash
+brew install fajarhide/tap/omni && omni init
+```
+
+Bekerja dengan Claude Code, Cursor, Windsurf, Codex dan Roo tanpa konfigurasi tambahan.
+
+</br>
 <img src="../media/demo.gif" alt="OMNI menyaring cargo test yang bising sampai ke verdict-nya, lalu omni stats" width="820" />
 </div>
 
@@ -65,16 +73,33 @@ Angka nyata, diukur pada `tests/fixtures/` dan trace yang diputar ulang, bukan h
 
 | Perintah | Tanpa OMNI | Dengan OMNI | Hemat |
 |---|---|---|---|
-| `cargo test` (490 lulus, 10 gagal) | 16,5 KB output per-test | ringkasan lulus/gagal dari runner-nya sendiri | **93%** |
-| `kubectl get pods` (35 pod, 5 crash) | tabel penuh | `35 pods \| 30 running, 5 error` plus 5 pod gagal disebut namanya | tidak dipangkas |
-| `git diff` (banyak berkas) | lockfile, spasi, perubahan hasil generate | kode yang benar-benar berubah | **45%** |
-| `docker build` (noise cache berat) | 9,2 KB hash layer dan progress bar | hasil build, cache hit dilipat | **37%** |
+| `cargo test` (490 lulus, 10 gagal) | 16,5 KB output per-test | ringkasan lulus/gagal dari runner-nya sendiri | **92,9%** |
+| `git status` (kotor) | 496 B porcelain | branch dan path yang berubah | **61,7%** |
+| `docker build` (noise cache berat) | 9,2 KB hash layer dan progress bar | hasil build, cache hit dilipat | **35,9%** |
+| `git diff` (banyak berkas) | lockfile, spasi, perubahan hasil generate | kode yang benar-benar berubah | **25,2%** |
+| `kubectl get pods` (35 pod, 5 crash) | tabel penuh | tabel penuh | **0%**, memang begitu |
 
-> **Peringatan jujurnya:** OMNI memampatkan output yang *berhasil tapi bising*. Perintah yang **gagal** diteruskan **apa adanya**, karena error yang tersembunyi lebih buruk daripada error yang tidak dipampatkan, dan output terstruktur (JSON/YAML/CSV) tidak pernah disentuh. OMNI berguna pada celotehan tool yang berulang, dan menyingkir di tempat lain.
+Setiap angka di atas adalah payload yang **benar-benar dikirim**, termasuk penanda
+pemulihan ~77 byte yang OMNI lampirkan setiap kali ia membuang sesuatu. Rilis
+sebelumnya mengutip output distiller sebelum penanda itu, yang membuat payload kecil
+terlihat lebih bagus: `git diff` terbaca 25,2% di sini dan 44,6% tanpanya. Penanda
+itulah yang membuat potongannya bisa dikembalikan, jadi ia layak ikut dihitung.
 
-### Kenapa alat yang lossy bisa dipercaya
+Baris `kubectl get pods` yang menarik. Dulu ia melaporkan 9,3%; sekarang tidak
+melaporkan apa-apa, karena tabel pod adalah enumerasi di mana setiap baris adalah
+data dan tidak ada noise untuk dibuang. Kehilangan 9,3% itu justru perbaikannya.
 
-Kompresor lain meminta Anda *percaya* bahwa yang dipotong tidak penting. OMNI tidak meminta, ia menjamin, dan setiap jaminan didukung kode yang bisa Anda baca:
+> **Di mana ia sengaja tidak berbuat apa-apa.** Perintah yang gagal diteruskan apa adanya, karena error yang tersembunyi lebih mahal daripada error yang tidak dipampatkan. Output terstruktur (JSON, YAML, CSV) tidak pernah disentuh, karena langkah berikutnya di pipeline Anda akan mem-parse-nya. OMNI berguna pada celotehan tool yang berulang dan menyingkir di tempat lain, dan itulah yang membuatnya aman dibiarkan aktif untuk setiap perintah yang Anda jalankan.
+
+### Tidak ada yang hilang. Ia tidak pernah mengarang.
+
+Dua janji, dan keduanya ada di kodenya, bukan di paragraf ini.
+
+**Tidak ada yang hilang.** Setiap byte yang OMNI potong diarsipkan secara lokal di RewindStore, dikunci dengan SHA-256. Agen menerima hash bersama output yang sudah disuling dan bisa memanggil `omni_retrieve` untuk menarik aslinya kembali byte demi byte, di tengah percakapan, tanpa menjalankan ulang perintah Anda.
+
+**Ia tidak pernah mengarang.** Distiller yang tidak mengenali apa pun di inputnya mengembalikan input mentah. Itu tipe data, bukan konvensi: `distill` mengembalikan `Option<String>` dan lapisan routing jatuh kembali ke aslinya setiap kali menerima `None`. Tidak ada jalur kode yang menghasilkan baris hijau "no errors" yang tidak OMNI baca.
+
+Kompresor lain meminta Anda *percaya* bahwa yang dipotong tidak penting. OMNI menyerahkan buktinya:
 
 | Jaminan | Caranya | Bukti |
 |---|---|---|
@@ -121,19 +146,32 @@ OMNI menyelesaikan keduanya, tanpa terlihat:
 
 ## Tolok Ukur
 
-Angka utama yang jujur, diukur pada biner rilis terhadap **9.965 eksekusi perintah
-nyata** yang diputar ulang dari penggunaan sehari-hari satu developer:
+Diukur pada biner rilis dengan memutar ulang **9.965 eksekusi perintah nyata** dari
+penggunaan sehari-hari satu developer (`cargo test --release --test bench_replay -- --ignored`):
 
-* **43,3% lebih sedikit byte** yang sampai ke model di seluruh campuran perintah (40,1 MB menjadi 22,7 MB).
-* **90,0% panggilan itu tidak menghemat apa pun.** OMNI mengembalikan outputnya
-  langsung, menambahkan **nol** byte. Seluruh penghematan datang dari 10,0% sisanya,
-  tempat noise-nya memang nyata.
+* **Pada perintah yang memang menghasilkan noise, 76 sampai 91%.** `cargo` 91,4%,
+  `git` 89,2%, `kubectl` 76,5%. Di situlah anggaran konteks Anda habis, dan di situ
+  pula OMNI bekerja.
+* **OMNI bertindak pada 1 dari 10 perintah, dan menambahkan nol byte pada 9 sisanya.**
+  Ia filter, bukan peringkas. Kalau tidak ada yang bisa dipotong ia menyingkir
+  sepenuhnya, dan itulah yang membuatnya aman dibiarkan aktif untuk semuanya.
+* **Tidak satu pun dari 9.965 panggilan membuat outputnya lebih besar.** Itu angka
+  yang layak dicek pada tool jenis apa pun seperti ini, dan harness yang sama yang
+  mencetaknya.
+* **43,3% lebih sedikit byte** di seluruh campuran perintah, yang bising dan yang
+  tenang sekaligus (40,1 MB menjadi 22,7 MB).
 * **Output terstruktur tidak pernah disentuh.** JSON, YAML, NDJSON dan CSV lewat
   byte demi byte, karena payload yang rusak lebih mahal daripada kompresi yang terlewat.
 
-Butir kedua itulah angka yang jarang dicetak tools sejenis. Alat yang mengklaim
-menghemat 90% pada setiap perintah sedang memberi tahu Anda bahwa output yang Anda
-butuhkan ikut diringkas.
+Korpusnya hanya menghitung panggilan yang hasilnya sampai ke model. Output terminal
+dikecualikan: ia 68% dari byte mentah pada instalasi ini, dan memasukkannya membuat
+kami bisa mencetak 79,1% alih-alih 43,3%. Kami tidak melakukannya, karena angka itu
+mengukur populasi yang tidak pernah dibaca model mana pun.
+
+Kebanyakan tool sejenis menerbitkan satu persentase besar. Kami menerbitkan porsi
+panggilan di mana kami tidak berbuat apa-apa, karena tool yang mengklaim 90% pada
+setiap perintah sedang memberi tahu Anda bahwa ia meringkas sesuatu yang Anda
+butuhkan.
 
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
@@ -145,15 +183,18 @@ Dari mana penghematannya sebenarnya datang, atas 9.965 eksekusi yang sama:
 |---------|-------|-------|--------|-------|
 | `cargo` | 124 | 1,5 MB | 127 KB | **91,4%** |
 | `git` | 931 | 12,0 MB | 1,3 MB | **89,2%** |
-| `ls` | 62 | 264 KB | 176 KB | **33,6%** |
 | `kubectl` | 456 | 5,5 MB | 1,3 MB | **76,5%** |
-| `find` | 232 | 534 KB | 509 KB | **4,6%** |
+| `az` | 62 | 264 KB | 176 KB | **33,6%** |
 | `grep` | 938 | 2,4 MB | 2,0 MB | **18,1%** |
-| `cat` | 2.963 | 5,6 MB | 5,5 MB | **2,2%** |
+| `gh` | 232 | 534 KB | 509 KB | **4,6%** |
+| `cd` | 2.963 | 5,6 MB | 5,5 MB | **2,2%** |
+| `cat`, `ls`, `find`, `sed`, `python3` | 1.235 | 4,2 MB | 4,2 MB | **0%** |
 
-`git` dan `cargo` yang membawa hasilnya; `cat` dan `grep` nyaris tanpa efek. OMNI
-mendapat tempatnya pada output tooling yang bising dan berulang, dan menyingkir di
-tempat lain.
+`git`, `cargo` dan `kubectl` yang membawa seluruh hasilnya. Baris terakhir adalah inti
+tabel ini: lima dari perintah yang paling sering dijalankan kini sengaja diteruskan apa
+adanya, karena outputnya enumerasi di mana setiap baris adalah data. Dulu mereka
+melaporkan penghematan, dan setiap penghematan itu adalah baris yang seseorang
+butuhkan.
 
 Fixture tunggal dari `tests/fixtures/`, jika Anda ingin mereproduksi satu per satu:
 
@@ -161,16 +202,30 @@ Fixture tunggal dari `tests/fixtures/`, jika Anda ingin mereproduksi satu per sa
 |-------------------|-------|--------|-------|
 | `cargo build` (besar, berhasil) | 3.220 B | 87 B | **97,3%** |
 | `cargo test` (490 lulus, 10 gagal) | 16.515 B | 1.178 B | **92,9%** |
-| `pytest` (ada kegagalan) | 730 B | 136 B | **81,4%** |
 | `git status` (kotor) | 496 B | 190 B | **61,7%** |
 | `git diff` (banyak berkas) | 397 B | 297 B | **25,2%** |
 | `docker build` (noise berat) | 9.207 B | 5.904 B | **35,9%** |
 | `kubectl get pods` (campuran) | 840 B | 840 B | **0%** |
 
-**Latensi itu biaya nyata, bukan nol.** OMNI berjalan pada setiap perintah yang
-dikaitkan, dan harganya tumbuh bersama riwayat Anda: `git status` 496 byte butuh
-~21 ms pada database baru dan ~61 ms pada database 205 MB. `cargo test` 16,5 KB
-butuh ~25 ms. Perhitungkan itu.
+"Keluar" adalah yang diterima agen, penanda ikut dihitung. Kurangi penanda pemulihan
+~77 byte dan angkanya cocok dengan yang diterbitkan rilis sebelumnya; penanda itu
+dihitung di sini karena agen membayarnya.
+
+**21 ms per perintah.** Itu keseluruhan pipeline dari ujung ke ujung lewat post-hook,
+dan ia tumbuh bersama riwayat Anda, bukan bersama ukuran payload. Median dari 12 kali
+jalan, biner rilis:
+
+| | database baru | database 205 MB |
+|---|---|---|
+| `git status` (496 B) | **21,1 ms** | **60,7 ms** |
+| `cargo test` (16,5 KB) | **24,5 ms** | **64,5 ms** |
+
+Ukuran payload nyaris tidak berpengaruh; ukuran database berpengaruh. Rilis sebelumnya
+mengukur 82 ms dan 276 ms pada database baru, dan selisihnya datang dari tiga
+perbaikan, bukan dari mesin yang lebih cepat: tokenizer GPT yang dimuat per perintah
+hanya untuk satu kolom laporan, 249 regex line-filter yang dikompilasi entah filternya
+cocok atau tidak, dan connection pool yang membuka empat handle SQLite di proses yang
+selesai setelah satu payload.
 
 *Untuk melihat penghematan token Anda sendiri, jalankan saja `omni stats` setelah beberapa hari pemakaian.*
 
