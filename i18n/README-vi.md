@@ -32,20 +32,14 @@ Chạy được ngay với Claude Code, Cursor, Windsurf, Codex và Roo.
 
 ---
 
-Mọi trợ lý lập trình AI đều có hai vấn đề lớn.
+Agent của bạn đọc từng dòng terminal in ra. Build log, Docker log, CI log, thanh tiến
+trình, màu ANSI. Hàng nghìn token chỉ để tìm một dòng. Claude không đắt. Terminal của
+bạn mới đắt.
 
-**1. Chúng đọc mọi thứ.**  
-Log build.  
-Log Docker.  
-Log CI.  
-Thanh tiến trình.  
-Màu ANSI.  
-Hàng nghìn token, chỉ để tìm một dòng. Claude không đắt. Terminal của bạn mới đắt.
+Và nó quên sạch sau một đêm. Khởi động lại Cursor, chuyển sang Claude Code, và bạn
+giải thích lại dự án từ đầu.
 
-**2. Chúng quên mọi thứ.**  
-Mỗi lần bạn khởi động lại Cursor, hay chuyển từ Claude Code sang Windsurf, agent của bạn mất trí nhớ. Bạn phải giải thích lại mục tiêu dự án. Bạn phải nhắc lại cùng những cái bẫy của framework hết lần này đến lần khác.
-
-OMNI sửa cả hai.
+OMNI sửa cả hai, và tránh đường ở mọi chỗ khác.
 
 ---
 
@@ -111,121 +105,46 @@ Các bộ nén khác đề nghị bạn *tin* rằng thứ họ cắt đi không
 
 Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
 
-**Vấn đề 2: agent của bạn quên sạch sau một đêm**
-
-### Bắt đầu một phiên mới
-**Không có OMNI:** "Giải thích lại cấu trúc dự án giúp mình, module auth đang hỏng, và tụi mình dùng Postgres chứ không phải MySQL."  
-**Có OMNI:** Agent đã biết rồi. Nó tiếp tục từ chỗ bạn dừng.
-
-### Sửa cùng một bug hai lần
-**Không có OMNI:** Agent lại vấp đúng cái bẫy framework nó đã gỡ hôm qua, vì nó không có trí nhớ.  
-**Có OMNI:** Cách sửa đã được lưu. Agent tự lôi ra qua công cụ MCP `omni_recall` trước khi lặp lại sai lầm.
-
-### Làm việc qua nhiều IDE (Cursor sang Claude Code)
-**Không có OMNI:** IDE mới, agent mới, ngữ cảnh bằng 0. Bạn bắt đầu lại từ đầu.  
-**Có OMNI:** Bản tóm tắt phiên được tiêm tự động. Agent mới bắt nhịp ngay.
-
----
-
-## Vì sao điều này quan trọng
-
-Đoạn mã bạn *không* gửi cho AI cũng quan trọng như đoạn bạn gửi.
-
-Khi bạn nhồi cho AI hàng megabyte nhiễu terminal, nó rơi vào tình trạng phình ngữ cảnh: ảo giác ra cách sửa cho những cảnh báo không liên quan và đốt ngân sách API vào đầu ra vô ích.
-
-Khi bạn khởi động lại agent và nó không có trí nhớ, bạn mất hàng giờ dựng lại ngữ cảnh lẽ ra đã được giữ tự động.
-
-OMNI giải quyết cả hai, một cách vô hình:
-
-* **Ít nhiễu hơn** nên chi phí thấp hơn, và ít đầu ra vô ích để mô hình vấp phải hơn.
-* **An toàn định dạng từ thiết kế**: JSON, YAML, NDJSON và CSV đi qua từng byte một; bộ chưng cất không phân tích được đầu vào sẽ im lặng thay vì bịa ra một bản tóm tắt.
-* **Bộ nhớ bền**: không phải giải thích lại dự án, không phải lặp lại cùng một cách sửa.
-* **Cài một lần**: chạy lặng lẽ cùng mọi agent bạn đang dùng.
-
 ---
 
 ## Đo đạc
 
 Đo trên bản binary phát hành bằng cách phát lại **9.965 lần thực thi lệnh thật** từ
-thói quen sử dụng của một lập trình viên (`cargo test --release --test bench_replay -- --ignored`):
+thói quen sử dụng của một lập trình viên:
 
 * **Trên những lệnh thực sự sinh nhiễu, 76 đến 91%.** `cargo` 91,4%, `git` 89,2%,
   `kubectl` 76,5%. Đó là nơi ngân sách ngữ cảnh của bạn tiêu hết, và cũng là nơi OMNI
   làm việc.
 * **OMNI ra tay với 1 lệnh trong 10, và thêm 0 byte vào 9 lệnh còn lại.** Nó là bộ lọc,
-  không phải bộ tóm tắt. Khi không có gì để cắt, nó tránh đường hoàn toàn, và đó là lý
-  do bật nó cho mọi thứ vẫn an toàn.
-* **Không một lệnh gọi nào trong 9.965 làm đầu ra lớn hơn.** Đó là con số đáng kiểm tra
-  ở bất kỳ công cụ nào kiểu này, và chính bộ đo đó in ra nó.
-* **Giảm 43,3% số byte** trên toàn bộ tổ hợp, cả lệnh ồn ào lẫn lệnh yên tĩnh
-  (40,1 MB xuống 22,7 MB).
-* **Đầu ra có cấu trúc không bao giờ bị chạm vào.** JSON, YAML, NDJSON và CSV đi qua
-  từng byte một, vì một payload hỏng đắt hơn một lần nén bị bỏ lỡ.
-
-Tập dữ liệu chỉ đếm những lệnh gọi mà kết quả đến được một mô hình. Đầu ra terminal bị
-loại trừ: nó chiếm 68% số byte thô trên bản cài này, và nếu tính vào thì chúng tôi có
-thể in 79,1% thay vì 43,3%. Chúng tôi không làm vậy, vì con số đó đang đo một tập hợp
-mà không mô hình nào từng đọc.
-
-Phần lớn công cụ cùng loại công bố một tỉ lệ phần trăm thật to. Chúng tôi công bố tỉ lệ
-lệnh gọi mà chúng tôi không làm gì cả, vì một công cụ tuyên bố 90% trên mọi lệnh đang
-nói với bạn rằng nó đã tóm tắt mất thứ bạn cần.
+  không phải bộ tóm tắt. Khi không có gì để cắt, nó tránh đường hoàn toàn.
+* **Không một lệnh gọi nào trong 9.965 làm đầu ra lớn hơn.**
+* **Giảm 43,3% số byte** trên toàn bộ tổ hợp, cả lệnh ồn ào lẫn lệnh yên tĩnh.
+* **21 ms mỗi lệnh** từ đầu tới cuối, lớn dần theo lịch sử của bạn chứ không theo kích
+  thước payload. Với cơ sở dữ liệu 205 MB con số là 61 ms.
 
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Phần tiết kiệm thực sự đến từ đâu, trên cùng 9.965 lần thực thi:
+Toàn bộ tập dữ liệu, phân tích theo lệnh, fixture và bảng độ trễ:
+**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**. Tái lập bằng
+`cargo test --release --test bench_replay -- --ignored`.
 
-| Lệnh | Lần gọi | Vào | Ra | Tiết kiệm |
-|---------|-------|-------|--------|-------|
-| `cargo` | 124 | 1,5 MB | 127 KB | **91,4%** |
-| `git` | 931 | 12,0 MB | 1,3 MB | **89,2%** |
-| `kubectl` | 456 | 5,5 MB | 1,3 MB | **76,5%** |
-| `az` | 62 | 264 KB | 176 KB | **33,6%** |
-| `grep` | 938 | 2,4 MB | 2,0 MB | **18,1%** |
-| `gh` | 232 | 534 KB | 509 KB | **4,6%** |
-| `cd` | 2.963 | 5,6 MB | 5,5 MB | **2,2%** |
-| `cat`, `ls`, `find`, `sed`, `python3` | 1.235 | 4,2 MB | 4,2 MB | **0%** |
+### Cách đọc một con số tiết kiệm, kể cả của chúng tôi
 
-`git`, `cargo` và `kubectl` gánh toàn bộ kết quả. Dòng cuối mới là điểm chính của bảng
-này: năm trong số các lệnh chạy nhiều nhất giờ được cho qua nguyên vẹn một cách có chủ
-đích, vì đầu ra của chúng là liệt kê mà mỗi dòng là một dữ liệu. Trước đây chúng từng
-báo có tiết kiệm, và mỗi phần tiết kiệm đó là một dòng ai đó cần.
+Công cụ nào trong nhóm này cũng công bố một tỉ lệ phần trăm. Đây là năm câu hỏi quyết
+định con số đó có nghĩa gì, cùng câu trả lời của chúng tôi:
 
-Các fixture đơn lẻ trong `tests/fixtures/`, nếu bạn muốn tự tái lập từng cái:
-
-| Lệnh / Bối cảnh | Vào | Ra | Tiết kiệm |
-|-------------------|-------|--------|-------|
-| `cargo build` (lớn, thành công) | 3.220 B | 87 B | **97,3%** |
-| `cargo test` (490 đạt, 10 hỏng) | 16.515 B | 1.178 B | **92,9%** |
-| `git status` (có thay đổi) | 496 B | 190 B | **61,7%** |
-| `git diff` (nhiều tệp) | 397 B | 297 B | **25,2%** |
-| `docker build` (nhiễu nặng) | 9.207 B | 5.904 B | **35,9%** |
-| `kubectl get pods` (hỗn hợp) | 840 B | 840 B | **0%** |
-
-"Ra" là thứ agent nhận được, đã gồm cả dấu khôi phục. Trừ đi dấu khoảng 77 byte thì
-các con số này khớp với những gì các bản phát hành trước công bố; dấu đó được đếm ở đây
-vì agent phải trả cho nó.
-
-**21 ms mỗi lệnh.** Đó là toàn bộ pipeline từ đầu tới cuối qua post-hook, và nó lớn dần
-theo lịch sử của bạn chứ không theo kích thước payload. Trung vị của 12 lần chạy mỗi ô,
-bản binary phát hành:
-
-| | cơ sở dữ liệu mới | cơ sở dữ liệu 205 MB |
+| Câu hỏi | Vì sao quan trọng | OMNI |
 |---|---|---|
-| `git status` (496 B) | **21,1 ms** | **60,7 ms** |
-| `cargo test` (16,5 KB) | **24,5 ms** | **64,5 ms** |
+| Bao nhiêu phần trăm lệnh gọi **không** tiết kiệm được gì? | Công cụ tiết kiệm trên mọi lệnh là đang tóm tắt phần đầu ra bạn cần | **90,0%**, có công bố |
+| Có lệnh gọi nào làm đầu ra **lớn hơn** không? | Dấu và tiêu đề đều tốn byte, và không ai báo cáo những lần phản tác dụng | **0 trong 9.965** |
+| Đã đo trên **tập hợp** nào? | Đếm cả byte terminal không mô hình nào đọc là cách thổi phồng miễn phí | chỉ phần tới được mô hình, và nói ra điều đó khiến chúng tôi mất 36 điểm |
+| Bạn có **chạy lại** được không? | Con số không tái lập được là một tuyên bố, không phải một phép đo | một lệnh, trên dữ liệu của chính bạn |
+| Phần bị cắt có **khôi phục** được không? | Có mất mát thì ổn nếu đảo ngược được, và chí mạng nếu không | từng byte một, qua `omni_retrieve` |
 
-Kích thước payload gần như không quan trọng; kích thước cơ sở dữ liệu thì có. Các bản
-phát hành trước đo được 82 ms và 276 ms trên cơ sở dữ liệu mới, và khác biệt đến từ ba
-bản sửa chứ không phải một cỗ máy nhanh hơn: một bộ tokenizer GPT được nạp cho mỗi lệnh
-chỉ để phục vụ một cột báo cáo, 249 biểu thức chính quy lọc dòng được biên dịch bất kể
-bộ lọc của chúng có khớp hay không, và một connection pool mở bốn handle SQLite trong
-một tiến trình kết thúc sau đúng một payload.
-
-*Để xem mức tiết kiệm token của chính bạn, chỉ cần chạy `omni stats` sau vài ngày sử dụng.*
-
+Chúng tôi công bố tỉ lệ lệnh gọi mà mình không làm gì cả, vì đó là con số cho bạn biết
+những con số còn lại đáng giá bao nhiêu.
 
 ---
 
@@ -263,73 +182,6 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
-## Tích hợp
-
-OMNI hoạt động trơn tru với các công cụ agent bạn đang dùng. Nó tự động chặn các lần thực thi terminal của chúng.
-
-* Claude Code
-* Cursor
-* Windsurf
-* Roo Code
-* OpenAI Codex
-* Antigravity CLI
-
----
-
-## Adaptive Memory OS
-
-OMNI không chỉ là một bộ lọc terminal, nó là thuốc chữa chứng mất trí nhớ của AI.
-
-Nếu bạn từng làm việc với một AI agent quá một giờ, bạn biết nỗi đau mất ngữ cảnh. Bạn khởi động lại agent, và đột nhiên nó quên đang làm gì. Nó quên mục tiêu dự án. Nó bắt đầu lặp đúng những sai lầm hôm qua vì đã quên những điểm kỳ quặc không được ghi lại của kho mã.
-
-Memory OS của OMNI chạy lặng lẽ ở nền để giải quyết chuyện này:
-
-* **Thôi giải thích lại mục tiêu (`omni goal`)**: đặt mục tiêu sao Bắc Đẩu của bạn một lần. OMNI sẽ nhắc agent về đúng ưu tiên đó trong từng prompt, không để nó trôi khỏi nhiệm vụ.
-* **Không đánh mất mạch suy nghĩ (tính liên tục của phiên)**: nếu Cursor sập hoặc bạn chuyển sang Claude Code, OMNI lập tức tiêm một bản tóm tắt nén của phiên trước. Agent mới biết chính xác tệp nào đang nóng và lỗi hoạt động cuối cùng là gì, rồi tiếp tục từ chỗ bạn dừng.
-* **Dạy một lần (`omni remember`)**: đừng sửa mãi cùng một ảo giác. Agent có thể lưu quy tắc, cái bẫy và quyết định kiến trúc riêng của dự án thẳng vào backend SQLite cục bộ của OMNI. Khi bí về sau, chúng tự kéo câu trả lời ra bằng tìm kiếm ngữ nghĩa.
-
-Agent của bạn hiểu kho mã của bạn hơn mỗi ngày, và bạn không phải lặp lại chính mình nữa.
-
----
-
-## Cách hoạt động
-
-OMNI chạy hoàn toàn cục bộ theo một pipeline tất định `Read → Guard → Score → Collapse → Distill → Persist`.
-
-```mermaid
-flowchart LR
-    Command[Đầu ra công cụ thô] --> Hook[Hook OMNI]
-    Hook --> Score[Bộ chấm điểm]
-    Score -->|Critical=1.0, Noise=0.1| Distill[Bộ chưng cất nội dung]
-    Distill --> Clean[Ngữ cảnh sạch]
-    Command --> SQLite[(RewindStore SQLite)]
-```
-
-Nếu AI *thực sự* cần phần nhiễu đã bị bỏ, **RewindStore** SQLite cục bộ của OMNI giữ toàn bộ log chưa nén một cách an toàn dưới dạng đã băm, để agent lấy lại bất cứ lúc nào.
-
----
-
-## Kiến trúc
-
-
-<div align="center">
-  <img src="../media/architecture.svg" alt="Sơ đồ kiến trúc OMNI" width="100%" />
-</div>
-
-Viết bằng Rust, dù chi phí đầu-cuối không phải bằng 0.
-
-* **Chưng cất**: bản thân pipeline chấm điểm và gộp chạy trong vài mili giây một chữ số.
-* **Đầu cuối**: thứ bạn thực sự chờ là phần đó cộng với lần ghi RewindStore, và nó lớn dần theo lịch sử, khoảng 21 ms với cơ sở dữ liệu mới và khoảng 61 ms với cơ sở dữ liệu 205 MB. Xem [Đo đạc](#đo-đạc) trước khi cho rằng nó miễn phí.
-* **Bộ nhớ**: hoạt động qua stream hiệu quả, giữ mức dùng bộ nhớ phẳng ngay cả với log 20.000 dòng.
-* **Fail open**: nếu OMNI panic, nó thất bại lặng lẽ và cho đầu ra thô đi qua. Nó sẽ không bao giờ làm sập agent chủ của bạn.
-
-```bash
-# Phát triển
-cargo build --release
-cargo test --all
-make fmt && make clippy
-```
-
 ---
 
 ## Câu hỏi thường gặp
@@ -347,6 +199,24 @@ Có. Bạn có thể dạy OMNI bóc phần nhiễu riêng của công cụ nộ
 [filters.my_tool]
 match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
+```
+
+**Làm sao xem mức tiết kiệm của chính tôi?**
+Chạy `omni stats` sau vài ngày. `omni stats --share` in ra cùng những con số đó ở dạng
+tiện sao chép.
+
+---
+
+## Tìm hiểu thêm
+
+* [Cách hoạt động và cái giá của nó](../docs/ARCHITECTURE.md): pipeline, RewindStore, Memory OS
+* [Đo đạc đầy đủ](../docs/BENCHMARKS.md): tập dữ liệu, theo lệnh, fixture, độ trễ
+* [Đóng góp](../CONTRIBUTING.md): chạy được `make ci` là xong
+
+---
+
+```bash
+brew install fajarhide/tap/omni && omni init
 ```
 
 ## Đóng góp & Giấy phép

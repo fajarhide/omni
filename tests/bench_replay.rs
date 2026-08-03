@@ -1,7 +1,7 @@
 //! #184 — the reproducible net-savings benchmark.
 //!
 //! Replays every `execution_traces.raw_input` through the CURRENT pipeline and
-//! aggregates raw vs distilled bytes, so the published headline (docs/PERFOMANCE.md,
+//! aggregates raw vs distilled bytes, so the published headline (docs/BENCHMARKS.md,
 //! README) can be re-measured on the shipped binary rather than trusted from a run
 //! nobody kept. This is the committed reproducer the README's "Numbers you can
 //! reproduce" promises.
@@ -11,7 +11,7 @@
 //!   OMNI_BENCH_DB=~/.omni/omni.db \
 //!     cargo test --release --test bench_replay -- --ignored --nocapture
 //!
-//! Faithfulness to docs/PERFOMANCE.md's method:
+//! Faithfulness to docs/BENCHMARKS.md's method:
 //! - `session: None` + `store: None` → the scorer sees no history, i.e. the
 //!   "fresh HOME per invocation" the method requires (a warm DB is non-deterministic).
 //! - `HOME` is pointed at an empty temp dir so only the embedded signals load, not
