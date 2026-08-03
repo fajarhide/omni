@@ -67,7 +67,42 @@ const SENSITIVE_PATTERNS: &[&str] = &[
 // Detection helpers
 // ---------------------------------------------------------------------------
 
+/// A `grep -n` over a **single** file: every line is `<lineno>:<text>` with no
+/// path, because grep only prefixes the filename when it was given more than one.
+///
+/// Worth its own arm because the payload that missed it was not distilled by
+/// `distill_grep_output` at all: it fell through to the generic system-ops
+/// fallback, which keeps Critical and Important segments and drops the rest, and
+/// dropped 7 of 12 matches including `expr: absent(probe_success{tier="nmc"} == 1)`
+/// and the alert summary, while four lines of runbook prose survived (#316).
+/// A grep pattern *is* the caller's filter, so scoring its results by noise is a
+/// second filter that cannot know what the first was looking for.
+///
+/// Misrouting into the grep distiller is harmless, which is what makes widening
+/// the detector the safe direction: `distill_grep_output` hoists losslessly and
+/// hands back the input whenever hoisting does not shrink it.
+fn is_numbered_single_file_grep(lines: &[&str]) -> bool {
+    let mut numbered = 0usize;
+    for l in lines {
+        let t = l.trim_end();
+        if t.is_empty() {
+            continue;
+        }
+        let Some((head, _)) = t.split_once(':') else {
+            return false;
+        };
+        if head.is_empty() || !head.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+        numbered += 1;
+    }
+    numbered >= 3
+}
+
 fn is_grep_output(lines: &[&str]) -> bool {
+    if is_numbered_single_file_grep(lines) {
+        return true;
+    }
     // grep/ripgrep: lines with "filepath:content" or "filepath:linenum:content"
     // Exclude lines that look like error output
     let grep_count = lines
@@ -572,6 +607,48 @@ fn distill_fallback(segments: &[OutputSegment]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// #316: `grep -n` over a single file prints `<lineno>:<text>` with no path,
+    /// because grep only prefixes the filename when given more than one. That
+    /// missed `is_grep_output`, so it fell through to the generic system-ops
+    /// fallback, which keeps Critical and Important segments and drops the rest.
+    /// On a 12-match grep over an alerting manifest it delivered 5 and cut 7,
+    /// including `expr: absent(probe_success{tier="nmc"} == 1)` and the alert
+    /// summary, while four lines of runbook prose survived. An agent reading it
+    /// concludes the file has one alert expression when it has two.
+    ///
+    /// Driven through `distill_with_command`, because the routing is the defect:
+    /// asserting on `distill_grep_output` would have passed all along.
+    #[test]
+    fn a_single_file_numbered_grep_keeps_every_match() {
+        let input = "\
+1:# NMC / partner connectivity alerts. Fire on the blackbox probe_success metric
+9:#   1. NMCConnectivityAllDown (critical) -- absent(probe_success{tier=nmc}==1):
+14:#      targets (e.g. a service that is simply off), so day-one does not page for
+26:  instanceSelector:
+49:        description: Every NMC-tier target on the connectivity probe has been unreachable for 5m (or the probe stopped reporting).
+67:            expr: absent(probe_success{tier=\"nmc\"} == 1)
+114:        summary: \"{{ $labels.service }} ({{ $labels.instance }}) is unreachable from 10.105.0.4\"
+115:        description: The connectivity probe to {{ $labels.service }} at {{ $labels.instance }} (tier {{ $labels.tier }}) has failed for 10m.
+117:          1. Reproduce: az ssh vm --ip 10.105.0.4 -- 'nc -zvw3 <host> <port>'
+118:          2. Is only this one target down, or several? Several nmc-tier targets = suspect the tunnel
+119:          3. One target only = likely the remote service/port, not the network.
+131:            expr: (probe_success{tier=~\"nmc|partner\"} == 0) and (max_over_time(probe_success[6h]) == 1)
+";
+        let cmd = "grep -n probe_success alerting/nmc-connectivity.yaml";
+        let segments = crate::pipeline::scorer::score_with_command(input, cmd, None);
+        let out = crate::distillers::distill_with_command(&segments, input, cmd, None);
+
+        for line_no in [
+            "1:", "9:", "14:", "26:", "49:", "67:", "114:", "115:", "117:", "118:", "119:", "131:",
+        ] {
+            assert!(
+                out.contains(line_no),
+                "match {line_no} was dropped; a grep pattern is the caller's filter: {out}"
+            );
+        }
+    }
+
     use super::*;
 
     /// #247: the match count was global and printed once at position 0, so it
