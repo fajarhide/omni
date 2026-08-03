@@ -3,7 +3,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -279,9 +279,11 @@ pub fn queue_for_learn(input: &str, command: &str) {
     let cmd = command.to_string();
 
     std::thread::spawn(move || {
-        let dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".omni");
+        // Through `paths`, not around it. Resolving the directory here meant
+        // `OMNI_HOME` did not cover the queue, so it was written to the real
+        // `~/.omni` whatever the configuration said, and the writer and the
+        // reader then disagreed about which home they were talking about (#312).
+        let dir = crate::paths::omni_home();
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("learn_queue.jsonl");
 
@@ -291,26 +293,23 @@ pub fn queue_for_learn(input: &str, command: &str) {
             "sample": input_clone,
         });
 
-        let mut should_auto_apply = false;
         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
             let _ = writeln!(file, "{}", entry);
-
-            // Check line count for auto-apply
-            if let Ok(content) = fs::read_to_string(&path)
-                && content.lines().count() >= 50
-            {
-                should_auto_apply = true;
-            }
         }
 
-        if should_auto_apply {
-            let _ = crate::cli::learn::run_learn(&[
-                "omni".to_string(),
-                "learn".to_string(),
-                "--apply".to_string(),
-                "--from-queue".to_string(),
-            ]);
-        }
+        // This thread used to call `cli::learn::run_learn` once the queue passed
+        // 50 lines. `run_learn` is a user-facing printer: it writes to stdout
+        // unconditionally, and in pipe mode stdout *is* the payload. On ubuntu
+        // that put 149 bytes of `ℹ No learning data available yet.` on the end
+        // of a git diff, so a 396 B passthrough was delivered as 545 B with
+        // OMNI's console text inside the data (#312). It was green on macOS
+        // every time, because the process usually exits before the thread runs,
+        // which is the worst property a bug can have.
+        //
+        // Queueing stays; applying does not happen behind the user's back. The
+        // filters it wrote unattended are the ones #307 measured accumulating to
+        // 1.8 MB, and #266 had already narrowed the suggestions they are built
+        // from. `omni learn --apply` still does it on request.
     });
 }
 

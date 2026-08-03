@@ -135,12 +135,25 @@ fi
 # ─── 5. Pipe Mode ────────────────────────────────────────
 echo "▸ Scenario 5: Pipe Mode"
 PIPE_INPUT=$(cat tests/fixtures/git_diff_multi_file.txt)
-PIPE_INPUT_LEN=${#PIPE_INPUT}
 PIPE_OUT=$(echo "$PIPE_INPUT" | "$OMNI" 2>/dev/null)
 PIPE_EXIT=$?
-PIPE_OUT_LEN=${#PIPE_OUT}
+# Bytes on both sides, explicitly. `${#var}` counts characters under a UTF-8
+# locale and bytes under C, so the same output measured 396 on macOS and 399 on
+# ubuntu: one `…` in a marker is three bytes and one character. The check is
+# about payload size, so it has to mean bytes everywhere.
+PIPE_INPUT_LEN=$(printf '%s' "$PIPE_INPUT" | wc -c | tr -d ' ')
+PIPE_OUT_LEN=$(printf '%s' "$PIPE_OUT" | wc -c | tr -d ' ')
 check_exit "pipe mode exit 0" "$PIPE_EXIT" "0"
 check_shorter "pipe output ≤ input" "$PIPE_INPUT_LEN" "$PIPE_OUT_LEN"
+if [ "$PIPE_OUT_LEN" -gt "$PIPE_INPUT_LEN" ]; then
+    # This check fails on ubuntu and passes on macOS with every cold and warm
+    # home I can build locally, so print what the binary actually returned
+    # rather than guess at it a fourth time.
+    echo "  ── pipe diagnostic ──"
+    echo "  OMNI_HOME=${OMNI_HOME:-<unset>}"
+    ls -la "${OMNI_HOME:-$HOME/.omni}" 2>&1 | sed 's/^/  ls| /' | head -8
+    printf '%s' "$PIPE_OUT" | sed 's/^/  out| /' | tail -12
+fi
 
 # ─── 6. SessionStart Mock ────────────────────────────────
 echo "▸ Scenario 6: SessionStart Hook"
