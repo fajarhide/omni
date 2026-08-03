@@ -135,10 +135,14 @@ fi
 # ─── 5. Pipe Mode ────────────────────────────────────────
 echo "▸ Scenario 5: Pipe Mode"
 PIPE_INPUT=$(cat tests/fixtures/git_diff_multi_file.txt)
-PIPE_INPUT_LEN=${#PIPE_INPUT}
 PIPE_OUT=$(echo "$PIPE_INPUT" | "$OMNI" 2>/dev/null)
 PIPE_EXIT=$?
-PIPE_OUT_LEN=${#PIPE_OUT}
+# Bytes on both sides, explicitly. `${#var}` counts characters under a UTF-8
+# locale and bytes under C, so the same output measured 396 on macOS and 399 on
+# ubuntu: one `…` in a marker is three bytes and one character. The check is
+# about payload size, so it has to mean bytes everywhere.
+PIPE_INPUT_LEN=$(printf '%s' "$PIPE_INPUT" | wc -c | tr -d ' ')
+PIPE_OUT_LEN=$(printf '%s' "$PIPE_OUT" | wc -c | tr -d ' ')
 check_exit "pipe mode exit 0" "$PIPE_EXIT" "0"
 check_shorter "pipe output ≤ input" "$PIPE_INPUT_LEN" "$PIPE_OUT_LEN"
 
