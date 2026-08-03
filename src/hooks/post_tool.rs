@@ -1127,7 +1127,34 @@ mod tests {
         })
         .to_string();
 
-        let out = process_payload(&payload, None, None).expect("signal should be distilled");
+        // Diagnostic on failure rather than a bare `expect`: this asserts a
+        // filter wins a race against every other loaded signal, and which one
+        // matched is the first thing anyone debugging it needs.
+        let out = process_payload(&payload, None, None).unwrap_or_else(|| {
+            let filters = crate::pipeline::toml_filter::load_all_filters();
+            let matched: Vec<&str> = filters
+                .iter()
+                .filter(|f| f.matches("black --check ."))
+                .map(|f| f.name.as_str())
+                .collect();
+            let outcome = filters
+                .iter()
+                .find(|f| f.matches("black --check ."))
+                .map(|f| match f.apply_batch(&content) {
+                    crate::pipeline::toml_filter::BatchFilterOutcome::Passthrough => {
+                        "Passthrough".to_string()
+                    }
+                    crate::pipeline::toml_filter::BatchFilterOutcome::Filtered(o) => {
+                        format!("Filtered({} B of {} B): {o:?}", o.len(), content.len())
+                    }
+                })
+                .unwrap_or_else(|| "no filter matched".to_string());
+            panic!(
+                "the hook declined. filters loaded={}, matching black={matched:?}, \
+                 first outcome={outcome}",
+                filters.len()
+            )
+        });
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
         let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
             .as_str()
