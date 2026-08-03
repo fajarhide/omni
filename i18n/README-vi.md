@@ -1,117 +1,148 @@
 <div align="center">
-  <img src="../media/hero.svg" alt="OMNI" width="800" />
-  
-  **Ngữ cảnh khử nhiễu và bộ nhớ dài hạn cho AI agent của bạn — có mất mát, nhưng luôn khôi phục được, và không bao giờ bịa ra kết quả. Đừng trả tiền để Claude đọc 10.000 dòng nhiễu terminal nữa.**
+  <img src="../media/logo.png" alt="OMNI Logo" width="300" />
 
-  **Giảm 58,9% token trên tổ hợp lệnh thực tế · Bộ nhớ xuyên phiên · An toàn định dạng · Luôn khôi phục được · Fail open, không bịa · Những con số bạn tái lập được**
+<h1>OMNI</h1>
+<p align="center">
+    <em>Ngữ cảnh khử nhiễu và bộ nhớ dài hạn cho AI agent của bạn. <b>Có mất mát, nhưng luôn khôi phục được, và không bao giờ bịa ra kết quả.</b> Đừng trả tiền để Claude đọc 10.000 dòng nhiễu terminal nữa.</em>
+</p>
 
-  [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
+[🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
 
-  [![CI](https://github.com/fajarhide/omni/actions/workflows/ci.yml/badge.svg)](https://github.com/fajarhide/omni/actions/workflows/ci.yml)
-  [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
+[![CI](https://github.com/fajarhide/omni/actions/workflows/ci.yml/badge.svg)](https://github.com/fajarhide/omni/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
   [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
+</br></br>
+<b>
+Giảm 58,9% token trên tổ hợp lệnh thực tế &middot; Bộ nhớ xuyên phiên &middot; An toàn định dạng &middot; Luôn khôi phục được &middot; Fail open, không bịa &middot; Những con số bạn tái lập được </b>
+
+</br></br>
+<img src="../media/demo.gif" alt="OMNI chưng cất một lần chạy cargo test ồn ào xuống còn kết luận, rồi hiển thị omni stats" width="820" />
 </div>
 
-<br/>
-
-> **OMNI** là **Hệ Điều Hành Ngữ Cảnh (Context OS) dành cho Tác Nhân AI Tự Trị**.
-> Nó hoạt động như một bộ lọc ngữ nghĩa hiệu suất cao giữa thiết bị đầu cuối (terminal) của bạn và LLM. Bằng cách chưng cất thông minh các log nhiễu, lưu đệm trạng thái và quản lý ngân sách token, OMNI đảm bảo agent của bạn giữ được tập trung, giảm ảo giác và chạy vòng lặp hoàn hảo. Đo trên 1.810 trace thực phát lại bằng bản binary phát hành: số byte tới model **giảm 58,9%** (15,0 MB → 6,2 MB) — và **63,6% lệnh gọi không tiết kiệm được gì**, con số đó chúng tôi cũng công bố.
-> 
-> *Ngừng trả tiền cho sự ồn ào của thiết bị đầu cuối. Bắt đầu xây dựng bằng tín hiệu thuần túy.*
 ---
 
-## Mục lục
-- [Vấn đề: Phình to ngữ cảnh, Token Đắt đỏ & Đầu ra Ồn ào](#vấn-đề-phình-to-ngữ-cảnh-token-đắt-đỏ--đầu-ra-ồn-ào)
-- [Giải pháp: Omni](#giải-pháp-omni)
-- [Triết lý](#triết-lý)
-- [Các Trường hợp Sử dụng Thực tế](#các-trường-hợp-sử-dụng-thực-tế)
-- [Hiệu suất & Điểm chuẩn](#hiệu-suất--điểm-chuẩn)
-- [Giải thích các Tính năng](#giải-thích-các-tính-năng)
-- [Dưới Mui xe: Cách Omni Hoạt động](#dưới-mui-xe-cách-omni-hoạt-động)
-- [Kiến trúc](#kiến-trúc)
-- [Bắt đầu Nhanh & Cài đặt](#bắt-đầu-nhanh--cài-đặt)
-- [Cách Sử dụng](#cách-sử-dụng)
-  - [Hỗ trợ & Tích hợp Đa Tác nhân](#hỗ-trợ--tích-hợp-đa-tác-nhân)
-  - [Chỉ mục Tài liệu](#chỉ-mục-tài-liệu)
-- [Hoạt động Tốt hơn với Heimsense](#hoạt-động-tốt-hơn-với-heimsense)
-- [Đóng góp & Giấy phép](#đóng-góp--giấy-phép)
+Mọi trợ lý lập trình AI đều có hai vấn đề lớn.
+
+**1. Chúng đọc mọi thứ.**  
+Log build.  
+Log Docker.  
+Log CI.  
+Thanh tiến trình.  
+Màu ANSI.  
+Hàng nghìn token, chỉ để tìm một dòng. Claude không đắt. Terminal của bạn mới đắt.
+
+**2. Chúng quên mọi thứ.**  
+Mỗi lần bạn khởi động lại Cursor, hay chuyển từ Claude Code sang Windsurf, agent của bạn mất trí nhớ. Bạn phải giải thích lại mục tiêu dự án. Bạn phải nhắc lại cùng những cái bẫy của framework hết lần này đến lần khác.
+
+OMNI sửa cả hai.
 
 ---
 
-## Vấn đề: Mã thông báo đắt đỏ, Ảo giác & Vòng lặp vô hạn
+## Khác biệt ở đâu
 
-Khi bạn chạy các tác nhân AI tự trị (như Claude Code, Cursor hoặc Aider) trong thiết bị đầu cuối của mình, chúng đọc *mọi thứ*. Một lệnh `npm install` hoặc `cargo test` đơn giản có thể dễ dàng đổ 10.000 đến 25.000 mã thông báo (token) chứa toàn tiếng ồn vô ích vào cửa sổ ngữ cảnh AI của bạn.
+**Vấn đề 1: terminal nhấn chìm tín hiệu**
 
-Điều này gây ra những thất bại nghiêm trọng:
-1. **Đốt sạch ngân sách**: Bạn trả tiền thật cho từng mã thông báo của đầu ra rác.
-2. **Tác nhân "Mất trí nhớ" & Ảo giác**: Các lỗi cốt lõi bị chôn vùi dưới hàng megabyte thanh tải (loading bar) và cảnh báo phụ thuộc. AI trở nên bối rối, đánh mất mục tiêu ban đầu và tạo ra các bản sửa lỗi ảo giác cho những vấn đề không chính xác.
-3. **Bị khóa vào Mô hình đắt tiền (Model Lock-in)**: Bạn buộc phải sử dụng các mô hình hàng đầu đắt tiền nhất chỉ để có một cửa sổ ngữ cảnh đủ lớn nhằm xử lý sự cồng kềnh đó.
-4. **Vòng lặp mong manh**: Các vòng lặp tự trị bị phá vỡ vì các tác nhân thiếu nhận thức về giới hạn mã thông báo và áp lực ngữ cảnh.
+Cùng một `git log`, đặt cạnh nhau. Không có OMNI, riêng `Author` / `Date` / phần thân
+của một commit đã đầy màn hình. Có OMNI, **mọi commit đều còn nguyên**, dưới dạng một
+dòng `hash subject`, nhỏ hơn 94%. Không có gì bị tóm tắt mất đi; con số ở chân trang
+được đo từ số byte thật, không phải lời hứa.
 
-## Giải pháp: OMNI Context OS
+<table>
+<tr>
+<td align="center"><b>Không có OMNI</b><br/><sub><code>git log -15</code> thô</sub></td>
+<td align="center"><b>Có OMNI</b><br/><sub>giữ mọi commit, nhỏ hơn 94%</sub></td>
+</tr>
+<tr>
+<td valign="top"><img src="../media/demo-git-without.gif" alt="git log -15 thô dài dòng: Author, Date và phần thân của một commit lấp đầy màn hình" width="400" /></td>
+<td valign="top"><img src="../media/demo-git-with.gif" alt="cùng git log -15 qua OMNI: mỗi commit thành một dòng hash và subject, nhỏ hơn 94%" width="400" /></td>
+</tr>
+</table>
 
-OMNI là phần mềm trung gian minh bạch tối thượng dành cho Agentic AI.
+Con số thật, đo trên `tests/fixtures/` và các trace phát lại, không phải mong muốn:
 
-Nó chặn các lệnh từ thiết bị đầu cuối ngay lập tức, loại bỏ tiếng ồn và cung cấp cho AI của bạn một bản tóm tắt ngữ nghĩa cô đọng cao. **Kết quả?** Bạn có thể chạy tác nhân của mình trên các mô hình giá cả phải chăng, cung cấp cho nó *không có tiếng ồn*, và chứng kiến nó giải quyết các tác vụ mã hóa phức tạp ngay lập tức.
+| Lệnh | Không có OMNI | Có OMNI | Tiết kiệm |
+|---|---|---|---|
+| `cargo test` (490 đạt, 10 hỏng) | 16,5 KB đầu ra từng test | bản tóm tắt đạt/hỏng của chính runner | **93%** |
+| `kubectl get pods` (35 pod, 5 crash) | toàn bộ bảng | `35 pods \| 30 running, 5 error` cùng tên 5 pod hỏng | không cắt |
+| `git diff` (nhiều tệp) | lockfile, khoảng trắng, thay đổi do sinh mã | phần mã thực sự thay đổi | **45%** |
+| `docker build` (nhiễu cache nặng) | 9,2 KB hash layer và thanh tiến trình | kết quả build, cache hit được gộp | **37%** |
 
-Cho dù bạn đang chạy một lệnh gọi công cụ MCP nhanh hay điều phối một vòng lặp Maker-Checker đa tác nhân khổng lồ, OMNI cung cấp bộ nhớ liên tục, theo dõi ngân sách và các hàng rào thực tế mà AI của bạn cần để thành công.
+> **Lưu ý thành thật:** OMNI nén phần đầu ra *thành công nhưng ồn ào*. Một lệnh **thất bại** được cho qua **nguyên vẹn**, vì một lỗi bị giấu còn tệ hơn một lỗi chưa nén, và đầu ra có cấu trúc (JSON/YAML/CSV) không bao giờ bị chạm vào. Nó xứng đáng có mặt ở phần lải nhải lặp lại của công cụ, và tránh đường ở mọi chỗ khác.
 
-Ngữ cảnh rất đắt đỏ và ồn ào. OMNI sẽ sửa chữa điều đó.
+### Vì sao một công cụ có mất mát vẫn đáng tin
+
+Các bộ nén khác đề nghị bạn *tin* rằng thứ họ cắt đi không quan trọng. OMNI không đề nghị, nó bảo đảm, và mỗi bảo đảm đều có mã nguồn bạn đọc được đứng sau:
+
+| Bảo đảm | Bằng cách nào | Bằng chứng |
+|---|---|---|
+| **Lấy lại bản gốc, từng byte một** | mọi thứ bị cắt đều được lưu trong **RewindStore** SQLite cục bộ (SHA-256 tới nội dung); agent nhận một hash và gọi `omni_retrieve` | [`Cách hoạt động`](#cách-hoạt-động) |
+| **Không bao giờ bịa kết quả** | bộ chưng cất không phân tích được tín hiệu nào sẽ trả về đầu ra thô, chứ không phải một dòng xanh `no errors` hay `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
+| **Thất bại không bao giờ bị che** | lệnh thoát với mã khác 0 được cho qua nguyên vẹn | [#120](https://github.com/fajarhide/omni/issues/120) |
+| **Dữ liệu có cấu trúc không bị chạm** | JSON / YAML / NDJSON / CSV đi qua từng byte một | `pipeline::format` |
+| **Số liệu là đo được, không phải kỳ vọng** | 1.810 trace thật phát lại trên bản binary phát hành, và 63,6% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
+
+Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
+
+**Vấn đề 2: agent của bạn quên sạch sau một đêm**
+
+### Bắt đầu một phiên mới
+**Không có OMNI:** "Giải thích lại cấu trúc dự án giúp mình, module auth đang hỏng, và tụi mình dùng Postgres chứ không phải MySQL."  
+**Có OMNI:** Agent đã biết rồi. Nó tiếp tục từ chỗ bạn dừng.
+
+### Sửa cùng một bug hai lần
+**Không có OMNI:** Agent lại vấp đúng cái bẫy framework nó đã gỡ hôm qua, vì nó không có trí nhớ.  
+**Có OMNI:** Cách sửa đã được lưu. Agent tự lôi ra qua công cụ MCP `omni_recall` trước khi lặp lại sai lầm.
+
+### Làm việc qua nhiều IDE (Cursor sang Claude Code)
+**Không có OMNI:** IDE mới, agent mới, ngữ cảnh bằng 0. Bạn bắt đầu lại từ đầu.  
+**Có OMNI:** Bản tóm tắt phiên được tiêm tự động. Agent mới bắt nhịp ngay.
 
 ---
 
-## Triết lý
+## Vì sao điều này quan trọng
 
-OMNI không được xây dựng chỉ để "cắt giảm ngữ cảnh" hoặc "tiết kiệm token" — đó chỉ là những tác dụng phụ vui vẻ. Triết lý thực sự đằng sau OMNI là **Chất lượng Ngữ cảnh**.
+Đoạn mã bạn *không* gửi cho AI cũng quan trọng như đoạn bạn gửi.
 
-Các tác nhân AI như Claude chỉ thông minh như ngữ cảnh bạn cung cấp cho chúng. Khi bạn làm ngập chúng bằng megabyte nhật ký phụ thuộc hoặc thanh tải, bạn buộc chúng phải sàng lọc rác để tìm ra vấn đề thực sự. Điều này làm loãng khả năng suy luận của chúng và dẫn đến các phản hồi bị suy giảm hoặc không hữu ích.
+Khi bạn nhồi cho AI hàng megabyte nhiễu terminal, nó rơi vào tình trạng phình ngữ cảnh: ảo giác ra cách sửa cho những cảnh báo không liên quan và đốt ngân sách API vào đầu ra vô ích.
 
-**Mục tiêu của OMNI là cung cấp cho AI của bạn tín hiệu thuần túy, mật độ cao.** Điều này có nghĩa là chỉ lấy ngữ cảnh thực sự quan trọng và có ý nghĩa đối với Claude. Chúng tôi dọn dẹp những tiếng ồn mà AI không cần, có nghĩa là:
-1. Tự động, số lượng token bạn sử dụng ít hơn đáng kể.
-2. Phản hồi của AI có **chất lượng cao hơn đáng kể** vì cửa sổ ngữ cảnh của nó được tập trung tia laser vào vấn đề thực sự.
+Khi bạn khởi động lại agent và nó không có trí nhớ, bạn mất hàng giờ dựng lại ngữ cảnh lẽ ra đã được giữ tự động.
 
-**Hãy dùng thử trong một tuần.** Cảm nhận sự khác biệt về chất lượng và tốc độ suy luận của AI khi nó được cung cấp một chế độ ăn gồm tín hiệu thuần túy thay vì tiếng ồn thô của thiết bị đầu cuối.
+OMNI giải quyết cả hai, một cách vô hình:
 
----
-
-## Các Trường hợp Sử dụng Thực tế
-
-OMNI được thiết kế để giải quyết những sự bực bội hàng ngày của các nhà phát triển Agentic AI. Đây là cách OMNI biến đổi quy trình làm việc của bạn:
-
-1. **"Vòng lặp Vô hạn của Cái chết" trong Monorepos**
-   - **Tình huống**: Bạn yêu cầu Claude chạy `npm install` và `npm run build` trong một monorepo lớn. Nó xuất ra 20.000 dòng cảnh báo phụ thuộc và một lỗi bản dựng nhỏ ở cuối. AI bị phân tâm bởi các cảnh báo và cố gắng khắc phục các sự cố phụ thuộc không liên quan, đốt cháy token của bạn và khiến bạn mắc kẹt trong một vòng lặp vô hạn.
-   - **Bản sửa lỗi của OMNI**: OMNI chặn bản dựng. Nó hoàn toàn tắt tiếng hàng trăm cảnh báo `peer dependency` và chỉ đưa ra `Build Error: Cannot find module 'X'` cùng với dấu vết ngăn xếp (stack trace). AI thấy đầu ra 50 token và sửa mã ngay lập tức.
-
-2. **"Ảo giác Im lặng" trên Tệp Lớn**
-   - **Tình huống**: AI muốn hiểu một dự án và chạy `cat src/utils.ts`. Tệp dài 3.000 dòng. AI vật lộn để giữ tất cả nó trong bộ nhớ làm việc và bắt đầu ảo giác các chữ ký hàm.
-   - **Bản sửa lỗi của OMNI**: OMNI chặn `cat` thô và thay thế nó bằng **Structured Outline (Dàn ý có cấu trúc)**. Nó hiển thị cho AI các lượt nhập, API công khai (tên hàm và loại) và đánh dấu rủi ro, giảm đầu ra 80%. Sau đó, OMNI cảnh báo AI: `"Tệp này có 12 yếu tố phụ thuộc — hãy sử dụng omni_context cho bản đồ tác động."` AI được hướng dẫn để thực hiện các chỉnh sửa an toàn hơn, dựa trên thực tế.
-
-3. **Cộng tác Đa Tác nhân**
-   - **Tình huống**: Bạn đang sử dụng Cursor IDE để chỉnh sửa nhanh và Claude Code CLI cho các tác vụ nặng. Cả hai đều cần biết chuyện gì đang xảy ra mà không cần chạy các lệnh thừa và lãng phí token.
-   - **Bản sửa lỗi của OMNI**: OMNI hoạt động như một lớp bộ nhớ chia sẻ. Bằng cách sử dụng `omni_agents` và `Store` SQLite cục bộ của nó, Cursor và Claude chia sẻ cùng các luồng bộ nhớ đã được lọc, lỗi hoạt động và môi trường thực thi. Chúng hợp tác mà không đụng độ.
+* **Ít nhiễu hơn** nên chi phí thấp hơn, và ít đầu ra vô ích để mô hình vấp phải hơn.
+* **An toàn định dạng từ thiết kế**: JSON, YAML, NDJSON và CSV đi qua từng byte một; bộ chưng cất không phân tích được đầu vào sẽ im lặng thay vì bịa ra một bản tóm tắt.
+* **Bộ nhớ bền**: không phải giải thích lại dự án, không phải lặp lại cùng một cách sửa.
+* **Cài một lần**: chạy lặng lẽ cùng mọi agent bạn đang dùng.
 
 ---
 
-## Hiệu suất & Điểm chuẩn
+## Đo đạc
+
+Con số tiêu đề trung thực, đo trên bản binary phát hành với **1.810 lần thực thi lệnh
+thật** phát lại từ thói quen sử dụng của một lập trình viên:
+
+* **Giảm 58,9% số byte** tới mô hình trên toàn bộ tổ hợp (15,0 MB xuống 6,2 MB).
+* **63,6% trong số lệnh gọi đó không tiết kiệm được gì cả.** OMNI trả đầu ra lại nguyên
+  vẹn, thêm **0** byte. Toàn bộ phần tiết kiệm đến từ 36,4% còn lại, nơi thực sự có
+  nhiễu để cắt.
+* **Đầu ra có cấu trúc không bao giờ bị chạm vào.** JSON, YAML, NDJSON và CSV đi qua
+  từng byte một, vì một payload hỏng đắt hơn một lần nén bị bỏ lỡ.
+
+Gạch đầu dòng thứ hai mới là con số mà các công cụ cùng loại hiếm khi in ra. Một công
+cụ tuyên bố tiết kiệm 90% trên mọi lệnh đang nói với bạn rằng phần đầu ra bạn cần cũng
+đã bị tóm tắt mất.
+
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Con số trung thực, đo trên tệp nhị phân phát hành với **1.810 lần thực thi lệnh thật**, phát lại từ việc sử dụng thực tế của một nhà phát triển:
-
-* **Giảm 58,9% số byte** đến được mô hình (15,0 MB → 6,2 MB).
-* **63,6% trong số các lần gọi đó không tiết kiệm được gì cả.** OMNI trả lại đầu ra nguyên vẹn và **không thêm một byte nào**. Toàn bộ phần tiết kiệm đến từ 36,4% còn lại, nơi thực sự có nhiễu để cắt.
-* **Đầu ra có cấu trúc không bao giờ bị đụng tới.** JSON, YAML, NDJSON và CSV đi qua nguyên vẹn từng byte, vì một payload hỏng đắt hơn một lần bỏ lỡ nén.
-
-Gạch đầu dòng thứ hai mới là con số mà các công cụ cùng loại hiếm khi in ra. Một công cụ tuyên bố tiết kiệm 90% trên mọi lệnh đang nói với bạn rằng phần đầu ra bạn cần cũng đã bị tóm tắt mất.
-
 Phần tiết kiệm thực sự đến từ đâu, trên cùng 1.810 lần thực thi:
 
-| Lệnh | Lần gọi | Đầu vào | Đầu ra | Tiết kiệm |
-|------|---------|---------|--------|-----------|
+| Lệnh | Lần gọi | Vào | Ra | Tiết kiệm |
+|---------|-------|-------|--------|-------|
 | `cargo` | 29 | 424 KB | 13 KB | **96,8%** |
 | `git` | 256 | 5,9 MB | 509 KB | **91,3%** |
 | `ls` | 52 | 71 KB | 29 KB | **59,5%** |
@@ -120,112 +151,54 @@ Phần tiết kiệm thực sự đến từ đâu, trên cùng 1.810 lần th�
 | `grep` | 184 | 534 KB | 385 KB | **27,8%** |
 | `cat` | 85 | 515 KB | 468 KB | **9,1%** |
 
-`git` và `cargo` gánh phần lớn kết quả; `cat` và `grep` gần như vô hiệu. OMNI phát huy giá trị trên đầu ra công cụ ồn ào và lặp lại, và tránh đường ở mọi nơi khác.
+`git` và `cargo` gánh kết quả; `cat` và `grep` gần như không đổi. OMNI xứng đáng có chỗ
+ở đầu ra công cụ ồn ào và lặp lại, còn ở nơi khác thì tránh đường.
 
-Các fixture đơn lẻ trong `tests/fixtures/`, nếu bạn muốn tự tái lập:
+Các fixture đơn lẻ trong `tests/fixtures/`, nếu bạn muốn tự tái lập từng cái:
 
-| Lệnh / Ngữ cảnh | Đầu vào | Đầu ra | Tiết kiệm |
-|-------------------|---------|--------|-----------|
+| Lệnh / Bối cảnh | Vào | Ra | Tiết kiệm |
+|-------------------|-------|--------|-------|
 | `cargo build` (lớn, thành công) | 3.220 B | 9 B | **99,7%** |
-| `cargo test` (490 đạt, 10 lỗi) | 16,5 KB | 1.100 B | **93,3%** |
+| `cargo test` (490 đạt, 10 hỏng) | 16,5 KB | 1.100 B | **93,3%** |
 | `pytest` (có lỗi) | 730 B | 136 B | **81,4%** |
-| `git status` (bẩn) | 496 B | 113 B | **77,2%** |
-| `git diff` (đa tệp) | 397 B | 220 B | **44,6%** |
+| `git status` (có thay đổi) | 496 B | 113 B | **77,2%** |
+| `git diff` (nhiều tệp) | 397 B | 220 B | **44,6%** |
 | `docker build` (nhiễu nặng) | 9,2 KB | 5,8 KB | **37,2%** |
 | `kubectl get pods` (hỗn hợp) | 840 B | 762 B | **9,3%** |
 
-**Độ trễ là chi phí thật, không phải bằng không.** OMNI chạy trên mọi lệnh được hook, và cái giá tăng theo lịch sử của bạn: `git status` 496 byte mất ~82 ms với cơ sở dữ liệu mới và ~308 ms với cơ sở dữ liệu 97 MB. `cargo test` 16,5 KB mất ~276 ms. Hãy tính đến điều đó.
+**Độ trễ là chi phí thật, không phải bằng 0.** OMNI chạy trên mọi lệnh được hook, và
+cái giá lớn dần theo lịch sử của bạn: `git status` 496 byte mất khoảng 82 ms với cơ sở
+dữ liệu mới và khoảng 308 ms với cơ sở dữ liệu 97 MB. `cargo test` 16,5 KB mất khoảng
+276 ms. Hãy tính vào ngân sách.
 
-*Để xem khoản tiết kiệm token thực tế của riêng bạn, chỉ cần chạy `omni stats` sau vài ngày sử dụng.*
+*Để xem mức tiết kiệm token của chính bạn, chỉ cần chạy `omni stats` sau vài ngày sử dụng.*
 
----
-
-## Giải thích các Tính năng
-
-### Động cơ Chưng cất Cốt lõi (Core Distillation Engine)
-- **Không còn sự nhầm lẫn cho AI**: Omni hoạt động như một bộ lọc thông minh. Nếu một bài kiểm tra thất bại, nó *chỉ* hiển thị cho AI dòng lỗi cụ thể và stack trace, chặn các nhật ký phụ thuộc ồn ào.
-- **Giảm 58,9% token trên tổ hợp lệnh thực tế**: đây là số đo, không phải kỳ vọng — 1.810 trace thực được phát lại trên bản binary phát hành. Nhưng lưu ý: **63,6% lệnh gọi không tiết kiệm được gì cả** — OMNI trả nguyên đầu ra, không thêm một byte nào. Toàn bộ phần tiết kiệm đến từ 36,4% còn lại, nơi thực sự có nhiễu.
-- **Nén Thích ứng (Adaptive Compression)**: OMNI theo dõi khi các tác nhân truy xuất đầu ra bị bỏ sót. Nếu một lệnh thường xuyên bị truy xuất, OMNI sẽ tự động nới lỏng việc nén vào lần tới.
-- **Bỏ qua Tốc độ cao Thông minh**: Để đảm bảo độ trễ bằng 0 cho các tác vụ nhỏ, OMNI tự động bỏ qua quá trình chưng cất đối với các đầu ra dưới ngưỡng 2000 token.
-
-### An toàn Ngữ cảnh & Bảo vệ Sự thật (Context Safety)
-- **Không mất thông tin**: Lo lắng Omni lọc mất thứ gì đó quan trọng? Đừng lo. Omni lưu đầu ra thô cục bộ (`RewindStore`). AI có thể tự động yêu cầu nó bằng cách sử dụng `omni_retrieve`.
-- **Cảnh vệ Chống Ảo giác**: OMNI chỉ phát ra cảnh báo khi nó có thông tin xác thực. Nếu đầu ra bị nén nhiều hoặc một tệp có quá nhiều phụ thuộc, OMNI sẽ đưa ra cảnh báo hệ thống để giữ cho AI của bạn thực tế.
-- **Khả năng Hiển thị Việc Bỏ sót**: OMNI đánh dấu rõ ràng nội dung bị xóa (ví dụ: `[OMNI: omitted X lines of noise]`) trong đầu ra, giúp AI của bạn nhận thức tình huống tốt hơn.
-
-### Trí tuệ Đa Tác nhân & Không gian Làm việc
-- **Cộng tác Đa Tác nhân**: Nhận thức đầy đủ về môi trường của nó. Nếu bạn đang chạy Cursor cùng với Claude CLI, chúng sẽ chia sẻ mượt mà các luồng bộ nhớ đã lọc mà không bị xung đột.
-- **Trí tuệ Phiên làm việc**: OMNI nhớ những gì bạn đang làm. Nó biết tệp nào bạn đang chỉnh sửa và ngừng cung cấp cho AI ngữ cảnh thừa thãi.
-- **ReadFile + Grep có Cấu trúc**: Thay vì kết xuất tệp thô, OMNI trả về dàn ý có cấu trúc (imports, public API) và các tóm tắt grep được nhóm.
-- **Biểu đồ Phụ thuộc Nhẹ**: OMNI xây dựng biểu đồ mối quan hệ tệp cục bộ nhanh chóng. Nếu AI của bạn đọc một tệp được nhập nhiều, OMNI sẽ cảnh báo về bản đồ tác động.
-
-### Độ trung thực Ngữ cảnh & Phục hồi Phiên (Context Fidelity & Session Recovery)
-- **Engrams (Tóm tắt Nhiệm vụ phụ Tự động)**: OMNI tự động phát hiện khi một nhiệm vụ phụ hoàn thành (ví dụ: giải quyết lỗi biên dịch, commit mã hoặc sửa một bài kiểm tra bị hỏng). Nó tạo ra một bản chụp nhanh được nén cao (một "Engram") mà không lãng phí token cho các cuộc gọi LLM, do đó tác nhân của bạn không bao giờ bị "chứng quên ngữ cảnh" trong các phiên làm việc dài.
-- **Nén Ngữ cảnh Thông minh (Smart Context Compaction)**: Khi cửa sổ ngữ cảnh của bạn đầy, OMNI không cắt giảm token một cách mù quáng. Nó sử dụng thuật toán nhận biết ưu tiên để đóng gói dữ liệu quan trọng nhất trước (Tệp được Ghim > Lỗi Hoạt động > Engrams > Hoạt động Công cụ > Tệp Nóng), tiết kiệm chi phí rất lớn.
-- **Bàn giao Phiên (Session Handoffs)**: Chuyển từ Claude Code sang Cursor? Sử dụng công cụ `omni_handoff` để xuất ngay lập tức bộ nhớ của phiên hiện tại (tệp nóng, lệnh gần đây, lỗi hoạt động) thành một bản tóm tắt markdown di động mà tác nhân mới của bạn có thể hấp thụ ngay lập tức.
-
-### Kỹ thuật Vòng lặp Tự động (Autonomous Loop Engineering)
-- **Hệ điều hành Ngữ cảnh cho Vòng lặp**: OMNI quản lý ngữ cảnh cho các tác nhân vòng lặp tự động lặp lại. Thông qua các biến môi trường (`OMNI_LOOP_BUDGET`, `OMNI_LOOP_GOAL`), OMNI áp đặt giới hạn chưng cất thích ứng và theo dõi lâu dài.
-- **Mẫu Xác minh Maker-Checker**: Mở rộng các nhiệm vụ của bạn một cách gọn gàng bằng cách tách việc thực thi (Tác nhân Maker) khỏi xác thực (Tác nhân Checker), trao đổi trạng thái ngữ cảnh một cách an toàn thông qua bộ nhớ phiên đa tác nhân của OMNI.
-- **Giới hạn Dự đoán Dựa trên Mục tiêu**: Việc chưng cất tự động mở rộng quy mô dựa trên mục tiêu nhiệm vụ—nếu mục tiêu chứa "debug", OMNI sẽ giữ lại nhiều ngữ cảnh lỗi hơn. Nếu là "refactor", OMNI sẽ nén dấu vết mã một cách mạnh mẽ.
-
-### Giám sát & Gỡ lỗi
-- **Bảng điều khiển Sức khỏe Phiên**: Chạy `omni session --health` để có bảng điều khiển trực quan đẹp mắt về áp lực ngữ cảnh, các engram hoạt động, hoạt động công cụ đang cuộn và token tiết kiệm được.
-- **Màn hình Chưng cất**: Theo dõi token tiết kiệm được theo thời gian. Sử dụng `omni_budget` và `omni_history` ngay bên trong LLM của bạn, hoặc chạy `omni stats`.
-- **Tác động Hình ảnh (`omni diff`)**: Chạy `omni diff` để so sánh trực quan đầu ra thô khổng lồ với phiên bản được lọc tinh gọn của Omni.
-- **Chuyển tiếp Gỡ lỗi**: Cần đầu ra thô? Chỉ cần đặt `OMNI_PASSTHROUGH=1` trong môi trường của bạn để vượt qua hoàn toàn động cơ và xem đầu ra gốc.
 
 ---
 
-## Dưới Mui xe: Cách Omni Hoạt động
+## Bắt đầu nhanh & Cài đặt
 
-OMNI không chỉ là một kịch bản regex; nó là một **Động cơ Tín hiệu Ngữ nghĩa** hiệu suất cao được viết bằng Rust. Nhưng làm thế nào nó cắt giảm đầu ra nhiễu trong chưa đầy 100 mili giây — và quyết định không làm gì khi không có gì để cắt?
-
-Đây là câu chuyện về những gì xảy ra bên trong cơ sở mã OMNI khi AI Agent của bạn nhập một lệnh như `cargo test`:
-
-1. **Sự đánh chặn (`src/hooks` & `src/main.rs`)**: Ngay lúc AI nhấn "Enter", OMNI sẽ đánh chặn việc thực thi. `main.rs` tự động phát hiện ngữ cảnh. Mô-đun `hooks` bọc lệnh một cách liền mạch, cho phép OMNI ghi lại đầu ra thiết bị đầu cuối thô dưới dạng luồng dữ liệu tốc độ cao mà không làm chậm quá trình thực thi.
-2. **Đường ống Truyền phát (`src/pipeline`)**: Thay vì đợi lệnh hoàn tất và đổ hàng megabyte văn bản vào bộ nhớ, OMNI xử lý đầu ra từng dòng bằng cách sử dụng đường ống truyền phát hiệu quả về bộ nhớ.
-3. **Bộ não Ngữ nghĩa (`src/distillers` & `src/guard`)**: Khi văn bản truyền vào, nó đi qua các Distillers. Được hỗ trợ bởi các quy tắc TOML (`signals/`), các bộ chưng cất phân tích ý nghĩa ngữ nghĩa của đầu ra.
-   - Đây có phải là một bánh xe tải không? *Vứt nó đi.*
-   - Đây có phải là danh sách 500 bài kiểm tra đạt không? *Vứt nó đi.*
-   - Đây có phải là một stack trace lỗi không? **Giữ nó lại.**
-   Trong khi đó, mô-đun `guard` đảm bảo sự thật được giữ nguyên.
-4. **Mạng lưới An toàn (`src/store`)**: OMNI tuân theo chính sách "Không mất thông tin" nghiêm ngặt. Trước khi bất kỳ tiếng ồn nào bị loại bỏ, đầu ra thô được lưu trữ an toàn trong cơ sở dữ liệu SQLite cục bộ, nhanh chóng (`Store`). OMNI để lại một mẩu bánh mì nhỏ trong ngữ cảnh của AI: `[OMNI: omitted 1,200 lines of noise. Use omni_retrieve to view]`.
-5. **Giao diện Đa tác nhân (`src/mcp` & `src/session`)**: Cuối cùng, đầu ra tín hiệu cao được trả về cho AI. Đằng sau hậu trường, máy chủ `mcp` đã sẵn sàng. Nếu AI muốn truy vấn các lỗi lịch sử, các công cụ MCP cung cấp quyền truy cập có cấu trúc ngay lập tức.
-
-**Kết quả:** Kết xuất đầu cuối `25.000` token cồng kềnh trở thành một báo cáo lỗi `400` token ngắn gọn. AI hiểu vấn đề ngay lập tức và bạn tiết kiệm được tiền thật.
-
----
-
-## Kiến trúc
-
-<div align="center">
-  <img src="../media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
-</div>
-
-## Bắt đầu Nhanh & Cài đặt
-
-Omni cực kỳ dễ thiết lập. Nó tích hợp nguyên bản vào thiết bị đầu cuối của bạn.
+OMNI cực kỳ dễ thiết lập và tích hợp nguyên bản vào terminal của bạn.
 
 **macOS / Linux:**
 ```bash
-# 1. Cài đặt qua Homebrew
+# 1. Cài qua Homebrew
 brew install fajarhide/tap/omni
 
-# 2. Thiết lập Omni (Menu tương tác)
+# 2. Thiết lập OMNI (menu tương tác cho Claude, VS Code, OpenCode, Codex, Antigravity)
 omni init
 
-# 3. Xác minh nó đang hoạt động
+# 3. Kiểm tra đã chạy
 omni doctor
 
-# 4. Hoặc tự động khắc phục mọi sự cố
+# 4. Hoặc tự động sửa nếu có vấn đề
 omni doctor --fix
 
-# 5. Kiểm tra trạng thái hiện tại
+# 5. Xem trạng thái hiện tại
 omni init --status
 ```
 
-**Trình cài đặt Chung (macOS / Linux / WSL):**
+**Trình cài đặt chung (macOS / Linux / WSL):**
 ```bash 
 curl -fsSL omni.weekndlabs.com/install | bash
 ```
@@ -237,76 +210,97 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
-## Cách Sử dụng
+## Tích hợp
 
-Sau khi được cài đặt, OMNI hoạt động vô hình trong nền. Cho dù AI của bạn chạy lệnh thiết bị đầu cuối qua MCP hay bạn tự chuyển đầu ra (`ls | omni`), OMNI tự động nhảy vào như một lớp trong suốt.
+OMNI hoạt động trơn tru với các công cụ agent bạn đang dùng. Nó tự động chặn các lần thực thi terminal của chúng.
 
-Để xem phân tích chi tiết về khoản tiết kiệm:
-```bash
-omni stats
+* Claude Code
+* Cursor
+* Windsurf
+* Roo Code
+* OpenAI Codex
+* Antigravity CLI
+
+---
+
+## Adaptive Memory OS
+
+OMNI không chỉ là một bộ lọc terminal, nó là thuốc chữa chứng mất trí nhớ của AI.
+
+Nếu bạn từng làm việc với một AI agent quá một giờ, bạn biết nỗi đau mất ngữ cảnh. Bạn khởi động lại agent, và đột nhiên nó quên đang làm gì. Nó quên mục tiêu dự án. Nó bắt đầu lặp đúng những sai lầm hôm qua vì đã quên những điểm kỳ quặc không được ghi lại của kho mã.
+
+Memory OS của OMNI chạy lặng lẽ ở nền để giải quyết chuyện này:
+
+* **Thôi giải thích lại mục tiêu (`omni goal`)**: đặt mục tiêu sao Bắc Đẩu của bạn một lần. OMNI sẽ nhắc agent về đúng ưu tiên đó trong từng prompt, không để nó trôi khỏi nhiệm vụ.
+* **Không đánh mất mạch suy nghĩ (tính liên tục của phiên)**: nếu Cursor sập hoặc bạn chuyển sang Claude Code, OMNI lập tức tiêm một bản tóm tắt nén của phiên trước. Agent mới biết chính xác tệp nào đang nóng và lỗi hoạt động cuối cùng là gì, rồi tiếp tục từ chỗ bạn dừng.
+* **Dạy một lần (`omni remember`)**: đừng sửa mãi cùng một ảo giác. Agent có thể lưu quy tắc, cái bẫy và quyết định kiến trúc riêng của dự án thẳng vào backend SQLite cục bộ của OMNI. Khi bí về sau, chúng tự kéo câu trả lời ra bằng tìm kiếm ngữ nghĩa.
+
+Agent của bạn hiểu kho mã của bạn hơn mỗi ngày, và bạn không phải lặp lại chính mình nữa.
+
+---
+
+## Cách hoạt động
+
+OMNI chạy hoàn toàn cục bộ theo một pipeline tất định `Read → Guard → Score → Collapse → Distill → Persist`.
+
+```mermaid
+flowchart LR
+    Command[Đầu ra công cụ thô] --> Hook[Hook OMNI]
+    Hook --> Score[Bộ chấm điểm]
+    Score -->|Critical=1.0, Noise=0.1| Distill[Bộ chưng cất nội dung]
+    Distill --> Clean[Ngữ cảnh sạch]
+    Command --> SQLite[(RewindStore SQLite)]
 ```
 
-Để chẩn đoán cài đặt OMNI của bạn:
+Nếu AI *thực sự* cần phần nhiễu đã bị bỏ, **RewindStore** SQLite cục bộ của OMNI giữ toàn bộ log chưa nén một cách an toàn dưới dạng đã băm, để agent lấy lại bất cứ lúc nào.
+
+---
+
+## Kiến trúc
+
+
+<div align="center">
+  <img src="../media/architecture.svg" alt="Sơ đồ kiến trúc OMNI" width="100%" />
+</div>
+
+Viết bằng Rust, dù chi phí đầu-cuối không phải bằng 0.
+
+* **Chưng cất**: bản thân pipeline chấm điểm và gộp chạy trong vài mili giây một chữ số.
+* **Đầu cuối**: thứ bạn thực sự chờ là phần đó cộng với lần ghi RewindStore, và nó lớn dần theo lịch sử, khoảng 82 ms với cơ sở dữ liệu mới và khoảng 308 ms với cơ sở dữ liệu 97 MB. Xem [Đo đạc](#đo-đạc) trước khi cho rằng nó miễn phí.
+* **Bộ nhớ**: hoạt động qua stream hiệu quả, giữ mức dùng bộ nhớ phẳng ngay cả với log 20.000 dòng.
+* **Fail open**: nếu OMNI panic, nó thất bại lặng lẽ và cho đầu ra thô đi qua. Nó sẽ không bao giờ làm sập agent chủ của bạn.
+
 ```bash
-omni doctor
+# Phát triển
+cargo build --release
+cargo test --all
+make fmt && make clippy
 ```
 
-Bạn có thể dễ dàng tạo các quy tắc của riêng mình bằng cách sử dụng các tệp TOML đơn giản trong `~/.omni/signals/`.
+---
 
-### Hỗ trợ & Tích hợp Đa Tác nhân
+## Câu hỏi thường gặp
 
-Theo mặc định, `omni init --claude` tự động móc vào **Claude Code**. Tuy nhiên, OMNI hoạt động hoàn hảo với bất kỳ AI tác nhân nào! Chạy `omni init` để xem menu tương tác.
+**OMNI có xóa vĩnh viễn log của tôi không?**  
+Không. Log thô được nén và lưu cục bộ trong RewindStore SQLite. AI nhận một hash và có thể lấy lại toàn bộ log khi cần.
 
-1. **VS Code & Continue.dev**: Sử dụng trình cung cấp ngữ cảnh MCP của chúng tôi (`integrations/continue-dev/`).
-2. **OpenCode & Codex CLI**: Các trình bao bọc tích hợp tự động chuyển đầu ra lệnh đến OMNI.
-3. **Antigravity IDE**: OMNI đăng ký dưới dạng máy chủ MCP nguyên bản.
-4. **Pi Agent**: Gói OMNI nguyên bản cho Pi.
+**Việc này có làm terminal của tôi chậm đi không?**  
+Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản thân pipeline chưng cất chạy trong vài mili giây một chữ số, nhưng mọi lệnh được hook cũng ghi vào RewindStore cục bộ: `git status` 496 byte mất khoảng 82 ms với cơ sở dữ liệu mới và khoảng 308 ms với cơ sở dữ liệu 97 MB, còn `cargo test` 16,5 KB mất khoảng 276 ms. Hãy tính vào ngân sách. `OMNI_PASSTHROUGH=1` bỏ qua toàn bộ pipeline khi bạn cần lại đầu ra thô.
 
-**Tinh chỉnh Đa Tác nhân (`~/.omni/config.toml`)**
+**Tôi có thể thêm bộ lọc của riêng mình không?**  
+Có. Bạn có thể dạy OMNI bóc phần nhiễu riêng của công cụ nội bộ bằng TOML:
 ```toml
-[global]
-aggressiveness = "balanced"
-
-[agents.vscode_continue]
-aggressiveness = "aggressive"
-enable_readfile_distillation = true
-
-[agents.opencode]
-aggressiveness = "conservative"
-enable_readfile_distillation = false
+# ~/.omni/signals/custom.toml
+[filters.my_tool]
+match_command = "^internal-tool\\b"
+strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
-
-### Chỉ mục Tài liệu
-
-**Dành cho Người dùng:**
-- [Hướng dẫn Tối thượng (HOW_TO_USE.md)](../docs/HOW_TO_USE.md) — Mọi thứ bạn cần.
-- [Tích hợp OpenClaw](https://clawhub.ai/fajarhide/omni-signal-engine) — Plugin OpenClaw chính thức.
-- [Tích hợp Hermes Agent](https://github.com/wysie/hermes-omni-plugin) — Plugin Hermes Agent cộng đồng.
-
-**Dành cho Nhà phát triển & Người Tích hợp Hệ thống:**
-- [Hướng dẫn Kỹ thuật Vòng lặp](../docs/LOOP_ENGINEERING.md) — Cách tích hợp OMNI với các tác nhân tự động.
-- [Hướng dẫn Phát triển](../docs/DEVELOPMENT.md) — Cách đóng góp.
-- [Kiến trúc Kiểm tra](../docs/TESTING.md) — Đảm bảo chất lượng.
-- [Tính liên tục của Phiên](../docs/SESSION.md) — Bộ nhớ của OMNI.
-- [Bản đồ Đường đi](../docs/ROADMAP.md) — Tính năng sắp tới.
-- [Hướng dẫn Di chuyển](../docs/MIGRATION.md)
-
----
-
-## Hoạt động Tốt hơn với Heimsense
-
-Omni là một phần của bộ công cụ AI cá nhân của tôi. Nếu bạn sử dụng `claude-code`, tôi khuyên bạn nên ghép Omni với dự án khác của tôi: **[Heimsense](https://github.com/fajarhide/heimsense)**.
-
-Heimsense mở khóa các môi trường hạn chế như `claude-code` để chạy với *bất kỳ* mô hình miễn phí hoặc tương thích với OpenAI nào.
-**Omni + Heimsense** = Chạy các khung tác nhân đẳng cấp thế giới bằng các mô hình giá cả phải chăng với độ ồn bằng 0.
-
----
 
 ## Đóng góp & Giấy phép
 
-Đây là một dự án đam mê được xây dựng cho kỷ nguyên của Agentic AI. Mọi đóng góp đều luôn được hoan nghênh!
+Đây là một dự án làm vì đam mê, xây cho kỷ nguyên AI dạng agent. Dù bạn đến để tiết kiệm tiền token, thử các mô hình miễn phí, hay góp sức dựng nên bộ đồ nghề agent tối thượng, đóng góp luôn được chào đón!
 
-- **Phát triển**: Muốn xây dựng từ mã nguồn? Chạy `make ci` và `cargo build`.
+- **Phát triển**: muốn build từ mã nguồn? Chạy `make ci` và `cargo build`. Đọc [CONTRIBUTING.md](../CONTRIBUTING.md) để biết chi tiết.
 - **Giấy phép**: [MIT License](../LICENSE)
 
 <!-- Star History -->
@@ -319,5 +313,6 @@ Heimsense mở khóa các môi trường hạn chế như `claude-code` để ch
     </picture>
   </a>
 </p>
-
-Dibuat dengan ❤️ oleh [Fajar Hidayat](https://github.com/fajarhide)
+<center>
+Build with ❤️ by <a href="https://github.com/fajarhide">Fajar Hidayat</a>
+</center>
