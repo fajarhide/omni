@@ -120,6 +120,23 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "python"
             | "python3"
             | "ruby"
+            // `make` is a composite runner, not a build tool. A target runs
+            // whatever its recipe says, which is usually several programs, and
+            // their output arrives concatenated with no delimiter — `make check`
+            // is tsc, then eslint, then pytest. `BuildDistiller` owned the whole
+            // buffer and could only speak for one of them: on a run where each
+            // gate found something, 431 B came back as 111 B headed
+            // `Build: 1 errors, 0 warnings`, with the eslint finding deleted and
+            // a headline that counted neither the warning nor the failed test
+            // (#129). That is the same rule already applied to `python`, `ruby`
+            // and `az aks command invoke`: a thing that runs an arbitrary
+            // program has no grammar of its own, so the honest answer is the
+            // input. `gcc`, `clang`, `cmake` and `cargo` still route to the
+            // distiller when invoked directly, so a compile still compresses;
+            // only the wrapper passes through. Measured before choosing: 0 of
+            // 9,832 recorded commands start with `make `, so this trades a
+            // compression that has never fired here for a false claim that does.
+            | "make"
             // File readers. Their stdout is whatever the file holds, so there is
             // no grammar to distil and every shape a summariser recognises in it
             // is a coincidence. `cat docs/DEVELOPMENT.md` — 127 lines of prose —
@@ -463,7 +480,6 @@ fn route(
     if matches!(
         base.as_str(),
         "cargo"
-            | "make"
             | "cmake"
             | "gcc"
             | "g++"
@@ -646,6 +662,39 @@ mod tests {
                 "`{cmd}` output is data, not build progress — it must survive"
             );
         }
+    }
+
+    /// From #129: a `make` target runs several programs and hands back their
+    /// concatenated output with no delimiter, so no single-tool distiller can
+    /// speak for it. `BuildDistiller` took the whole buffer and answered
+    /// `Build: 1 errors, 0 warnings` for a run that also had an eslint warning
+    /// and a failed test, deleting the eslint finding on the way.
+    #[test]
+    fn hands_back_a_composite_make_target() {
+        let mixed = "npx tsc --noEmit\n\
+                     src/api/client.ts(42,7): error TS2322: Type 'string' is not assignable to type 'number'.\n\
+                     npx eslint src --max-warnings 0\n\
+                     \n\
+                     /repo/src/hooks/useAuth.ts\n\
+                     \x20 12:5  warning  Unexpected console statement  no-console\n\
+                     \n\
+                     1 problem (0 errors, 1 warning)\n\
+                     pytest -q\n\
+                     FAILED tests/test_auth.py::test_expiry - assert 0 == 1\n\
+                     39 passed, 1 failed in 3.02s\n";
+
+        for cmd in ["make check", "make ci", "make test", "make"] {
+            let segments = scorer::score_with_command(mixed, cmd, None);
+            assert_eq!(
+                distill_with_command(&segments, mixed, cmd, None),
+                mixed,
+                "`{cmd}` runs several programs; every gate's verdict must survive"
+            );
+        }
+
+        // The passthrough must be declared in one place, or the collapse
+        // fallback folds what routing just handed back (#214).
+        assert!(passes_through_verbatim("make check"));
     }
 
     /// From #190: a `python3 -c "..."` script prints arbitrary output that *is*
