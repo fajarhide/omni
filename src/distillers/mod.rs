@@ -14,12 +14,24 @@ pub mod test;
 pub mod vcs;
 
 pub trait Distiller: Send + Sync {
+    /// `None` means "I could not read this input". The dispatch boundary then
+    /// hands the raw bytes back, which is the only honest answer for output a
+    /// distiller did not parse.
+    ///
+    /// The return type carries the invariant on purpose (#250). Nine releases
+    /// shipped the same defect — `Build: ok` for a `python3` script, `Tests: 0
+    /// passed` for a package with no tests, `grep: 20 matches` for a search that
+    /// found nothing — because the rule lived in a helper each distiller had to
+    /// remember to call, and the nine that forgot are where every instance
+    /// landed. A verdict a distiller synthesised for input it never recognised
+    /// is worse than no compression: it is shorter, plausible, and wrong, and
+    /// no caller can tell it apart from a real one.
     fn distill(
         &self,
         segments: &[OutputSegment],
         input: &str,
         session: Option<&crate::pipeline::SessionState>,
-    ) -> String;
+    ) -> Option<String>;
 }
 
 /// The subcommand of a `cargo` invocation, skipping env-var prefixes, the path
@@ -108,6 +120,23 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "python"
             | "python3"
             | "ruby"
+            // `make` is a composite runner, not a build tool. A target runs
+            // whatever its recipe says, which is usually several programs, and
+            // their output arrives concatenated with no delimiter — `make check`
+            // is tsc, then eslint, then pytest. `BuildDistiller` owned the whole
+            // buffer and could only speak for one of them: on a run where each
+            // gate found something, 431 B came back as 111 B headed
+            // `Build: 1 errors, 0 warnings`, with the eslint finding deleted and
+            // a headline that counted neither the warning nor the failed test
+            // (#129). That is the same rule already applied to `python`, `ruby`
+            // and `az aks command invoke`: a thing that runs an arbitrary
+            // program has no grammar of its own, so the honest answer is the
+            // input. `gcc`, `clang`, `cmake` and `cargo` still route to the
+            // distiller when invoked directly, so a compile still compresses;
+            // only the wrapper passes through. Measured before choosing: 0 of
+            // 9,832 recorded commands start with `make `, so this trades a
+            // compression that has never fired here for a false claim that does.
+            | "make"
             // File readers. Their stdout is whatever the file holds, so there is
             // no grammar to distil and every shape a summariser recognises in it
             // is a coincidence. `cat docs/DEVELOPMENT.md` — 127 lines of prose —
@@ -344,18 +373,23 @@ fn git_enumerates_files(command: &str) -> bool {
     })
 }
 
-/// Zero-state guard: a distiller may emit a success/clean summary only if it
-/// positively parsed a recognized signal. With no evidence anything was parsed,
-/// fail open by returning the raw input unchanged — never a synthesized
-/// `✓`/"no errors"/"passed" string that is byte-identical to a real clean run.
+/// The same zero-state rule as `Distiller::distill`'s `None`, for the helpers
+/// several layers below it that still hand a `String` back to their caller.
 ///
-/// This is the shared invariant behind #143: a misdetection upstream then
-/// degrades to passthrough instead of a confident false claim.
+/// The trait is where the invariant is enforced now (#250) — it applies whether
+/// a distiller remembers this function or not. This stays because converting an
+/// entire helper chain to `Option` would be a large diff for an identical
+/// outcome: a helper returning the input and the boundary returning the input
+/// produce the same bytes.
 pub(crate) fn require_parsed(parsed: bool, input: &str, summary: String) -> String {
     if parsed { summary } else { input.to_string() }
 }
 
-/// Distill output based on command
+/// Distill output based on command.
+///
+/// This is the boundary that enforces the trait's `None` contract: a distiller
+/// that could not read its input, and every arm that declines to route, fail
+/// open to the raw bytes here rather than in twelve separate files.
 #[tracing::instrument(skip_all)]
 pub fn distill_with_command(
     segments: &[crate::pipeline::OutputSegment],
@@ -363,14 +397,21 @@ pub fn distill_with_command(
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
+    route(segments, input, command, session).unwrap_or_else(|| input.to_string())
+}
+
+fn route(
+    segments: &[crate::pipeline::OutputSegment],
+    input: &str,
+    command: &str,
+    session: Option<&crate::pipeline::SessionState>,
+) -> Option<String> {
     // A chain's stdout belongs to several programs and arrives as one stream, so
     // there is no honest way to hand it to the distiller named by the first of
     // them: `git status && echo === && find .` came back as the git one-liner
     // with the `find` output deleted, unmarked (#264). One producer routes;
     // several pass through.
-    let Some(command) = crate::pipeline::registry::sole_output_command(command) else {
-        return input.to_string();
-    };
+    let command = crate::pipeline::registry::sole_output_command(command)?;
 
     // 1. Resolve pipeline profile (though we match command here too)
     let _profile = crate::pipeline::registry::resolve_profile(command);
@@ -387,7 +428,7 @@ pub fn distill_with_command(
     // Git subcommand routing
     if base == "git" {
         if git_enumerates_files(command) {
-            return input.to_string();
+            return None;
         }
         return git::GitDistiller.distill(segments, input, session);
     }
@@ -411,7 +452,7 @@ pub fn distill_with_command(
     // GitHub/VCS CLIs
     if matches!(base.as_str(), "gh" | "hub" | "glab") {
         if !is_vcs_list_command(command) {
-            return input.to_string();
+            return None;
         }
         return vcs::VcsDistiller.distill(segments, input, session);
     }
@@ -439,7 +480,6 @@ pub fn distill_with_command(
     if matches!(
         base.as_str(),
         "cargo"
-            | "make"
             | "cmake"
             | "gcc"
             | "g++"
@@ -474,7 +514,7 @@ pub fn distill_with_command(
                 ) => build::BuildDistiller.distill(segments, input, session),
                 // tree, metadata, search, pkgid, locate-project, vendor, add,
                 // remove, update, publish, … — output is the answer, hand it back.
-                _ => input.to_string(),
+                _ => None,
             };
         }
 
@@ -509,7 +549,7 @@ pub fn distill_with_command(
     }
 
     if passes_through_verbatim(command) {
-        return input.to_string();
+        return None;
     }
 
     // Cloud & infra → CloudDistiller
@@ -622,6 +662,39 @@ mod tests {
                 "`{cmd}` output is data, not build progress — it must survive"
             );
         }
+    }
+
+    /// From #129: a `make` target runs several programs and hands back their
+    /// concatenated output with no delimiter, so no single-tool distiller can
+    /// speak for it. `BuildDistiller` took the whole buffer and answered
+    /// `Build: 1 errors, 0 warnings` for a run that also had an eslint warning
+    /// and a failed test, deleting the eslint finding on the way.
+    #[test]
+    fn hands_back_a_composite_make_target() {
+        let mixed = "npx tsc --noEmit\n\
+                     src/api/client.ts(42,7): error TS2322: Type 'string' is not assignable to type 'number'.\n\
+                     npx eslint src --max-warnings 0\n\
+                     \n\
+                     /repo/src/hooks/useAuth.ts\n\
+                     \x20 12:5  warning  Unexpected console statement  no-console\n\
+                     \n\
+                     1 problem (0 errors, 1 warning)\n\
+                     pytest -q\n\
+                     FAILED tests/test_auth.py::test_expiry - assert 0 == 1\n\
+                     39 passed, 1 failed in 3.02s\n";
+
+        for cmd in ["make check", "make ci", "make test", "make"] {
+            let segments = scorer::score_with_command(mixed, cmd, None);
+            assert_eq!(
+                distill_with_command(&segments, mixed, cmd, None),
+                mixed,
+                "`{cmd}` runs several programs; every gate's verdict must survive"
+            );
+        }
+
+        // The passthrough must be declared in one place, or the collapse
+        // fallback folds what routing just handed back (#214).
+        assert!(passes_through_verbatim("make check"));
     }
 
     /// From #190: a `python3 -c "..."` script prints arbitrary output that *is*

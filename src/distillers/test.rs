@@ -61,7 +61,7 @@ impl Distiller for TestDistiller {
         segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         let mut passed = 0;
         let mut failed = 0;
         let mut failure_details = Vec::new();
@@ -131,7 +131,7 @@ impl Distiller for TestDistiller {
             // of #190). A genuine zero-test run is safe: the runner prints a
             // real summary, so `summary` is `Some` and is returned above.
             if summary.is_none() && passed == 0 {
-                return input.to_string();
+                return None;
             }
             // Quote every target's tally. Before #210 a green workspace run
             // reached this branch with `failure_details` wrongly non-empty, so
@@ -139,9 +139,9 @@ impl Distiller for TestDistiller {
             // `headline` here would have fixed the label and replaced it with a
             // second false claim, reporting 17 targets as the first one's count.
             if summaries.len() > 1 {
-                return summaries.join("\n");
+                return Some(summaries.join("\n"));
             }
-            return headline;
+            return Some(headline);
         }
 
         out.push_str(&headline);
@@ -161,7 +161,7 @@ impl Distiller for TestDistiller {
             }
         }
 
-        out.trim().to_string()
+        Some(out.trim().to_string())
     }
 }
 
@@ -185,7 +185,9 @@ mod tests {
         let segments = scorer::score_segments(&collapsed, profile.segmentation, None, "cargo test");
 
         // Act
-        let output = TestDistiller.distill(&segments, &collapsed, None);
+        let output = TestDistiller
+            .distill(&segments, &collapsed, None)
+            .expect("the fixture carries the signal this test asserts on");
 
         // Assert
         assert!(
@@ -209,7 +211,9 @@ mod tests {
         );
 
         // Act
-        let output = TestDistiller.distill(&segments, input, None);
+        let output = TestDistiller
+            .distill(&segments, input, None)
+            .expect("the fixture carries the signal this test asserts on");
 
         // Assert
         assert!(
@@ -240,9 +244,11 @@ mod tests {
         // Act
         let output = TestDistiller.distill(&segments, input, None);
 
-        // Assert
+        // Assert — `None` is the decline itself, which is stronger than the old
+        // `output == input`: that also passed for a distiller that rebuilt the
+        // input by coincidence.
         assert_eq!(
-            output, input,
+            output, None,
             "no parsed test signal must fail open, not fabricate a tally"
         );
     }
@@ -267,7 +273,7 @@ mod tests {
 
         // Assert
         assert_eq!(
-            output, input,
+            output, None,
             "a path containing `ok` is not a test result: fail open"
         );
     }
@@ -305,7 +311,9 @@ mod tests {
         );
 
         // Act
-        let output = TestDistiller.distill(&segments, &input, None);
+        let output = TestDistiller
+            .distill(&segments, &input, None)
+            .expect("the fixture carries the signal this test asserts on");
 
         // Assert
         assert!(
@@ -332,7 +340,9 @@ mod tests {
         );
 
         // Act
-        let output = TestDistiller.distill(&segments, &input, None);
+        let output = TestDistiller
+            .distill(&segments, &input, None)
+            .expect("the fixture carries the signal this test asserts on");
 
         // Assert
         assert_eq!(
@@ -357,7 +367,9 @@ mod tests {
         );
 
         // Act
-        let output = TestDistiller.distill(&segments, input, None);
+        let output = TestDistiller
+            .distill(&segments, input, None)
+            .expect("the fixture carries the signal this test asserts on");
 
         // Assert
         assert_eq!(
@@ -380,7 +392,9 @@ mod tests {
             "cargo test",
         );
 
-        let output = TestDistiller.distill(&segments, input, None);
+        let output = TestDistiller
+            .distill(&segments, input, None)
+            .expect("the fixture carries the signal this test asserts on");
 
         assert!(
             output.starts_with("test result: ok. 0 passed"),

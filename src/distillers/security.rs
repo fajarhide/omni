@@ -9,7 +9,7 @@ impl Distiller for SecurityDistiller {
         _segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         let mut critical_findings: Vec<String> = vec![];
         let mut high_findings: Vec<String> = vec![];
         let mut medium_count = 0usize;
@@ -37,11 +37,7 @@ impl Distiller for SecurityDistiller {
             // so with none seen it cannot tell a clean scan from a misrouted input.
             // Only assert "no issues" if at least one severity token was parsed.
             let parsed = total_critical > 0 || total_high > 0 || medium_count > 0 || low_count > 0;
-            return crate::distillers::require_parsed(
-                parsed,
-                input,
-                "Security scan: no issues found ✓".to_string(),
-            );
+            return parsed.then_some("Security scan: no issues found ✓".to_string());
         }
 
         let mut out = format!(
@@ -61,6 +57,6 @@ impl Distiller for SecurityDistiller {
                 total_critical + total_high - 8
             ));
         }
-        out.trim().to_string()
+        Some(out.trim().to_string())
     }
 }

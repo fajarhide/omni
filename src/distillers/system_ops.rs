@@ -14,14 +14,14 @@ impl Distiller for SystemOpsDistiller {
         segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         let lines: Vec<&str> = input.lines().collect();
         if lines.is_empty() {
-            return String::new();
+            return None;
         }
 
         // Dispatch based on content analysis
-        if is_env_output(&lines) {
+        Some(if is_env_output(&lines) {
             distill_env_output(input)
         } else if is_ls_output(&lines) {
             distill_ls_output(input)
@@ -33,7 +33,7 @@ impl Distiller for SystemOpsDistiller {
             distill_grep_output(input)
         } else {
             distill_fallback(segments)
-        }
+        })
     }
 }
 

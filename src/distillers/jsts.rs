@@ -14,7 +14,7 @@ impl Distiller for JsTsDistiller {
         segments: &[OutputSegment],
         input: &str,
         session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         let mut lines: Vec<&str> = input.lines().collect();
 
         if let Some(state) = session
@@ -40,11 +40,11 @@ impl Distiller for JsTsDistiller {
         // generic collapse fold the repeated build noise while keeping every gate's
         // distinct verdict line.
         if is_composite_command(&lines) {
-            return fold_bundler_assets(&filtered_input);
+            return Some(fold_bundler_assets(&filtered_input));
         }
 
         // Dispatch based on content analysis
-        if is_vitest_output(&lines) {
+        Some(if is_vitest_output(&lines) {
             distill_vitest(&filtered_input)
         } else if is_tsc_output(&lines) {
             distill_tsc(&filtered_input)
@@ -59,7 +59,7 @@ impl Distiller for JsTsDistiller {
             // used to stand here called this same function with the same
             // arguments, so the condition decided nothing.
             distill_fallback(segments, session)
-        }
+        })
     }
 }
 
@@ -1220,7 +1220,9 @@ mod tests {
         ];
 
         // 1. Without session, no filtering
-        let output_none = distiller.distill(&segments, input, None);
+        let output_none = distiller
+            .distill(&segments, input, None)
+            .expect("the fixture carries the signal this test asserts on");
         assert!(output_none.contains("pnpm: packages are hard linked"));
         assert!(output_none.contains("yarn install v1."));
 
@@ -1229,7 +1231,9 @@ mod tests {
         state_pnpm
             .toolchain_hints
             .insert("js".to_string(), "pnpm".to_string());
-        let output_pnpm = distiller.distill(&segments, input, Some(&state_pnpm));
+        let output_pnpm = distiller
+            .distill(&segments, input, Some(&state_pnpm))
+            .expect("the fixture carries the signal this test asserts on");
         assert!(!output_pnpm.contains("pnpm: packages are hard linked"));
         assert!(output_pnpm.contains("yarn install v1."));
 
@@ -1238,7 +1242,9 @@ mod tests {
         state_yarn
             .toolchain_hints
             .insert("js".to_string(), "yarn".to_string());
-        let output_yarn = distiller.distill(&segments, input, Some(&state_yarn));
+        let output_yarn = distiller
+            .distill(&segments, input, Some(&state_yarn))
+            .expect("the fixture carries the signal this test asserts on");
         assert!(output_yarn.contains("pnpm: packages are hard linked"));
         assert!(!output_yarn.contains("yarn install v1."));
     }
