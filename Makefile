@@ -62,8 +62,12 @@ binary-check:
 	chmod +x tests/smoke_test.sh
 	# The smoke test drives the binary directly, so cargo's `[env]` block does
 	# not reach it and it would learn filters into the developer's live
-	# `~/.omni` (#307). Point it at the same workspace home the suite uses.
-	OMNI_HOME=$(CURDIR)/target/omni-home tests/smoke_test.sh ./target/release/omni
+	# `~/.omni` (#307). It gets its own home rather than the suite's, and a
+	# clean one each run: it asserts things like "pipe output <= input", and
+	# session history feeds the scorer, so inheriting whatever `cargo test`
+	# left behind makes those assertions depend on test ordering.
+	rm -rf $(CURDIR)/target/omni-smoke
+	OMNI_HOME=$(CURDIR)/target/omni-smoke tests/smoke_test.sh ./target/release/omni
 
 ci: fmt clippy test security binary-check
 	@echo "========================================"
