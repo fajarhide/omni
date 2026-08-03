@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-Giảm 58,9% token trên tổ hợp lệnh thực tế &middot; Bộ nhớ xuyên phiên &middot; An toàn định dạng &middot; Luôn khôi phục được &middot; Fail open, không bịa &middot; Những con số bạn tái lập được </b>
+Giảm 43,3% số byte tới model, đo trên 9.965 lệnh thực tế &middot; Bộ nhớ xuyên phiên &middot; An toàn định dạng &middot; Luôn khôi phục được &middot; Fail open, không bịa &middot; Những con số bạn tái lập được </b>
 
 </br></br>
 <img src="../media/demo.gif" alt="OMNI chưng cất một lần chạy cargo test ồn ào xuống còn kết luận, rồi hiển thị omni stats" width="820" />
@@ -82,7 +82,7 @@ Các bộ nén khác đề nghị bạn *tin* rằng thứ họ cắt đi không
 | **Không bao giờ bịa kết quả** | bộ chưng cất không phân tích được tín hiệu nào sẽ trả về đầu ra thô, chứ không phải một dòng xanh `no errors` hay `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Thất bại không bao giờ bị che** | lệnh thoát với mã khác 0 được cho qua nguyên vẹn | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Dữ liệu có cấu trúc không bị chạm** | JSON / YAML / NDJSON / CSV đi qua từng byte một | `pipeline::format` |
-| **Số liệu là đo được, không phải kỳ vọng** | 1.810 trace thật phát lại trên bản binary phát hành, và 63,6% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
+| **Số liệu là đo được, không phải kỳ vọng** | 9.965 trace thật phát lại trên bản binary phát hành, và 90,0% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
 
 Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
 
@@ -121,12 +121,12 @@ OMNI giải quyết cả hai, một cách vô hình:
 
 ## Đo đạc
 
-Con số tiêu đề trung thực, đo trên bản binary phát hành với **1.810 lần thực thi lệnh
+Con số tiêu đề trung thực, đo trên bản binary phát hành với **9.965 lần thực thi lệnh
 thật** phát lại từ thói quen sử dụng của một lập trình viên:
 
-* **Giảm 58,9% số byte** tới mô hình trên toàn bộ tổ hợp (15,0 MB xuống 6,2 MB).
-* **63,6% trong số lệnh gọi đó không tiết kiệm được gì cả.** OMNI trả đầu ra lại nguyên
-  vẹn, thêm **0** byte. Toàn bộ phần tiết kiệm đến từ 36,4% còn lại, nơi thực sự có
+* **Giảm 43,3% số byte** tới mô hình trên toàn bộ tổ hợp (40,1 MB xuống 22,7 MB).
+* **90,0% trong số lệnh gọi đó không tiết kiệm được gì cả.** OMNI trả đầu ra lại nguyên
+  vẹn, thêm **0** byte. Toàn bộ phần tiết kiệm đến từ 10,0% còn lại, nơi thực sự có
   nhiễu để cắt.
 * **Đầu ra có cấu trúc không bao giờ bị chạm vào.** JSON, YAML, NDJSON và CSV đi qua
   từng byte một, vì một payload hỏng đắt hơn một lần nén bị bỏ lỡ.
@@ -139,17 +139,17 @@ cụ tuyên bố tiết kiệm 90% trên mọi lệnh đang nói với bạn r�
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Phần tiết kiệm thực sự đến từ đâu, trên cùng 1.810 lần thực thi:
+Phần tiết kiệm thực sự đến từ đâu, trên cùng 9.965 lần thực thi:
 
 | Lệnh | Lần gọi | Vào | Ra | Tiết kiệm |
 |---------|-------|-------|--------|-------|
-| `cargo` | 29 | 424 KB | 13 KB | **96,8%** |
-| `git` | 256 | 5,9 MB | 509 KB | **91,3%** |
-| `ls` | 52 | 71 KB | 29 KB | **59,5%** |
-| `kubectl` | 212 | 4,4 MB | 2,3 MB | **48,0%** |
-| `find` | 39 | 83 KB | 53 KB | **36,2%** |
-| `grep` | 184 | 534 KB | 385 KB | **27,8%** |
-| `cat` | 85 | 515 KB | 468 KB | **9,1%** |
+| `cargo` | 124 | 1,5 MB | 127 KB | **91,4%** |
+| `git` | 931 | 12,0 MB | 1,3 MB | **89,2%** |
+| `ls` | 62 | 264 KB | 176 KB | **33,6%** |
+| `kubectl` | 456 | 5,5 MB | 1,3 MB | **76,5%** |
+| `find` | 232 | 534 KB | 509 KB | **4,6%** |
+| `grep` | 938 | 2,4 MB | 2,0 MB | **18,1%** |
+| `cat` | 2.963 | 5,6 MB | 5,5 MB | **2,2%** |
 
 `git` và `cargo` gánh kết quả; `cat` và `grep` gần như không đổi. OMNI xứng đáng có chỗ
 ở đầu ra công cụ ồn ào và lặp lại, còn ở nơi khác thì tránh đường.
@@ -158,18 +158,18 @@ Các fixture đơn lẻ trong `tests/fixtures/`, nếu bạn muốn tự tái l�
 
 | Lệnh / Bối cảnh | Vào | Ra | Tiết kiệm |
 |-------------------|-------|--------|-------|
-| `cargo build` (lớn, thành công) | 3.220 B | 9 B | **99,7%** |
-| `cargo test` (490 đạt, 10 hỏng) | 16,5 KB | 1.100 B | **93,3%** |
+| `cargo build` (lớn, thành công) | 3.220 B | 87 B | **97,3%** |
+| `cargo test` (490 đạt, 10 hỏng) | 16.515 B | 1.178 B | **92,9%** |
 | `pytest` (có lỗi) | 730 B | 136 B | **81,4%** |
-| `git status` (có thay đổi) | 496 B | 113 B | **77,2%** |
-| `git diff` (nhiều tệp) | 397 B | 220 B | **44,6%** |
-| `docker build` (nhiễu nặng) | 9,2 KB | 5,8 KB | **37,2%** |
-| `kubectl get pods` (hỗn hợp) | 840 B | 762 B | **9,3%** |
+| `git status` (có thay đổi) | 496 B | 190 B | **61,7%** |
+| `git diff` (nhiều tệp) | 397 B | 297 B | **25,2%** |
+| `docker build` (nhiễu nặng) | 9.207 B | 5.904 B | **35,9%** |
+| `kubectl get pods` (hỗn hợp) | 840 B | 840 B | **0%** |
 
 **Độ trễ là chi phí thật, không phải bằng 0.** OMNI chạy trên mọi lệnh được hook, và
-cái giá lớn dần theo lịch sử của bạn: `git status` 496 byte mất khoảng 82 ms với cơ sở
-dữ liệu mới và khoảng 308 ms với cơ sở dữ liệu 97 MB. `cargo test` 16,5 KB mất khoảng
-276 ms. Hãy tính vào ngân sách.
+cái giá lớn dần theo lịch sử của bạn: `git status` 496 byte mất khoảng 21 ms với cơ sở
+dữ liệu mới và khoảng 61 ms với cơ sở dữ liệu 205 MB. `cargo test` 16,5 KB mất khoảng
+25 ms. Hãy tính vào ngân sách.
 
 *Để xem mức tiết kiệm token của chính bạn, chỉ cần chạy `omni stats` sau vài ngày sử dụng.*
 
@@ -266,7 +266,7 @@ Nếu AI *thực sự* cần phần nhiễu đã bị bỏ, **RewindStore** SQLi
 Viết bằng Rust, dù chi phí đầu-cuối không phải bằng 0.
 
 * **Chưng cất**: bản thân pipeline chấm điểm và gộp chạy trong vài mili giây một chữ số.
-* **Đầu cuối**: thứ bạn thực sự chờ là phần đó cộng với lần ghi RewindStore, và nó lớn dần theo lịch sử, khoảng 82 ms với cơ sở dữ liệu mới và khoảng 308 ms với cơ sở dữ liệu 97 MB. Xem [Đo đạc](#đo-đạc) trước khi cho rằng nó miễn phí.
+* **Đầu cuối**: thứ bạn thực sự chờ là phần đó cộng với lần ghi RewindStore, và nó lớn dần theo lịch sử, khoảng 21 ms với cơ sở dữ liệu mới và khoảng 61 ms với cơ sở dữ liệu 205 MB. Xem [Đo đạc](#đo-đạc) trước khi cho rằng nó miễn phí.
 * **Bộ nhớ**: hoạt động qua stream hiệu quả, giữ mức dùng bộ nhớ phẳng ngay cả với log 20.000 dòng.
 * **Fail open**: nếu OMNI panic, nó thất bại lặng lẽ và cho đầu ra thô đi qua. Nó sẽ không bao giờ làm sập agent chủ của bạn.
 
@@ -285,7 +285,7 @@ make fmt && make clippy
 Không. Log thô được nén và lưu cục bộ trong RewindStore SQLite. AI nhận một hash và có thể lấy lại toàn bộ log khi cần.
 
 **Việc này có làm terminal của tôi chậm đi không?**  
-Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản thân pipeline chưng cất chạy trong vài mili giây một chữ số, nhưng mọi lệnh được hook cũng ghi vào RewindStore cục bộ: `git status` 496 byte mất khoảng 82 ms với cơ sở dữ liệu mới và khoảng 308 ms với cơ sở dữ liệu 97 MB, còn `cargo test` 16,5 KB mất khoảng 276 ms. Hãy tính vào ngân sách. `OMNI_PASSTHROUGH=1` bỏ qua toàn bộ pipeline khi bạn cần lại đầu ra thô.
+Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản thân pipeline chưng cất chạy trong vài mili giây một chữ số, nhưng mọi lệnh được hook cũng ghi vào RewindStore cục bộ: `git status` 496 byte mất khoảng 21 ms với cơ sở dữ liệu mới và khoảng 61 ms với cơ sở dữ liệu 205 MB, còn `cargo test` 16,5 KB mất khoảng 25 ms. Hãy tính vào ngân sách. `OMNI_PASSTHROUGH=1` bỏ qua toàn bộ pipeline khi bạn cần lại đầu ra thô.
 
 **Tôi có thể thêm bộ lọc của riêng mình không?**  
 Có. Bạn có thể dạy OMNI bóc phần nhiễu riêng của công cụ nội bộ bằng TOML:

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The benchmark behind the published headline still counted terminal bytes, so the README overstated savings by 36 points (#324)**: `tests/bench_replay.rs` read `SELECT command, raw_input FROM execution_traces` with no agent filter. On the reporting installation that corpus is 68% `terminal` by bytes, 888 traces carrying 86.0 MB of TTY output no model ever receives, against 13.9 MB from `claude_code` and 25.7 MB from `aider`. #212 established exactly this and fixed it in `omni stats`, which now prints "Terminal output is excluded" on its own line; the harness that produces the number the README quotes never got the same fix. Replaying the same pipeline over the same database, one run each: **everything, 126.0 MB to 26.3 MB, 79.1% net**; **model-facing only, 40.1 MB to 22.7 MB, 43.3% net**. The harness replays the model-facing population by default now, prints which population it used, and `OMNI_BENCH_ALL=1` asks for the wider one. Both are worth having, because the gap between them is the mistake, and hiding one of the two is how it comes back.
+
+### Changed
+- **Every published number re-measured on 0.6.12, and most of them moved down**: the README carried 58.9% net over an 1,810-trace corpus with 63.6% of calls saving nothing. Measured now over 9,965 model-facing traces: **43.3% net, 90.0% saving nothing, and not one call in 9,965 that made the output larger**. The drop is not a regression, it is this release's correctness work showing up in the accounting: `Build: ok` no longer answers for commands that never built (#250), `make`, `kubectl` listings, single-file `grep -n`, green `npm test` and reshaping pipeline tails all pass through now (#129, #301, #316, #310, #277), and each of those passthroughs used to be counted as a saving. The fixture table moved for a different reason and by a constant: every row is ~77 bytes larger because #271 attaches a retrieval marker whenever anything is dropped, so `git diff` reads 25.2% delivered against the 44.6% earlier releases quoted for the distiller's output alone. The marker is what makes the cut reversible, so the table counts it and says so. `kubectl get pods` went from 9.3% to 0%, which was the fix. Latency moved the other way: a 496 B `git status` is **21.1 ms** on a fresh database and **60.7 ms** on a 205 MB one, against the 82 ms and 308 ms the README promised, and a 16.5 KB `cargo test` is 24.5 ms rather than 276 ms, after #283, #296 and #174. All six translations carry the same figures, and their hero lines said "tokens" for a benchmark that measures bytes; they say bytes now.
+
+
 ## [0.6.12] - 2026-08-03
 
 ### Changed

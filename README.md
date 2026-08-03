@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-58.9% fewer tokens on a real command mix &middot; Cross-Session Memory &middot; Format-safe &middot; Always reversible &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
+43.3% fewer bytes reaching the model, measured on 9,965 real commands &middot; Cross-Session Memory &middot; Format-safe &middot; Always reversible &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
 
 </br></br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
@@ -65,10 +65,21 @@ Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirati
 
 | Command | Without OMNI | With OMNI | Saved |
 |---|---|---|---|
-| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **93%** |
-| `kubectl get pods` (35 pods, 5 crashing) | the full table | `35 pods \| 30 running, 5 error` + the 5 failing pods named | — |
-| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **45%** |
-| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **37%** |
+| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **92.9%** |
+| `git status` (dirty) | 496 B of porcelain | the branch and the changed paths | **61.7%** |
+| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **35.9%** |
+| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **25.2%** |
+| `kubectl get pods` (35 pods, 5 crashing) | the full table | the full table | **0%**, by design |
+
+Every figure above is the **delivered** payload, which includes the ~77 byte
+retrieval marker OMNI attaches whenever it drops anything. Earlier releases
+quoted the distiller's output before that marker, which flattered small payloads:
+`git diff` reads 25.2% here and 44.6% without it. The marker is what makes the
+cut reversible, so it belongs in the number.
+
+`kubectl get pods` is the interesting row. It used to report 9.3%; it now reports
+nothing at all, because a pod table is an enumeration where every row is a datum
+and there is no noise to drop. Losing that 9.3% was the fix.
 
 > **The honest caveat:** OMNI compresses *noisy successful* output. A command that **fails** is passed through **verbatim** — a hidden error is worse than an uncompressed one — and structured output (JSON/YAML/CSV) is never touched. It earns its keep on repetitive tool chatter and gets out of the way everywhere else.
 
@@ -82,7 +93,7 @@ Every other compressor asks you to *trust* that what it cut didn't matter. OMNI 
 | **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
-| **Numbers are measured, not aspirational** | 1,810 real traces replayed on the release binary — and 63.6% of calls net zero, which we publish too | [`Benchmarks`](#benchmarks) |
+| **Numbers are measured, not aspirational** | 9,965 real traces replayed on the release binary, and 90.0% of calls net zero, which we publish too | [`Benchmarks`](#benchmarks) |
 
 That is the one thing a bigger compression number can't buy: **you can always recover the original, and it will never lie to your agent.**
 
@@ -121,15 +132,23 @@ OMNI solves both, invisibly:
 
 ## Benchmarks
 
-The honest headline, measured on the release binary against **1,810 real command
-executions** replayed from one developer's actual usage:
+The honest headline, measured on the release binary by replaying **9,965 real
+command executions** from one developer's actual usage
+(`cargo test --release --test bench_replay -- --ignored`):
 
-* **58.9% fewer bytes** reaching the model across the whole mix (15.0 MB → 6.2 MB).
-* **63.6% of those calls saved nothing at all.** OMNI handed the output straight
-  back, adding **zero** bytes. Every byte of the saving comes from the other 36.4%,
+* **43.3% fewer bytes** reaching the model across the whole mix (40.1 MB → 22.7 MB).
+* **90.0% of those calls saved nothing at all.** OMNI handed the output straight
+  back, adding **zero** bytes. Every byte of the saving comes from the other 10%,
   where there was real noise to cut.
+* **Not one call in 9,965 made the output larger.** That is the number worth
+  checking in any tool of this kind, and it is printed by the same harness.
 * **Structured output is never touched.** JSON, YAML, NDJSON and CSV pass through
   byte-for-byte, because a corrupted payload costs more than a missed compression.
+
+The corpus counts only calls whose result reached a model. Terminal output is
+excluded: it is 68% of the raw bytes on this installation, and including it reads
+as 79.1% instead of 43.3%. A number that large is measuring the wrong population,
+which is the mistake this section exists to avoid.
 
 That second bullet is the number most tools in this category do not print. A tool
 that claims to save 90% of every command is telling you it summarises output you
@@ -139,38 +158,53 @@ needed.
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Where the saving actually comes from, over the same 1,810 executions:
+Where the saving actually comes from, over the same 9,965 executions:
 
 | Command | Calls | Input | Output | Saved |
 |---------|-------|-------|--------|-------|
-| `cargo` | 29 | 424 KB | 13 KB | **96.8%** |
-| `git` | 256 | 5.9 MB | 509 KB | **91.3%** |
-| `ls` | 52 | 71 KB | 29 KB | **59.5%** |
-| `kubectl` | 212 | 4.4 MB | 2.3 MB | **48.0%** |
-| `find` | 39 | 83 KB | 53 KB | **36.2%** |
-| `grep` | 184 | 534 KB | 385 KB | **27.8%** |
-| `cat` | 85 | 515 KB | 468 KB | **9.1%** |
+| `cargo` | 124 | 1.5 MB | 127 KB | **91.4%** |
+| `git` | 931 | 12.0 MB | 1.3 MB | **89.2%** |
+| `kubectl` | 456 | 5.5 MB | 1.3 MB | **76.5%** |
+| `az` | 62 | 264 KB | 176 KB | **33.6%** |
+| `grep` | 938 | 2.4 MB | 2.0 MB | **18.1%** |
+| `gh` | 232 | 534 KB | 509 KB | **4.6%** |
+| `cd` | 2,963 | 5.6 MB | 5.5 MB | **2.2%** |
+| `cat`, `ls`, `find`, `sed`, `python3` | 1,235 | 4.2 MB | 4.2 MB | **0%** |
 
-`git` and `cargo` carry the result; `cat` and `grep` are close to a no-op. OMNI
-earns its place on noisy, repetitive tooling output and gets out of the way
-everywhere else.
+`git`, `cargo` and `kubectl` carry the entire result. The last row is the point
+of the table: five of the most-run commands are now deliberate passthroughs,
+because their output is an enumeration where every line is a datum. They used to
+report savings, and each of those savings was a row someone needed.
 
 Single fixtures from `tests/fixtures/`, if you want to reproduce one by hand:
 
-| Command / Context | Input | Output | Saved |
-|-------------------|-------|--------|-------|
-| `cargo build` (large, successful) | 3,220 B | 9 B | **99.7%** |
-| `cargo test` (490 passed, 10 failed) | 16.5 KB | 1,100 B | **93.3%** |
-| `pytest` (failures) | 730 B | 136 B | **81.4%** |
-| `git status` (dirty) | 496 B | 113 B | **77.2%** |
-| `git diff` (multi-file) | 397 B | 220 B | **44.6%** |
-| `docker build` (heavy noise) | 9.2 KB | 5.8 KB | **37.2%** |
-| `kubectl get pods` (mixed) | 840 B | 762 B | **9.3%** |
+| Command / Context | Input | Delivered | Saved |
+|-------------------|-------|-----------|-------|
+| `cargo build` (large, successful) | 3,220 B | 87 B | **97.3%** |
+| `cargo test` (490 passed, 10 failed) | 16,515 B | 1,178 B | **92.9%** |
+| `git status` (dirty) | 496 B | 190 B | **61.7%** |
+| `docker build` (heavy noise) | 9,207 B | 5,904 B | **35.9%** |
+| `git diff` (multi-file) | 397 B | 297 B | **25.2%** |
+| `kubectl get pods` (mixed) | 840 B | 840 B | **0%** |
 
-**Latency is a real cost, not zero.** OMNI runs on every hooked command, and the
-price grows with your history: a 496-byte `git status` takes ~82 ms against a
-fresh database and ~308 ms against a 97 MB one. A 16.5 KB `cargo test` takes
-~276 ms. Budget for it.
+"Delivered" is what the agent receives, marker included. Subtract the ~77 byte
+retrieval marker and these match the figures earlier releases published; the
+marker is counted here because the agent pays for it.
+
+**Latency is a real cost, not zero**, and it grows with your history. Median of
+12 runs each, release binary, measured end to end through the post-hook:
+
+| | fresh database | 205 MB database |
+|---|---|---|
+| `git status` (496 B) | **21.1 ms** | **60.7 ms** |
+| `cargo test` (16.5 KB) | **24.5 ms** | **64.5 ms** |
+
+Payload size barely matters; database size does. Earlier releases measured 82 ms
+and 276 ms on a fresh database, and the difference is three fixes rather than a
+faster machine: a GPT tokenizer that was loaded per command for a reporting
+column, 249 line-filter regexes compiled whether or not their filter matched, and
+a connection pool opening four SQLite handles in a process that exits after one
+payload.
 
 *To see your own actual token savings, just run `omni stats` after a few days of usage.*
 
@@ -267,7 +301,7 @@ If the AI *really* needs the dropped noise, OMNI's local SQLite **RewindStore** 
 Built in Rust, though the end-to-end cost is not zero.
 
 * **Distillation**: the scoring and collapsing pipeline itself runs in single-digit milliseconds.
-* **End to end**: what you actually wait for is that plus the RewindStore write, and it grows with your history — roughly 82 ms against a fresh database and ~308 ms against a 97 MB one. See [Benchmarks](#benchmarks) before you assume it is free.
+* **End to end**: what you actually wait for is that plus the RewindStore write, and it grows with your history: about 21 ms against a fresh database and 61 ms against a 205 MB one. See [Benchmarks](#benchmarks) before you assume it is free.
 * **Memory**: Operates via efficient streams, keeping memory usage flat even on 20,000-line logs.
 * **Fail Open**: If OMNI panics, it fails silently and passes the raw output through. It will never crash your host agent.
 
@@ -286,7 +320,7 @@ make fmt && make clippy
 No. The raw logs are compressed and stored locally in the SQLite RewindStore. The AI receives a hash and can retrieve the full log if needed.
 
 **Will this slow down my terminal?**  
-Yes, measurably, and the cost grows with your history. The distillation pipeline itself runs in single-digit milliseconds, but every hooked command also writes to the local RewindStore: a 496-byte `git status` takes ~82 ms against a fresh database and ~308 ms against a 97 MB one, and a 16.5 KB `cargo test` takes ~276 ms. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely when you need the raw output back.
+Yes, measurably, and the cost grows with your history rather than with the payload. A 496-byte `git status` takes about 21 ms against a fresh database and 61 ms against a 205 MB one; a 16.5 KB `cargo test` takes 24 ms and 65 ms respectively. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely when you need the raw output back.
 
 **Can I add my own filters?**  
 Yes. You can teach OMNI to strip noise specific to your internal tools using TOML:

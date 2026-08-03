@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-58,9% lebih sedikit token pada campuran perintah nyata &middot; Memori lintas sesi &middot; Aman terhadap format &middot; Selalu reversibel &middot; Gagal terbuka, tidak pernah mengarang &middot; Angka yang bisa Anda reproduksi </b>
+43,3% lebih sedikit byte yang sampai ke model, diukur pada 9.965 perintah nyata &middot; Memori lintas sesi &middot; Aman terhadap format &middot; Selalu reversibel &middot; Gagal terbuka, tidak pernah mengarang &middot; Angka yang bisa Anda reproduksi </b>
 
 </br></br>
 <img src="../media/demo.gif" alt="OMNI menyaring cargo test yang bising sampai ke verdict-nya, lalu omni stats" width="820" />
@@ -82,7 +82,7 @@ Kompresor lain meminta Anda *percaya* bahwa yang dipotong tidak penting. OMNI ti
 | **Tidak pernah mengarang hasil** | distiller yang tidak berhasil mem-parse sinyal apa pun mengembalikan output mentah, bukan string hijau `no errors` atau `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Kegagalan tidak pernah ditutupi** | perintah yang keluar dengan status bukan nol diteruskan apa adanya | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Data terstruktur tidak pernah disentuh** | JSON / YAML / NDJSON / CSV lewat byte demi byte | `pipeline::format` |
-| **Angkanya diukur, bukan diharapkan** | 1.810 trace nyata diputar ulang di biner rilis, dan 63,6% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
+| **Angkanya diukur, bukan diharapkan** | 9.965 trace nyata diputar ulang di biner rilis, dan 90,0% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
 
 Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **aslinya selalu bisa Anda pulihkan, dan ia tidak akan pernah membohongi agen Anda.**
 
@@ -121,12 +121,12 @@ OMNI menyelesaikan keduanya, tanpa terlihat:
 
 ## Tolok Ukur
 
-Angka utama yang jujur, diukur pada biner rilis terhadap **1.810 eksekusi perintah
+Angka utama yang jujur, diukur pada biner rilis terhadap **9.965 eksekusi perintah
 nyata** yang diputar ulang dari penggunaan sehari-hari satu developer:
 
-* **58,9% lebih sedikit byte** yang sampai ke model di seluruh campuran perintah (15,0 MB menjadi 6,2 MB).
-* **63,6% panggilan itu tidak menghemat apa pun.** OMNI mengembalikan outputnya
-  langsung, menambahkan **nol** byte. Seluruh penghematan datang dari 36,4% sisanya,
+* **43,3% lebih sedikit byte** yang sampai ke model di seluruh campuran perintah (40,1 MB menjadi 22,7 MB).
+* **90,0% panggilan itu tidak menghemat apa pun.** OMNI mengembalikan outputnya
+  langsung, menambahkan **nol** byte. Seluruh penghematan datang dari 10,0% sisanya,
   tempat noise-nya memang nyata.
 * **Output terstruktur tidak pernah disentuh.** JSON, YAML, NDJSON dan CSV lewat
   byte demi byte, karena payload yang rusak lebih mahal daripada kompresi yang terlewat.
@@ -139,17 +139,17 @@ butuhkan ikut diringkas.
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Dari mana penghematannya sebenarnya datang, atas 1.810 eksekusi yang sama:
+Dari mana penghematannya sebenarnya datang, atas 9.965 eksekusi yang sama:
 
 | Perintah | Panggilan | Masuk | Keluar | Hemat |
 |---------|-------|-------|--------|-------|
-| `cargo` | 29 | 424 KB | 13 KB | **96,8%** |
-| `git` | 256 | 5,9 MB | 509 KB | **91,3%** |
-| `ls` | 52 | 71 KB | 29 KB | **59,5%** |
-| `kubectl` | 212 | 4,4 MB | 2,3 MB | **48,0%** |
-| `find` | 39 | 83 KB | 53 KB | **36,2%** |
-| `grep` | 184 | 534 KB | 385 KB | **27,8%** |
-| `cat` | 85 | 515 KB | 468 KB | **9,1%** |
+| `cargo` | 124 | 1,5 MB | 127 KB | **91,4%** |
+| `git` | 931 | 12,0 MB | 1,3 MB | **89,2%** |
+| `ls` | 62 | 264 KB | 176 KB | **33,6%** |
+| `kubectl` | 456 | 5,5 MB | 1,3 MB | **76,5%** |
+| `find` | 232 | 534 KB | 509 KB | **4,6%** |
+| `grep` | 938 | 2,4 MB | 2,0 MB | **18,1%** |
+| `cat` | 2.963 | 5,6 MB | 5,5 MB | **2,2%** |
 
 `git` dan `cargo` yang membawa hasilnya; `cat` dan `grep` nyaris tanpa efek. OMNI
 mendapat tempatnya pada output tooling yang bising dan berulang, dan menyingkir di
@@ -159,18 +159,18 @@ Fixture tunggal dari `tests/fixtures/`, jika Anda ingin mereproduksi satu per sa
 
 | Perintah / Konteks | Masuk | Keluar | Hemat |
 |-------------------|-------|--------|-------|
-| `cargo build` (besar, berhasil) | 3.220 B | 9 B | **99,7%** |
-| `cargo test` (490 lulus, 10 gagal) | 16,5 KB | 1.100 B | **93,3%** |
+| `cargo build` (besar, berhasil) | 3.220 B | 87 B | **97,3%** |
+| `cargo test` (490 lulus, 10 gagal) | 16.515 B | 1.178 B | **92,9%** |
 | `pytest` (ada kegagalan) | 730 B | 136 B | **81,4%** |
-| `git status` (kotor) | 496 B | 113 B | **77,2%** |
-| `git diff` (banyak berkas) | 397 B | 220 B | **44,6%** |
-| `docker build` (noise berat) | 9,2 KB | 5,8 KB | **37,2%** |
-| `kubectl get pods` (campuran) | 840 B | 762 B | **9,3%** |
+| `git status` (kotor) | 496 B | 190 B | **61,7%** |
+| `git diff` (banyak berkas) | 397 B | 297 B | **25,2%** |
+| `docker build` (noise berat) | 9.207 B | 5.904 B | **35,9%** |
+| `kubectl get pods` (campuran) | 840 B | 840 B | **0%** |
 
 **Latensi itu biaya nyata, bukan nol.** OMNI berjalan pada setiap perintah yang
 dikaitkan, dan harganya tumbuh bersama riwayat Anda: `git status` 496 byte butuh
-~82 ms pada database baru dan ~308 ms pada database 97 MB. `cargo test` 16,5 KB
-butuh ~276 ms. Perhitungkan itu.
+~21 ms pada database baru dan ~61 ms pada database 205 MB. `cargo test` 16,5 KB
+butuh ~25 ms. Perhitungkan itu.
 
 *Untuk melihat penghematan token Anda sendiri, jalankan saja `omni stats` setelah beberapa hari pemakaian.*
 
@@ -267,7 +267,7 @@ Kalau AI *benar-benar* butuh noise yang dibuang, **RewindStore** SQLite lokal mi
 Dibangun dengan Rust, walau biaya ujung-ke-ujungnya bukan nol.
 
 * **Distilasi**: pipeline scoring dan collapsing-nya sendiri berjalan dalam hitungan milidetik satu digit.
-* **Ujung ke ujung**: yang benar-benar Anda tunggu adalah itu ditambah penulisan RewindStore, dan itu tumbuh bersama riwayat Anda, kira-kira 82 ms pada database baru dan ~308 ms pada database 97 MB. Lihat [Tolok ukur](#tolok-ukur) sebelum Anda menganggapnya gratis.
+* **Ujung ke ujung**: yang benar-benar Anda tunggu adalah itu ditambah penulisan RewindStore, dan itu tumbuh bersama riwayat Anda, kira-kira 21 ms pada database baru dan ~61 ms pada database 205 MB. Lihat [Tolok ukur](#tolok-ukur) sebelum Anda menganggapnya gratis.
 * **Memori**: bekerja lewat stream yang efisien, menjaga pemakaian memori tetap datar bahkan pada log 20.000 baris.
 * **Gagal terbuka**: kalau OMNI panik, ia gagal diam-diam dan meneruskan output mentahnya. Ia tidak akan pernah membuat agen host Anda crash.
 
@@ -286,7 +286,7 @@ make fmt && make clippy
 Tidak. Log mentahnya dipampatkan dan disimpan lokal di RewindStore SQLite. AI menerima sebuah hash dan bisa mengambil log lengkapnya kalau perlu.
 
 **Apakah ini memperlambat terminal saya?**  
-Ya, terukur, dan biayanya tumbuh bersama riwayat Anda. Pipeline distilasinya sendiri berjalan dalam milidetik satu digit, tapi setiap perintah yang dikaitkan juga menulis ke RewindStore lokal: `git status` 496 byte butuh ~82 ms pada database baru dan ~308 ms pada database 97 MB, dan `cargo test` 16,5 KB butuh ~276 ms. Perhitungkan itu. `OMNI_PASSTHROUGH=1` melewati pipeline sepenuhnya kalau Anda butuh output mentahnya kembali.
+Ya, terukur, dan biayanya tumbuh bersama riwayat Anda. Pipeline distilasinya sendiri berjalan dalam milidetik satu digit, tapi setiap perintah yang dikaitkan juga menulis ke RewindStore lokal: `git status` 496 byte butuh ~21 ms pada database baru dan ~61 ms pada database 205 MB, dan `cargo test` 16,5 KB butuh ~25 ms. Perhitungkan itu. `OMNI_PASSTHROUGH=1` melewati pipeline sepenuhnya kalau Anda butuh output mentahnya kembali.
 
 **Bisakah saya menambahkan filter sendiri?**  
 Bisa. Anda bisa mengajari OMNI membuang noise khas tools internal Anda memakai TOML:
