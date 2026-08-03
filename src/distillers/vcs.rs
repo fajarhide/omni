@@ -9,12 +9,12 @@ impl Distiller for VcsDistiller {
         _segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         let lines: Vec<&str> = input.lines().filter(|l| !l.trim().is_empty()).collect();
         let total = lines.len();
 
         if total <= 10 {
-            return input.trim().to_string();
+            return None;
         }
 
         // PR/Issue list — show first 10, summarize rest
@@ -26,6 +26,6 @@ impl Distiller for VcsDistiller {
                 total - 10
             ));
         }
-        out
+        Some(out)
     }
 }

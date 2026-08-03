@@ -9,14 +9,17 @@ impl Distiller for DatabaseDistiller {
         segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         // Detect apakah ini query result, error, atau migration output
         if input.contains("ERROR:") || input.contains("FATAL:") || input.contains("error:") {
-            distill_db_error(input)
+            Some(distill_db_error(input))
         } else if input.contains("rows)") || input.contains("row)") || looks_like_table(input) {
-            distill_query_result(input)
+            Some(distill_query_result(input))
         } else {
-            distill_db_generic(segments, input)
+            // `.schema`, `.tables`, `PRAGMA` and every other non-tabular result is
+            // itself the answer, so fail open rather than assert a health verdict
+            // the input never stated (#216).
+            distill_db_generic(segments)
         }
     }
 }
@@ -112,19 +115,16 @@ fn distill_query_result(input: &str) -> String {
     out.trim().to_string()
 }
 
-fn distill_db_generic(segments: &[OutputSegment], input: &str) -> String {
+fn distill_db_generic(segments: &[OutputSegment]) -> Option<String> {
     let errors: Vec<&str> = segments
         .iter()
         .filter(|s| s.tier == SignalTier::Critical)
         .map(|s| s.content.as_str())
         .collect();
     if errors.is_empty() {
-        // Nothing was parsed. `.schema`, `.tables`, `PRAGMA` and every other
-        // non-tabular result is itself the answer, so fail open instead of
-        // asserting a health verdict the input never stated (#216).
-        input.to_string()
+        None
     } else {
-        format!(
+        Some(format!(
             "DB errors: {}\n{}",
             errors.len(),
             errors
@@ -133,7 +133,7 @@ fn distill_db_generic(segments: &[OutputSegment], input: &str) -> String {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("\n")
-        )
+        ))
     }
 }
 

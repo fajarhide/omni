@@ -10,7 +10,7 @@ impl Distiller for GenericDistiller {
         segments: &[OutputSegment],
         _input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         let max_lines = 100;
         let mut selected_indices = HashSet::new();
 
@@ -84,7 +84,7 @@ impl Distiller for GenericDistiller {
             out.push_str(&format!("... [{} more lines]\n", segments.len() - 1 - last));
         }
 
-        out.trim().to_string()
+        Some(out.trim().to_string())
     }
 }
 
@@ -112,7 +112,9 @@ mod tests {
             })
             .collect();
 
-        let output = GenericDistiller.distill(&segments, "", None);
+        let output = GenericDistiller
+            .distill(&segments, "", None)
+            .expect("the fixture carries the signal this test asserts on");
 
         assert!(
             output.contains("... [6 lines omitted]"),
@@ -139,7 +141,9 @@ mod tests {
         }
 
         let distiller = GenericDistiller;
-        let output = distiller.distill(&segments, "", None);
+        let output = distiller
+            .distill(&segments, "", None)
+            .expect("the fixture carries the signal this test asserts on");
 
         assert!(
             output.contains("Line 120"),
@@ -164,7 +168,9 @@ mod tests {
             .collect();
 
         let distiller = GenericDistiller;
-        let output = distiller.distill(&segments, "", None);
+        let output = distiller
+            .distill(&segments, "", None)
+            .expect("the fixture carries the signal this test asserts on");
 
         assert!(
             output.contains("noise lines omitted"),

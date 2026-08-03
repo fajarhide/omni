@@ -21,36 +21,34 @@ impl Distiller for CloudDistiller<'_> {
         segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
+    ) -> Option<String> {
         match self.tool {
-            "docker" | "podman" => {
-                if input.contains("CONTAINER ID") {
-                    distill_docker_ps(input)
-                } else if input.contains("Step ") && input.contains(" : ") {
-                    distill_docker_build(input)
-                } else {
-                    distill_docker_logs(segments, input)
-                }
-            }
+            "docker" | "podman" => Some(if input.contains("CONTAINER ID") {
+                distill_docker_ps(input)
+            } else if input.contains("Step ") && input.contains(" : ") {
+                distill_docker_build(input)
+            } else {
+                distill_docker_logs(segments, input)
+            }),
             "kubectl" => {
                 if is_kubectl_table(input) {
-                    distill_kubectl(input)
+                    Some(distill_kubectl(input))
                 } else if is_resource_table(input) {
                     // A columnar listing we have no distiller for (`kubectl get
                     // pvc|pv|ns|certificates …`). The fallback would keep 20
                     // lines and drop the rest with no marker, so hand back the
                     // payload untouched.
-                    input.to_string()
+                    None
                 } else {
-                    distill_kubectl_generic(segments, input)
+                    Some(distill_kubectl_generic(segments, input))
                 }
             }
-            "helm" => distill_helm(input),
-            "terraform" | "tofu" => distill_terraform(input),
-            "aws" => distill_aws(segments, input),
+            "helm" => Some(distill_helm(input)),
+            "terraform" | "tofu" => Some(distill_terraform(input)),
+            "aws" => Some(distill_aws(segments, input)),
             // gcloud, az, doctl, … — no dedicated parser, so keep the signal
             // tiers rather than guessing at a format.
-            _ => distill_fallback(segments, input),
+            _ => Some(distill_fallback(segments, input)),
         }
     }
 }
@@ -729,7 +727,11 @@ default     api-7fb96c846b-f4jnm     1/1     Running            0          5d
 kube-系统   auth-5d4f6c8b99-abc12    0/1     CrashLoopBackOff   15         2h";
 
     fn distill_as(tool: &str, input: &str) -> String {
-        CloudDistiller { tool }.distill(&[], input, None)
+        // Mirrors the dispatch boundary: a distiller that could not read its
+        // input fails open to the raw bytes.
+        CloudDistiller { tool }
+            .distill(&[], input, None)
+            .unwrap_or_else(|| input.to_string())
     }
 
     fn distill(input: &str) -> String {

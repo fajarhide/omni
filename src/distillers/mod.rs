@@ -14,12 +14,24 @@ pub mod test;
 pub mod vcs;
 
 pub trait Distiller: Send + Sync {
+    /// `None` means "I could not read this input". The dispatch boundary then
+    /// hands the raw bytes back, which is the only honest answer for output a
+    /// distiller did not parse.
+    ///
+    /// The return type carries the invariant on purpose (#250). Nine releases
+    /// shipped the same defect — `Build: ok` for a `python3` script, `Tests: 0
+    /// passed` for a package with no tests, `grep: 20 matches` for a search that
+    /// found nothing — because the rule lived in a helper each distiller had to
+    /// remember to call, and the nine that forgot are where every instance
+    /// landed. A verdict a distiller synthesised for input it never recognised
+    /// is worse than no compression: it is shorter, plausible, and wrong, and
+    /// no caller can tell it apart from a real one.
     fn distill(
         &self,
         segments: &[OutputSegment],
         input: &str,
         session: Option<&crate::pipeline::SessionState>,
-    ) -> String;
+    ) -> Option<String>;
 }
 
 /// The subcommand of a `cargo` invocation, skipping env-var prefixes, the path
@@ -344,18 +356,23 @@ fn git_enumerates_files(command: &str) -> bool {
     })
 }
 
-/// Zero-state guard: a distiller may emit a success/clean summary only if it
-/// positively parsed a recognized signal. With no evidence anything was parsed,
-/// fail open by returning the raw input unchanged — never a synthesized
-/// `✓`/"no errors"/"passed" string that is byte-identical to a real clean run.
+/// The same zero-state rule as `Distiller::distill`'s `None`, for the helpers
+/// several layers below it that still hand a `String` back to their caller.
 ///
-/// This is the shared invariant behind #143: a misdetection upstream then
-/// degrades to passthrough instead of a confident false claim.
+/// The trait is where the invariant is enforced now (#250) — it applies whether
+/// a distiller remembers this function or not. This stays because converting an
+/// entire helper chain to `Option` would be a large diff for an identical
+/// outcome: a helper returning the input and the boundary returning the input
+/// produce the same bytes.
 pub(crate) fn require_parsed(parsed: bool, input: &str, summary: String) -> String {
     if parsed { summary } else { input.to_string() }
 }
 
-/// Distill output based on command
+/// Distill output based on command.
+///
+/// This is the boundary that enforces the trait's `None` contract: a distiller
+/// that could not read its input, and every arm that declines to route, fail
+/// open to the raw bytes here rather than in twelve separate files.
 #[tracing::instrument(skip_all)]
 pub fn distill_with_command(
     segments: &[crate::pipeline::OutputSegment],
@@ -363,14 +380,21 @@ pub fn distill_with_command(
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
+    route(segments, input, command, session).unwrap_or_else(|| input.to_string())
+}
+
+fn route(
+    segments: &[crate::pipeline::OutputSegment],
+    input: &str,
+    command: &str,
+    session: Option<&crate::pipeline::SessionState>,
+) -> Option<String> {
     // A chain's stdout belongs to several programs and arrives as one stream, so
     // there is no honest way to hand it to the distiller named by the first of
     // them: `git status && echo === && find .` came back as the git one-liner
     // with the `find` output deleted, unmarked (#264). One producer routes;
     // several pass through.
-    let Some(command) = crate::pipeline::registry::sole_output_command(command) else {
-        return input.to_string();
-    };
+    let command = crate::pipeline::registry::sole_output_command(command)?;
 
     // 1. Resolve pipeline profile (though we match command here too)
     let _profile = crate::pipeline::registry::resolve_profile(command);
@@ -387,7 +411,7 @@ pub fn distill_with_command(
     // Git subcommand routing
     if base == "git" {
         if git_enumerates_files(command) {
-            return input.to_string();
+            return None;
         }
         return git::GitDistiller.distill(segments, input, session);
     }
@@ -411,7 +435,7 @@ pub fn distill_with_command(
     // GitHub/VCS CLIs
     if matches!(base.as_str(), "gh" | "hub" | "glab") {
         if !is_vcs_list_command(command) {
-            return input.to_string();
+            return None;
         }
         return vcs::VcsDistiller.distill(segments, input, session);
     }
@@ -474,7 +498,7 @@ pub fn distill_with_command(
                 ) => build::BuildDistiller.distill(segments, input, session),
                 // tree, metadata, search, pkgid, locate-project, vendor, add,
                 // remove, update, publish, … — output is the answer, hand it back.
-                _ => input.to_string(),
+                _ => None,
             };
         }
 
@@ -509,7 +533,7 @@ pub fn distill_with_command(
     }
 
     if passes_through_verbatim(command) {
-        return input.to_string();
+        return None;
     }
 
     // Cloud & infra → CloudDistiller

@@ -9,14 +9,14 @@ impl Distiller for GitDistiller {
         segments: &[OutputSegment],
         input: &str,
         _session: Option<&crate::pipeline::SessionState>,
-    ) -> String {
-        if input.contains("diff --git") {
+    ) -> Option<String> {
+        Some(if input.contains("diff --git") {
             distill_diff(segments, input)
         } else if input.contains("On branch") || input.contains("HEAD detached") {
             distill_status(input)
         } else {
             distill_log(segments, input)
-        }
+        })
     }
 }
 
