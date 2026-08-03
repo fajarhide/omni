@@ -74,7 +74,6 @@ tempfile = "3"
 ureq = { version = "2", features = ["json"] }
 rust-embed = "8"
 strsim = "0.11"
-tiktoken-rs = "0.5"
 schemars = "1.2.1"
 unicode-width = "0.2.2"
 dialoguer = "0.11"
