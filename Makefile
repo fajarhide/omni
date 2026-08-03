@@ -60,7 +60,10 @@ binary-check:
 	echo "Binary size check passed ✓"
 	@echo "=== Running Smoke Tests ==="
 	chmod +x tests/smoke_test.sh
-	tests/smoke_test.sh ./target/release/omni
+	# The smoke test drives the binary directly, so cargo's `[env]` block does
+	# not reach it and it would learn filters into the developer's live
+	# `~/.omni` (#307). Point it at the same workspace home the suite uses.
+	OMNI_HOME=$(CURDIR)/target/omni-home tests/smoke_test.sh ./target/release/omni
 
 ci: fmt clippy test security binary-check
 	@echo "========================================"
