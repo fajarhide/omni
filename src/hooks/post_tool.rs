@@ -328,26 +328,26 @@ pub fn process_payload(
             } else {
                 &normalized.command
             };
-            // Phase 6: check graph for many dependents
-            let graph = std::env::current_dir()
-                .ok()
-                .and_then(|cwd| crate::graph::indexer::build_graph(&cwd).ok());
+            // Phase 6: the dependents guard needs a count, and getting one walks
+            // the repository. Handed over as a closure so the walk happens only
+            // if the distiller reaches the guard, which it does after two gates
+            // that reject most payloads. Building it here cost 48 ms on every
+            // hooked Read, most of them for a number nothing read (#320).
+            let count_dependents = || {
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|cwd| crate::graph::indexer::build_graph(&cwd).ok())
+                    .map(|g| g.context_for(filepath).imported_by.len())
+                    .unwrap_or(0)
+            };
 
-            if let Some(g) = graph {
-                let imported_by_count = g.context_for(filepath).imported_by.len();
-                return crate::distillers::readfile::distill_readfile_with_context(
-                    &content,
-                    filepath,
-                    imported_by_count,
-                )
-                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
-                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
-            }
-
-            // Fallback if graph fails
-            return crate::distillers::readfile::distill_readfile(&content, filepath)
-                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
-                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
+            return crate::distillers::readfile::distill_readfile_with_context(
+                &content,
+                filepath,
+                count_dependents,
+            )
+            .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
+            .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
         }
         "Grep" => {
             if !agent_config.grep_enabled() {

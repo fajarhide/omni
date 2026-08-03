@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Every hooked `Read` rebuilt the whole import graph, 48 ms, to sometimes append one advisory line (#320)**: `hooks/post_tool.rs` called `graph::indexer::build_graph(&cwd)` unconditionally on the Read arm and passed the resulting count into `distill_readfile_with_context`. That count has exactly one use, the dependents guard at `readfile.rs:50`, and the guard sits behind two gates that reject most payloads: `estimated_tokens >= MIN_DISTILL_TOKENS` (2,000) and a distillation that actually shrank the file by a fifth. So a `Read` of any small file walked the repository and threw the answer away a few lines later. Measured on the release binary against this repository, 125 files indexed: **116.6 ms cold, 48.0 ms median warm**, against an `AGENTS.md` budget of 10 ms for the whole hook and a Bash post-hook that measures 18.9 ms end to end. `MAX_FILES` is 5,000 and there is no cache, so a larger project pays more. The count is passed as `impl FnOnce() -> usize` now and consulted at the guard, so the walk happens only when the line it feeds is about to be printed. The test asserts the closure is **not called** for a file below the threshold, because "it compiles with a closure" was equally true of the version that still walked every time. This became reachable rather than being missed: #258 recorded the Read arm as unreachable on 2026-07-29, and #172 widened the `PostToolUse` matcher to `Bash`, `Read`, `Grep` and `WebFetch` in 0.6.9 after it. #258 itself stays open and still describes something else, feeding `imported_by` into the scorer. The now-unreachable `graph failed` fallback goes with it, and `distill_readfile` becomes the test-only helper it had already turned into.
+
+
 ## [0.6.11] - 2026-08-03
 
 ### Fixed
