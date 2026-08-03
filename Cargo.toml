@@ -1,6 +1,6 @@
 [package]
 name = "omni"
-version = "0.6.9"
+version = "0.6.10"
 edition = "2024"
 authors = ["Fajar Hidayat"]
 description = "Semantic Signal Engine for AI agents: 58.9% fewer tokens on a real command mix, measured."
