@@ -154,8 +154,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
     let mut executions = Vec::new();
 
     if use_queue {
-        let dir = crate::paths::omni_home();
-        let path = dir.join("learn_queue.jsonl");
+        let path = crate::paths::learn_queue_path();
         if path.exists() {
             let content = fs::read_to_string(&path)?;
             for line in content.lines() {
@@ -326,7 +325,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
             // AUTO-CLEAR QUEUE after successful apply
             if use_queue {
-                let queue_path = crate::paths::omni_home().join("learn_queue.jsonl");
+                let queue_path = crate::paths::learn_queue_path();
                 if queue_path.exists() {
                     let _ = fs::write(&queue_path, ""); // Truncate the file
                     println!(

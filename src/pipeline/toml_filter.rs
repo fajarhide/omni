@@ -854,25 +854,18 @@ pub fn load_all_filters() -> Vec<TomlFilter> {
 /// Resolve the effective signal directory for a given base path.
 /// Prefers `<base>/.omni/signals/` (new), falls back to `<base>/.omni/filters/` (legacy).
 fn resolve_signal_dir(base: &Path) -> std::path::PathBuf {
-    let new_path = base.join(".omni").join("signals");
-    if new_path.exists() {
-        new_path
-    } else {
-        base.join(".omni").join("filters")
-    }
+    crate::paths::project_signal_dir(base)
 }
 
 /// Resolve the effective user-global signal directory.
-/// Prefers `~/.omni/signals/` (new), falls back to `~/.omni/filters/` (legacy).
+///
+/// Through `paths`, not around it. This derived `~/.omni` itself, so it sat
+/// outside `OMNI_HOME` and read the developer's live filters during every
+/// `cargo test` while the same suite's writes were correctly isolated (#315).
+/// It runs on every hooked command, which made it the most expensive place in
+/// the tree to have missed.
 fn resolve_user_signal_dir() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| {
-        let new_path = h.join(".omni").join("signals");
-        if new_path.exists() {
-            new_path
-        } else {
-            h.join(".omni").join("filters")
-        }
-    })
+    Some(crate::paths::user_signal_dir())
 }
 
 fn load_all_filters_uncached() -> Vec<TomlFilter> {
@@ -1328,6 +1321,41 @@ mod tests {
         // Descending priority; the two 200s keep their alphabetical (stable) order.
         let names: Vec<_> = filters.iter().map(|filter| filter.name.as_str()).collect();
         assert_eq!(names, ["high_a", "high_b", "aaa_low"]);
+    }
+
+    /// #315: `resolve_user_signal_dir` derived `~/.omni` itself, so `OMNI_HOME`
+    /// did not cover it and the suite read the developer's live filters on every
+    /// hook while its own writes were correctly isolated. That is also the
+    /// remaining half of #304: filters from a developer's home joined the
+    /// `find()` race and decided which signal claimed a command, so the suite's
+    /// result depended on whose machine it ran on.
+    ///
+    /// Asserting the *loaded set* rather than the resolved path, because the
+    /// path was already right once while the loaded set was still wrong.
+    #[test]
+    fn loads_only_shipped_signals_under_a_configured_home() {
+        // `resolve_user_signal_dir`, not `paths::user_signal_dir`. The first
+        // version of this test asserted the accessor and stayed green with the
+        // loader pointed straight back at `~/.omni`, which is the same mistake
+        // #315 was: checking the thing that was already right.
+        let dir = resolve_user_signal_dir().expect("a home resolves");
+        assert!(
+            dir.starts_with(crate::paths::config_home()),
+            "the loader reads {}, outside the configured home {}",
+            dir.display(),
+            crate::paths::config_home().display()
+        );
+
+        let filters = load_all_filters();
+        let leaked: Vec<&str> = filters
+            .iter()
+            .filter(|f| f.name.starts_with("learned_"))
+            .map(|f| f.name.as_str())
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "auto-learned filters reached the suite's filter set: {leaked:?}"
+        );
     }
 
     #[test]

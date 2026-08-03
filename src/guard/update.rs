@@ -11,10 +11,7 @@ struct UpdateCache {
 }
 
 fn get_cache_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".omni")
-        .join("update_cache.json")
+    crate::paths::data_home().join("update_cache.json")
 }
 
 pub enum Status {

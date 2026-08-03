@@ -283,9 +283,10 @@ pub fn queue_for_learn(input: &str, command: &str) {
         // `OMNI_HOME` did not cover the queue, so it was written to the real
         // `~/.omni` whatever the configuration said, and the writer and the
         // reader then disagreed about which home they were talking about (#312).
-        let dir = crate::paths::omni_home();
-        let _ = fs::create_dir_all(&dir);
-        let path = dir.join("learn_queue.jsonl");
+        let path = crate::paths::learn_queue_path();
+        if let Some(dir) = path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
 
         let entry = json!({
             "ts": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),

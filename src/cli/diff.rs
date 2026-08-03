@@ -21,10 +21,7 @@ pub fn run_diff(args: &[String]) -> Result<()> {
     }
     super::check_flags("diff", args, FLAGS)?;
 
-    let cache_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".omni")
-        .join("cache");
+    let cache_dir = crate::paths::cache_directory();
     let input_path = cache_dir.join("last_input.txt");
     let output_path = cache_dir.join("last_output.txt");
 

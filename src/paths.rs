@@ -4,39 +4,87 @@
 //! All paths are automatically OS-agnostic using cross-platform libraries.
 //! No conditional compilation is needed here - `dirs` and `std::env::temp_dir`
 //! handle platform differences automatically.
+//!
+//! **Single source of truth means every caller asks here.** A call site that
+//! builds `dirs::home_dir().join(".omni")` itself is outside every override this
+//! module offers, and that is not hypothetical: `session::learn::queue_for_learn`
+//! wrote the learn queue to the real home whatever the configuration said
+//! (#312), and `toml_filter::resolve_user_signal_dir` read the developer's live
+//! filters during `cargo test` while the same suite's writes were correctly
+//! isolated (#315). Both looked correct in isolation and both bypassed the
+//! override that was supposed to cover them.
 
 use dirs::home_dir;
 use std::env;
 use std::path::PathBuf;
 
-/// Get OMNI home directory
+/// The legacy tree, `~/.omni`, whether or not it exists.
+fn legacy_home() -> PathBuf {
+    home_dir().unwrap_or_else(temp_dir).join(".omni")
+}
+
+/// Resolve one of the two roots.
 ///
-/// Resolves automatically:
-/// - `$OMNI_HOME` when set, used verbatim
-/// - Linux/macOS: `~/.omni`
-/// - Windows: `%USERPROFILE%\.omni`
-///   Falls back to temp directory if home directory is not available
+/// Precedence, most specific first (#217):
 ///
-/// The override exists because there was none, and the test suite wrote into the
-/// developer's live config as a result: `cargo test --all` left 11 auto-learned
-/// filters in `~/.omni/filters/learned.toml`, one `make ci` added 31,458 bytes,
-/// and the file had reached 1.8 MB of filters nobody asked for. `load_all_filters`
-/// reads that directory on every hook, so the suite was quietly making the tool
-/// slower for the person running it, and the filters then joined the `find()`
-/// race and decided which signal claimed a command (#307).
+/// 1. `OMNI_HOME` puts the whole tree in one place.
+/// 2. `OMNI_CONFIG_HOME` / `OMNI_DATA_HOME` split config from data.
+/// 3. **An existing `~/.omni` wins over XDG.** This is the migration decision
+///    and it is deliberate: an install that already has a tree keeps using it,
+///    so upgrading never appears to lose a database. #217 offered moving the
+///    directory with a notice as an alternative; silently continuing to work is
+///    the boring option and the one that cannot surprise anyone.
+/// 4. `XDG_CONFIG_HOME/omni` / `XDG_DATA_HOME/omni` for a fresh install on a
+///    machine that asked for the spec.
+/// 5. `~/.omni`.
 ///
-/// Read through a `LazyLock` on purpose. Cargo runs tests in parallel in one
-/// process, so a value read per call could change under a test that set it,
-/// which is the process-state hazard this repo has already paid for once. Read
-/// once, at first use, and the answer is the same for every caller.
+/// Read once through a `LazyLock` at each call site below. Cargo runs tests in
+/// parallel in one process, so a value re-read per call could change under a
+/// test that set it, which is the process-state hazard this repo has already
+/// paid for once.
+fn resolve_root(split_var: &str, xdg_var: &str) -> PathBuf {
+    if let Some(p) = env::var_os("OMNI_HOME").filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    if let Some(p) = env::var_os(split_var).filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    let legacy = legacy_home();
+    if legacy.exists() {
+        return legacy;
+    }
+    if let Some(p) = env::var_os(xdg_var).filter(|p| !p.is_empty()) {
+        return PathBuf::from(p).join("omni");
+    }
+    legacy
+}
+
+/// Where configuration lives: `config.toml`, `filters/`, `signals/`,
+/// `trusted.json`.
+#[inline]
+pub fn config_home() -> PathBuf {
+    static ROOT: std::sync::LazyLock<PathBuf> =
+        std::sync::LazyLock::new(|| resolve_root("OMNI_CONFIG_HOME", "XDG_CONFIG_HOME"));
+    ROOT.clone()
+}
+
+/// Where state lives: the database, transcripts, caches, exports.
+#[inline]
+pub fn data_home() -> PathBuf {
+    static ROOT: std::sync::LazyLock<PathBuf> =
+        std::sync::LazyLock::new(|| resolve_root("OMNI_DATA_HOME", "XDG_DATA_HOME"));
+    ROOT.clone()
+}
+
+/// The OMNI home directory.
+///
+/// Kept as the name most of the tree already asks for, and equal to
+/// [`config_home`]. With no environment set at all, every root here is the same
+/// `~/.omni`, so splitting config from data changes nothing for an existing
+/// install and only matters to someone who asked for it.
 #[inline]
 pub fn omni_home() -> PathBuf {
-    static HOME: std::sync::LazyLock<PathBuf> =
-        std::sync::LazyLock::new(|| match env::var_os("OMNI_HOME") {
-            Some(p) if !p.is_empty() => PathBuf::from(p),
-            _ => home_dir().unwrap_or_else(temp_dir).join(".omni"),
-        });
-    HOME.clone()
+    config_home()
 }
 
 /// Get system temporary directory
@@ -52,32 +100,96 @@ pub fn temp_dir() -> PathBuf {
 /// Get path to OMNI SQLite database
 #[inline]
 pub fn database_path() -> PathBuf {
-    omni_home().join("omni.db")
+    data_home().join("omni.db")
 }
 
 /// Get path to user defined filters directory
 #[inline]
 pub fn filters_directory() -> PathBuf {
-    omni_home().join("filters")
+    config_home().join("filters")
+}
+
+/// Get path to the user's signal directory, the newer name for the same thing.
+#[inline]
+pub fn signals_directory() -> PathBuf {
+    config_home().join("signals")
+}
+
+/// The effective user-global signal directory: `signals/` when it exists, the
+/// legacy `filters/` otherwise.
+///
+/// This lives here rather than in `pipeline::toml_filter` because that copy
+/// derived `~/.omni` itself and so was outside `OMNI_HOME` entirely. It runs on
+/// every hooked command, which made it the most expensive place in the tree to
+/// have missed (#315).
+#[inline]
+pub fn user_signal_dir() -> PathBuf {
+    let signals = signals_directory();
+    if signals.exists() {
+        signals
+    } else {
+        filters_directory()
+    }
+}
+
+/// The same signals-then-filters choice for a project-local `.omni` directory.
+#[inline]
+pub fn project_signal_dir(base: &std::path::Path) -> PathBuf {
+    let signals = base.join(".omni").join("signals");
+    if signals.exists() {
+        signals
+    } else {
+        base.join(".omni").join("filters")
+    }
 }
 
 /// Get path to trusted projects signature file
 #[inline]
 #[cfg_attr(test, allow(dead_code))]
 pub fn trusted_projects_path() -> PathBuf {
-    omni_home().join("trusted.json")
+    config_home().join("trusted.json")
 }
 
-/// Get path to learned filters file
+/// Get path to the user configuration file.
+#[inline]
+pub fn config_file() -> PathBuf {
+    config_home().join("config.toml")
+}
+
+/// Get path to learned filters file.
+///
+/// It stays inside `filters_directory()` rather than following the database
+/// into `data_home()`, even though it is generated rather than authored: the
+/// loader reads that directory as a unit, so splitting one file out of it would
+/// mean two directory walks to answer one question.
 #[inline]
 pub fn learned_filters_path() -> PathBuf {
     filters_directory().join("learned.toml")
 }
 
+/// Get path to the learn queue.
+#[inline]
+pub fn learn_queue_path() -> PathBuf {
+    data_home().join("learn_queue.jsonl")
+}
+
+/// Get path to the cache directory.
+#[inline]
+pub fn cache_directory() -> PathBuf {
+    data_home().join("cache")
+}
+
+/// Get path to the session export directory.
+#[inline]
+pub fn exports_directory() -> PathBuf {
+    data_home().join("exports")
+}
+
 /// Ensure OMNI home directory exists
 /// Creates parent directories if they don't exist
 pub fn ensure_omni_home() -> std::io::Result<()> {
-    std::fs::create_dir_all(omni_home())?;
+    std::fs::create_dir_all(config_home())?;
+    std::fs::create_dir_all(data_home())?;
     std::fs::create_dir_all(filters_directory())?;
     Ok(())
 }
@@ -89,7 +201,7 @@ mod tests {
     /// #307: without an override the suite wrote into the developer's live
     /// `~/.omni`. `.cargo/config.toml` points `OMNI_HOME` at the workspace's
     /// `target/`, so this fails if either half is removed: the config entry, or
-    /// `omni_home`'s reading of it.
+    /// the reading of it here.
     #[test]
     fn a_test_run_never_resolves_to_the_developers_real_home() {
         let home = omni_home();
@@ -105,10 +217,68 @@ mod tests {
             real,
             "the suite must not share a home with the installed binary"
         );
+    }
 
-        // Everything else derives from it, so one override covers the DB, the
-        // filters and the transcripts alike.
-        assert!(learned_filters_path().starts_with(&home));
-        assert!(database_path().starts_with(&home));
+    /// #315: the previous version of the test above asserted only that the
+    /// *accessor* was overridden, and passed while `toml_filter` read the real
+    /// `~/.omni/filters` on every hook. Every path the product actually opens is
+    /// checked here, so a new call site that derives its own is caught by the
+    /// one test rather than by a CI flake months later.
+    #[test]
+    fn every_resolved_path_stays_inside_a_configured_root() {
+        let config = config_home();
+        let data = data_home();
+
+        for (name, path) in [
+            ("filters_directory", filters_directory()),
+            ("signals_directory", signals_directory()),
+            ("user_signal_dir", user_signal_dir()),
+            ("trusted_projects_path", trusted_projects_path()),
+            ("config_file", config_file()),
+            ("learned_filters_path", learned_filters_path()),
+        ] {
+            assert!(
+                path.starts_with(&config),
+                "{name} resolved to {}, outside the config root {}",
+                path.display(),
+                config.display()
+            );
+        }
+
+        for (name, path) in [
+            ("database_path", database_path()),
+            ("learn_queue_path", learn_queue_path()),
+            ("cache_directory", cache_directory()),
+            ("exports_directory", exports_directory()),
+        ] {
+            assert!(
+                path.starts_with(&data),
+                "{name} resolved to {}, outside the data root {}",
+                path.display(),
+                data.display()
+            );
+        }
+    }
+
+    /// The migration decision, stated as a test because it is the one thing an
+    /// upgrade could get visibly wrong: an install that already has `~/.omni`
+    /// keeps using it, even when XDG is set.
+    #[test]
+    fn an_existing_legacy_tree_wins_over_xdg() {
+        // `resolve_root` is pure apart from the environment, and this asserts
+        // the ordering rather than driving the process env, which a parallel
+        // test would race on.
+        let legacy = legacy_home();
+        if legacy.exists() {
+            assert_eq!(
+                resolve_root("OMNI_DATA_HOME_UNSET_FOR_TEST", "XDG_DATA_HOME"),
+                if env::var_os("OMNI_HOME").is_some_and(|p| !p.is_empty()) {
+                    omni_home()
+                } else {
+                    legacy
+                },
+                "an existing ~/.omni must keep being used"
+            );
+        }
     }
 }
