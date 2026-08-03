@@ -168,6 +168,18 @@ STATS_OUT=$("$OMNI" stats 2>&1 || true)
 check "stats shows header" "$STATS_OUT" "Signal Report"
 check "stats shows commands" "$STATS_OUT" "commands"
 
+# The share card runs against a fresh store here, so it takes the no-data path.
+# Both branches have to exit 0: a growth surface that panics on a new install is
+# worse than not having one.
+SHARE_OUT=$("$OMNI" stats --share 2>&1)
+SHARE_EXIT=$?
+check_exit "stats --share exits 0" "$SHARE_EXIT" "0"
+if echo "$SHARE_OUT" | grep -q "OMNI saved me"; then
+    check "share card names the source" "$SHARE_OUT" "terminal output excluded"
+else
+    check "share card says so when there is no data" "$SHARE_OUT" "No data yet"
+fi
+
 # ─── 8. Learn ────────────────────────────────────────────
 echo "▸ Scenario 8: Learn"
 LEARN_OUT=$(cat tests/fixtures/cargo_build_errors.txt | "$OMNI" learn 2>&1 || true)
