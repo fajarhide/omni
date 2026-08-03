@@ -168,6 +168,8 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         || (base == "git" && git_enumerates_files(command))
         // A container listing, for the same reason (#233).
         || lists_containers(command)
+        // A kubectl listing that has no columns to summarise (#301).
+        || lists_kubectl_names(command)
         // A wrapper whose stdout belongs to whatever it ran inside (#234).
         || wraps_another_command(command)
 }
@@ -246,6 +248,52 @@ fn lists_containers(command: &str) -> bool {
         Some("container") => matches!(tokens.next(), Some("ls") | Some("ps")),
         _ => false,
     }
+}
+
+/// `kubectl` asked for a list of names rather than a table of state.
+///
+/// `kubectl config get-contexts -o name` prints one identifier per row and
+/// nothing else, so there is no status column to summarise and no noise to drop:
+/// the identifiers *are* the answer, the same rule as `ls`, `find`, `docker ps`
+/// and every other enumeration on this list. `distill_kubectl_generic` keeps only
+/// rows that match its critical or `configured|created|unchanged|deleted`
+/// vocabulary, and a context name matches neither, so a 20 row list came back as
+/// the first 10 with the rest dropped. Because the estate sorts alphabetically,
+/// the cut landed on the tail and every `k8s-*` production cluster was the half
+/// that went, which is worse than a random ten: the delivered list looks complete
+/// and contains no production context at all (#301).
+///
+/// Narrow on purpose. `kubectl get pods` keeps its distiller, because a pod table
+/// has a `STATUS` column with real noise in it and a fingerprint (`READY` +
+/// `RESTARTS`) that says so. This covers the forms whose output has no columns:
+/// `-o name` on any subcommand, and the three subcommands that only ever
+/// enumerate.
+fn lists_kubectl_names(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().map(|t| t.trim_matches('"'));
+    let base = tokens
+        .next()
+        .and_then(|w| std::path::Path::new(w).file_name()?.to_str());
+    if base != Some("kubectl") {
+        return false;
+    }
+    let rest: Vec<&str> = tokens.collect();
+
+    // `-o name`, `--output name`, `-oname`, `--output=name`.
+    let asks_for_names = rest
+        .windows(2)
+        .any(|w| matches!(w[0], "-o" | "--output") && w[1] == "name")
+        || rest.iter().any(|t| *t == "-oname" || *t == "--output=name");
+
+    asks_for_names
+        || matches!(
+            rest.first().copied(),
+            Some("api-resources") | Some("api-versions")
+        )
+        || (rest.first().copied() == Some("config")
+            && matches!(
+                rest.get(1).copied(),
+                Some("get-contexts") | Some("get-clusters") | Some("get-users")
+            ))
 }
 
 fn looks_like_env_assignment(token: &str) -> bool {
@@ -662,6 +710,48 @@ mod tests {
                 "`{cmd}` output is data, not build progress — it must survive"
             );
         }
+    }
+
+    /// From #301: `kubectl config get-contexts -o name` prints one identifier
+    /// per row with no status column, so `distill_kubectl_generic` kept only the
+    /// rows matching its own vocabulary and dropped the rest. The estate sorts
+    /// alphabetically, so the cut landed on the tail and every production
+    /// cluster was the half that went, leaving a list that looks complete.
+    #[test]
+    fn hands_back_kubectl_listings_that_have_no_columns() {
+        let names = "Mednet-cluster\n\
+                     aks-okadoc-admin-uaen\n\
+                     arn:aws:eks:ap-southeast-1:107126629234:cluster/evermos-prod\n\
+                     circlecare-aks\n\
+                     do-sgp1-k8s-prod\n\
+                     docker-desktop\n\
+                     k8s-ehs-prod-uaenorth\n\
+                     k8s-m42-prod-uaenorth\n\
+                     k8s-mednet-prod-uaenorth\n\
+                     kind-local\n";
+
+        for cmd in [
+            "kubectl config get-contexts -o name",
+            "kubectl config get-contexts",
+            "kubectl get pods -o name",
+            "kubectl get deploy --output name",
+            "kubectl api-resources",
+        ] {
+            let segments = scorer::score_with_command(names, cmd, None);
+            assert_eq!(
+                distill_with_command(&segments, names, cmd, None),
+                names,
+                "`{cmd}` lists identifiers; there is no column to summarise"
+            );
+            assert!(
+                passes_through_verbatim(cmd),
+                "`{cmd}` must be exempt from the collapse fallback too (#214)"
+            );
+        }
+
+        // The pod table keeps its distiller: it has a STATUS column with real
+        // noise and a fingerprint that says so.
+        assert!(!passes_through_verbatim("kubectl get pods -A"));
     }
 
     /// From #129: a `make` target runs several programs and hands back their

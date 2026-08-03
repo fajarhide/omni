@@ -136,18 +136,26 @@ fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -
 /// content was too large for `MAX_REWIND_BYTES` or there is no store. The caller
 /// decides whether the marker is affordable, because only the caller knows what
 /// it will hand back if it is not.
-fn rewind_marker(store: Option<&Arc<Store>>, content: &str, output: &str) -> (String, String) {
-    let omitted_lines = content
-        .lines()
-        .count()
-        .saturating_sub(output.lines().count());
+/// `kept_lines` and `kept_bytes` describe what the *distiller* produced, not what
+/// is about to be sent. The two differ once OMNI appends its own commentary, and
+/// counting a banner as surviving content understated the loss by exactly the
+/// number of banner lines: 10 dropped rows reported as `9 lines omitted` (#301).
+/// They are numbers rather than a `&str` so the caller cannot pass the wrong
+/// string again.
+fn rewind_marker(
+    store: Option<&Arc<Store>>,
+    content: &str,
+    kept_lines: usize,
+    kept_bytes: usize,
+) -> (String, String) {
+    let omitted_lines = content.lines().count().saturating_sub(kept_lines);
     // Lines are what a reader can act on, but a distillation can also shorten
     // lines in place and leave the count alone. Report the unit that is true for
     // this call rather than printing "0 lines omitted" over missing bytes.
     let lost = if omitted_lines > 0 {
         format!("{omitted_lines} lines")
     } else {
-        format!("{} bytes", content.len().saturating_sub(output.len()))
+        format!("{} bytes", content.len().saturating_sub(kept_bytes))
     };
 
     if content.len() > crate::guard::limits::MAX_REWIND_BYTES {
@@ -192,7 +200,8 @@ fn archive_tool_reply(
     if distilled.len() >= content.len() {
         return Some(distilled);
     }
-    let (marker, _hash) = rewind_marker(store, content, &distilled);
+    // No banner on this path: the distilled string is the whole reply.
+    let (marker, _hash) = rewind_marker(store, content, distilled.lines().count(), distilled.len());
     (distilled.len() + marker.len() < content.len()).then(|| distilled + &marker)
 }
 
@@ -588,6 +597,16 @@ pub fn process_payload(
         Route::Passthrough
     };
 
+    // Where the distiller's output ends and OMNI's own commentary begins. The
+    // marker below states how much of the command's output is missing, and
+    // counting a banner OMNI appended as if it were surviving content
+    // understates that by exactly the number of banner lines: a 20 row
+    // `kubectl config get-contexts -o name` kept 10 rows and reported
+    // `9 lines omitted` for the 10 that went (#301). An agent uses that number
+    // to decide whether a rewind is worth fetching.
+    let distilled_lines = final_out.lines().count();
+    let distilled_len = final_out.len();
+
     if route == Route::Soft {
         final_out.push_str("\n[Partial signal - omni learn recommended]\n");
     }
@@ -629,7 +648,8 @@ pub fn process_payload(
     // agent had never lost. A passthrough returns `None` below and the host keeps
     // its own bytes; there is nothing to recover and nothing to record.
     if route != Route::Passthrough && final_out.len() < content.len() {
-        let (marker, hash) = rewind_marker(store.as_ref(), &content, &final_out);
+        let (marker, hash) =
+            rewind_marker(store.as_ref(), &content, distilled_lines, distilled_len);
         rewind_hash = hash;
 
         // The marker is not free. One that costs more than the cut saved is a
@@ -1088,6 +1108,62 @@ mod tests {
             passthroughs, 1,
             "this input must reach the low-compression branch, or the test \
              guards nothing"
+        );
+    }
+
+    /// #301: the marker states how many lines are missing, and an agent uses
+    /// that number to decide whether fetching the rewind is worth it. It was
+    /// computed against a `final_out` that already carried OMNI's own
+    /// `[Partial signal]` banner, so every banner line counted as content that
+    /// survived and the loss was understated by exactly that many. Reported as
+    /// `9 lines omitted` for 10 dropped rows.
+    #[test]
+    fn the_omitted_count_ignores_omnis_own_banner() {
+        let rows: Vec<String> = (0..20)
+            .map(|i| format!("context-{i:02}-cluster-name"))
+            .collect();
+        let content = format!("{}\n", rows.join("\n"));
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl describe node"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let out = process_payload(&payload, None, None).expect("this payload is distilled");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+        let stdout = v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+            .as_str()
+            .expect("stdout is a string");
+
+        let marker = stdout
+            .lines()
+            .find(|l| l.starts_with("[OMNI:"))
+            .expect("a lossy reply carries a marker");
+        assert!(
+            stdout.contains("[Partial signal"),
+            "fixture must reach the banner path or it does not guard this: {stdout}"
+        );
+
+        // Everything that is not OMNI's own commentary is content that survived.
+        let survived = stdout
+            .lines()
+            .filter(|l| {
+                !l.trim().is_empty() && !l.starts_with("[OMNI:") && !l.starts_with("[Partial")
+            })
+            .count();
+        let claimed: usize = marker
+            .split_whitespace()
+            .nth(1)
+            .and_then(|n| n.parse().ok())
+            .expect("the marker leads with a count");
+
+        assert_eq!(
+            claimed,
+            rows.len() - survived,
+            "marker claims {claimed} lines omitted, but {} of {} rows are missing: {stdout}",
+            rows.len() - survived,
+            rows.len()
         );
     }
 
