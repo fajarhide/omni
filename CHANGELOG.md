@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-08-03
+
 ### Removed
 - **Five direct dependencies that nothing in the tree references (#174)**: `indicatif` was already dead when that audit was written, and the `Cargo.toml` comment beside it described progress bars for heavy operations that were never built. The other four went dead since, because #251 and #298 deleted their callers: `console` (4 files at the time of the audit), `lru` (1), `unicode-segmentation` (1) and `glob` now all grep to zero across `src/`, `tests/` and `benches/`. Dropping them takes `Cargo.lock` from 299 packages to 290, since `console` and `indicatif` between them carried `number_prefix`, `portable-atomic`, `web-time` and a second major of `foldhash`, and `lru` carried `allocator-api2`. This is not a binary size crusade: the cost of a dead dependency is that it is a supply chain entry and a standing upgrade obligation that buys nothing back. What the same audit listed and this change keeps is kept on purpose, each with one real caller: `dialoguer` for the interactive `omni init` prompt, `is-terminal` for the pipe's TTY check, `strsim` for unknown-flag suggestions and correction matching, `unicode-width` for column alignment. The two subsystem questions on that ticket are not deletions and stay open: `tiktoken-rs` is the `cl100k_base` half of #283, a product call about which model's vocabulary a reported token count is counted against, and the `r2d2` pool needs a measurement of the MCP server, its one long lived caller, before the single shot hook path is moved to a plain connection.
 
