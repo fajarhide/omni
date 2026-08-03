@@ -44,22 +44,22 @@ impl Distiller for JsTsDistiller {
         }
 
         // Dispatch based on content analysis
-        Some(if is_vitest_output(&lines) {
-            distill_vitest(&filtered_input)
+        if is_vitest_output(&lines) {
+            Some(distill_vitest(&filtered_input))
         } else if is_tsc_output(&lines) {
-            distill_tsc(&filtered_input)
+            Some(distill_tsc(&filtered_input))
         } else if is_playwright_output(&lines) {
-            distill_playwright(&filtered_input)
+            Some(distill_playwright(&filtered_input))
         } else if is_eslint_output(&lines) {
-            distill_eslint(&filtered_input)
+            Some(distill_eslint(&filtered_input))
         } else if is_prettier_output(&lines) {
-            distill_prettier(&filtered_input)
+            Some(distill_prettier(&filtered_input))
         } else {
             // Both arms of the `filtered_input.len() < input.len()` branch that
             // used to stand here called this same function with the same
             // arguments, so the condition decided nothing.
             distill_fallback(segments, session)
-        })
+        }
     }
 }
 
@@ -848,9 +848,6 @@ fn capped_lines(items: &[&str], cap: usize) -> String {
 /// as a 90% saving.
 const FALLBACK_MAX_LINES: usize = 30;
 
-/// Segments sampled when nothing in the output scored Critical or Important.
-const FALLBACK_SAMPLE_SEGMENTS: usize = 10;
-
 /// Package-manager chatter the session hint already told us to expect.
 ///
 /// Both loops below filtered this with the same two `contains` checks written
@@ -866,7 +863,7 @@ fn is_pm_noise(line: &str, js_pm: Option<&str>) -> bool {
 fn distill_fallback(
     segments: &[OutputSegment],
     session: Option<&crate::pipeline::SessionState>,
-) -> String {
+) -> Option<String> {
     let js_pm = session.and_then(|s| s.toolchain_hints.get("js").map(|v| v.as_str()));
 
     let eligible: Vec<&str> = segments
@@ -877,31 +874,29 @@ fn distill_fallback(
         .collect();
 
     if !eligible.is_empty() {
-        return with_tail(&eligible, FALLBACK_MAX_LINES);
+        return Some(with_tail(&eligible, FALLBACK_MAX_LINES));
     }
 
-    // Nothing scored: sample the first line of each of the first N segments
-    // rather than return nothing at all. That is still a sample, so it is
-    // counted against every line there was — not against the ones sampled.
-    let sample: Vec<&str> = segments
-        .iter()
-        .take(FALLBACK_SAMPLE_SEGMENTS)
-        .filter_map(|seg| seg.content.lines().find(|l| !is_pm_noise(l, js_pm)))
-        .collect();
-    let total_lines = segments
-        .iter()
-        .flat_map(|seg| seg.content.lines())
-        .filter(|l| !is_pm_noise(l, js_pm))
-        .count();
-
-    let mut out = sample.join("\n");
-    if let Some(tail) = more_tail(total_lines, sample.len()) {
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(&tail);
-    }
-    out.trim().to_string()
+    // Nothing scored, so nothing here was read. This used to sample the first
+    // line of each of the first N segments "rather than return nothing at all",
+    // which is a sentence that stopped being reasonable at #250: a sample of the
+    // head is not a summary, it is truncation of a payload the distiller could
+    // not parse, and for a test runner the verdict is always in the tail.
+    //
+    // Measured on a green `node --test` TAP run through the release post-hook:
+    // 804 B and 44 lines came back as 122 B and three, the first of which was
+    // npm's own echo of the script name. `1..6`, `# pass 6` and `# fail 0` were
+    // all gone, so the reply answered "npm test ran" for a question that was
+    // "did it pass". The same payload with one failing subtest passed through
+    // untouched, because failure vocabulary tiers those segments Critical, so a
+    // green run lost its result while a red one kept it and `… and 42 more`
+    // looked identical either way (#310).
+    //
+    // Declining costs nothing on the noisy case this branch existed for, and
+    // that was measured rather than assumed: a 300 line `npm install`
+    // deprecation wall, 21,680 B, already came back as a passthrough on `main`
+    // before this change. The sample was not what was compressing it.
+    None
 }
 
 /// `items` capped at `cap`, one per line, with the omission tail when it bites.
@@ -1116,7 +1111,8 @@ mod tests {
     #[test]
     fn reports_how_many_lines_the_cap_dropped() {
         let lines = npm_warnings(300);
-        let out = distill_fallback(&important_segments(&lines), None);
+        let out = distill_fallback(&important_segments(&lines), None)
+            .expect("segments tiered Important take the eligible path");
 
         assert!(
             out.contains("… and 270 more"),
@@ -1134,7 +1130,8 @@ mod tests {
     #[test]
     fn stays_silent_when_nothing_was_dropped() {
         let lines = npm_warnings(FALLBACK_MAX_LINES);
-        let out = distill_fallback(&important_segments(&lines), None);
+        let out = distill_fallback(&important_segments(&lines), None)
+            .expect("segments tiered Important take the eligible path");
 
         assert!(
             !out.contains("more"),
@@ -1154,7 +1151,8 @@ mod tests {
             .toolchain_hints
             .insert("js".to_string(), "pnpm".to_string());
 
-        let out = distill_fallback(&important_segments(&lines), Some(&session));
+        let out = distill_fallback(&important_segments(&lines), Some(&session))
+            .expect("segments tiered Important take the eligible path");
 
         assert!(
             out.contains("… and 270 more"),
@@ -1164,8 +1162,54 @@ mod tests {
 
     /// The zero-state sample path (nothing scored Critical or Important) takes
     /// one line per segment and used to drop the rest just as silently.
+    /// #310, end to end through the dispatch boundary rather than the helper,
+    /// because the routing is half of it: `npm test` reaches `JsTsDistiller`,
+    /// TAP is none of the five shapes it detects, and the fallback then owned
+    /// output nobody had read. A green run came back as npm's own echo line.
     #[test]
-    fn marks_omissions_in_the_zero_state_sample_too() {
+    fn a_green_tap_run_keeps_its_verdict() {
+        let mut tap = String::from(
+            "\n> @acme/design@0.1.0 test\n> node --test lib/*.test.js\n\nTAP version 13\n",
+        );
+        for (i, name) in [
+            "parses hex into channels",
+            "rejects a malformed hex string",
+            "computes relative luminance",
+            "contrast ratio is symmetric",
+            "clamps out-of-range channels",
+            "round trips through hsl",
+        ]
+        .iter()
+        .enumerate()
+        {
+            tap.push_str(&format!(
+                "# Subtest: {name}\nok {} - {name}\n  ---\n  duration_ms: 0.{}\n  ...\n",
+                i + 1,
+                i + 2
+            ));
+        }
+        tap.push_str("1..6\n# tests 6\n# suites 0\n# pass 6\n# fail 0\n# duration_ms 56.09\n");
+
+        let segments = crate::pipeline::scorer::score_with_command(&tap, "npm test", None);
+        let out = crate::distillers::distill_with_command(&segments, &tap, "npm test", None);
+
+        for verdict in ["# pass 6", "# fail 0", "1..6"] {
+            assert!(
+                out.contains(verdict),
+                "`{verdict}` is the answer to `npm test` and it did not survive: {out}"
+            );
+        }
+    }
+
+    /// #310: this used to assert the zero-state *sample* carried an omission
+    /// marker. Sampling was the defect. With nothing scored, the distiller read
+    /// nothing, and the head of an unread payload is not a summary of it: a
+    /// green `node --test` run came back as npm's own echo line plus
+    /// `… and 42 more`, with `# pass 6` and `# fail 0` deleted. The honest
+    /// answer is to decline and let the hook hand the bytes back, or collapse
+    /// them if they are genuinely repetitive.
+    #[test]
+    fn declines_when_no_segment_scored_rather_than_sampling_the_head() {
         let segments: Vec<OutputSegment> = (0..20)
             .map(|i| OutputSegment {
                 content: format!("context line {i}a\ncontext line {i}b"),
@@ -1176,11 +1220,10 @@ mod tests {
             })
             .collect();
 
-        let out = distill_fallback(&segments, None);
-
-        assert!(
-            out.contains("more"),
-            "sampled 10 of 40 lines with nothing saying so: {out}"
+        assert_eq!(
+            distill_fallback(&segments, None),
+            None,
+            "nothing was recognised, so there is nothing to summarise"
         );
     }
 
