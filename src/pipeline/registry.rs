@@ -113,12 +113,27 @@ fn reshaped_by(segment: &str) -> Option<&str> {
         .split_whitespace()
         .next()
         .map(|w| w.trim_matches(|c| c == '"' || c == '\''))?;
-    matches!(
-        base,
-        "jq" | "yq" | "cut" | "tr" | "awk" | "base64" | "wc" | "column" | "xargs"
-    )
-    .then_some(last)
+    RESHAPING_TAILS.contains(&base).then_some(last)
 }
+
+/// The stage names `reshaped_by` recognises, in one place because two callers
+/// need the same answer and a comment is not a mechanism.
+///
+/// `distillers::passes_through_verbatim` has to agree with this list: naming a
+/// tail as the payload's owner only helps if that tail is then handled, and none
+/// of these has a grammar to distil. #277 added seven names to both lists in two
+/// files and the only thing keeping them in step was a note telling the next
+/// person to keep them in step. That is the duplication #194 is about, so the
+/// half of it with a demonstrated cost is a shared constant now.
+///
+/// There is deliberately no test walking this list against
+/// `passes_through_verbatim`. One was written and it could not fail: once both
+/// sides read the same constant, asserting that every member of the list is in
+/// the list proves nothing. The constant *is* the mechanism, which is the point
+/// of removing the comment that used to be.
+pub const RESHAPING_TAILS: &[&str] = &[
+    "jq", "yq", "cut", "tr", "awk", "base64", "wc", "column", "xargs",
+];
 
 /// Splits on unquoted single `|`, the pipe operator. `||` is a sequential
 /// operator and `split_sequential` has already dealt with it.

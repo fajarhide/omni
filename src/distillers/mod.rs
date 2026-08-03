@@ -154,22 +154,15 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             // and the collapse fallback would leave that payload unparseable.
             // `kubectl get pod -o json | jq -r '...'` lost three of four lines
             // before this (#269).
-            | "jq"
-            | "yq"
-            // The rest of the reshaping tails `registry::reshaped_by` routes to
-            // (#277). Naming a stage as the payload's owner only helps if that
-            // stage is then handled, and none of these has a grammar: `cut` and
-            // `column` project or lay out columns, `tr` and `base64` rewrite
-            // bytes, `xargs` runs some other program entirely. Declared here as
-            // well as there because a passthrough the collapse fallback then
-            // folds is #214, and because `gh api … | base64 -d` decodes to a
-            // source file, which an enumeration cut would shred (#235).
-            | "cut"
-            | "tr"
-            | "base64"
-            | "column"
-            | "xargs"
     )
+        // The reshaping tails `registry::reshaped_by` routes to, read from the
+        // one list rather than repeated here (#277, #194). Naming a stage as the
+        // payload's owner only helps if that stage is then handled, and none of
+        // these has a grammar: `cut` and `column` project or lay out columns,
+        // `tr` and `base64` rewrite bytes, `xargs` runs some other program.
+        // Keeping the two in step by comment is what let `gh api … | base64 -d`
+        // reach the generic distiller and get cut, on the first run of #277.
+        || crate::pipeline::registry::RESHAPING_TAILS.contains(&base)
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty — match on any `env`
         // token in that case rather than only the first word (review of #203).
