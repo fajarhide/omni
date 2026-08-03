@@ -1,7 +1,7 @@
 //! #184 — the reproducible net-savings benchmark.
 //!
 //! Replays every `execution_traces.raw_input` through the CURRENT pipeline and
-//! aggregates raw vs distilled bytes, so the published headline (docs/PERFOMANCE.md,
+//! aggregates raw vs distilled bytes, so the published headline (docs/BENCHMARKS.md,
 //! README) can be re-measured on the shipped binary rather than trusted from a run
 //! nobody kept. This is the committed reproducer the README's "Numbers you can
 //! reproduce" promises.
@@ -11,7 +11,7 @@
 //!   OMNI_BENCH_DB=~/.omni/omni.db \
 //!     cargo test --release --test bench_replay -- --ignored --nocapture
 //!
-//! Faithfulness to docs/PERFOMANCE.md's method:
+//! Faithfulness to docs/BENCHMARKS.md's method:
 //! - `session: None` + `store: None` → the scorer sees no history, i.e. the
 //!   "fresh HOME per invocation" the method requires (a warm DB is non-deterministic).
 //! - `HOME` is pointed at an empty temp dir so only the embedded signals load, not
@@ -62,14 +62,42 @@ fn replay_execution_traces_net_savings() {
     }
 
     let conn = rusqlite::Connection::open(&db).expect("open trace db");
-    let mut stmt = conn
-        .prepare("SELECT command, raw_input FROM execution_traces")
-        .expect("prepare");
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .expect("query")
-        .filter_map(Result::ok)
-        .collect();
+    // Two populations, because the difference between them is the number this
+    // project keeps having to correct. `terminal` rows are TTY output no model
+    // ever receives, and on the reporting installation they are 888 traces
+    // carrying 86 MB, 68% of the corpus by bytes. Replaying everything reported
+    // **79.1%** where the model-facing population reports **43.1%**, and the
+    // README quoted the harness. #212 fixed exactly this in `omni stats`, which
+    // now prints "Terminal output is excluded" on its own line; the harness that
+    // produces the published figure never got the same fix (#324).
+    //
+    // Both are printed rather than one being chosen, so the gap stays visible
+    // instead of being a decision someone has to remember.
+    let fetch = |sql: &str| -> Vec<(String, String)> {
+        let mut stmt = conn.prepare(sql).expect("prepare");
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .filter_map(Result::ok)
+            .collect()
+    };
+
+    let model_facing = fetch(
+        "SELECT command, raw_input FROM execution_traces \
+         WHERE agent_id IS NOT NULL AND agent_id != 'terminal'",
+    );
+    let everything = fetch("SELECT command, raw_input FROM execution_traces");
+    let total_traces = everything.len();
+    let use_everything = std::env::var("OMNI_BENCH_ALL").is_ok() || model_facing.is_empty();
+    let rows = if use_everything {
+        everything
+    } else {
+        model_facing
+    };
+    let population = if rows.len() == total_traces {
+        "every trace, terminal included, which is not the figure to publish"
+    } else {
+        "traces whose result reached a model, terminal excluded per #212"
+    };
 
     assert!(!rows.is_empty(), "trace DB has no rows to replay");
     assert!(
@@ -127,6 +155,7 @@ fn replay_execution_traces_net_savings() {
     let pct = |part: u64| 100.0 * part as f64 / n as f64;
 
     println!("\n=== #184 net-savings replay (current pipeline) ===");
+    println!("population:        {population}");
     println!("corpus:            {n} traces from {db} ({errored} errored, excluded)");
     println!("bytes:             {raw_total} -> {out_total}");
     println!("NET SAVINGS:       {net:.1}%");

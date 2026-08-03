@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em>Noise-canceling context and long-term memory for your AI agent — <b>lossy, but always reversible, and it never fabricates a result.</b> Stop paying Claude to read 10,000 lines of terminal noise.</em>
+    <em><b>Stop paying Claude to read 10,000 lines of terminal noise.</b> OMNI cuts <code>git</code> by 89%, <code>cargo</code> by 91% and <code>kubectl</code> by 77% before your agent ever sees them. Everything else passes through untouched. Nothing is ever lost, and it never invents a result.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -16,39 +16,38 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-58.9% fewer tokens on a real command mix &middot; Cross-Session Memory &middot; Format-safe &middot; Always reversible &middot; Fails open, never fabricates &middot; Numbers you can reproduce </b>
+<code>git</code> 89% &middot; <code>cargo</code> 91% &middot; <code>kubectl</code> 77% &middot; 21 ms per command &middot; 0 of 9,965 calls ever grew the output &middot; every cut recoverable byte for byte &middot; cross-session memory </b>
 
 </br></br>
+
+```bash
+brew install fajarhide/tap/omni && omni init
+```
+
+Works with Claude Code, Cursor, Windsurf, Codex and Roo out of the box.
+
+</br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
 </div>
 
 ---
 
-Every AI coding assistant has two massive problems.
+Your agent reads every line your terminal prints. Build logs, Docker logs, CI logs,
+progress bars, ANSI colors. Thousands of tokens to find one line. Claude isn't
+expensive. Your terminal is.
 
-**1. They read everything.**  
-Build logs.  
-Docker logs.  
-CI logs.  
-Progress bars.  
-ANSI colors.  
-Thousands of tokens... to find one line. Claude isn't expensive. Your terminal is.
+And it forgets all of it overnight. Restart Cursor, switch to Claude Code, and you
+re-explain the project from scratch.
 
-**2. They forget everything.**  
-Every time you restart Cursor, or switch from Claude Code to Windsurf, your agent gets amnesia. You have to re-explain the project goal. You have to remind them of the same framework gotchas over and over again.
-
-OMNI fixes both.
+OMNI fixes both, and stays out of the way everywhere else.
 
 ---
 
-## The Difference
+## The same `git log`, side by side
 
-**Problem 1: Your terminal drowns out the signal**
-
-The same `git log` side by side. Without OMNI, one commit's `Author` / `Date` /
-body already fills the screen. With OMNI, **every commit is kept** — as one
-`hash subject` line, 94% smaller. Nothing is summarised away; the footer is
-measured from the real byte counts, not promised.
+Without OMNI, one commit's `Author` / `Date` / body already fills the screen. With
+OMNI, **every commit is kept**, as one `hash subject` line, 94% smaller. Nothing is
+summarised away.
 
 <table>
 <tr>
@@ -56,151 +55,104 @@ measured from the real byte counts, not promised.
 <td align="center"><b>With OMNI</b><br/><sub>every commit kept, 94% smaller</sub></td>
 </tr>
 <tr>
-<td valign="top"><img src="media/demo-git-without.gif" alt="a raw verbose git log -15 — one commit's Author, Date and body fill the screen" width="400" /></td>
+<td valign="top"><img src="media/demo-git-without.gif" alt="a raw verbose git log -15: one commit's Author, Date and body fill the screen" width="400" /></td>
 <td valign="top"><img src="media/demo-git-with.gif" alt="the same git log -15 through OMNI: every commit as a compact hash + subject line, 94% smaller" width="400" /></td>
 </tr>
 </table>
 
-Real numbers, measured on `tests/fixtures/` and replayed traces — not aspirations:
-
 | Command | Without OMNI | With OMNI | Saved |
 |---|---|---|---|
-| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **93%** |
-| `kubectl get pods` (35 pods, 5 crashing) | the full table | `35 pods \| 30 running, 5 error` + the 5 failing pods named | — |
-| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **45%** |
-| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **37%** |
+| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **92.9%** |
+| `git status` (dirty) | 496 B of porcelain | the branch and the changed paths | **61.7%** |
+| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **35.9%** |
+| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **25.2%** |
+| `kubectl get pods` (35 pods, 5 crashing) | the full table | the full table | **0%**, by design |
 
-> **The honest caveat:** OMNI compresses *noisy successful* output. A command that **fails** is passed through **verbatim** — a hidden error is worse than an uncompressed one — and structured output (JSON/YAML/CSV) is never touched. It earns its keep on repetitive tool chatter and gets out of the way everywhere else.
-
-### Why you can trust a lossy tool
-
-Every other compressor asks you to *trust* that what it cut didn't matter. OMNI doesn't ask — it guarantees, and each guarantee is backed by code you can read:
-
-| Guarantee | How | Proof |
-|---|---|---|
-| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite **RewindStore** (SHA-256 → content); the agent gets a hash and calls `omni_retrieve` | [`How it works`](#how-it-works) |
-| **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
-| **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
-| **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
-| **Numbers are measured, not aspirational** | 1,810 real traces replayed on the release binary — and 63.6% of calls net zero, which we publish too | [`Benchmarks`](#benchmarks) |
-
-That is the one thing a bigger compression number can't buy: **you can always recover the original, and it will never lie to your agent.**
-
-**Problem 2: Your agent forgets everything overnight**
-
-### Starting a new session
-**Without OMNI:** "Please re-explain the project structure, the auth module is broken, and we use Postgres not MySQL."  
-**With OMNI:** The agent already knows. It picks up where you left off.
-
-### Fixing the same bug twice
-**Without OMNI:** Agent hits the same framework gotcha it already solved yesterday because it has no memory.  
-**With OMNI:** The fix is already stored. The agent surfaces it through the `omni_recall` MCP tool before it repeats the mistake.
-
-### Multi-IDE workflows (Cursor → Claude Code)
-**Without OMNI:** New IDE, new agent, zero context. You're starting from scratch.  
-**With OMNI:** Session summary is injected automatically. New agent is immediately up to speed.
+> **Where it does nothing, on purpose.** A command that fails is passed through
+> verbatim, because a hidden error costs more than an uncompressed one. Structured
+> output (JSON, YAML, CSV) is never touched, because the next step in your pipeline
+> is going to parse it. That is what makes it safe to leave on for every command you
+> run.
 
 ---
 
-## Why This Matters
+## Nothing is ever lost. It never makes something up.
 
-The code you *don't* send to the AI is just as important as the code you do.
+Two promises, and both are in the code rather than in this paragraph.
 
-When you feed an AI megabytes of terminal noise, it suffers from context bloat—hallucinating fixes for the wrong warnings and burning your API budget on irrelevant output.
+**Nothing is ever lost.** Every byte OMNI cuts is archived locally in the
+RewindStore, keyed by SHA-256. The agent gets a hash with the distilled output and
+can call `omni_retrieve` to pull the original back byte for byte, mid-conversation,
+without re-running your command.
 
-When you restart an agent and it has no memory, you lose hours re-establishing context that should have been preserved automatically.
+**It never makes something up.** A distiller that recognises nothing in its input
+returns the raw input. That is a type, not a convention: `distill` returns
+`Option<String>` and the routing layer falls back to the original whenever it gets
+`None`. There is no code path that produces a green "no errors" line OMNI did not
+read.
 
-OMNI solves both, invisibly:
-
-* **Less noise** → lower cost, and less irrelevant output for the model to trip over.
-* **Format-safe by design** → JSON, YAML, NDJSON and CSV pass through byte-for-byte; a distiller that can't parse its input stays quiet instead of fabricating a summary.
-* **Persistent memory** → no more re-explaining your project, no more repeating fixes.
-* **One install** → works silently with every agent you already use.
+| Guarantee | How | Proof |
+|---|---|---|
+| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite RewindStore; the agent gets a hash and calls `omni_retrieve` | [Architecture](docs/ARCHITECTURE.md) |
+| **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
+| **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
+| **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
 
 ---
 
 ## Benchmarks
 
-The honest headline, measured on the release binary against **1,810 real command
-executions** replayed from one developer's actual usage:
+Measured on the release binary by replaying **9,965 real command executions** from
+one developer's actual usage:
 
-* **58.9% fewer bytes** reaching the model across the whole mix (15.0 MB → 6.2 MB).
-* **63.6% of those calls saved nothing at all.** OMNI handed the output straight
-  back, adding **zero** bytes. Every byte of the saving comes from the other 36.4%,
-  where there was real noise to cut.
-* **Structured output is never touched.** JSON, YAML, NDJSON and CSV pass through
-  byte-for-byte, because a corrupted payload costs more than a missed compression.
-
-That second bullet is the number most tools in this category do not print. A tool
-that claims to save 90% of every command is telling you it summarises output you
-needed.
+* **On the commands that actually generate noise, 76 to 91%.** `cargo` 91.4%,
+  `git` 89.2%, `kubectl` 76.5%. That is where your context budget goes, and that
+  is where OMNI works.
+* **OMNI acts on 1 command in 10, and adds zero bytes to the other 9.** It is a
+  filter, not a summariser. When there is nothing to cut it gets out of the way
+  completely.
+* **Not one call in 9,965 made the output larger.**
+* **43.3% fewer bytes** across the entire mix, noisy and quiet commands together.
+* **21 ms per command** end to end, growing with your history rather than with the
+  payload. On a 205 MB database it is 61 ms.
 
 <div align="center">
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Where the saving actually comes from, over the same 1,810 executions:
+Full corpus, per-command breakdown, fixtures and latency tables:
+**[docs/BENCHMARKS.md](docs/BENCHMARKS.md)**. Reproduce them with
+`cargo test --release --test bench_replay -- --ignored`.
 
-| Command | Calls | Input | Output | Saved |
-|---------|-------|-------|--------|-------|
-| `cargo` | 29 | 424 KB | 13 KB | **96.8%** |
-| `git` | 256 | 5.9 MB | 509 KB | **91.3%** |
-| `ls` | 52 | 71 KB | 29 KB | **59.5%** |
-| `kubectl` | 212 | 4.4 MB | 2.3 MB | **48.0%** |
-| `find` | 39 | 83 KB | 53 KB | **36.2%** |
-| `grep` | 184 | 534 KB | 385 KB | **27.8%** |
-| `cat` | 85 | 515 KB | 468 KB | **9.1%** |
+### How to read a savings number, including ours
 
-`git` and `cargo` carry the result; `cat` and `grep` are close to a no-op. OMNI
-earns its place on noisy, repetitive tooling output and gets out of the way
-everywhere else.
+Every tool in this category publishes a percentage. Here are the five questions that
+decide whether it means anything, and our answers:
 
-Single fixtures from `tests/fixtures/`, if you want to reproduce one by hand:
+| Question | Why it matters | OMNI |
+|---|---|---|
+| What share of calls saved **nothing**? | A tool that saves on every command is summarising output you needed | **90.0%**, published |
+| Did any call make the output **larger**? | Markers and headers cost bytes; nobody reports the ones that backfire | **0 of 9,965** |
+| Which **population** was measured? | Counting terminal bytes no model reads inflates the number for free | model-facing only, and saying so costs us 36 points |
+| Can you **re-run** it? | A number you cannot reproduce is a claim, not a measurement | one command, on your own data |
+| Is the cut **recoverable**? | Lossy is fine when it is reversible, and fatal when it is not | byte for byte, via `omni_retrieve` |
 
-| Command / Context | Input | Output | Saved |
-|-------------------|-------|--------|-------|
-| `cargo build` (large, successful) | 3,220 B | 9 B | **99.7%** |
-| `cargo test` (490 passed, 10 failed) | 16.5 KB | 1,100 B | **93.3%** |
-| `pytest` (failures) | 730 B | 136 B | **81.4%** |
-| `git status` (dirty) | 496 B | 113 B | **77.2%** |
-| `git diff` (multi-file) | 397 B | 220 B | **44.6%** |
-| `docker build` (heavy noise) | 9.2 KB | 5.8 KB | **37.2%** |
-| `kubectl get pods` (mixed) | 840 B | 762 B | **9.3%** |
-
-**Latency is a real cost, not zero.** OMNI runs on every hooked command, and the
-price grows with your history: a 496-byte `git status` takes ~82 ms against a
-fresh database and ~308 ms against a 97 MB one. A 16.5 KB `cargo test` takes
-~276 ms. Budget for it.
-
-*To see your own actual token savings, just run `omni stats` after a few days of usage.*
-
+We publish the share of calls where we did nothing because it is the number that
+tells you what the rest are worth.
 
 ---
 
-## Quick Start & Installation
-
-Omni is incredibly easy to set up. It natively integrates into your terminal.
+## Install
 
 **macOS / Linux:**
 ```bash
-# 1. Install via Homebrew
 brew install fajarhide/tap/omni
-
-# 2. Setup Omni (Interactive Menu for Claude, VS Code, OpenCode, Codex, Antigravity)
-omni init
-
-# 3. Verify it's working
-omni doctor
-
-# 4. Or auto-fix any issues
-omni doctor --fix
-
-# 5. Check Current Status
-omni init --status
+omni init      # interactive setup for Claude, Cursor, VS Code, Codex, Antigravity
+omni doctor    # verify, or `omni doctor --fix`
 ```
 
-**Universal Installer (macOS / Linux / WSL):**
-```bash 
+**Universal (macOS / Linux / WSL):**
+```bash
 curl -fsSL omni.weekndlabs.com/install | bash
 ```
 
@@ -209,87 +161,23 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
----
-
-## Integrations
-
-OMNI works seamlessly with the agentic tools you already use. It intercepts their terminal executions automatically.
-
-* Claude Code
-* Cursor
-* Windsurf
-* Roo Code
-* OpenAI Codex
-* Antigravity CLI
-
----
-
-## Adaptive Memory OS
-
-OMNI isn't just a terminal filter—it's a cure for AI amnesia.
-
-If you've ever worked with an AI agent for more than an hour, you know the pain of context loss. You restart the agent, and suddenly it forgets what you were working on. It forgets the project goal. It starts making the exact same mistakes it made yesterday because it forgot the repository's undocumented quirks.
-
-OMNI's Memory OS runs silently in the background to solve this:
-
-* **Stop Re-Explaining the Goal (`omni goal`)**: Set your North Star objective once. OMNI will relentlessly remind the agent of this exact priority on every single prompt, preventing it from drifting off-task.
-* **Never Lose Your Train of Thought (Session Continuity)**: If Cursor crashes or you switch to Claude Code, OMNI instantly injects a compressed summary of your last session. The new agent knows exactly which files were hot and what the last active error was, picking up right where you left off.
-* **Teach It Once (`omni remember`)**: Stop fixing the same hallucination. Agents can save project-specific rules, gotchas, and architecture decisions directly into OMNI's local SQLite backend. When they get stuck later, they automatically pull the exact answer back out via semantic search.
-
-Your agent gets smarter about your codebase every single day, and you never have to repeat yourself again.
-
----
-
-## How it works
-
-Omni operates purely locally using a deterministic `Read → Guard → Score → Collapse → Distill → Persist` pipeline.
-
-```mermaid
-flowchart LR
-    Command[Raw Tool Output] --> Hook[Omni Hook]
-    Hook --> Score[Scorer Engine]
-    Score -->|Critical=1.0, Noise=0.1| Distill[Content Distiller]
-    Distill --> Clean[Clean Context]
-    Command --> SQLite[(RewindStore SQLite)]
-```
-
-If the AI *really* needs the dropped noise, OMNI's local SQLite **RewindStore** keeps the full uncompressed log safely hashed, allowing the agent to retrieve it anytime.
-
----
-
-## Architecture
-
-
-<div align="center">
-  <img src="media/architecture.svg" alt="OMNI Architecture Diagram" width="100%" />
-</div>
-
-Built in Rust, though the end-to-end cost is not zero.
-
-* **Distillation**: the scoring and collapsing pipeline itself runs in single-digit milliseconds.
-* **End to end**: what you actually wait for is that plus the RewindStore write, and it grows with your history — roughly 82 ms against a fresh database and ~308 ms against a 97 MB one. See [Benchmarks](#benchmarks) before you assume it is free.
-* **Memory**: Operates via efficient streams, keeping memory usage flat even on 20,000-line logs.
-* **Fail Open**: If OMNI panics, it fails silently and passes the raw output through. It will never crash your host agent.
-
-```bash
-# Development
-cargo build --release
-cargo test --all
-make fmt && make clippy
-```
+Then run your commands normally. There is nothing to prefix and no proxy to wrap.
 
 ---
 
 ## FAQ
 
-**Does Omni permanently delete my logs?**  
-No. The raw logs are compressed and stored locally in the SQLite RewindStore. The AI receives a hash and can retrieve the full log if needed.
+**Does OMNI permanently delete my logs?**
+No. Raw logs are stored locally in the SQLite RewindStore. The agent receives a hash
+and can retrieve the full log at any time.
 
-**Will this slow down my terminal?**  
-Yes, measurably, and the cost grows with your history. The distillation pipeline itself runs in single-digit milliseconds, but every hooked command also writes to the local RewindStore: a 496-byte `git status` takes ~82 ms against a fresh database and ~308 ms against a 97 MB one, and a 16.5 KB `cargo test` takes ~276 ms. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely when you need the raw output back.
+**Will this slow down my terminal?**
+Measurably, yes, and the cost grows with your history rather than with the payload. A
+496-byte `git status` takes about 21 ms against a fresh database and 61 ms against a
+205 MB one. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely.
 
-**Can I add my own filters?**  
-Yes. You can teach OMNI to strip noise specific to your internal tools using TOML:
+**Can I add my own filters?**
+Yes, in TOML:
 ```toml
 # ~/.omni/signals/custom.toml
 [filters.my_tool]
@@ -297,14 +185,27 @@ match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
 
-## Contributing & License
+**How do I see my own savings?**
+`omni stats` after a few days. `omni stats --share` prints a copy-pasteable summary
+of the same figures.
 
-This is a passion project built for the era of Agentic AI. Whether you're here to save money on tokens, test out free models, or help build the ultimate agentic toolbelt, contributions are always welcome!
+---
 
-- **Development**: Want to build from source? Run `make ci` and `cargo build`. Read our [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-- **License**: [MIT License](LICENSE)
+## Learn more
 
-<!-- Star History -->
+* [How it works, and what it costs](docs/ARCHITECTURE.md): pipeline, RewindStore, the Memory OS
+* [Benchmarks in full](docs/BENCHMARKS.md): corpus, per-command, fixtures, latency
+* [Contributing](CONTRIBUTING.md): `make ci` and you're in
+
+---
+
+```bash
+brew install fajarhide/tap/omni && omni init
+```
+
+A passion project for the era of agentic AI. Contributions welcome.
+[MIT License](LICENSE).
+
 <p align="center">
   <a href="https://star-history.com/#fajarhide/omni&Date">
     <picture>
@@ -314,6 +215,5 @@ This is a passion project built for the era of Agentic AI. Whether you're here t
     </picture>
   </a>
 </p>
-<center>
-Build with ❤️ by [Fajar Hidayat](https://github.com/fajarhide)
-</center>
+
+<p align="center">Built with care by <a href="https://github.com/fajarhide">Fajar Hidayat</a></p>
