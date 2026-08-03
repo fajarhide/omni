@@ -1,15 +1,30 @@
-pub fn distill_readfile(content: &str, filepath: &str) -> Option<String> {
-    distill_readfile_with_context(content, filepath, 0)
+/// The no-dependency-context form, kept for the tests below that exercise the
+/// per-language distillers without caring about the dependents guard.
+///
+/// Production has no caller: the Read hook always has a way to count dependents,
+/// and since #320 it passes that as a closure the distiller may never call. The
+/// `graph failed` fallback that used to call this was unreachable once the graph
+/// stopped being built up front.
+#[cfg(test)]
+fn distill_readfile(content: &str, filepath: &str) -> Option<String> {
+    distill_readfile_with_context(content, filepath, || 0)
 }
 
 const MIN_DISTILL_TOKENS: usize = 2000;
 
 /// `imported_by_count`: number of files that import this file (from graph).
 /// When > 3, append a factual warning suggesting omni_context.
+/// `imported_by` is a closure, not a number, because computing it walks the
+/// repository. It is consulted at one place, the dependents guard below, and
+/// only after two earlier gates have already decided there is something to
+/// return. Passing the value meant `hooks::post_tool` built the whole import
+/// graph before either gate ran, so every hooked `Read` of a small file paid
+/// **48 ms** on this repository to produce a number that was discarded a few
+/// lines later, against a 10 ms budget for the entire hook (#320).
 pub fn distill_readfile_with_context(
     content: &str,
     filepath: &str,
-    imported_by_count: usize,
+    imported_by: impl FnOnce() -> usize,
 ) -> Option<String> {
     let line_count = content.lines().count();
     let ext = std::path::Path::new(filepath)
@@ -46,7 +61,9 @@ pub fn distill_readfile_with_context(
             "[OMNI ReadFile: {} → distilled ({} lines)]\n{}",
             filepath, line_count, distilled
         );
-        // Phase 6: factual guard — file has many dependents
+        // Phase 6: factual guard — file has many dependents. The walk happens
+        // here or not at all.
+        let imported_by_count = imported_by();
         if imported_by_count > 3 {
             out.push_str(&format!(
                 "\n[OMNI Guard: {} is imported by {} files — changes here may have wide impact. Call omni_context(\"{}\") for full dependency map.]",
@@ -415,6 +432,56 @@ fn distill_unknown_file(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// #320: `hooks::post_tool` built the whole import graph before calling this,
+    /// so every hooked `Read` paid 48 ms on this repository, most of them for a
+    /// number discarded a few lines later. The count is a closure now, consulted
+    /// only at the dependents guard, which sits behind two gates that reject the
+    /// common case.
+    ///
+    /// Asserting the closure is *not called*, because "it compiles with a
+    /// closure" was true of the version that still walked the repository every
+    /// time.
+    #[test]
+    fn the_dependents_walk_is_skipped_when_the_file_is_too_small_to_distil() {
+        use std::cell::Cell;
+        let called = Cell::new(false);
+
+        // Well under MIN_DISTILL_TOKENS, so both gates reject it.
+        let tiny = "fn main() {}\n";
+        let out = distill_readfile_with_context(tiny, "src/main.rs", || {
+            called.set(true);
+            9
+        });
+
+        assert!(out.is_none(), "a tiny file must pass through");
+        assert!(
+            !called.get(),
+            "the import graph was walked for a file that was never distilled"
+        );
+    }
+
+    /// The other half: when the guard is reached the count is consulted and the
+    /// advisory line appears, so deferring did not disable the feature.
+    #[test]
+    fn the_dependents_guard_still_fires_when_it_is_reached() {
+        let mut content = String::new();
+        for i in 0..400 {
+            content.push_str(&format!(
+                "// comment line {i} explaining a thing at some length for bulk\n"
+            ));
+            content.push_str(&format!("fn helper_{i}(x: usize) -> usize {{ x + {i} }}\n"));
+        }
+
+        let out = distill_readfile_with_context(&content, "src/lib.rs", || 9)
+            .expect("large enough to distil");
+
+        assert!(
+            out.contains("imported by 9 files"),
+            "the dependents guard did not fire: {out}"
+        );
+    }
+
     use super::*;
 
     #[test]
