@@ -207,9 +207,18 @@ fn resolve_candidate(root: &Path, candidate: &Path) -> Option<String> {
         candidate.join("index.tsx"),
         candidate.join("index.js"),
     ];
+    // `is_file`, not `exists`: a directory is not a module. `use
+    // crate::pipeline::{CollapseMode, SegmentationMode}` leaves the extractor
+    // holding `crate::pipeline::`, which joined to a candidate is the directory
+    // `src/pipeline`. That directory exists, so it won the lookup and became a
+    // node. Two such nodes, `src` and `src/pipeline`, held 143 of the graph's
+    // edges, while the module files that the imports actually name held none of
+    // them. `mod.rs` and `index.*` are already later in this list, so rejecting
+    // the bare directory sends brace-grouped imports to the module file they mean
+    // (#258).
     candidates
         .iter()
-        .find(|p| p.exists())
+        .find(|p| p.is_file())
         .map(|p| normalize_relative(root, p))
 }
 
@@ -259,5 +268,53 @@ mod tests {
         let graph = build_graph(dir.path()).unwrap();
         let ctx = graph.context_for("b.ts");
         assert!(ctx.imported_by.contains(&"a.ts".to_string()));
+    }
+
+    /// #258. A brace-grouped `use` leaves the extractor holding the module path
+    /// with an empty tail, and the candidate built from that is the directory.
+    /// `exists()` accepted it, so `src/pipeline` became a node with 30 dependents
+    /// while `src/pipeline/mod.rs`, the file every one of those imports names,
+    /// had none. Two directory nodes held 143 of this repo's edges.
+    ///
+    /// The edge has to land on the module file, and a directory has to resolve to
+    /// nothing when it holds no module file, which is what the second half checks:
+    /// `use crate::{a, b}` names no single file and must not become an edge to
+    /// `src`, which is where 113 of the 143 went.
+    #[test]
+    fn resolves_a_brace_grouped_use_to_the_module_file_not_its_directory() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/pipeline")).unwrap();
+        fs::write(
+            dir.path().join("src/pipeline/mod.rs"),
+            "pub struct CollapseMode;\npub struct SegmentationMode;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/registry.rs"),
+            "use crate::pipeline::{CollapseMode, SegmentationMode};\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "use crate::{a, b};\n").unwrap();
+
+        let graph = build_graph(dir.path()).unwrap();
+
+        assert!(
+            graph
+                .context_for("src/pipeline/mod.rs")
+                .imported_by
+                .contains(&"src/registry.rs".to_string()),
+            "the module file owns the edge, got {:?}",
+            graph.imported_by
+        );
+        assert!(
+            !graph.imported_by.contains_key("src/pipeline"),
+            "a directory is not a module and must not be a node, got {:?}",
+            graph.imported_by.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            !graph.imported_by.contains_key("src"),
+            "`use crate::{{a, b}}` names no single file, got {:?}",
+            graph.imported_by.keys().collect::<Vec<_>>()
+        );
     }
 }
