@@ -1685,11 +1685,9 @@ mod tests {
     /// while the dropped lines said `3/3 MCP servers connected` and `Bolt app is
     /// running!`, which is what the command was run to find out.
     ///
-    /// Deliberately 15 lines with three near-identical `connected` rows: over
-    /// `MIN_LINES_FOR_COLLAPSE` and `MIN_GROUP_SIZE`, so routing alone would not
-    /// have saved it. With the distiller handing the input back, the collapse
-    /// fallback is what folds those three into one marker and takes the two
-    /// server names with it.
+    /// This covers the routing half only. The collapse half has its own test
+    /// below, because this payload does not reach the fallback: routed by
+    /// `kubectl` it takes `CollapseMode::Infra`, which leaves these lines alone.
     #[test]
     fn never_rescores_a_payload_the_callers_grep_already_filtered() {
         let content = "\
@@ -1733,6 +1731,57 @@ INFO:jean.server:startup complete in 4.2s
             assert!(
                 delivered.contains(line),
                 "the grep pattern matched this line, so it was asked for by name: {line:?}\ngot: {delivered}"
+            );
+        }
+    }
+
+    /// The other half of #326, and the reason `grep` is in
+    /// `passes_through_verbatim` and not only in the routing. Routing the payload
+    /// to the grep path is not enough: when the pattern's result has no repeated
+    /// path to hoist, that path returns the input, which cannot beat
+    /// `beats_guardrail`, and the hook then treats it as a distiller that punted
+    /// and collapses it. Measured while writing this: with the three names taken
+    /// back out of the predicate, 121 matched lines came back as
+    /// `120 INFO entries (collapsed from 120 lines)` over `119 lines omitted`.
+    ///
+    /// Sized against the gates on purpose. A bare `grep` command, so the profile
+    /// is `CollapseMode::Log` rather than the `Infra` a `kubectl`-headed pipeline
+    /// resolves to; 121 lines, well over `MIN_LINES_FOR_COLLAPSE`; and enough of
+    /// them alike to clear `MIN_GROUP_SIZE` and the route thresholds the
+    /// collapsed form has to beat before anything is emitted. The first version
+    /// of this test had a `kubectl … | grep` command and 15 lines, and stayed
+    /// green with the predicate broken.
+    #[test]
+    fn never_collapses_a_payload_the_callers_grep_already_filtered() {
+        let mut content = String::new();
+        for i in 0..120 {
+            content.push_str(&format!(
+                "INFO:mcp_client:mcp plugin_{i}_server: connected ({i} tools, attempt 1/3)\n"
+            ));
+        }
+        content.push_str("ERROR:server:no approvers configured\n");
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -iE 'mcp|error' pod.log"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let delivered = match process_payload(&payload, None, None) {
+            None => content.clone(), // declined: the host keeps its own bytes
+            Some(out) => {
+                let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+                v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                    .as_str()
+                    .expect("stdout is a string")
+                    .to_string()
+            }
+        };
+
+        for line in content.lines() {
+            assert!(
+                delivered.contains(line),
+                "the grep pattern matched this line, so the collapse fallback may not fold it away: {line:?}"
             );
         }
     }

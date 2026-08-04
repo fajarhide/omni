@@ -107,7 +107,9 @@ fn extract_base_executable(command: &str) -> String {
 /// deliberate. `route` reaches the grep arm **before** this predicate, so the
 /// grep distiller still runs: it hoists repeated paths losslessly when that
 /// shrinks the payload, and returns the input when it does not. Membership here
-/// is what stops the hooks collapsing the payload on the second outcome.
+/// is what stops the hooks collapsing the payload on the second outcome, and it
+/// is load-bearing rather than defensive: with these three names removed, 121
+/// matched lines came back as `120 INFO entries (collapsed from 120 lines)`.
 /// Measured over 214 recorded `grep`/`rg` traces before adding it: the hoist
 /// fires on 46 of them for 13.4 KB, which is why the arm stays, and 28 more came
 /// back carrying a `[Partial signal]` marker over lines the pattern had matched.
@@ -160,11 +162,12 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "awk"
             // The caller's own filter. The pattern already picked these lines, so
             // the collapse fallback is a second filter that cannot know what the
-            // first was looking for: three `mcp … connected` lines share a shape
-            // and fold into one marker, and the names of the two that went are
-            // the answer (#316/#326). The grep distiller still runs, because
-            // `route` reaches it above the call to this predicate, so a lossless
-            // hoist is unaffected; this only governs what happens when it punts.
+            // first was looking for (#316/#326). Measured with these three names
+            // taken back out: 121 matched lines came back as `120 INFO entries
+            // (collapsed from 120 lines)` over a `119 lines omitted` marker. The
+            // grep distiller still runs, because `route` reaches it above the
+            // call to this predicate, so a lossless hoist is unaffected; this
+            // only governs what happens when it punts.
             | "grep"
             | "rg"
             | "ag"
