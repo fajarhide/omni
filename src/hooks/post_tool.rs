@@ -505,7 +505,8 @@ pub fn process_payload(
         // payload the next step parses, and it sees `cd` in `cd x && cat file`
         // and collapses a file read the same way (#269, #235).
         let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
-            && output_command.is_some_and(|c| !crate::distillers::passes_through_verbatim(c))
+            && output_command
+                .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
         {
             let collapse_result = collapse::collapse(&content, &profile.collapse);
             collapse_savings_data = if collapse_result.original_lines > collapse_result.collapsed_to

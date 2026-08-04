@@ -450,7 +450,7 @@ fn distill(
             let collapse_savings_data =
                 if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
                     || !output_command
-                        .is_some_and(|c| !crate::distillers::passes_through_verbatim(c))
+                        .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
                 {
                     None
                 } else {
