@@ -1,11 +1,5 @@
 import { execFile } from "node:child_process";
-import type {
-  ExtensionAPI,
-  SessionStartEvent,
-  BeforeAgentStartEvent,
-  SessionBeforeCompactEvent,
-  ToolResultEvent,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 
 const OMNI_AGENT_ID = "pi";
 const DEFAULT_OMNI_PATH = "omni";

@@ -1,7 +1,31 @@
 version: 2
 updates:
+  # The root manifest is `private: true` and declares no dependencies at all, so
+  # this entry has never had anything to open a PR for. It stays because the
+  # `pi.extensions` block lives there and a dependency could arrive later.
   - package-ecosystem: "npm"
     directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "fajarhide"
+
+  # The two directories that actually have dependencies, and neither was watched
+  # until now. Every advisory against them has been found by hand: #138, #139 and
+  # #300 are the same transitive pin caught three times by someone running
+  # `npm audit` on a hunch. `npm audit` is not part of `make ci` either, so
+  # nothing else was going to notice.
+  - package-ecosystem: "npm"
+    directory: "/plugins/pi"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "fajarhide"
+
+  - package-ecosystem: "npm"
+    directory: "/plugins/openclaw"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
