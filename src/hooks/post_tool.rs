@@ -1677,6 +1677,66 @@ mod tests {
         }
     }
 
+    /// #326. The pattern in a `grep` is the caller's own selection, so every line
+    /// it returned was asked for by name. This payload went through two filters
+    /// that could not know that: routed by `kubectl`, `distill_kubectl_generic`
+    /// kept `is_critical` lines and dropped 14 of 15. The one it kept was
+    /// the `ERROR`, so the delivered answer said the pod had failed to configure
+    /// while the dropped lines said `3/3 MCP servers connected` and `Bolt app is
+    /// running!`, which is what the command was run to find out.
+    ///
+    /// Deliberately 15 lines with three near-identical `connected` rows: over
+    /// `MIN_LINES_FOR_COLLAPSE` and `MIN_GROUP_SIZE`, so routing alone would not
+    /// have saved it. With the distiller handing the input back, the collapse
+    /// fallback is what folds those three into one marker and takes the two
+    /// server names with it.
+    #[test]
+    fn never_rescores_a_payload_the_callers_grep_already_filtered() {
+        let content = "\
+WARNING:jean.server:channel scoping INACTIVE: soul.md lists no allowed channels
+ERROR:jean.server:no approvers configured: JEAN_APPROVERS is unset
+INFO:jean.plugins.mcp_config:loaded 3 mcp server definitions
+INFO:jean.plugins.mcp_config:plugin_grafana_grafana transport=stdio
+INFO:jean.plugins.mcp_proxy:proxy listening on unix:///tmp/jean-mcp.sock
+INFO:jean.plugins.mcp_proxy:proxy ready
+INFO:jean.plugins.mcp_client:starting 3 MCP server(s)
+INFO:jean.plugins.mcp_client:mcp plugin_grafana_grafana: connected (65 tools)
+INFO:jean.plugins.mcp_client:mcp plugin_kubectl_kubernetes: connected (14 tools)
+INFO:jean.plugins.mcp_client:mcp plugin_elasticsearch: connected (4 tools)
+INFO:jean.plugins.mcp_client:3/3 MCP servers connected
+INFO:jean.server:slack app token accepted, socket mode ready
+INFO:slack_bolt.AsyncApp:A new session has been established
+INFO:slack_bolt.AsyncApp:Bolt app is running!
+INFO:jean.server:startup complete in 4.2s
+";
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command":
+                "kubectl --context aks-devops -n devops logs jean-0 --tail=60 2>&1 \
+                 | grep -iE 'mcp|plugin|slack|kube|error|warn|ready|started'"},
+            "tool_response": bash_response(content),
+        })
+        .to_string();
+
+        let delivered = match process_payload(&payload, None, None) {
+            None => content.to_string(), // declined: the host keeps its own bytes
+            Some(out) => {
+                let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+                v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                    .as_str()
+                    .expect("stdout is a string")
+                    .to_string()
+            }
+        };
+
+        for line in content.lines() {
+            assert!(
+                delivered.contains(line),
+                "the grep pattern matched this line, so it was asked for by name: {line:?}\ngot: {delivered}"
+            );
+        }
+    }
+
     /// 200 green test lines and a tally: output a distiller reduces hard, so the
     /// reply is unambiguously lossy.
     fn lossy_content(lines: usize) -> String {
