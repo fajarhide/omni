@@ -82,7 +82,7 @@ fn extract_base_executable(command: &str) -> String {
 /// Commands whose output `distill_with_command` hands back byte-for-byte, and
 /// which the hooks must therefore also exempt from the collapse fallback.
 ///
-/// The three halves reach the same rule for different reasons:
+/// The four halves reach the same rule for different reasons:
 ///
 /// * **Enumeration** (`ls`, `find`, `ps`, `wc`, `df`, `du`, `stat`, `tree`, bare
 ///   `env`) lists distinct data one datum per line. The items *are* the answer
@@ -92,6 +92,9 @@ fn extract_base_executable(command: &str) -> String {
 /// * **File readers** (`cat`, `head`, `tail`, `sed`, `awk`) emit whatever the
 ///   file holds, so any shape a summariser recognises in it is a coincidence
 ///   (#235/#236).
+/// * **The caller's own filter** (`grep`, `rg`, `ag`) already selected these
+///   lines by pattern, so a second selection cannot know what the first was
+///   after (#316/#326).
 ///
 /// The single list is the point. A passthrough returns its input, so it can
 /// never beat `beats_guardrail`, so the hooks treat it as a distiller that
@@ -100,8 +103,16 @@ fn extract_base_executable(command: &str) -> String {
 /// a passthrough arm without adding it here is that bug, so both live in one
 /// predicate rather than in a routing arm and a guard that can drift apart.
 ///
-/// `grep`/`rg` are deliberately excluded: their distiller hoists the repeated
-/// path losslessly and keeps every match.
+/// The filter half is the one exception to "hands back byte-for-byte", and it is
+/// deliberate. `route` reaches the grep arm **before** this predicate, so the
+/// grep distiller still runs: it hoists repeated paths losslessly when that
+/// shrinks the payload, and returns the input when it does not. Membership here
+/// is what stops the hooks collapsing the payload on the second outcome, and it
+/// is load-bearing rather than defensive: with these three names removed, 121
+/// matched lines came back as `120 INFO entries (collapsed from 120 lines)`.
+/// Measured over 214 recorded `grep`/`rg` traces before adding it: the hoist
+/// fires on 46 of them for 13.4 KB, which is why the arm stays, and 28 more came
+/// back carrying a `[Partial signal]` marker over lines the pattern had matched.
 pub fn passes_through_verbatim(command: &str) -> bool {
     let base_exec = extract_base_executable(command);
     let base = std::path::Path::new(&base_exec)
@@ -149,13 +160,24 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "tail"
             | "sed"
             | "awk"
+            // The caller's own filter. The pattern already picked these lines, so
+            // the collapse fallback is a second filter that cannot know what the
+            // first was looking for (#316/#326). Measured with these three names
+            // taken back out: 121 matched lines came back as `120 INFO entries
+            // (collapsed from 120 lines)` over a `119 lines omitted` marker. The
+            // grep distiller still runs, because `route` reaches it above the
+            // call to this predicate, so a lossless hoist is unaffected; this
+            // only governs what happens when it punts.
+            | "grep"
+            | "rg"
+            | "ag"
             // Format renderers. Their whole job is to emit something a later step
             // parses, which is the format-safe contract stated in `AGENTS.md`,
             // and the collapse fallback would leave that payload unparseable.
             // `kubectl get pod -o json | jq -r '...'` lost three of four lines
             // before this (#269).
     )
-        // The reshaping tails `registry::reshaped_by` routes to, read from the
+        // The reshaping tails `registry::owning_tail` routes to, read from the
         // one list rather than repeated here (#277, #194). Naming a stage as the
         // payload's owner only helps if that stage is then handled, and none of
         // these has a grammar: `cut` and `column` project or lay out columns,
@@ -602,6 +624,18 @@ fn route(
         return jsts::JsTsDistiller.distill(segments, input, session);
     }
 
+    // The caller's own filter, which is in `passes_through_verbatim` and so has
+    // to be answered before it. `SystemOpsDistiller` cannot serve this: it
+    // dispatches on the *shape* of the payload, and a grep result has whatever
+    // shape the file had. When none of its detectors matched it fell to
+    // `distill_fallback`, which scores by noise and cut 8 of 15 lines a pattern
+    // had explicitly matched, under a `[Partial signal]` marker (#316/#326).
+    // The grep path is the only one that cannot do that: it hoists repeated
+    // paths and hands the input back whenever hoisting does not shrink it.
+    if matches!(base.as_str(), "grep" | "rg" | "ag") {
+        return Some(system_ops::distill_user_filtered(input));
+    }
+
     if passes_through_verbatim(command) {
         return None;
     }
@@ -645,9 +679,7 @@ fn route(
     // System ops → SystemOpsDistiller
     if matches!(
         base.as_str(),
-        "grep"
-            | "rg"
-            | "curl"
+        "curl"
             | "wget"
             | "sort"
             | "uniq"
@@ -1161,8 +1193,20 @@ mod tests {
         assert!(passes_through_verbatim("env"));
         assert!(passes_through_verbatim("command env"));
         assert!(passes_through_verbatim("ls -la"));
-        assert!(!passes_through_verbatim("grep -r foo"));
         assert!(!passes_through_verbatim("echo hi"));
+    }
+
+    /// #326. `grep` moved into this predicate, which reads oddly next to a
+    /// routing arm that still distils it, so the reason is worth pinning: the
+    /// predicate governs only the hooks' collapse fallback, and that fallback
+    /// runs exactly when the grep distiller punted and handed the input back.
+    /// Folding three `mcp … connected` lines into one marker at that point loses
+    /// the two server names the pattern matched on.
+    #[test]
+    fn exempts_the_callers_own_filter_from_the_collapse_fallback() {
+        assert!(passes_through_verbatim("grep -r foo"));
+        assert!(passes_through_verbatim("rg -n 'stream_mode'"));
+        assert!(passes_through_verbatim("ag TODO src/"));
     }
 
     /// #214 moved the interpreters into this predicate and deleted their own

@@ -66,6 +66,9 @@ const HEADER_KEYWORDS: &[&str] = &["for", "select", "case"];
 /// Routing it upstream is how `kubectl get pod -o json | jq -r '...'` reached the
 /// cloud distiller, which kept one arbitrary row of four and dropped the three
 /// that carried the answer (#269).
+///
+/// A `grep` tail claims the payload for a second, unrelated reason. See
+/// `FILTERING_TAILS`.
 pub fn sole_output_command(command: &str) -> Option<&str> {
     let segments = split_sequential(command);
     let producer = match segments.len() {
@@ -77,7 +80,7 @@ pub fn sole_output_command(command: &str) -> Option<&str> {
             producers.next().is_none().then_some(first)?
         }
     };
-    Some(reshaped_by(producer).unwrap_or(producer))
+    Some(owning_tail(producer).unwrap_or(producer))
 }
 
 /// The trailing pipeline stage when it rewrites the payload rather than
@@ -107,16 +110,45 @@ pub fn sole_output_command(command: &str) -> Option<&str> {
 /// the shape intact and are 334 of the recorded tails between them; treating
 /// them as reshapers would stop distilling a pod table because someone sorted
 /// it.
-fn reshaped_by(segment: &str) -> Option<&str> {
+fn owning_tail(segment: &str) -> Option<&str> {
     let last = split_pipeline(segment).pop()?;
     let base = last
         .split_whitespace()
         .next()
         .map(|w| w.trim_matches(|c| c == '"' || c == '\''))?;
-    RESHAPING_TAILS.contains(&base).then_some(last)
+    (RESHAPING_TAILS.contains(&base) || FILTERING_TAILS.contains(&base)).then_some(last)
 }
 
-/// The stage names `reshaped_by` recognises, in one place because two callers
+/// The trailing stage when the caller's own pattern produced the result set, so
+/// every line in it was asked for by name.
+///
+/// A different reason from `RESHAPING_TAILS` reaching the same answer: `grep`
+/// emits its input's grammar unchanged, so nothing about the *shape* says the
+/// payload changed hands. What changed is that a filter already ran. Scoring the
+/// result by noise is a second filter that cannot know what the first was looking
+/// for, and it drops the lines the pattern was written to find.
+///
+/// #316 established that for a bare `grep` and fixed it inside `system_ops`,
+/// where the payload arrives without its command. So a `grep` on the end of a
+/// pipeline never reached the rule: `kubectl logs … | grep -iE 'error|ready'` is
+/// routed by `kubectl`, and `distill_kubectl_generic` keeps `is_critical` lines
+/// only, so 14 of 15 matched lines went. The one that survived was an `ERROR`,
+/// which made the delivered answer say the pod had failed to start while the
+/// dropped lines said `3/3 MCP servers connected` and `Bolt app is running!`
+/// (#326).
+///
+/// Measured on 3,392 recorded traces before choosing the rule: 429 pipelines put
+/// a `grep` after a pipe, and the ones with a real distiller upstream are where
+/// it costs. `kubectl … | grep` keeps 76.8% of its bytes on average, with
+/// individual rows at 5% (1,793 → 95 bytes on a `get pods -A`). What the rule
+/// gives up is those same reductions, which is the point: they were produced by
+/// deleting matched lines.
+///
+/// `ag` rides along because it is the same contract; it has no recorded traces
+/// here, so it is included on grammar rather than on measurement.
+const FILTERING_TAILS: &[&str] = &["grep", "rg", "ag"];
+
+/// The stage names `owning_tail` recognises, in one place because two callers
 /// need the same answer and a comment is not a mechanism.
 ///
 /// `distillers::passes_through_verbatim` has to agree with this list: naming a
@@ -638,7 +670,6 @@ mod tests {
         for cmd in [
             "kubectl get pods | head -20",
             "cargo test | tail -30",
-            "git log --oneline | grep fix",
             "kubectl get pods | sort",
             "kubectl get pods | sed 's/Running/UP/'",
         ] {
@@ -687,18 +718,44 @@ mod tests {
         );
     }
 
-    /// A filter selects rows out of a shape it leaves intact, so the output
-    /// still belongs to whatever fed it and routing does not move.
+    /// A positional filter selects rows out of a shape it leaves intact, so the
+    /// output still belongs to whatever fed it and routing does not move.
     #[test]
     fn keeps_a_pipeline_intact() {
-        assert_eq!(
-            sole_output_command("cat app.log | grep ERROR"),
-            Some("cat app.log | grep ERROR")
-        );
         assert_eq!(
             sole_output_command("kubectl get pods | head -20"),
             Some("kubectl get pods | head -20")
         );
+        assert_eq!(
+            sole_output_command("cargo test | tail -30"),
+            Some("cargo test | tail -30")
+        );
+    }
+
+    /// #326. A `grep` tail is not a positional filter: the pattern is the
+    /// caller's own selection, so whatever it returned was asked for by name and
+    /// nothing downstream may score it again. `kubectl logs … | grep -iE …` was
+    /// routed by `kubectl` into a distiller that keeps `is_critical` lines only,
+    /// and 14 of 15 matched lines went. The one that survived was an `ERROR`, so
+    /// what arrived said the pod had failed while the lines it dropped said it
+    /// had come up.
+    #[test]
+    fn hands_a_pipeline_to_the_grep_that_filtered_it() {
+        for (cmd, expect) in [
+            (
+                "kubectl -n devops logs jean-0 --tail=60 2>&1 | grep -iE 'error|ready'",
+                "grep -iE 'error|ready'",
+            ),
+            ("cat app.log | grep ERROR", "grep ERROR"),
+            ("git log --oneline | grep fix", "grep fix"),
+            ("kubectl get pods -A | rg -i crashloop", "rg -i crashloop"),
+        ] {
+            assert_eq!(
+                sole_output_command(cmd).map(str::trim),
+                Some(expect),
+                "`{cmd}` ends in the caller's own filter"
+            );
+        }
     }
 
     /// #269. `jq` rewrites the payload rather than selecting from it, so the

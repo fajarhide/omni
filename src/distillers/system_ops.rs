@@ -267,6 +267,28 @@ fn flush_grep_section(
     *files = 0;
 }
 
+/// The result set of a `grep`/`rg`/`ag`, which the caller's pattern already
+/// filtered.
+///
+/// Separate from `SystemOpsDistiller::distill` because that one dispatches on the
+/// shape of the payload, and a grep result carries whatever shape the file had.
+/// A `kubectl logs … | grep -iE 'error|ready'` is bare log text, so every
+/// detector missed and it landed in `distill_fallback`, which drops by noise
+/// score (#326). Here the command is known, so shape does not have to be guessed
+/// at: the grep path hoists repeated paths and returns the input whenever
+/// hoisting does not shrink it, and neither outcome can lose a matched line.
+///
+/// Env output keeps its own arm. `distill_env_output` redacts values against
+/// `SENSITIVE_PATTERNS`, which is a security gate rather than a compression one,
+/// and `grep -i secret .env` is exactly the shape that needs it.
+pub fn distill_user_filtered(input: &str) -> String {
+    let lines: Vec<&str> = input.lines().collect();
+    if is_env_output(&lines) {
+        return distill_env_output(input);
+    }
+    distill_grep_output(input)
+}
+
 fn distill_grep_output(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut section = String::with_capacity(input.len());
