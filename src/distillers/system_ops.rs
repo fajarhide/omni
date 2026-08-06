@@ -73,7 +73,7 @@ const SENSITIVE_PATTERNS: &[&str] = &[
 /// Worth its own arm because the payload that missed it was not distilled by
 /// `distill_grep_output` at all: it fell through to the generic system-ops
 /// fallback, which keeps Critical and Important segments and drops the rest, and
-/// dropped 7 of 12 matches including `expr: absent(probe_success{tier="nmc"} == 1)`
+/// dropped 7 of 12 matches including `expr: absent(probe_success{tier="carrier"} == 1)`
 /// and the alert summary, while four lines of runbook prose survived (#316).
 /// A grep pattern *is* the caller's filter, so scoring its results by noise is a
 /// second filter that cannot know what the first was looking for.
@@ -635,7 +635,7 @@ mod tests {
     /// missed `is_grep_output`, so it fell through to the generic system-ops
     /// fallback, which keeps Critical and Important segments and drops the rest.
     /// On a 12-match grep over an alerting manifest it delivered 5 and cut 7,
-    /// including `expr: absent(probe_success{tier="nmc"} == 1)` and the alert
+    /// including `expr: absent(probe_success{tier="carrier"} == 1)` and the alert
     /// summary, while four lines of runbook prose survived. An agent reading it
     /// concludes the file has one alert expression when it has two.
     ///
@@ -644,20 +644,20 @@ mod tests {
     #[test]
     fn a_single_file_numbered_grep_keeps_every_match() {
         let input = "\
-1:# NMC / partner connectivity alerts. Fire on the blackbox probe_success metric
-9:#   1. NMCConnectivityAllDown (critical) -- absent(probe_success{tier=nmc}==1):
+1:# Carrier / partner connectivity alerts. Fire on the blackbox probe_success metric
+9:#   1. CarrierConnectivityAllDown (critical) -- absent(probe_success{tier=carrier}==1):
 14:#      targets (e.g. a service that is simply off), so day-one does not page for
 26:  instanceSelector:
-49:        description: Every NMC-tier target on the connectivity probe has been unreachable for 5m (or the probe stopped reporting).
-67:            expr: absent(probe_success{tier=\"nmc\"} == 1)
-114:        summary: \"{{ $labels.service }} ({{ $labels.instance }}) is unreachable from 10.105.0.4\"
+49:        description: Every Carrier-tier target on the connectivity probe has been unreachable for 5m (or the probe stopped reporting).
+67:            expr: absent(probe_success{tier=\"carrier\"} == 1)
+114:        summary: \"{{ $labels.service }} ({{ $labels.instance }}) is unreachable from 10.0.0.4\"
 115:        description: The connectivity probe to {{ $labels.service }} at {{ $labels.instance }} (tier {{ $labels.tier }}) has failed for 10m.
-117:          1. Reproduce: az ssh vm --ip 10.105.0.4 -- 'nc -zvw3 <host> <port>'
-118:          2. Is only this one target down, or several? Several nmc-tier targets = suspect the tunnel
+117:          1. Reproduce: az ssh vm --ip 10.0.0.4 -- 'nc -zvw3 <host> <port>'
+118:          2. Is only this one target down, or several? Several carrier-tier targets = suspect the tunnel
 119:          3. One target only = likely the remote service/port, not the network.
-131:            expr: (probe_success{tier=~\"nmc|partner\"} == 0) and (max_over_time(probe_success[6h]) == 1)
+131:            expr: (probe_success{tier=~\"carrier|partner\"} == 0) and (max_over_time(probe_success[6h]) == 1)
 ";
-        let cmd = "grep -n probe_success alerting/nmc-connectivity.yaml";
+        let cmd = "grep -n probe_success alerting/carrier-connectivity.yaml";
         let segments = crate::pipeline::scorer::score_with_command(input, cmd, None);
         let out = crate::distillers::distill_with_command(&segments, input, cmd, None);
 

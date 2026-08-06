@@ -1624,7 +1624,7 @@ mod tests {
     #[test]
     fn does_not_let_the_upstream_command_claim_a_reshaped_payload() {
         let content = "phase: Running\nnode: aks-stateful-9kf4v\n\
-                       zoneSel: uaenorth-1\ncreated: 2026-08-02T03:43:16Z\n";
+                       zoneSel: reg1north-1\ncreated: 2026-08-02T03:43:16Z\n";
         let payload = json!({
             "tool_name": "Bash",
             "tool_input": {"command": "kubectl get pod jenkins-0 -o json | jq -r '.status.phase'"},
