@@ -139,15 +139,15 @@ mod tests {
     /// cluster was the half that went, leaving a list that looks complete.
     #[test]
     fn hands_back_kubectl_listings_that_have_no_columns() {
-        let names = "Mednet-cluster\n\
-                     aks-okadoc-admin-uaen\n\
-                     arn:aws:eks:ap-southeast-1:107126629234:cluster/evermos-prod\n\
-                     circlecare-aks\n\
+        let names = "Mercury-cluster\n\
+                     aks-orgx-admin-reg1\n\
+                     arn:aws:eks:ap-southeast-1:000000000000:cluster/acme-prod\n\
+                     clientc-aks\n\
                      do-sgp1-k8s-prod\n\
                      docker-desktop\n\
-                     k8s-ehs-prod-uaenorth\n\
-                     k8s-m42-prod-uaenorth\n\
-                     k8s-mednet-prod-uaenorth\n\
+                     k8s-echo-prod-reg1n\n\
+                     k8s-m01-prod-reg1n\n\
+                     k8s-mercury-prod-reg1n\n\
                      kind-local\n";
 
         for cmd in [
