@@ -485,7 +485,13 @@ fn distill(
                 Route::Passthrough
             };
 
-            if route == Route::Soft {
+            // A distiller that emitted more lines than it consumed restructured
+            // rather than cut, so calling the result partial is a false claim
+            // about a complete answer. `distill_grep_output` folds a repeated
+            // `path:` prefix into a header: 11 matches become 15 lines holding all
+            // 11, the byte ratio lands in `Soft`, and the banner said the output
+            // was incomplete (#335). Same guard as `hooks::post_tool`.
+            if route == Route::Soft && out.lines().count() <= input_text.lines().count() {
                 out.push_str("\n[Partial signal - omni learn recommended]\n");
             }
 

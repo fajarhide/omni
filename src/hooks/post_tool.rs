@@ -148,10 +148,22 @@ fn rewind_marker(
     kept_lines: usize,
     kept_bytes: usize,
 ) -> (String, String) {
-    let omitted_lines = content.lines().count().saturating_sub(kept_lines);
+    let input_lines = content.lines().count();
+    let omitted_lines = input_lines.saturating_sub(kept_lines);
     // Lines are what a reader can act on, but a distillation can also shorten
     // lines in place and leave the count alone. Report the unit that is true for
     // this call rather than printing "0 lines omitted" over missing bytes.
+    //
+    // More lines out than in means the distiller restructured rather than cut:
+    // `distill_grep_output` folds a repeated `path:` prefix into a header, so 11
+    // matches become 15 lines holding all 11, and the byte delta is the redundant
+    // prefixes. Reporting that as `274 bytes omitted` under a `[Partial signal]`
+    // banner told the reader a complete answer was incomplete (#335). An
+    // in-place shortening keeps the count equal, which is why the test is `>`
+    // and not `>=`: that case is real loss and still gets its byte figure.
+    if kept_lines > input_lines {
+        return (String::new(), String::new());
+    }
     let lost = if omitted_lines > 0 {
         format!("{omitted_lines} lines")
     } else {
@@ -619,7 +631,12 @@ pub fn process_payload(
     let distilled_lines = final_out.lines().count();
     let distilled_len = final_out.len();
 
-    if route == Route::Soft {
+    // Same condition as `rewind_marker`'s: a restructure that emits more lines
+    // than it consumed dropped nothing, so the banner saying the signal is
+    // partial is a false claim about a complete answer (#335). `Soft` is decided
+    // on the byte ratio alone, and folding a repeated prefix shrinks bytes
+    // without losing a line.
+    if route == Route::Soft && distilled_lines <= content.lines().count() {
         final_out.push_str("\n[Partial signal - omni learn recommended]\n");
     }
 
@@ -1043,6 +1060,31 @@ fn strip_html_simple(html: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// #335: `distill_grep_output` folds a repeated `path:` prefix into a header,
+    /// so 11 matches come back as 15 lines holding all 11. Nothing was dropped,
+    /// and the output still said `274 bytes omitted` under a `[Partial signal]`
+    /// banner. More lines out than in is a restructure, never a cut.
+    #[test]
+    fn claims_no_omission_when_the_distiller_added_lines() {
+        let content = "a.yaml:1:x\na.yaml:2:y\nb.yaml:3:z\n";
+        let (marker, hash) = rewind_marker(None, content, 5, content.len() - 20);
+        assert!(
+            marker.is_empty(),
+            "a restructure must not claim an omission: {marker}"
+        );
+        assert!(hash.is_empty());
+    }
+
+    /// The counterpart, and the reason the test above is `>` and not `>=`: an
+    /// in-place shortening leaves the line count equal and *is* real loss, so it
+    /// still reports its byte figure.
+    #[test]
+    fn still_reports_bytes_when_lines_were_shortened_in_place() {
+        let content = "a very long line indeed\nanother very long line\n";
+        let (marker, _) = rewind_marker(None, content, 2, 10);
+        assert!(marker.contains("bytes omitted"), "got: {marker}");
+    }
 
     /// #158. The host replaces what the model sees only when it finds
     /// `updatedToolOutput`; any other key is dropped without a word, and the

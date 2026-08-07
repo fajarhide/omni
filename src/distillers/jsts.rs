@@ -241,6 +241,18 @@ fn distill_vitest(input: &str) -> String {
 
     let lines: Vec<&str> = input.lines().collect();
 
+    // A suite that failed to *load* runs zero tests, and vitest says so in its own
+    // words: `Tests  no tests`. There is no test outcome to summarise, and the
+    // `❯` lines in that payload are the transform's stack frames rather than test
+    // locations, so counting them published `✗ 4` for a run where nothing
+    // executed, while deleting the `[TSCONFIG_ERROR] …` line that was the entire
+    // cause (#333). A distiller that cannot parse its input returns the input.
+    if lines.iter().any(|l| {
+        l.trim().to_lowercase().starts_with("tests") && l.to_lowercase().contains("no test")
+    }) {
+        return input.to_string();
+    }
+
     // Attempt to parse formal summary first
     for line in &lines {
         let t = line.trim();
@@ -918,6 +930,37 @@ fn with_tail(items: &[&str], cap: usize) -> String {
 mod tests {
     use super::*;
     use crate::pipeline::{SessionState, SignalTier};
+
+    /// #333: a suite that fails to *load* runs zero tests, and vitest says so in
+    /// its own words. The `❯` lines there are the transform's stack frames, so
+    /// counting them published `✗ 4` for a run where nothing executed, while
+    /// deleting the `[TSCONFIG_ERROR] …` line that was the entire cause.
+    #[test]
+    fn hands_back_a_vitest_run_where_no_test_loaded() {
+        let input = "\
+ FAIL  src/x/y.test.ts [ ... ]
+Error: Transform failed with 1 error:
+
+[TSCONFIG_ERROR] Failed to load tsconfig: Tsconfig not found
+
+ ❯ transformWithOxc ../node_modules/vite/dist/node/chunks/node.js:4090:19
+ ❯ transform ../node_modules/vite/dist/node/chunks/node.js:4161:26
+ ❯ transform ../node_modules/vite/dist/node/chunks/node.js:30796:51
+ ❯ loadAndTransform ../node_modules/vite/dist/node/chunks/node.js:20594:26
+
+ Test Files  1 failed (1)
+      Tests  no tests
+";
+        let out = distill_vitest(input);
+        assert!(
+            out.contains("TSCONFIG_ERROR"),
+            "the only actionable line must survive: {out}"
+        );
+        assert!(
+            !out.contains("✗ 4"),
+            "stack frames are not test failures: {out}"
+        );
+    }
 
     #[test]
     fn keeps_every_gate_verdict_when_folding_a_composite_asset_table() {

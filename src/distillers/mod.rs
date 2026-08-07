@@ -58,7 +58,36 @@ pub fn distill_with_command(
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
+    // Format-safety, applied per line at the one place every distiller is reached
+    // from. `hooks::post_tool` already gates whole structured payloads, but that
+    // gate is all-or-nothing: two JSON API responses printed beside a single
+    // `pod "vmq" deleted` notice are not NDJSON, so the protection switched off
+    // for the payload and the cloud distiller delivered 17 bytes of a 460 byte
+    // answer, both result sets gone (#334). A distiller re-parses raw input, so
+    // tiering the line in the scorer does not reach it; the guard has to sit
+    // ahead of dispatch.
+    //
+    // Measured over 5,515 recorded traces before taking it: 116 hold at least one
+    // JSON line, and handing all of those back whole costs **0 KB** of the 371 KB
+    // the corpus saves, because none of them was being usefully compressed in the
+    // first place. A free guard against the worst failure class in this tracker.
+    if input.lines().any(is_json_line) {
+        return input.to_string();
+    }
     route(segments, input, command, session).unwrap_or_else(|| input.to_string())
+}
+
+/// A whole line that is a JSON object or array. Strict on purpose: it must
+/// bracket *and* parse, so prose containing a brace, or a truncated fragment,
+/// cannot silently switch compression off.
+fn is_json_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.len() < 2 {
+        return false;
+    }
+    let bracketed =
+        (t.starts_with('{') && t.ends_with('}')) || (t.starts_with('[') && t.ends_with(']'));
+    bracketed && serde_json::from_str::<serde_json::Value>(t).is_ok()
 }
 
 /// One `match` over the registry's decision. Every arm of what used to be here
@@ -105,6 +134,33 @@ mod tests {
     use super::*;
     use crate::pipeline::registry::passes_through_verbatim;
     use crate::pipeline::scorer;
+
+    /// #334: two JSON API responses printed beside a single `pod "vmq" deleted`
+    /// notice are not NDJSON, so the payload-level gate in `hooks::post_tool` did
+    /// not fire and the cloud distiller delivered 17 bytes of a 460 byte answer
+    /// with both result sets gone. A distiller re-parses raw input and never sees
+    /// the scorer's tiers, so format-safety has to reach the dispatch point.
+    #[test]
+    fn hands_back_a_payload_holding_a_json_line() {
+        let input = "{\"result\":[{\"cluster\":\"a\",\"v\":154},{\"cluster\":\"b\",\"v\":11}]}\n\
+                     {\"result\":[{\"cluster\":\"c\",\"v\":1}]}\n\
+                     pod \"vmq\" deleted\n";
+        let cmd =
+            "kubectl run vmq --image=curlimages/curl --rm -i --command -- sh -c 'curl a; curl b'";
+        assert_eq!(distill_with_command(&[], input, cmd, None), input);
+    }
+
+    /// The guard must stay strict, or a brace in prose stops compression
+    /// everywhere. It has to bracket *and* parse.
+    #[test]
+    fn a_brace_in_prose_is_not_a_json_line() {
+        assert!(!is_json_line("use crate::pipeline::{CollapseMode};"));
+        assert!(!is_json_line("{ this is not json }"));
+        assert!(!is_json_line("{\"truncated\": "));
+        assert!(!is_json_line("kubectl get pods -o json | jq ."));
+        assert!(is_json_line("  {\"a\": 1}  "));
+        assert!(is_json_line("[1, 2, 3]"));
+    }
 
     /// From #170: `cargo tree` prints a dependency tree that *is* the answer.
     /// Routing every `cargo` command to `BuildDistiller` summarised 21.4 KB of

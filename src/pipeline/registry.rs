@@ -164,8 +164,18 @@ const FILTERING_TAILS: &[&str] = &["grep", "rg", "ag"];
 /// sides read the same constant, asserting that every member of the list is in
 /// the list proves nothing. The constant *is* the mechanism, which is the point
 /// of removing the comment that used to be.
+/// `uniq` is here for `uniq -c`, which prepends a count column and so emits a
+/// grammar its input did not have: `kubectl logs … | awk … | sort | uniq -c` is a
+/// histogram, and routing it to `kubectl` handed an already-aggregated 40-row
+/// answer to the pod-table distiller, which delivered 10 rows and dropped the two
+/// spikes the query existed to find (#338). Bare `uniq` only dedupes and by the
+/// reasoning above belongs with `sort` rather than here, but splitting the two
+/// costs an argument check for no measured gain: of 4,335 recorded pipelines, 55
+/// end in `uniq -c` and **none** end in a bare `uniq`. A deduped list is an
+/// enumeration anyway, which is the shape `passes_through_verbatim` already
+/// protects.
 pub const RESHAPING_TAILS: &[&str] = &[
-    "jq", "yq", "cut", "tr", "awk", "base64", "wc", "column", "xargs",
+    "jq", "yq", "cut", "tr", "awk", "base64", "wc", "column", "xargs", "uniq",
 ];
 
 /// Splits on unquoted single `|`, the pipe operator. `||` is a sequential
@@ -1605,6 +1615,23 @@ mod tests {
         assert_eq!(
             sole_output_command("./bin/x=y --flag"),
             Some("./bin/x=y --flag")
+        );
+    }
+
+    /// #338: `kubectl logs … | awk … | sort | uniq -c` is a histogram by the time
+    /// it reaches OMNI. Routing it by the `kubectl` head handed an already
+    /// aggregated 40-row answer to the pod-table distiller, which delivered 10
+    /// rows and dropped both traffic spikes the query existed to find.
+    #[test]
+    fn a_uniq_c_tail_owns_the_payload_it_aggregated() {
+        assert_eq!(
+            sole_output_command("kubectl -n ns-a logs pod-a | awk '{print $1}' | sort | uniq -c"),
+            Some("uniq -c"),
+        );
+        // Without an aggregating tail the pipeline still belongs to its filter.
+        assert_eq!(
+            sole_output_command("kubectl -n ns-a logs pod-a | grep err"),
+            Some("grep err"),
         );
     }
 
