@@ -30,6 +30,34 @@ Three properties, in the order they win when they conflict:
    the content allows, a rewind hash.
 3. **Then compress**, as hard as the first two allow and no harder.
 
+## The number that decides progress
+
+Adopted 2026-08-07 (#357), replacing blended reduction % as the north star.
+
+**Primary: context-window pressure for the same job.** Conversation growth,
+turns before compaction, and the cost of recovering task state in a new chat.
+That is the meter a user watches and the one OMNI is bought to move.
+
+**Secondary: distill %.** Always scoped by `agent_id`, always model-facing only.
+It is a diagnostic for one host's pipeline, not a product claim.
+
+Why the swap. On the reporting corpus, 81% of calls are Passthrough and
+correctly do nothing, so a blended % describes the command mix more than the
+product. `terminal` rows are TTY bytes no model reads. Prompt-cache reads bill
+about a tenth of fresh input, so bytes saved once are not dollars saved per turn.
+And on a flat-rate plan compression does not reduce a bill at all; what it buys
+is session lifetime and fewer re-runs.
+
+A host that cannot rewrite built-in tool output cannot move the secondary number
+however good the distillers get, which is why the tier a host is on is product
+law rather than a footnote. See the tier table in `README.md`; `omni doctor`
+prints the same tiers.
+
+**Gate on any public headline number.** It cites the `agent_id` it covers, the
+corpus it was measured on, and a command a reader can run to reproduce it.
+A figure that blends `terminal` with hook agents, or counts a rewrite the host
+never applied, does not ship. #212 and #324 are what that rule is made of.
+
 ## Non-goals
 
 Recorded with dates, because the useful part of a rejected option is the reason.
@@ -38,6 +66,9 @@ Recorded with dates, because the useful part of a rejected option is the reason.
 |---|---|---|
 | An HTTP proxy in front of the model | It puts OMNI on the request path and routes the user's API key through a local process. The hook is the product, and the absence of that friction is most of the advantage. | 2026-07-23 |
 | A model or an ML compressor inside the pipeline | Hooks have a sub-10 ms budget (`AGENTS.md`). Nothing with an inference call meets it. | 2026-07-23 |
+| Chasing a higher reduction % by making distillers more aggressive | The failure mode this project keeps shipping is a confident summary that deleted the answer. More aggression buys the number and costs the product, and on a host that cannot rewrite built-in tool output it buys nothing at all. | 2026-08-07 |
+| Claiming shell distillation on a Handoff-first or MCP-only host | The host does not apply the rewrite, so the model reads the same bytes it always did. Saying otherwise is the same defect as a distiller reporting a saving it did not make. | 2026-08-07 |
+| Intercepting a host's shell by denying it and returning output as a hook message | Technically possible on Cursor (`beforeShellExecution` deny + `agent_message`). It tells the agent its command was blocked, loses the exit code, moves execution semantics into OMNI, and bypasses the host's approval flow. Rejected with the option recorded on #352. | 2026-08-07 |
 | Filter marketplace, team mode, remote RewindStore, IDE extension | Ecosystem features for a tool whose core claims are not all true yet. Worth reopening once the three axes below are done. | 2026-07-29 |
 
 ## The three axes

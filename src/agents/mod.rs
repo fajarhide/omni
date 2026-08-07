@@ -66,12 +66,17 @@ pub trait AgentIntegration {
 /// cannot drift apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
-    /// The host applies OMNI's rewrite, so the model reads distilled output.
+    /// The host applies OMNI's rewrite, so the model reads distilled output for
+    /// its own built-in tools.
     Full,
-    /// The host exposes no way to change what the model reads for built-in
-    /// tools. MCP, session memory and command rewriting may still work, and
-    /// `omni_run` distils anything routed through it, but the built-in shell
-    /// tool cannot be touched.
+    /// The host cannot rewrite built-in tool output, but OMNI can still be the
+    /// tool that runs the command: `omni_run` returns distilled bytes, and the
+    /// installed rule is what makes the agent reach for it. Distinct from
+    /// `McpOnly` because the model demonstrably reads less here, which is the
+    /// unit #352 measures by.
+    HandoffFirst,
+    /// Memory, recall and session state only. No path by which OMNI changes what
+    /// the model reads for a shell command, and no claim that it does.
     McpOnly,
 }
 
@@ -79,8 +84,11 @@ impl Tier {
     /// One line for `doctor`, phrased as the thing a user actually wants to know.
     pub fn label(self) -> &'static str {
         match self {
-            Tier::Full => "model-facing distill active",
-            Tier::McpOnly => "hooks/MCP only, built-in tool output not rewritten",
+            Tier::Full => "Full: model-facing distill active",
+            Tier::HandoffFirst => {
+                "Handoff-first: built-in tool output not rewritten; omni_run distils what you route through it"
+            }
+            Tier::McpOnly => "MCP-only: memory and session state, no shell distill",
         }
     }
 }

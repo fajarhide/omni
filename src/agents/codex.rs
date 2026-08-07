@@ -51,16 +51,34 @@ impl AgentIntegration for CodexIntegration {
         }
 
         println!(
-            "  {} Configured MCP Server in ~/.codex/config.toml",
-            "✓".green()
+            "  {} Configured MCP Server in {}",
+            "✓".green(),
+            config_path.display()
         );
 
         // Install hooks in hooks.json
         install_omni_hooks(exe_path)?;
         println!(
-            "  {} Configured {} in ~/.codex/hooks.json",
+            "  {} Configured {} in {}",
             "✓".green(),
-            "Hooks".bold()
+            "Hooks".bold(),
+            codex_dir.join("hooks.json").display()
+        );
+        // Codex will not run a hook it has not been told to trust, and says
+        // nothing when it skips one, so writing the config is only half of the
+        // install (#359).
+        println!(
+            "  {} Start {} once and approve them under {}, or Codex skips them",
+            "!".yellow(),
+            "codex".bold(),
+            "\"Hooks need review\"".bold()
+        );
+        // Codex keeps its bypass on the command line on purpose: it is rejected
+        // from config.toml, so no installer can turn it on for you (#359).
+        println!(
+            "    {} for unattended runs, pass {}",
+            "or".bright_black(),
+            "--dangerously-bypass-hook-trust".bright_black()
         );
 
         Ok(())
@@ -77,15 +95,20 @@ impl AgentIntegration for CodexIntegration {
                 let new_content = strip_omni_server(&content);
                 fs::write(&config_path, new_content.trim_end().to_string() + "\n")?;
                 println!(
-                    "  {} Removed MCP Server from ~/.codex/config.toml",
-                    "✓".yellow()
+                    "  {} Removed MCP Server from {}",
+                    "✓".yellow(),
+                    config_path.display()
                 );
             }
         }
 
         // Remove hooks from hooks.json
         remove_omni_hooks()?;
-        println!("  {} Removed Hooks from ~/.codex/hooks.json", "✓".yellow());
+        println!(
+            "  {} Removed Hooks from {}",
+            "✓".yellow(),
+            codex_dir.join("hooks.json").display()
+        );
 
         Ok(())
     }
@@ -107,7 +130,7 @@ impl AgentIntegration for CodexIntegration {
             println!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
-                "~/.codex/config.toml".bright_black(),
+                config_path.display().to_string().bright_black(),
                 "[OK]".green().bold()
             );
         } else {
@@ -157,6 +180,25 @@ impl AgentIntegration for CodexIntegration {
             fmt_hook("PreToolUse", has_pre);
             fmt_hook("PostToolUse", has_post);
             fmt_hook("SessionStart", has_session);
+
+            // Installed is not the same as running: Codex skips any hook it has
+            // not been told to trust, and says nothing about it (#359).
+            let config = fs::read_to_string(&config_path).unwrap_or_default();
+            let awaiting = hooks_awaiting_review(&config, &hooks_path.to_string_lossy());
+            if !awaiting.is_empty() {
+                all_ok = false;
+                println!(
+                    "   {:<15} {}",
+                    "Trust:".bright_black(),
+                    format!("[WARNING] {} awaiting review in Codex", awaiting.join(", ")).yellow()
+                );
+                warnings.push(format!(
+                    "Codex has not been told to trust OMNI's hooks ({}), so it skips them silently. \
+                     Start `codex` once and approve them under \"Hooks need review\", or pass \
+                     `--dangerously-bypass-hook-trust` for unattended runs.",
+                    awaiting.join(", ")
+                ));
+            }
         } else {
             all_ok = false;
             if fix_mode {
@@ -241,10 +283,48 @@ fn strip_omni_server(config: &str) -> String {
     out
 }
 
+/// Codex reads its config from `$CODEX_HOME` and only falls back to `~/.codex`.
+/// Installing to the fallback while the host is using the override writes a
+/// config Codex never loads, and `doctor` then reports the file it wrote rather
+/// than the file in use. Seen on a machine where a launcher exported
+/// `CODEX_HOME` to its own runtime directory: `~/.codex/config.toml` held the
+/// MCP server, the live home did not, and OMNI reported healthy either way.
+/// The OMNI hook events Codex has no trust record for, and will therefore skip.
+///
+/// Codex 0.144.6 trusts hooks one entry at a time, keyed
+/// `<hooks.json path>:<event>:<group>:<index>` under `[hooks.state]`, with the
+/// entry's own hash. An entry it has not been shown is ignored, and `codex exec`
+/// prints nothing about it, so a config that reads as installed does nothing at
+/// all. Proved by deleting one trust record: the hook stopped firing, and came
+/// back when the record was restored (#359).
+///
+/// OMNI deliberately does not write these records. The hash exists so a human
+/// approves each command before Codex runs it, and a tool that grants itself
+/// that approval removes the only thing standing between "can write a config
+/// file" and "can execute anything".
+fn hooks_awaiting_review(config: &str, hooks_path: &str) -> Vec<&'static str> {
+    [
+        ("pre_tool_use", "PreToolUse"),
+        ("post_tool_use", "PostToolUse"),
+        ("session_start", "SessionStart"),
+    ]
+    .into_iter()
+    .filter(|(wire, _)| !config.contains(&format!("{}:{}:", hooks_path, wire)))
+    .map(|(_, display)| display)
+    .collect()
+}
+
 fn get_codex_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codex")
+    codex_dir_from(std::env::var_os("CODEX_HOME"), dirs::home_dir())
+}
+
+/// The choice itself, kept free of the environment so it can be tested without
+/// a concurrently running test seeing the mutation.
+fn codex_dir_from(codex_home: Option<std::ffi::OsString>, home: Option<PathBuf>) -> PathBuf {
+    match codex_home {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => home.unwrap_or_else(|| PathBuf::from(".")).join(".codex"),
+    }
 }
 
 pub fn install_omni_hooks(exe_path: &str) -> anyhow::Result<()> {
@@ -339,6 +419,61 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #359: `omni init --codex` wrote a valid hooks.json and every hook was
+    /// ignored, because Codex runs only entries it has a trust record for and
+    /// skips the rest without a word. Doctor said `[OK] installed` throughout.
+    #[test]
+    fn reports_hooks_codex_has_not_been_told_to_trust() {
+        let untrusted = hooks_awaiting_review("", "/h/hooks.json");
+
+        assert_eq!(untrusted, vec!["PreToolUse", "PostToolUse", "SessionStart"]);
+    }
+
+    /// The record is per entry, so approving one hook must not vouch for the
+    /// others, and the key is path-scoped so another file's record cannot count.
+    #[test]
+    fn counts_only_the_records_for_this_hooks_file() {
+        let config = "\
+[hooks.state.\"/h/hooks.json:pre_tool_use:0:0\"]\nenabled = true\n\
+[hooks.state.\"/other/hooks.json:post_tool_use:0:0\"]\nenabled = true\n";
+
+        assert_eq!(
+            hooks_awaiting_review(config, "/h/hooks.json"),
+            vec!["PostToolUse", "SessionStart"]
+        );
+    }
+
+    /// Codex resolves its own config through `$CODEX_HOME`, so installing to
+    /// `~/.codex` regardless writes a file the running Codex never opens. Found
+    /// on a machine whose launcher points `CODEX_HOME` at its own runtime
+    /// directory: `omni init --codex` reported success into `~/.codex` while the
+    /// home actually in use kept no MCP server at all.
+    #[test]
+    fn installs_into_the_home_codex_is_actually_using() {
+        let dir = codex_dir_from(
+            Some("/somewhere/runtime-home".into()),
+            Some(PathBuf::from("/Users/x")),
+        );
+
+        assert_eq!(dir, PathBuf::from("/somewhere/runtime-home"));
+    }
+
+    /// An exported-but-empty `CODEX_HOME` is not a location; treating it as one
+    /// would install into the process's working directory.
+    #[test]
+    fn falls_back_to_the_default_home_when_the_override_is_absent_or_empty() {
+        let home = Some(PathBuf::from("/Users/x"));
+
+        assert_eq!(
+            codex_dir_from(None, home.clone()),
+            PathBuf::from("/Users/x/.codex")
+        );
+        assert_eq!(
+            codex_dir_from(Some("".into()), home),
+            PathBuf::from("/Users/x/.codex")
+        );
+    }
 
     /// #351: uninstall stopped skipping at the next `[`, so
     /// `[mcp_servers.omni.tools.x]` outlived its own parent. Codex then reads a

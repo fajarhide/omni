@@ -26,6 +26,18 @@ brew install fajarhide/tap/omni && omni init
 
 Distills command output on Claude Code, Codex CLI and Gemini CLI, where the host applies OMNI's rewrite. Everywhere else you get the MCP server, shared session state, and `omni_run`, which distils any command you route through it. Run `omni doctor` to see which tier each installed host is on.
 
+
+### What each host lets OMNI do
+
+| Tier | Hosts | What you get |
+|---|---|---|
+| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | The host applies OMNI's rewrite, so the model reads distilled output from its own built-in tools. |
+| **Handoff-first** | Cursor, Windsurf | The host cannot rewrite built-in tool output. `omni_run` distils anything you route through it, and `omni init --cursor` installs the rule that makes the agent reach for it. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Memory, recall and session state. No shell distillation, and no claim of it. |
+
+`omni doctor` prints the tier for every installed host. Savings are only ever counted where the model actually received less.
+
+Codex CLI needs one extra step. It runs only hooks it has been told to trust, and skips the rest without a word, so after `omni init --codex` start `codex` once and approve them under "Hooks need review". `omni doctor` fails until you do. See [#359](https://github.com/fajarhide/omni/issues/359).
 </br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
 </div>

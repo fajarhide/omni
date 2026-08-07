@@ -26,6 +26,18 @@ brew install fajarhide/tap/omni && omni init
 
 Claude Code, Codex CLI, Gemini CLI에서 명령 출력을 증류합니다. 이 호스트들이 OMNI의 재작성을 적용하기 때문입니다. 다른 호스트에서도 MCP 서버, 공유 세션 상태, 그리고 통과시킨 명령을 증류하는 `omni_run`을 사용할 수 있습니다. 각 호스트의 티어는 `omni doctor`로 확인하세요.
 
+
+### 각 호스트가 OMNI에 허용하는 것
+
+| 티어 | 호스트 | 무엇을 얻는가 |
+|---|---|---|
+| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | 호스트가 OMNI의 재작성을 적용하므로 모델은 내장 도구의 증류된 출력을 읽습니다. |
+| **Handoff-first** | Cursor, Windsurf | 호스트가 내장 도구 출력을 재작성할 수 없습니다. `omni_run`으로 실행한 명령은 증류되며, `omni init --cursor`가 에이전트로 하여금 그것을 선택하게 하는 규칙을 설치합니다. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | 메모리, 리콜, 세션 상태만. 셸 증류는 없으며 있다고 주장하지도 않습니다. |
+
+`omni doctor`가 설치된 호스트마다 티어를 출력합니다. 절감은 모델이 실제로 더 적게 받았을 때만 집계됩니다.
+
+Codex CLI에는 한 단계가 더 필요합니다. 신뢰하도록 등록된 훅만 실행하고 나머지는 아무 말 없이 건너뜁니다. `omni init --codex` 후 `codex`를 한 번 실행해 "Hooks need review"에서 승인하세요. 그전까지 `omni doctor`는 실패합니다. [#359](https://github.com/fajarhide/omni/issues/359) 참고.
 </br>
 <img src="../media/demo.gif" alt="시끄러운 cargo test 실행을 판정 결과까지 정제한 뒤 omni stats를 보여주는 OMNI" width="820" />
 </div>

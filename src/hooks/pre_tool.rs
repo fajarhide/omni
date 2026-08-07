@@ -92,7 +92,14 @@ fn process_payload(
     let parsed: PreHookInput = serde_json::from_str(input_str).ok()?;
     let cmd_str = parsed.tool_input.command.as_ref()?;
 
-    if let Some(rewritten) = crate::cli::rewrite::rewrite_logic(cmd_str) {
+    // The payload already says which host is asking; naming it in the rewrite is
+    // the only chance to tell the child, which inherits nothing else (#360).
+    let host = match parsed.hook_event_name.as_deref() {
+        Some("BeforeTool") => Some("gemini"),
+        _ => None,
+    };
+
+    if let Some(rewritten) = crate::cli::rewrite::rewrite_logic(cmd_str, host) {
         let mut updated_input = parsed.tool_input.clone();
         updated_input.command = Some(rewritten);
 

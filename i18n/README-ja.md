@@ -26,6 +26,18 @@ brew install fajarhide/tap/omni && omni init
 
 Claude Code、Codex CLI、Gemini CLI ではコマンド出力を蒸留します。これらはホストが OMNI の書き換えを適用するためです。それ以外のホストでも MCP サーバー、共有セッション状態、そして通したコマンドを蒸留する `omni_run` が使えます。各ホストのティアは `omni doctor` で確認できます。
 
+
+### 各ホストが OMNI に許可すること
+
+| ティア | ホスト | 得られるもの |
+|---|---|---|
+| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | ホストが OMNI の書き換えを適用するため、モデルは組み込みツールの蒸留済み出力を読みます。 |
+| **Handoff-first** | Cursor, Windsurf | ホストは組み込みツールの出力を書き換えられません。`omni_run` を通したコマンドは蒸留され、`omni init --cursor` がエージェントにそれを選ばせるルールを導入します。 |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | メモリ、リコール、セッション状態のみ。シェルの蒸留はなく、あるとも主張しません。 |
+
+`omni doctor` が導入済みホストごとにティアを表示します。削減量はモデルが実際に受け取る量が減った場合にのみ計上されます。
+
+Codex CLI にはもう一手間必要です。信頼済みとして登録されたフックしか実行せず、それ以外は何も告げずに無視します。`omni init --codex` の後に `codex` を一度起動し、"Hooks need review" で承認してください。それまで `omni doctor` は失敗します。[#359](https://github.com/fajarhide/omni/issues/359) を参照。
 </br>
 <img src="../media/demo.gif" alt="ノイズの多い cargo test を判定結果まで蒸留し、続いて omni stats を表示する OMNI" width="820" />
 </div>
