@@ -507,75 +507,59 @@ fn distill_tree_output(input: &str) -> String {
 // env distiller (⚠️ SECURITY CRITICAL — Gate 6)
 // ---------------------------------------------------------------------------
 
+/// `env` output is an enumeration: every `KEY=VALUE` line is the answer, the same
+/// shape `passes_through_verbatim` already protects for `ls` and `ps`. The only
+/// reason to touch it at all is the secret in it.
+///
+/// It used to emit per-prefix *counts* and no values, except the sensitive one it
+/// named in order to say it had been redacted. On a nine-variable `kubectl exec …
+/// env` that delivered `DB(8) APP(1)` plus the password line: eight values gone,
+/// and the single value surfaced by name was the only one that must never be
+/// printed (#342). `DB(8)` answers "which DB vars are set" while the question
+/// anyone runs this command for is "set to *what*".
+///
+/// So it redacts rather than summarises. Nothing is lost but the secrets, which is
+/// what a security filter is supposed to do, and the byte saving on an `env` dump
+/// was never the point.
 pub fn distill_env_output(input: &str) -> String {
-    let mut total = 0u32;
+    let mut out = String::with_capacity(input.len());
     let mut redacted_count = 0u32;
-    let mut by_prefix: BTreeMap<String, u32> = BTreeMap::new();
-    let mut redacted_lines: Vec<String> = Vec::new();
+    let mut parsed_any = false;
 
     for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+        let trimmed = line.trim_end();
+        let Some(eq_pos) = trimmed.find('=') else {
+            // grep headers, blank separators, a shell's own notice. Not ours to
+            // reshape, and dropping them is how a command's context disappears.
+            out.push_str(trimmed);
+            out.push('\n');
             continue;
-        }
-
-        if let Some(eq_pos) = trimmed.find('=') {
-            let key = &trimmed[..eq_pos];
-            total += 1;
-
-            // Check if sensitive
-            let key_upper = key.to_uppercase();
-            let is_sensitive = SENSITIVE_PATTERNS.iter().any(|p| key_upper.contains(p));
-
-            if is_sensitive {
-                redacted_count += 1;
-                redacted_lines.push(format!("{}=[REDACTED]", key));
-            }
-
-            // Group by prefix (first word before _ or full key if no _)
-            let prefix = if let Some(underscore_pos) = key.find('_') {
-                let p = &key[..underscore_pos];
-                if p.is_empty() {
-                    key.to_string()
-                } else {
-                    p.to_string()
-                }
-            } else {
-                key.to_string()
-            };
-            *by_prefix.entry(prefix).or_insert(0) += 1;
+        };
+        parsed_any = true;
+        let key = &trimmed[..eq_pos];
+        let key_upper = key.to_uppercase();
+        if SENSITIVE_PATTERNS.iter().any(|p| key_upper.contains(p)) {
+            redacted_count += 1;
+            out.push_str(key);
+            out.push_str("=[REDACTED]\n");
+        } else {
+            out.push_str(trimmed);
+            out.push('\n');
         }
     }
 
-    let mut out = format!(
-        "env: {} vars | REDACTED: {} sensitive",
-        total, redacted_count
-    );
-
-    // Sort by count descending, show top prefixes
-    let mut sorted: Vec<(String, u32)> = by_prefix.into_iter().collect();
-    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
-
-    let prefix_strs: Vec<String> = sorted
-        .iter()
-        .take(8)
-        .map(|(prefix, n)| format!("{}({})", prefix, n))
-        .collect();
-    if !prefix_strs.is_empty() {
-        out.push_str(&format!("\n  {}", prefix_strs.join(" ")));
+    // Zero-state guard (#143): no `KEY=VALUE` line means this was never env
+    // output, and a summary of nothing is the false claim this project keeps
+    // shipping.
+    if !parsed_any {
+        return input.to_string();
     }
 
-    // Show redacted keys for transparency
-    if !redacted_lines.is_empty() {
-        out.push_str("\n  Sensitive:");
-        for rl in redacted_lines.iter().take(10) {
-            out.push_str(&format!("\n    {}", rl));
-        }
-        if redacted_lines.len() > 10 {
-            out.push_str(&format!("\n    +{} more", redacted_lines.len() - 10));
-        }
+    // One line, only when something was hidden, so a reader who sees `[REDACTED]`
+    // knows OMNI did it rather than the command.
+    if redacted_count > 0 {
+        return format!("[OMNI: {redacted_count} sensitive value(s) redacted]\n{out}");
     }
-
     out
 }
 
@@ -629,6 +613,46 @@ fn distill_fallback(segments: &[OutputSegment]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// #342: the env distiller emitted per-prefix counts and no values, except the
+    /// sensitive one it named to say it had been redacted. Nine variables came
+    /// back as `DB(8) APP(1)` plus the password line: the eight values anyone runs
+    /// the command for were gone, and the one value shown by name was the only one
+    /// that must never be printed.
+    #[test]
+    fn keeps_every_value_and_redacts_only_the_secret() {
+        let input = "DB_TYPE=postgresdb\n\
+                     DB_POSTGRESDB_HOST=db.svc.internal\n\
+                     DB_POSTGRESDB_PORT=5432\n\
+                     DB_POSTGRESDB_USER=appuser\n\
+                     DB_POSTGRESDB_PASSWORD=hunter2\n\
+                     APP_HOST=app.example.com\n";
+        let out = super::distill_env_output(input);
+
+        for kept in [
+            "DB_TYPE=postgresdb",
+            "DB_POSTGRESDB_HOST=db.svc.internal",
+            "DB_POSTGRESDB_PORT=5432",
+            "DB_POSTGRESDB_USER=appuser",
+            "APP_HOST=app.example.com",
+        ] {
+            assert!(out.contains(kept), "value must survive: {kept}\n{out}");
+        }
+        assert!(
+            !out.contains("hunter2"),
+            "the secret must not appear:\n{out}"
+        );
+        assert!(out.contains("DB_POSTGRESDB_PASSWORD=[REDACTED]"), "{out}");
+    }
+
+    /// Not env output at all, so there is nothing to summarise and nothing to
+    /// redact. A summary of nothing is the false claim this project keeps
+    /// shipping (#143).
+    #[test]
+    fn returns_input_when_no_key_value_line_is_present() {
+        let input = "Warming up\nnothing here looks like an assignment\n";
+        assert_eq!(super::distill_env_output(input), input);
+    }
 
     /// #316: `grep -n` over a single file prints `<lineno>:<text>` with no path,
     /// because grep only prefixes the filename when given more than one. That

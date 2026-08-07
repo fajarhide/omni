@@ -640,8 +640,16 @@ pub fn process_payload(
         final_out.push_str("\n[Partial signal - omni learn recommended]\n");
     }
 
+    // A redaction is never undone by the guardrail. `distill_env_output` replaces
+    // a secret's value with `[REDACTED]`, which can make the output *longer* than
+    // the input (`hunter2` is shorter than the marker), and handing the raw bytes
+    // back under "nothing worth a deletion" would put the password on screen. The
+    // guardrail exists to stop OMNI deleting an answer, not to stop it hiding a
+    // credential (#342).
+    let redacted_here = final_out.contains("[REDACTED]") && !content.contains("[REDACTED]");
+
     // Measure ratio strictly
-    if final_out.len() >= content.len() * 9 / 10 {
+    if !redacted_here && final_out.len() >= content.len() * 9 / 10 {
         // Record passthrough metric regardless of size
         if let Some(ref s) = store {
             s.record_passthrough(&format!("{clean_command} [below guardrail]"), content.len());
@@ -1060,6 +1068,34 @@ fn strip_html_simple(html: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// #342, and the reason the guard lives in the hook rather than the distiller:
+    /// redacting makes the output *longer* than the input, because `[REDACTED]` is
+    /// wider than the secret it replaces. The guardrail restore hands the raw
+    /// bytes back whenever a distiller saved under a tenth, which would have put
+    /// the password on screen after the distiller had correctly hidden it. Driven
+    /// through `process_payload` because that is the boundary where it can be
+    /// wrong; asserting on the distiller alone cannot see the restore.
+    #[test]
+    fn never_undoes_a_redaction_at_the_guardrail() {
+        let raw = "DB_TYPE=postgresdb\n\
+                   DB_POSTGRESDB_HOST=db.svc.internal\n\
+                   DB_POSTGRESDB_PASSWORD=hunter2\n\
+                   APP_HOST=app.example.com\n";
+        let payload = json!({
+            "session_id": "redaction-guard",
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl -n demo exec app-0 -- sh -c 'env | grep -E \"^DB_|APP_HOST\"'"},
+            "tool_response": {"stdout": raw, "stderr": "", "interrupted": false}
+        });
+
+        if let Some(out) = process_payload(&payload.to_string(), None, None) {
+            assert!(
+                !out.contains("hunter2"),
+                "the guardrail restored the raw bytes and un-redacted the secret:\n{out}"
+            );
+        }
+    }
 
     /// #335: `distill_grep_output` folds a repeated `path:` prefix into a header,
     /// so 11 matches come back as 15 lines holding all 11. Nothing was dropped,
