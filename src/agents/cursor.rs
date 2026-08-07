@@ -271,7 +271,7 @@ fn install_omni_hooks_at(hooks_path: &PathBuf, exe_path: &str) -> anyhow::Result
     }
 
     let mut val = if hooks_path.exists() {
-        let content = fs::read_to_string(&hooks_path)?;
+        let content = fs::read_to_string(hooks_path)?;
         serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
     } else {
         json!({})
@@ -328,7 +328,7 @@ fn install_omni_hooks_at(hooks_path: &PathBuf, exe_path: &str) -> anyhow::Result
         ensure_hook(hooks.entry(event).or_insert_with(|| json!([])), cmd);
     }
 
-    fs::write(&hooks_path, serde_json::to_string_pretty(&val)?)?;
+    fs::write(hooks_path, serde_json::to_string_pretty(&val)?)?;
     Ok(())
 }
 
