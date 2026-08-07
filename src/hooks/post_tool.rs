@@ -520,9 +520,16 @@ pub fn process_payload(
             distilled
         };
 
+        // Label the row with the program that produced the output, not with
+        // whatever token came first. `OMNI_DB_PATH=/tmp/d.db sqlite3 …` wrote the
+        // assignment and its value into this column: 1,079 rows and 264 distinct
+        // values in one database, which made every aggregate keyed on it useless
+        // and hid the routing defect this change fixes (#339).
+        let producer =
+            crate::pipeline::registry::sole_output_command(clean_command).unwrap_or(clean_command);
         (
             output,
-            clean_command
+            producer
                 .split_whitespace()
                 .next()
                 .unwrap_or("omni")
@@ -536,8 +543,12 @@ pub fn process_payload(
     let mut final_out = final_out;
     let mut rewind_hash = String::new();
 
-    // Re-check segments from content for metadata/learning
-    let profile = crate::pipeline::registry::resolve_profile(clean_command);
+    // Re-check segments from content for metadata/learning. Same resolver the
+    // distillation above used: the direct one disagrees on a chain, so on
+    // `cd /tmp/x && kubectl get pods` this read `Generic` where the scoring read
+    // `Infra`, and the counts and the learn queue were built from a profile that
+    // never ran (#339).
+    let profile = crate::pipeline::registry::resolve_profile_for_chain(clean_command);
     let check_segments =
         scorer::score_segments(&content, profile.segmentation, None, clean_command);
 
