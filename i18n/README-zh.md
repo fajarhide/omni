@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-在 Claude Code 上蒸馏命令输出。在 Cursor、Windsurf、Codex 和 Roo 上安装钩子、MCP 服务器与共享会话状态；能否重写输出取决于宿主：Cursor 不允许钩子替换内置工具的输出。
+在 Claude Code、Codex CLI 与 Gemini CLI 上蒸馏命令输出，这些宿主会应用 OMNI 的重写。其他宿主仍可获得 MCP 服务器、共享会话状态，以及 `omni_run`：凡经它执行的命令都会被蒸馏。运行 `omni doctor` 查看每个宿主所处的层级。
 
 </br>
 <img src="../media/demo.gif" alt="OMNI 把嘈杂的 cargo test 蒸馏到只剩结论，随后展示 omni stats" width="820" />

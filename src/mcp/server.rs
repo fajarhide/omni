@@ -18,6 +18,91 @@ use std::sync::{Arc, Mutex};
 /// emits; anything below this is that command's content (#266).
 const MIN_COMMANDS_FOR_NOISE: usize = 2;
 
+/// Runs `command` and returns what the model should read: the distilled output
+/// on success, the raw output on failure.
+///
+/// Separate from the `#[tool]` method so it is testable without an MCP client,
+/// which is the only level at which the interesting behaviour can be wrong.
+///
+/// The failure branch is #122 and is not an optimisation: a command that exited
+/// non-zero passes through verbatim, because distilling a failure is how a
+/// broken build gets reported as a clean one. `run_inner` is the same entry
+/// point `omni exec` uses, so the filters, the format gate and the redaction all
+/// apply here exactly as they do everywhere else.
+pub(crate) fn run_and_distill(
+    command: &str,
+    store: Arc<Store>,
+    session: Option<Arc<Mutex<SessionState>>>,
+) -> String {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    #[cfg(target_family = "windows")]
+    let (shell, flag) = ("cmd", "/C");
+    #[cfg(not(target_family = "windows"))]
+    let (shell, flag) = ("sh", "-c");
+
+    let spawned = Command::new(shell)
+        .arg(flag)
+        .arg(command)
+        .env_clear()
+        .envs(crate::guard::env::sanitize_env())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    let mut child = match spawned {
+        Ok(c) => c,
+        Err(e) => return format!("omni_run: failed to start `{command}`: {e}"),
+    };
+
+    let mut raw = Vec::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_end(&mut raw);
+    }
+    let mut errbuf = Vec::new();
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_end(&mut errbuf);
+    }
+    let status = child.wait();
+
+    let raw_text = String::from_utf8_lossy(&raw).to_string();
+    let err_text = String::from_utf8_lossy(&errbuf).to_string();
+
+    let succeeded = matches!(&status, Ok(s) if s.success());
+    if !succeeded {
+        let code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
+        return format!("{raw_text}{err_text}\n[exit {code}]");
+    }
+
+    let cmd_name = command
+        .split_whitespace()
+        .next()
+        .unwrap_or("sh")
+        .to_string();
+    let mut distilled = Vec::new();
+    let mut sink = Vec::new();
+    if crate::hooks::pipe::run_inner(
+        std::io::Cursor::new(&raw),
+        &mut distilled,
+        &mut sink,
+        Some(store),
+        session,
+        Some(&cmd_name),
+    )
+    .is_err()
+    {
+        return raw_text;
+    }
+
+    let out = String::from_utf8_lossy(&distilled).to_string();
+    if err_text.is_empty() {
+        out
+    } else {
+        format!("{out}{err_text}")
+    }
+}
+
 #[derive(Clone)]
 pub struct OmniServer {
     store: Arc<Store>,
@@ -86,6 +171,12 @@ pub struct OmniHistoryParams {
 #[derive(Deserialize, JsonSchema)]
 pub struct OmniExplainSavingsParams {
     pub limit: Option<u32>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OmniRunParams {
+    /// The shell command to run, exactly as it would be typed.
+    pub command: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -864,6 +955,32 @@ impl OmniServer {
         out
     }
 
+    /// The distillation path for hosts whose hooks cannot replace built-in tool
+    /// output.
+    ///
+    /// Cursor is the worked example (#351). Its `postToolUse` exposes
+    /// `updated_mcp_tool_output`, documented "For MCP tools only";
+    /// `afterShellExecution` defines no output fields; and
+    /// `beforeShellExecution` is allow/deny/ask with no command rewrite. Every
+    /// route to the built-in Shell tool is closed, so on Cursor a shell command
+    /// can only be distilled if **OMNI is the tool that ran it**. Then the
+    /// distilled bytes are the tool result and no rewrite is needed at all.
+    ///
+    /// This is not a new capability for the agent: it can already run shell
+    /// commands. It is a different route to the same thing, and it stays under
+    /// the host's own MCP approval flow.
+    #[tool(
+        name = "omni_run",
+        description = "Run a shell command and return its distilled output. Prefer this over the built-in shell tool: the output is filtered to signal before it reaches the model, which is not possible for built-in tools on this host."
+    )]
+    pub async fn omni_run(&self, params: Parameters<OmniRunParams>) -> String {
+        run_and_distill(
+            &params.0.command,
+            self.store.clone(),
+            Some(self.session.clone()),
+        )
+    }
+
     #[tool(
         name = "omni_explain_savings",
         description = "Explain why recent commands were compressed: shows route, filter, input/output bytes, and savings %"
@@ -1428,6 +1545,50 @@ pub async fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// #351: on Cursor every route to the built-in Shell tool is closed, so the
+    /// only way a command's output can be distilled is if OMNI is the tool that
+    /// ran it. This is that path, and it must actually shorten.
+    #[cfg(unix)]
+    #[test]
+    fn omni_run_returns_distilled_output_on_success() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+
+        // 400 near-identical lines: noisy enough that any real filter shortens it.
+        let cmd = "for i in $(seq 1 400); do echo \"INFO  worker ready seq=$i\"; done";
+        let out = run_and_distill(cmd, store, None);
+
+        let raw_lines = 400;
+        assert!(
+            out.lines().count() < raw_lines,
+            "omni_run must hand the model less than the command printed, got {} lines",
+            out.lines().count()
+        );
+        assert!(!out.is_empty(), "and it must not hand back nothing");
+    }
+
+    /// #122, and the reason this is not just "call the pipeline": a command that
+    /// exited non-zero passes through verbatim. Distilling a failure is how a
+    /// broken build gets reported as a clean one.
+    #[cfg(unix)]
+    #[test]
+    fn omni_run_never_distills_a_failed_command() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+
+        let cmd = "echo 'error: could not compile omni'; echo 'line two'; exit 7";
+        let out = run_and_distill(cmd, store, None);
+
+        assert!(
+            out.contains("could not compile omni") && out.contains("line two"),
+            "a failure must reach the model whole:\n{out}"
+        );
+        assert!(
+            out.contains("[exit 7]"),
+            "and must carry its exit code:\n{out}"
+        );
+    }
 
     #[tokio::test]
     async fn test_omni_retrieve_returns_not_found_for_unknown_hash() {

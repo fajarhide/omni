@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-Claude Code ではコマンド出力を蒸留します。Cursor、Windsurf、Codex、Roo にはフック、MCP サーバー、共有セッション状態を導入しますが、出力の書き換えはホスト次第です。Cursor は組み込みツールの出力をフックで置き換えることを許可していません。
+Claude Code、Codex CLI、Gemini CLI ではコマンド出力を蒸留します。これらはホストが OMNI の書き換えを適用するためです。それ以外のホストでも MCP サーバー、共有セッション状態、そして通したコマンドを蒸留する `omni_run` が使えます。各ホストのティアは `omni doctor` で確認できます。
 
 </br>
 <img src="../media/demo.gif" alt="ノイズの多い cargo test を判定結果まで蒸留し、続いて omni stats を表示する OMNI" width="820" />
