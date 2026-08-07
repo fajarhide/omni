@@ -26,6 +26,16 @@ brew install fajarhide/tap/omni && omni init
 
 Chưng cất đầu ra lệnh trên Claude Code, Codex CLI và Gemini CLI, những host áp dụng bản ghi đè của OMNI. Ở các host khác bạn vẫn có máy chủ MCP, trạng thái phiên dùng chung, và `omni_run` chưng cất mọi lệnh bạn chạy qua nó. Chạy `omni doctor` để xem tier của từng host.
 
+
+### Mỗi host cho phép OMNI làm gì
+
+| Tier | Host | Bạn nhận được gì |
+|---|---|---|
+| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | Host áp dụng bản ghi đè của OMNI, nên mô hình đọc đầu ra đã chưng cất từ công cụ tích hợp của chính nó. |
+| **Handoff-first** | Cursor, Windsurf | Host không thể ghi đè đầu ra công cụ tích hợp. `omni_run` chưng cất mọi lệnh bạn chạy qua nó, và `omni init --cursor` cài quy tắc khiến agent chọn nó. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Chỉ bộ nhớ, recall và trạng thái phiên. Không chưng cất shell, và không tuyên bố là có. |
+
+`omni doctor` in ra tier của từng host đã cài. Tiết kiệm chỉ được tính khi mô hình thực sự nhận ít hơn.
 </br>
 <img src="../media/demo.gif" alt="OMNI chưng cất một lần chạy cargo test ồn ào xuống còn kết luận, rồi hiển thị omni stats" width="820" />
 </div>

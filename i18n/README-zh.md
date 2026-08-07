@@ -26,6 +26,16 @@ brew install fajarhide/tap/omni && omni init
 
 在 Claude Code、Codex CLI 与 Gemini CLI 上蒸馏命令输出，这些宿主会应用 OMNI 的重写。其他宿主仍可获得 MCP 服务器、共享会话状态，以及 `omni_run`：凡经它执行的命令都会被蒸馏。运行 `omni doctor` 查看每个宿主所处的层级。
 
+
+### 每个宿主允许 OMNI 做什么
+
+| 层级 | 宿主 | 你得到什么 |
+|---|---|---|
+| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | 宿主会应用 OMNI 的重写，因此模型读取的是其内置工具的蒸馏输出。 |
+| **Handoff-first** | Cursor, Windsurf | 宿主无法重写内置工具输出。`omni_run` 会蒸馏你经它执行的任何命令，`omni init --cursor` 会安装让代理主动选择它的规则。 |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | 仅记忆、召回与会话状态。没有 shell 蒸馏，也不宣称有。 |
+
+`omni doctor` 会为每个已安装宿主打印层级。只有模型确实收到更少内容时才计入节省。
 </br>
 <img src="../media/demo.gif" alt="OMNI 把嘈杂的 cargo test 蒸馏到只剩结论，随后展示 omni stats" width="820" />
 </div>

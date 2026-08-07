@@ -7,6 +7,10 @@ use std::path::PathBuf;
 pub struct CursorIntegration;
 
 impl AgentIntegration for CursorIntegration {
+    fn tier(&self) -> crate::agents::Tier {
+        crate::agents::Tier::HandoffFirst
+    }
+
     fn id(&self) -> &'static str {
         "cursor"
     }

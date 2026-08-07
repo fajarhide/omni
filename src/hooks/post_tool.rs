@@ -418,7 +418,13 @@ pub fn process_payload(
     }
 
     let command = normalized.command.clone();
-    let _agent_id = &normalized.agent_id;
+    // The row is filed under the host that is running, not under the payload
+    // shape. Codex sends Claude Code's document, so keying the label off the
+    // shape put every Codex distillation in the `claude_code` bucket (#351).
+    // `normalized.agent_id` stays the contract value because the host-cap branch
+    // above depends on it.
+    let stats_agent = crate::hooks::normalize::stats_agent_id(&normalized.agent);
+    let _agent_id = stats_agent.as_str();
 
     let clean_command = if let Some(stripped) = command.strip_prefix("omni exec ") {
         stripped

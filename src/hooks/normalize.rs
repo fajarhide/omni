@@ -163,6 +163,46 @@ fn extract_host_session_id(input: &str) -> Option<String> {
 /// VS Code: "vscode"
 /// dll.
 pub fn detect_agent_id(agent: &AgentFormat) -> String {
+    // Pure, and it has to stay pure: `hooks::post_tool` keys the Claude Code
+    // host-cap branch off this value, so it describes the *payload contract*.
+    // Reading the environment here made a behaviour decision depend on ambient
+    // state and let a concurrently running test relabel it, which is the
+    // cross-test hazard `AGENTS.md` names. The stats label is a different
+    // question and is answered at the point of recording (see `stats_agent_id`).
+    resolve_agent_id(agent, "")
+}
+
+/// Which host to file this row under in `omni stats`.
+///
+/// Separate from `detect_agent_id` because they answer different questions.
+/// That one describes the payload contract and drives behaviour; this one names
+/// the host and drives reporting only.
+///
+/// Codex CLI sends Claude Code's exact payload document, so shape alone filed
+/// every Codex distillation under `claude_code` and Codex could never appear in
+/// Agent Distribution however well its hooks worked (#351). Where the format is
+/// ambiguous the environment decides; a format that identifies itself keeps its
+/// own answer, so a stale env var cannot relabel Aider's pipe as Codex.
+pub fn stats_agent_id(agent: &AgentFormat) -> String {
+    resolve_agent_id(agent, &crate::agents::multiagent::detect_agent_id())
+}
+
+/// The decision, split from the environment lookup so it can be tested without
+/// `set_var`. `cargo` runs tests in parallel and a test that mutates the
+/// environment decides what a concurrently running one sees, which is the
+/// failure `AGENTS.md` calls out.
+///
+/// It also stops the probe lying to you: run the naive check under Claude Code
+/// and `CLAUDECODE` is already set in the ambient environment, so a Codex
+/// payload answers `claude_code` and the fix looks broken when it is not.
+pub fn resolve_agent_id(agent: &AgentFormat, from_env: &str) -> String {
+    if matches!(agent, AgentFormat::ClaudeCode | AgentFormat::Unknown)
+        && !from_env.is_empty()
+        && from_env != "unknown"
+    {
+        return from_env.to_string();
+    }
+
     match agent {
         AgentFormat::ClaudeCode => "claude_code".to_string(),
         AgentFormat::OpenCode => "opencode".to_string(),
@@ -657,6 +697,53 @@ fn normalize_tool_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #351: Codex CLI sends Claude Code's exact payload document, so shape alone
+    /// labelled every Codex distillation `claude_code` and Codex could never
+    /// appear in `omni stats` Agent Distribution however well its hooks worked.
+    /// Where the format is ambiguous the environment decides.
+    #[test]
+    fn the_environment_decides_when_two_hosts_share_a_payload_shape() {
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::ClaudeCode, "codex_cli"),
+            "codex_cli"
+        );
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::ClaudeCode, "claude_code"),
+            "claude_code"
+        );
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::Unknown, "gemini"),
+            "gemini",
+            "an unrecognised shape has nothing better to go on"
+        );
+    }
+
+    /// The other half, and the reason this is not just "prefer the environment":
+    /// a payload that identifies itself keeps its own answer. An env var left
+    /// over from a parent process must not relabel Aider's pipe as Codex.
+    #[test]
+    fn a_self_identifying_payload_ignores_the_environment() {
+        assert_eq!(resolve_agent_id(&AgentFormat::Aider, "codex_cli"), "aider");
+        assert_eq!(resolve_agent_id(&AgentFormat::Pi, "codex_cli"), "pi");
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::CursorWindsurf, "codex_cli"),
+            "cursor"
+        );
+    }
+
+    /// An empty or unknown environment must not blank the answer.
+    #[test]
+    fn falls_back_to_the_format_when_the_environment_says_nothing() {
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::ClaudeCode, ""),
+            "claude_code"
+        );
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::ClaudeCode, "unknown"),
+            "claude_code"
+        );
+    }
 
     #[test]
     fn test_detect_claude_code() {

@@ -26,6 +26,16 @@ brew install fajarhide/tap/omni && omni init
 
 Mendistilasi output perintah di Claude Code, Codex CLI, dan Gemini CLI, yaitu host yang menerapkan penulisan ulang dari OMNI. Di host lain kamu tetap dapat server MCP, state sesi bersama, dan `omni_run` yang mendistilasi perintah apa pun yang kamu lewatkan melaluinya. Jalankan `omni doctor` untuk melihat tier tiap host.
 
+
+### Apa yang tiap host izinkan OMNI lakukan
+
+| Tier | Host | Yang kamu dapat |
+|---|---|---|
+| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | Host menerapkan penulisan ulang OMNI, jadi model membaca output terdistilasi dari tool bawaannya sendiri. |
+| **Handoff-first** | Cursor, Windsurf | Host tidak bisa menulis ulang output tool bawaan. `omni_run` mendistilasi apa pun yang kamu lewatkan melaluinya, dan `omni init --cursor` memasang aturan yang membuat agent memilihnya. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Memori, recall, dan state sesi. Tidak ada distilasi shell, dan tidak diklaim ada. |
+
+`omni doctor` mencetak tier tiap host yang terpasang. Penghematan hanya dihitung ketika model benar-benar menerima lebih sedikit.
 </br>
 <img src="../media/demo.gif" alt="OMNI menyaring cargo test yang bising sampai ke verdict-nya, lalu omni stats" width="820" />
 </div>
