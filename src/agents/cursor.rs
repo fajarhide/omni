@@ -33,6 +33,7 @@ impl AgentIntegration for CursorIntegration {
             "Hooks".bold()
         );
 
+        install_cursor_rule()?;
         Ok(())
     }
 
@@ -54,6 +55,12 @@ impl AgentIntegration for CursorIntegration {
         // Remove hooks
         remove_omni_hooks()?;
         println!("  {} Removed Hooks from ~/.cursor/hooks.json", "✓".yellow());
+
+        let rule = project_rule_path();
+        if rule.exists() && fs::read_to_string(&rule).unwrap_or_default() == CURSOR_RULE {
+            let _ = fs::remove_file(&rule);
+            println!("  {} Removed .cursor/rules/omni.mdc", "✓".yellow());
+        }
         Ok(())
     }
 
@@ -144,8 +151,120 @@ impl AgentIntegration for CursorIntegration {
             }
         }
 
+        // The rule is not cosmetic here. `omni_run` is the only path by which a
+        // shell command is distilled on Cursor, and the agent only reaches for
+        // it when a rule says to. Hooks green plus no rule is the Cursor-shaped
+        // false green all over again: everything installed, nothing distilled
+        // (#352).
+        if in_a_project() {
+            let rule = project_rule_path();
+            if rule.exists() {
+                println!(
+                    "   {:<21} {}",
+                    "omni_run rule".bright_black(),
+                    "[OK] .cursor/rules/omni.mdc".green()
+                );
+            } else {
+                all_ok = false;
+                if fix_mode {
+                    let _ = install_cursor_rule();
+                } else {
+                    println!(
+                        "   {:<21} {}",
+                        "omni_run rule".bright_black(),
+                        "[WARNING] missing: the agent will keep using the built-in shell"
+                            .yellow()
+                            .bold()
+                    );
+                    warnings.push(
+                        "Cursor has no omni_run rule, so nothing is distilled here. Run `omni init --cursor` in this project."
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
         all_ok
     }
+}
+
+/// The rule text a Cursor user needs, printed rather than written.
+///
+/// Cursor cannot let a hook replace built-in tool output (#349), so the only way
+/// a command's output is distilled there is if `omni_run` is the tool that ran
+/// it (#351). That tool exists, and the agent still has to choose it, which is
+/// the difference between a lever being available and being used.
+///
+/// Printed, not installed, for two reasons. `omni init` is a per-machine action
+/// and `.cursor/rules/` is per-project, so writing one would put OMNI's file in
+/// somebody's repository uninvited. And rules are a fixed context cost that
+/// #352 tracks as its own bucket, so the user should decide whether to spend it.
+/// Deliberately two lines: a longer rule makes the bucket it is trying to help
+/// worse.
+pub const CURSOR_RULE: &str = "\
+---
+alwaysApply: true
+---
+Run shell commands with the `omni_run` MCP tool instead of the built-in shell tool.
+Its output is filtered to signal before it reaches you, which the built-in tool cannot do on this host.
+";
+
+/// Where a project's Cursor rules live, relative to its root.
+fn project_rule_path() -> PathBuf {
+    PathBuf::from(".cursor/rules/omni.mdc")
+}
+
+/// True when the working directory looks like a checkout rather than a home
+/// directory, which is the only place a project rule belongs.
+fn in_a_project() -> bool {
+    PathBuf::from(".git").exists()
+}
+
+/// Writes the rule when run inside a project, prints it otherwise.
+///
+/// Printing alone was the cheap option and it does not work: the user has to
+/// notice a hint, copy it, and create a file, and the tool sits unused when they
+/// do not. `omni_run` is the *only* way a shell command is distilled on Cursor
+/// (#349, #351), so an unused tool is the whole feature not working.
+///
+/// Only inside a project, because `.cursor/rules/` is per-project and OMNI has
+/// no business writing into a home directory or an unrelated folder. Uninstall
+/// removes it again.
+fn install_cursor_rule() -> anyhow::Result<()> {
+    if !in_a_project() {
+        println!(
+            "\n  {} Not in a project, so the {} rule was not written.",
+            "!".yellow().bold(),
+            "omni_run".bold()
+        );
+        println!("    Cursor cannot rewrite built-in tool output, so run `omni init --cursor`");
+        println!(
+            "    from a repository, or save this as {}:\n",
+            ".cursor/rules/omni.mdc".bold()
+        );
+        for line in CURSOR_RULE.lines() {
+            println!("      {}", line.bright_black());
+        }
+        return Ok(());
+    }
+
+    let path = project_rule_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, CURSOR_RULE)?;
+    println!(
+        "  {} Wrote {} so the agent reaches for {}",
+        "✓".green(),
+        ".cursor/rules/omni.mdc".bold(),
+        "omni_run".bold()
+    );
+    println!(
+        "    {}",
+        "(Cursor cannot rewrite built-in tool output; that tool is the only distill path here)"
+            .bright_black()
+    );
+    Ok(())
 }
 
 /// The event each hook has to sit under for Cursor to feed it anything, so
@@ -418,6 +537,33 @@ mod tests {
         assert!(
             !installed.iter().any(|(e, _)| e == "afterFileEdit"),
             "afterFileEdit carries no command output and must not be registered"
+        );
+    }
+
+    /// #352: the rule is the only thing that makes `omni_run` get used, and it is
+    /// charged to the Rules bucket that issue tracks, so it has to stay small and
+    /// it has to be valid. `alwaysApply` is what Cursor reads to include a rule in
+    /// every session; without it the rule sits there and never fires.
+    #[test]
+    fn the_printed_cursor_rule_is_valid_and_short() {
+        assert!(
+            CURSOR_RULE.starts_with("---\nalwaysApply: true\n---\n"),
+            "a rule without alwaysApply is never included:\n{CURSOR_RULE}"
+        );
+        assert!(
+            CURSOR_RULE.contains("omni_run"),
+            "the rule must name the tool it exists to steer toward"
+        );
+
+        let body: Vec<&str> = CURSOR_RULE
+            .lines()
+            .skip_while(|l| *l == "---" || l.starts_with("alwaysApply"))
+            .filter(|l| !l.trim().is_empty() && *l != "---")
+            .collect();
+        assert!(
+            body.len() <= 3,
+            "rules are a fixed context cost; keep this at most 3 lines, got {}: {body:?}",
+            body.len()
         );
     }
 
