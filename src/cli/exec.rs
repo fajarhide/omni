@@ -17,8 +17,19 @@ pub fn run_exec(
         std::process::exit(1);
     }
 
-    let cmd = &args[2];
-    let cmd_args = &args[3..];
+    // `--agent <id>` is written by our own pre-hook, never by a user, and names
+    // the host that rewrote the command. It has to be consumed here or it would
+    // be executed as part of the command line (#360).
+    let rest = match args.get(2).map(String::as_str) {
+        Some("--agent") if args.len() > 4 => {
+            crate::hooks::pipe::set_host_that_rewrote(&args[3]);
+            &args[4..]
+        }
+        _ => &args[2..],
+    };
+
+    let cmd = &rest[0];
+    let cmd_args = &rest[1..];
 
     // A shell is needed only when the whole command arrived as a SINGLE string
     // (`omni exec 'a; b'`) — then the metacharacters and word boundaries are the

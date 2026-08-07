@@ -703,13 +703,45 @@ fn persist<E: Write>(
 /// the peer-session tracker all name an agent the same way, and that name
 /// matches what `hooks::normalize` derives from a payload on the hook path.
 fn resolve_pipe_agent_id() -> String {
-    if let Ok(agent) = std::env::var("OMNI_AGENT_ID")
-        && !agent.trim().is_empty()
-    {
-        return agent;
+    pipe_agent_id_from(
+        HOST_THAT_REWROTE.get().map(String::as_str),
+        std::env::var("OMNI_AGENT_ID").ok().as_deref(),
+    )
+}
+
+/// The precedence, kept pure so tests never write the process-global or the
+/// environment. Writing either from a test leaks into every other test sharing
+/// the binary, which is the hazard this codebase has already paid for twice.
+fn pipe_agent_id_from(from_flag: Option<&str>, from_env: Option<&str>) -> String {
+    // The flag outranks the environment: it is evidence about *this* command,
+    // while the environment only describes whichever shell happens to be
+    // outermost.
+    if let Some(agent) = from_flag.filter(|a| !a.trim().is_empty()) {
+        return agent.to_string();
+    }
+
+    if let Some(agent) = from_env.filter(|a| !a.trim().is_empty()) {
+        return agent.to_string();
     }
 
     crate::agents::multiagent::detect_agent_id()
+}
+
+/// The host whose pre-hook rewrote this command into `omni exec`, passed down as
+/// `--agent` because the child inherits no evidence of who spawned it.
+///
+/// Without it the run guesses from ambient environment and is wrong in both
+/// directions: under Gemini it filed as `claude_code` when a Claude session was
+/// the outer shell, and as `terminal` once that was stripped, so Gemini rows
+/// could never reach Agent Distribution (#360).
+static HOST_THAT_REWROTE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Records which host asked for this run. Later calls are ignored, so a command
+/// that somehow carries the flag twice cannot change identity mid-run.
+pub fn set_host_that_rewrote(agent: &str) {
+    if !agent.trim().is_empty() {
+        let _ = HOST_THAT_REWROTE.set(agent.to_string());
+    }
 }
 
 /// Bytes from this run that reach a model's context.
@@ -911,6 +943,29 @@ fn extract_command_from_pipeline(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #360: Gemini's hook rewrote the command and the resulting run filed
+    /// itself under the outer shell. The flag describes this command; the
+    /// environment only describes whoever launched the terminal, so the flag
+    /// has to win.
+    #[test]
+    fn the_rewriting_host_outranks_the_surrounding_environment() {
+        assert_eq!(
+            pipe_agent_id_from(Some("gemini"), Some("claude_code")),
+            "gemini"
+        );
+    }
+
+    /// A flag that arrived empty is not an identity, and neither is an empty
+    /// `OMNI_AGENT_ID`; both must fall through rather than record a blank agent.
+    #[test]
+    fn falls_through_when_a_source_is_present_but_empty() {
+        assert_eq!(
+            pipe_agent_id_from(Some("  "), Some("codex_cli")),
+            "codex_cli"
+        );
+        assert_ne!(pipe_agent_id_from(Some(""), Some("")), "");
+    }
 
     #[test]
     fn passes_through_when_reduction_is_too_small() {

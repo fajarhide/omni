@@ -47,7 +47,7 @@ fn has_downstream_stage(cmd: &str) -> bool {
     false
 }
 
-pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
+pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>) -> Option<String> {
     let allow_list = [
         "git ",
         "cargo ",
@@ -79,7 +79,14 @@ pub fn rewrite_logic(cmd_str: &str) -> Option<String> {
         #[cfg(windows)]
         let exe_name = exe_name.replace('\\', "/");
 
-        return Some(format!("{} exec {}", exe_name, cmd_str));
+        // Name the host that asked, so the child does not have to guess it from
+        // ambient environment (#360). A flag rather than an `OMNI_AGENT_ID=`
+        // prefix: the prefix is shell dependent, and the command string is later
+        // read back by the registry, which would have to strip it again.
+        return Some(match agent {
+            Some(id) if !id.is_empty() => format!("{} exec --agent {} {}", exe_name, id, cmd_str),
+            _ => format!("{} exec {}", exe_name, cmd_str),
+        });
     }
 
     None
@@ -92,7 +99,7 @@ mod tests {
     #[test]
     fn rewrites_a_plain_command() {
         assert_eq!(
-            rewrite_logic("git status")
+            rewrite_logic("git status", None)
                 .expect("git should rewrite")
                 .split(" exec ")
                 .nth(1),
@@ -100,28 +107,55 @@ mod tests {
         );
     }
 
+    /// #360: the child process inherits no evidence of who spawned it, so a
+    /// command Gemini's hook rewrote was filed under whatever the ambient
+    /// environment suggested: `claude_code` inside a Claude shell, `terminal`
+    /// once that was stripped, never `gemini`.
+    #[test]
+    fn names_the_host_that_asked_for_the_rewrite() {
+        let rewritten = rewrite_logic("cargo tree", Some("gemini")).expect("cargo should rewrite");
+
+        assert!(
+            rewritten.contains(" exec --agent gemini cargo tree"),
+            "the host and the original command must both survive: {rewritten}"
+        );
+    }
+
+    /// Hosts whose payload does not identify them get no flag rather than a
+    /// guessed one, so `omni exec` falls back instead of recording a lie.
+    #[test]
+    fn omits_the_flag_when_the_host_is_unknown() {
+        let rewritten = rewrite_logic("cargo tree", None).expect("cargo should rewrite");
+
+        assert!(
+            !rewritten.contains("--agent"),
+            "no host means no claim about one: {rewritten}"
+        );
+        assert!(rewritten.ends_with(" exec cargo tree"), "{rewritten}");
+    }
+
     /// #157: the rewrite wrapped the whole string, so distillation sat upstream
     /// of the caller's `tail` and the script's summary line was deleted before
     /// `tail` ever saw it.
     #[test]
     fn leaves_a_command_that_pipes_into_its_own_stage() {
-        assert_eq!(rewrite_logic("bash tidy.sh 2>&1 | tail -3"), None);
-        assert_eq!(rewrite_logic("git log | head -5"), None);
+        assert_eq!(rewrite_logic("bash tidy.sh 2>&1 | tail -3", None), None);
+        assert_eq!(rewrite_logic("git log | head -5", None), None);
     }
 
     /// #170 / #207: `npm run build > build.log 2>&1` wrote a truncated log plus
     /// OMNI's banner into the file the shell was told to write.
     #[test]
     fn leaves_a_command_that_redirects_to_a_file() {
-        assert_eq!(rewrite_logic("npm run build > build.log 2>&1"), None);
-        assert_eq!(rewrite_logic("cargo tree > tree.log"), None);
-        assert_eq!(rewrite_logic("make ci >> ci.log"), None);
+        assert_eq!(rewrite_logic("npm run build > build.log 2>&1", None), None);
+        assert_eq!(rewrite_logic("cargo tree > tree.log", None), None);
+        assert_eq!(rewrite_logic("make ci >> ci.log", None), None);
     }
 
     #[test]
     fn leaves_a_chained_command() {
-        assert_eq!(rewrite_logic("npm ci && npm test"), None);
-        assert_eq!(rewrite_logic("git fetch; git status"), None);
+        assert_eq!(rewrite_logic("npm ci && npm test", None), None);
+        assert_eq!(rewrite_logic("git fetch; git status", None), None);
     }
 
     /// An operator inside quotes is data, not a stage — blocking on it would
@@ -134,7 +168,7 @@ mod tests {
             "git commit -m \"escaped \\\" quote; still one arg\"",
         ] {
             assert!(
-                rewrite_logic(cmd).is_some(),
+                rewrite_logic(cmd, None).is_some(),
                 "quoted operator should not block the rewrite: {cmd}"
             );
         }
@@ -145,7 +179,7 @@ mod tests {
     fn test_rewrite_uses_forward_slashes_on_windows() {
         // On Windows, the rewritten command must not contain backslashes from
         // the omni exe path; Git Bash strips them as escape characters.
-        let rewritten = rewrite_logic("git status").expect("git should rewrite");
+        let rewritten = rewrite_logic("git status", None).expect("git should rewrite");
         let exe_part = rewritten.trim_end_matches(" exec git status");
         assert!(
             !exe_part.contains('\\'),
