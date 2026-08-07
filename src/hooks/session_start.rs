@@ -19,6 +19,20 @@ struct HookInput {
         default
     )]
     working_directory: String,
+    /// Claude Code sends `prompt_id` with its hook payloads; Codex does not.
+    ///
+    /// It decides whether the reply may carry `watchPaths`. Codex's `SessionStart`
+    /// reply schema is `additionalProperties: false`, so one extra field makes it
+    /// discard the whole reply, taking the session summary with it, and print
+    /// `SessionStart Failed` (#364). Claude Code documents `watchPaths` and
+    /// accepts it. `turn_id` cannot be used here: Codex omits it on `SessionStart`
+    /// even though it sends one on `PreToolUse`.
+    ///
+    /// The failure direction is deliberate. If Claude Code ever omits `prompt_id`
+    /// the cost is one unregistered watch list; guessing the other way costs the
+    /// entire reply on Codex.
+    #[serde(rename = "promptId", alias = "prompt_id", default)]
+    prompt_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -31,7 +45,13 @@ pub struct HookOutput {
 pub struct HookSpecificOutput {
     #[serde(rename = "hookEventName")]
     pub hook_event_name: String,
-    #[serde(rename = "systemPromptAddition")]
+    /// The field both hosts actually read. It was `systemPromptAddition`, which
+    /// neither accepts: Claude Code documents `additionalContext`, and Codex's
+    /// reply schema is `additionalProperties: false` with `additionalContext` as
+    /// the only content field, so it rejected the whole reply and printed
+    /// `SessionStart Failed`. The session summary had never reached a model on
+    /// either host (#364), the same defect as #158 one layer up.
+    #[serde(rename = "additionalContext")]
     pub system_prompt_addition: String,
     #[serde(rename = "watchPaths", default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -146,8 +166,13 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
         new_state.toolchain_hints.insert("python".to_string(), pm);
     }
 
-    // Detect watch paths for file monitoring
-    let watch_paths = detect_watch_paths(cwd_path, &new_state.toolchain_hints);
+    // Detect watch paths for file monitoring, but only for a host that will
+    // accept the field (#364).
+    let watch_paths = if parsed.prompt_id.is_some() {
+        detect_watch_paths(cwd_path, &new_state.toolchain_hints)
+    } else {
+        Vec::new()
+    };
 
     store.upsert_session(&new_state);
     let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
@@ -207,7 +232,7 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
 /// This is similar to [`process_payload`] but is intended for the per-agent-turn
 /// pre-prompt hook (currently only the Pi extension emits this). It does NOT
 /// bootstrap a fresh session, write transcripts, or register watch paths.
-/// It only emits a `systemPromptAddition` summary when there is a recent
+/// It only emits an `additionalContext` summary when there is a recent
 /// session to continue from. Otherwise it returns `None` (fail-open).
 pub fn process_before_agent_start_payload(
     input_str: &str,
@@ -252,15 +277,17 @@ pub fn process_before_agent_start_payload(
         return None;
     }
 
-    let out = HookOutput {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "BeforeAgentStart".to_string(),
-            system_prompt_addition: summary_truncated,
-            watch_paths: vec![],
-        },
-    };
-
-    serde_json::to_string(&out).ok()
+    // `BeforeAgentStart` is OMNI's own event, emitted and read by the Pi
+    // extension, so it keeps `systemPromptAddition`. Only `SessionStart` is
+    // constrained by Claude Code and Codex, and renaming this too would break a
+    // working host to fix two others (#364).
+    serde_json::to_string(&serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "BeforeAgentStart",
+            "systemPromptAddition": summary_truncated,
+        }
+    }))
+    .ok()
 }
 
 /// Auto-detect critical project files to watch based on toolchain
@@ -425,6 +452,71 @@ pub fn read_pinned_files(cwd: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// #364: a fresh session emitted `watchPaths`, Codex's reply schema forbids
+    /// any field beyond `additionalContext`, so it discarded the whole reply and
+    /// the session summary never arrived. `SessionStart Failed` in its log.
+    #[test]
+    fn omits_watch_paths_for_a_host_that_rejects_unknown_fields() {
+        let (store, _dir) = get_store();
+        // No `prompt_id`: this is Codex's payload shape.
+        let input = json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "cx1",
+            "cwd": env!("CARGO_MANIFEST_DIR"),
+        });
+
+        let out = process_payload(&input.to_string(), store, default_config());
+
+        if let Some(res) = out {
+            assert!(
+                !res.contains("watchPaths"),
+                "Codex would discard this whole reply: {res}"
+            );
+        }
+    }
+
+    /// Claude Code sends `prompt_id` and documents `watchPaths`, so it still gets
+    /// the file list. Without this the fix would be "never emit it".
+    #[test]
+    fn still_registers_watch_paths_for_a_host_that_accepts_them() {
+        let (store, _dir) = get_store();
+        let input = json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "cc1",
+            "prompt_id": "p1",
+            "cwd": env!("CARGO_MANIFEST_DIR"),
+        });
+
+        let out = process_payload(&input.to_string(), store, default_config())
+            .expect("a Rust repo has watch paths, so there is a reply");
+
+        assert!(out.contains("watchPaths"), "{out}");
+    }
+
+    /// #364: the reply carried `systemPromptAddition`, a field neither host
+    /// reads. Claude Code documents `additionalContext`, and Codex's schema is
+    /// `additionalProperties: false` with `additionalContext` as the only
+    /// content field, so it rejected the whole reply and printed
+    /// `SessionStart Failed`. The summary had never reached a model.
+    #[test]
+    fn emits_the_context_field_both_hosts_read() {
+        let out = HookOutput {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "SessionStart".to_string(),
+                system_prompt_addition: "OMNI: continued".to_string(),
+                watch_paths: vec![],
+            },
+        };
+
+        let json = serde_json::to_string(&out).expect("serialises");
+
+        assert!(json.contains("\"additionalContext\""), "{json}");
+        assert!(
+            !json.contains("systemPromptAddition"),
+            "the rejected field name is back: {json}"
+        );
+    }
     use super::*;
     use serde_json::json;
     use tempfile::tempdir;
@@ -531,7 +623,7 @@ mod tests {
         let out = process_payload(&input.to_string(), store.clone(), cfg);
         assert!(out.is_some());
         let res = out.expect("must succeed");
-        assert!(res.contains("systemPromptAddition"));
+        assert!(res.contains("additionalContext"), "{res}");
         assert!(res.contains("missing semicolon"));
         assert!(res.contains("src/main.rs (1x)"));
     }
@@ -695,18 +787,23 @@ mod tests {
         let out = process_before_agent_start_payload(&input.to_string(), store.clone(), cfg);
         assert!(out.is_some());
         let res = out.expect("must succeed");
-        let parsed: HookOutput = serde_json::from_str(&res).expect("must be valid JSON");
-        assert_eq!(
-            parsed.hook_specific_output.hook_event_name,
-            "BeforeAgentStart"
+        // Parsed loosely on purpose: `BeforeAgentStart` is OMNI's own event and
+        // keeps `systemPromptAddition`, while `SessionStart` had to move to the
+        // `additionalContext` both Claude Code and Codex read (#364). Sharing a
+        // struct here would tie Pi's contract to theirs.
+        let parsed: serde_json::Value = serde_json::from_str(&res).expect("must be valid JSON");
+        let hso = &parsed["hookSpecificOutput"];
+        assert_eq!(hso["hookEventName"], "BeforeAgentStart");
+        assert!(
+            hso["systemPromptAddition"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty()),
+            "Pi reads systemPromptAddition: {res}"
         );
         assert!(
-            !parsed
-                .hook_specific_output
-                .system_prompt_addition
-                .is_empty()
+            hso.get("watchPaths").is_none(),
+            "Pi's reply carries no watch list: {res}"
         );
-        assert!(parsed.hook_specific_output.watch_paths.is_empty());
     }
 
     #[test]

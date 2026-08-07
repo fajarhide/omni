@@ -23,7 +23,7 @@ fn omni_config_path() -> PathBuf {
 /// Checks: config.yaml (MCP + compression), plugin files, OMNI binary
 /// availability, and OMNI config presence. Returns `None` when all
 /// checks pass, or a formatted diagnostics string that gets injected
-/// into the Hermes `systemPromptAddition` so the agent can self-heal.
+/// into the Hermes session-start context so the agent can self-heal.
 pub fn validate_startup() -> Option<String> {
     let mut warnings: Vec<&str> = Vec::new();
 
