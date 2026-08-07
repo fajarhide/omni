@@ -58,7 +58,36 @@ pub fn distill_with_command(
     command: &str,
     session: Option<&crate::pipeline::SessionState>,
 ) -> String {
+    // Format-safety, applied per line at the one place every distiller is reached
+    // from. `hooks::post_tool` already gates whole structured payloads, but that
+    // gate is all-or-nothing: two JSON API responses printed beside a single
+    // `pod "vmq" deleted` notice are not NDJSON, so the protection switched off
+    // for the payload and the cloud distiller delivered 17 bytes of a 460 byte
+    // answer, both result sets gone (#334). A distiller re-parses raw input, so
+    // tiering the line in the scorer does not reach it; the guard has to sit
+    // ahead of dispatch.
+    //
+    // Measured over 5,515 recorded traces before taking it: 116 hold at least one
+    // JSON line, and handing all of those back whole costs **0 KB** of the 371 KB
+    // the corpus saves, because none of them was being usefully compressed in the
+    // first place. A free guard against the worst failure class in this tracker.
+    if input.lines().any(is_json_line) {
+        return input.to_string();
+    }
     route(segments, input, command, session).unwrap_or_else(|| input.to_string())
+}
+
+/// A whole line that is a JSON object or array. Strict on purpose: it must
+/// bracket *and* parse, so prose containing a brace, or a truncated fragment,
+/// cannot silently switch compression off.
+fn is_json_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.len() < 2 {
+        return false;
+    }
+    let bracketed =
+        (t.starts_with('{') && t.ends_with('}')) || (t.starts_with('[') && t.ends_with(']'));
+    bracketed && serde_json::from_str::<serde_json::Value>(t).is_ok()
 }
 
 /// One `match` over the registry's decision. Every arm of what used to be here

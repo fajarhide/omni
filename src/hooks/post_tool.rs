@@ -148,10 +148,22 @@ fn rewind_marker(
     kept_lines: usize,
     kept_bytes: usize,
 ) -> (String, String) {
-    let omitted_lines = content.lines().count().saturating_sub(kept_lines);
+    let input_lines = content.lines().count();
+    let omitted_lines = input_lines.saturating_sub(kept_lines);
     // Lines are what a reader can act on, but a distillation can also shorten
     // lines in place and leave the count alone. Report the unit that is true for
     // this call rather than printing "0 lines omitted" over missing bytes.
+    //
+    // More lines out than in means the distiller restructured rather than cut:
+    // `distill_grep_output` folds a repeated `path:` prefix into a header, so 11
+    // matches become 15 lines holding all 11, and the byte delta is the redundant
+    // prefixes. Reporting that as `274 bytes omitted` under a `[Partial signal]`
+    // banner told the reader a complete answer was incomplete (#335). An
+    // in-place shortening keeps the count equal, which is why the test is `>`
+    // and not `>=`: that case is real loss and still gets its byte figure.
+    if kept_lines > input_lines {
+        return (String::new(), String::new());
+    }
     let lost = if omitted_lines > 0 {
         format!("{omitted_lines} lines")
     } else {
@@ -619,7 +631,12 @@ pub fn process_payload(
     let distilled_lines = final_out.lines().count();
     let distilled_len = final_out.len();
 
-    if route == Route::Soft {
+    // Same condition as `rewind_marker`'s: a restructure that emits more lines
+    // than it consumed dropped nothing, so the banner saying the signal is
+    // partial is a false claim about a complete answer (#335). `Soft` is decided
+    // on the byte ratio alone, and folding a repeated prefix shrinks bytes
+    // without losing a line.
+    if route == Route::Soft && distilled_lines <= content.lines().count() {
         final_out.push_str("\n[Partial signal - omni learn recommended]\n");
     }
 

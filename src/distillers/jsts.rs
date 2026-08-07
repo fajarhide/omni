@@ -241,6 +241,18 @@ fn distill_vitest(input: &str) -> String {
 
     let lines: Vec<&str> = input.lines().collect();
 
+    // A suite that failed to *load* runs zero tests, and vitest says so in its own
+    // words: `Tests  no tests`. There is no test outcome to summarise, and the
+    // `❯` lines in that payload are the transform's stack frames rather than test
+    // locations, so counting them published `✗ 4` for a run where nothing
+    // executed, while deleting the `[TSCONFIG_ERROR] …` line that was the entire
+    // cause (#333). A distiller that cannot parse its input returns the input.
+    if lines.iter().any(|l| {
+        l.trim().to_lowercase().starts_with("tests") && l.to_lowercase().contains("no test")
+    }) {
+        return input.to_string();
+    }
+
     // Attempt to parse formal summary first
     for line in &lines {
         let t = line.trim();
