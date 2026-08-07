@@ -37,7 +37,7 @@ Chưng cất đầu ra lệnh trên Claude Code, Codex CLI và Gemini CLI, nhữ
 
 `omni doctor` in ra tier của từng host đã cài. Tiết kiệm chỉ được tính khi mô hình thực sự nhận ít hơn.
 
-Tier Full của Codex CLI đang bị nghi ngờ trên 0.144.6: không hook nào do OMNI tạo được ghi nhận là chạy, và không có dòng `codex_cli` nào được ghi. Theo dõi tại [#359](https://github.com/fajarhide/omni/issues/359).
+Codex CLI cần thêm một bước. Nó chỉ chạy những hook đã được tin cậy và bỏ qua phần còn lại mà không báo gì, nên sau `omni init --codex` hãy chạy `codex` một lần rồi phê duyệt ở mục "Hooks need review". `omni doctor` sẽ báo lỗi cho tới khi bạn làm việc đó. Xem [#359](https://github.com/fajarhide/omni/issues/359).
 </br>
 <img src="../media/demo.gif" alt="OMNI chưng cất một lần chạy cargo test ồn ào xuống còn kết luận, rồi hiển thị omni stats" width="820" />
 </div>

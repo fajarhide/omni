@@ -37,7 +37,7 @@ Claude Code、Codex CLI、Gemini CLI ではコマンド出力を蒸留します�
 
 `omni doctor` が導入済みホストごとにティアを表示します。削減量はモデルが実際に受け取る量が減った場合にのみ計上されます。
 
-Codex CLI の Full ティアは 0.144.6 では確認が取れていません。OMNI が書き込んだフックが実行された形跡はなく、`codex_cli` の行も記録されませんでした。[#359](https://github.com/fajarhide/omni/issues/359) で追跡しています。
+Codex CLI にはもう一手間必要です。信頼済みとして登録されたフックしか実行せず、それ以外は何も告げずに無視します。`omni init --codex` の後に `codex` を一度起動し、"Hooks need review" で承認してください。それまで `omni doctor` は失敗します。[#359](https://github.com/fajarhide/omni/issues/359) を参照。
 </br>
 <img src="../media/demo.gif" alt="ノイズの多い cargo test を判定結果まで蒸留し、続いて omni stats を表示する OMNI" width="820" />
 </div>

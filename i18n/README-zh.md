@@ -37,7 +37,7 @@ brew install fajarhide/tap/omni && omni init
 
 `omni doctor` 会为每个已安装宿主打印层级。只有模型确实收到更少内容时才计入节省。
 
-Codex CLI 的 Full 层级在 0.144.6 上存疑：没有观察到任何由 OMNI 写入的钩子被执行，也没有写入 `codex_cli` 行。见 [#359](https://github.com/fajarhide/omni/issues/359)。
+Codex CLI 还需要一步。它只运行已被信任的钩子，其余的会被静默跳过。因此在 `omni init --codex` 之后，启动一次 `codex` 并在 "Hooks need review" 中批准。在此之前 `omni doctor` 会报错。见 [#359](https://github.com/fajarhide/omni/issues/359)。
 </br>
 <img src="../media/demo.gif" alt="OMNI 把嘈杂的 cargo test 蒸馏到只剩结论，随后展示 omni stats" width="820" />
 </div>

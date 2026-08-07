@@ -37,7 +37,7 @@ Distills command output on Claude Code, Codex CLI and Gemini CLI, where the host
 
 `omni doctor` prints the tier for every installed host. Savings are only ever counted where the model actually received less.
 
-Codex CLI's Full tier is disputed on 0.144.6: no OMNI-authored hook was observed to run, and no `codex_cli` row was written. Tracked in [#359](https://github.com/fajarhide/omni/issues/359).
+Codex CLI needs one extra step. It runs only hooks it has been told to trust, and skips the rest without a word, so after `omni init --codex` start `codex` once and approve them under "Hooks need review". `omni doctor` fails until you do. See [#359](https://github.com/fajarhide/omni/issues/359).
 </br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
 </div>

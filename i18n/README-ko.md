@@ -37,7 +37,7 @@ Claude Code, Codex CLI, Gemini CLI에서 명령 출력을 증류합니다. 이 �
 
 `omni doctor`가 설치된 호스트마다 티어를 출력합니다. 절감은 모델이 실제로 더 적게 받았을 때만 집계됩니다.
 
-Codex CLI의 Full 티어는 0.144.6에서 확인되지 않았습니다. OMNI가 설치한 훅이 실행된 정황이 없고 `codex_cli` 행도 기록되지 않았습니다. [#359](https://github.com/fajarhide/omni/issues/359)에서 추적 중입니다.
+Codex CLI에는 한 단계가 더 필요합니다. 신뢰하도록 등록된 훅만 실행하고 나머지는 아무 말 없이 건너뜁니다. `omni init --codex` 후 `codex`를 한 번 실행해 "Hooks need review"에서 승인하세요. 그전까지 `omni doctor`는 실패합니다. [#359](https://github.com/fajarhide/omni/issues/359) 참고.
 </br>
 <img src="../media/demo.gif" alt="시끄러운 cargo test 실행을 판정 결과까지 정제한 뒤 omni stats를 보여주는 OMNI" width="820" />
 </div>
