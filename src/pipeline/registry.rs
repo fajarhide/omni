@@ -765,6 +765,47 @@ fn extract_base_executable(command: &str) -> String {
 /// Measured over 214 recorded `grep`/`rg` traces before adding it: the hoist
 /// fires on 46 of them for 13.4 KB, which is why the arm stays, and 28 more came
 /// back carrying a `[Partial signal]` marker over lines the pattern had matched.
+/// `-o tsv`, `--output json`, `-o name` and friends: the value is the tell, not
+/// the flag, so `-o wide` and `-o table` stay human-facing and compressible.
+///
+/// `grep -o` takes a pattern rather than a format, so a `grep -o json` would
+/// match here. Harmless: the cost is a missed compression on a search whose
+/// pattern happens to be a format name, against reading a truncated payload that
+/// something was about to parse.
+fn names_a_machine_readable_format(command: &str) -> bool {
+    const MACHINE_READABLE: &[&str] = &[
+        "tsv",
+        "json",
+        "jsonc",
+        "yaml",
+        "name",
+        "jsonpath",
+        "go-template",
+        "custom-columns",
+    ];
+    let is_format = |v: &str| {
+        let v = v.trim_matches(|c| c == '"' || c == '\'');
+        MACHINE_READABLE
+            .iter()
+            .any(|f| v == *f || v.starts_with(&format!("{f}=")))
+    };
+
+    let mut words = command.split_whitespace().peekable();
+    while let Some(w) = words.next() {
+        if let Some(v) = w
+            .strip_prefix("--output=")
+            .or_else(|| w.strip_prefix("-o="))
+        {
+            if is_format(v) {
+                return true;
+            }
+        } else if (w == "-o" || w == "--output") && words.peek().is_some_and(|v| is_format(v)) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn passes_through_verbatim(command: &str) -> bool {
     let base_exec = extract_base_executable(command);
     let base = std::path::Path::new(&base_exec)
@@ -837,6 +878,15 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         // Keeping the two in step by comment is what let `gh api … | base64 -d`
         // reach the generic distiller and get cut, on the first run of #277.
         || crate::pipeline::registry::RESHAPING_TAILS.contains(&base)
+        // The caller named a parseable output format, which is a statement that
+        // something downstream reads this. `format::sniff` covers the shapes it
+        // can recognise, and a single-column `-o tsv` has no delimiter to
+        // recognise: `az acr repository show-tags … -o tsv` came back as 10 of 25
+        // rows, and a time-ordered listing cut at the head keeps what the caller
+        // already knew and drops the history they ran it for (#346). Measured
+        // over the recorded corpus: 48 traces carry the flag and 3 of them were
+        // being visibly shortened, for 1.4 KB that was loss rather than saving.
+        || names_a_machine_readable_format(command)
         // `extract_base_executable` strips a leading `env`/`command` wrapper, so
         // bare `env` and `command env` both leave base empty, so match on any `env`
         // token in that case rather than only the first word (review of #203).
@@ -1633,6 +1683,34 @@ mod tests {
             sole_output_command("kubectl -n ns-a logs pod-a | grep err"),
             Some("grep err"),
         );
+    }
+
+    /// #346: `az acr repository show-tags … -o tsv` came back as 10 of 25 rows.
+    /// `format::sniff` cannot help, because a single-column TSV has no delimiter
+    /// to recognise, and a time-ordered listing cut at the head keeps what the
+    /// caller already knew and drops the history they ran it for.
+    #[test]
+    fn a_machine_readable_output_flag_passes_the_payload_through() {
+        for cmd in [
+            "az acr repository show-tags -n r --repository p --top 25 -o tsv",
+            "az acr repository show-tags --output=tsv",
+            "kubectl get pods -o name",
+            "gh pr list --output json",
+            "kubectl get pod x -o jsonpath='{.status.phase}'",
+        ] {
+            assert!(
+                passes_through_verbatim(cmd),
+                "`{cmd}` names a format something downstream parses"
+            );
+        }
+        // The value is the tell, not the flag: these render for a human and stay
+        // compressible.
+        for cmd in ["kubectl get pods -o wide", "az vm list -o table"] {
+            assert!(
+                !passes_through_verbatim(cmd),
+                "`{cmd}` is human-facing and must still compress"
+            );
+        }
     }
 
     #[test]
