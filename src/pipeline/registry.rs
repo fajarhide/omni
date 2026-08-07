@@ -80,6 +80,7 @@ pub fn sole_output_command(command: &str) -> Option<&str> {
             producers.next().is_none().then_some(first)?
         }
     };
+    let producer = strip_assignments(producer);
     Some(owning_tail(producer).unwrap_or(producer))
 }
 
@@ -212,11 +213,37 @@ fn is_silent(segment: &str) -> bool {
     }
     let mut rest = std::iter::once(first)
         .chain(words)
-        .skip_while(|w| CLAUSE_PREFIXES.contains(w));
+        .skip_while(|w| CLAUSE_PREFIXES.contains(w) || is_assignment(w));
     match rest.next() {
+        // Every word was a clause prefix or an assignment, so nothing ran.
         None => true,
-        Some(base) => SILENT_BUILTINS.contains(&base) || is_assignment(base),
+        Some(base) => SILENT_BUILTINS.contains(&base),
     }
+}
+
+/// The command with any leading `VAR=value` words removed, so every caller that
+/// reads a head reads the program rather than the environment set for it.
+///
+/// `is_assignment` already existed but only decided whether a *whole* segment was
+/// silent, and a single-segment command never reaches that branch. So
+/// `OMNI_DB_PATH=/tmp/d.db kubectl get pods` resolved to `Generic` where the bare
+/// command resolves to `Infra`, and `sole_output_command` handed back the string
+/// with the assignment still on the front, which no TOML filter keyed on
+/// `^kubectl\b` can match either (#339).
+///
+/// Measured before choosing the shape: env-prefixed commands are 1,082 of 9,812
+/// recorded here and save 14.9% against 22.9% for the rest, so this is worth about
+/// 112 KB over the whole corpus. Small, and a one-line strip rather than a parser
+/// is what that buys.
+pub(crate) fn strip_assignments(command: &str) -> &str {
+    let mut rest = command.trim_start();
+    while let Some(word) = rest.split_whitespace().next() {
+        if !is_assignment(word) {
+            break;
+        }
+        rest = rest[word.len()..].trim_start();
+    }
+    rest
 }
 
 /// `i=0` and `f=path/to.yaml` set a variable and print nothing. Distinguished
@@ -293,7 +320,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         return ToolProfile::default();
     }
 
-    let cmd = command.trim();
+    let cmd = strip_assignments(command.trim());
     let base = {
         let first_word = cmd
             .split_whitespace()
@@ -584,6 +611,7 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
         .iter()
         .enumerate()
         .map(|(i, seg)| {
+            let seg = strip_assignments(seg);
             let base = seg
                 .split_whitespace()
                 .next()
@@ -591,7 +619,7 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
                 .and_then(|w| std::path::Path::new(w).file_name()?.to_str())
                 .unwrap_or("");
             let specificity = command_specificity(base, seg);
-            (i, *seg, specificity)
+            (i, seg, specificity)
         })
         .collect();
 
@@ -1541,6 +1569,40 @@ mod tests {
         assert!(!is_assignment("./bin/tool"));
         assert!(!is_assignment("=leading"));
         assert!(is_assignment("PATH=/usr/bin"));
+    }
+
+    /// #339: an env-var prefix is not a chain, so `is_silent` never saw it and
+    /// the head read as `OMNI_DB_PATH=/tmp/d.db`. `kubectl` lost `Infra` and
+    /// `cargo test` lost the test profile, silently, on 1,082 of 9,812 recorded
+    /// commands.
+    #[test]
+    fn resolves_the_program_behind_an_env_assignment() {
+        assert_eq!(
+            resolve_profile_for_chain("OMNI_DB_PATH=/tmp/d.db kubectl get pods").collapse,
+            CollapseMode::Infra,
+        );
+        assert_eq!(
+            resolve_profile("FOO=bar cargo test").collapse,
+            resolve_profile("cargo test").collapse,
+        );
+        assert_eq!(
+            sole_output_command("OMNI_DB_PATH=/tmp/d.db kubectl get pods"),
+            Some("kubectl get pods"),
+        );
+        // Several prefixes, and a bare assignment still prints nothing.
+        assert_eq!(
+            sole_output_command("A=1 B=2 kubectl get pods"),
+            Some("kubectl get pods"),
+        );
+        assert_eq!(
+            sole_output_command("A=1 && kubectl get pods"),
+            Some("kubectl get pods")
+        );
+        // A path that merely contains `=` is still a program, not an assignment.
+        assert_eq!(
+            sole_output_command("./bin/x=y --flag"),
+            Some("./bin/x=y --flag")
+        );
     }
 
     #[test]
