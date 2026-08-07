@@ -7,6 +7,10 @@ use std::path::PathBuf;
 pub struct GeminiIntegration;
 
 impl AgentIntegration for GeminiIntegration {
+    fn tier(&self) -> crate::agents::Tier {
+        crate::agents::Tier::Full
+    }
+
     fn id(&self) -> &'static str {
         "gemini"
     }
@@ -257,14 +261,18 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
     let post_cmd = format!("{} --post-hook", exe_path);
 
     // Gemini CLI uses BeforeTool / AfterTool (analogous to Claude's PreToolUse / PostToolUse)
+    // Gemini matches on ITS OWN tool names, not Claude's. The shell tool is
+    // `run_shell_command`; a matcher of "Bash" never fires, which is why this
+    // integration recorded zero rows (#351). Same defect class as Cursor's
+    // `afterFileEdit`: config written, host ignores it, doctor reports OK.
     ensure_hook(
         hooks.entry("BeforeTool").or_insert_with(|| json!([])),
-        "Bash",
+        "run_shell_command",
         &pre_cmd,
     );
     ensure_hook(
         hooks.entry("AfterTool").or_insert_with(|| json!([])),
-        "Bash",
+        "run_shell_command",
         &post_cmd,
     );
 }
@@ -297,6 +305,34 @@ pub fn remove_omni_hooks(val: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #351: the matcher was `"Bash"`, which is Claude Code's tool name. Gemini
+    /// matches on its own, and its shell tool is `run_shell_command`, so the
+    /// hooks were registered against a name the host never emits. Config
+    /// written, host ignores it, doctor reports OK, zero rows: the same shape as
+    /// Cursor's `afterFileEdit`.
+    #[test]
+    fn hooks_match_geminis_own_shell_tool_name() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/usr/local/bin/omni");
+
+        let hooks = val["hooks"].as_object().expect("hooks object");
+        for event in ["BeforeTool", "AfterTool"] {
+            let entries = hooks[event].as_array().expect("event array");
+            let matchers: Vec<&str> = entries
+                .iter()
+                .filter_map(|e| e["matcher"].as_str())
+                .collect();
+            assert!(
+                matchers.contains(&"run_shell_command"),
+                "{event} must match Gemini's shell tool, got {matchers:?}"
+            );
+            assert!(
+                !matchers.contains(&"Bash"),
+                "{event} must not use Claude's tool name, got {matchers:?}"
+            );
+        }
+    }
 
     #[test]
     fn test_install_hooks_creates_valid_structure() {

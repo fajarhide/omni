@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-Chưng cất đầu ra lệnh trên Claude Code. Cài hook, máy chủ MCP và trạng thái phiên dùng chung trên Cursor, Windsurf, Codex và Roo, nơi việc ghi đè phụ thuộc vào host: Cursor không cho phép hook thay thế đầu ra của công cụ tích hợp.
+Chưng cất đầu ra lệnh trên Claude Code, Codex CLI và Gemini CLI, những host áp dụng bản ghi đè của OMNI. Ở các host khác bạn vẫn có máy chủ MCP, trạng thái phiên dùng chung, và `omni_run` chưng cất mọi lệnh bạn chạy qua nó. Chạy `omni doctor` để xem tier của từng host.
 
 </br>
 <img src="../media/demo.gif" alt="OMNI chưng cất một lần chạy cargo test ồn ào xuống còn kết luận, rồi hiển thị omni stats" width="820" />

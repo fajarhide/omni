@@ -44,13 +44,18 @@ impl AgentIntegration for ClineIntegration {
             }
         }
 
-        install_omni_hooks(&mut val, exe_path);
+        // Purge rather than install. Earlier versions wrote `PreToolUse`,
+        // `PostToolUse` and `PreCompact` here, which are Claude Code's event
+        // names; Cline's lifecycle hooks are `TaskStart`, `UserPromptSubmit`,
+        // `TaskComplete` and `TaskCancel`, and none fires per tool call. Those
+        // three were never called, so doctor reported them installed while the
+        // agent recorded zero rows (#351). An upgrade removes them.
+        remove_omni_hooks(&mut val);
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
         println!(
-            "  {} Configured {} + {} in Cline settings",
+            "  {} Configured {} in Cline settings (MCP tier: no per-tool hook on this host)",
             "✓".green(),
-            "MCP Server".bold(),
-            "Hooks".bold()
+            "MCP Server".bold()
         );
         Ok(())
     }
@@ -138,39 +143,21 @@ impl AgentIntegration for ClineIntegration {
             }
         }
 
-        // Check hooks
-        let has_hooks = content.contains("PreToolUse") && content.contains("PostToolUse");
-        if has_hooks {
-            println!(
-                "   {:<15} {}",
-                "PreToolUse".bright_black(),
-                "[OK] installed".green()
-            );
-            println!(
-                "   {:<15} {}",
-                "PostToolUse".bright_black(),
-                "[OK] installed".green()
-            );
-        } else {
-            all_ok = false;
-            if fix_mode {
-                if let Ok(exe_path) = std::env::current_exe() {
-                    let _ = self.install(&exe_path.to_string_lossy());
-                }
-                println!(
-                    "   {:<15} {}",
-                    "Hooks:".bright_black(),
-                    "[FIXED] missing hooks installed".green().bold()
-                );
-            } else {
-                println!(
-                    "   {:<15} {}",
-                    "Hooks:".bright_black(),
-                    "[WARNING] hooks not configured".yellow().bold()
-                );
-                warnings.push("Cline hooks not configured. Run `omni init --cline`.".to_string());
-            }
-        }
+        // No hook check, on purpose. Cline's lifecycle hooks are `TaskStart`,
+        // `UserPromptSubmit`, `TaskComplete` and `TaskCancel`, and none of them
+        // fires per tool call, so there is no event that can carry a command's
+        // output to a distiller. The `PreToolUse` / `PostToolUse` names this
+        // integration used to write are Claude Code's and Cline never emits
+        // them: config written, host ignores it, doctor prints `[OK] installed`,
+        // zero rows recorded. Exactly the shape of Cursor's `afterFileEdit`
+        // (#351).
+        //
+        // Reporting the tier is honest; reporting an installed hook is not.
+        println!(
+            "   {:<15} {}",
+            "Distill:".bright_black(),
+            "MCP tier: no per-tool hook on this host".bright_black()
+        );
 
         all_ok
     }
@@ -197,60 +184,6 @@ fn get_cline_path() -> PathBuf {
     {
         PathBuf::from("cline_mcp_settings.json")
     }
-}
-
-pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
-    let obj = match val.as_object_mut() {
-        Some(o) => o,
-        None => {
-            *val = json!({});
-            val.as_object_mut().unwrap()
-        }
-    };
-    let hooks = obj
-        .entry("hooks")
-        .or_insert_with(|| json!({}))
-        .as_object_mut()
-        .unwrap();
-    if exe_path.is_empty() {
-        return;
-    }
-
-    let ensure_hook = |arr_val: &mut Value, matcher: &str, hook_cmd: &str| {
-        let arr = arr_val.as_array_mut().unwrap();
-        for v in arr.iter() {
-            if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
-                for h in inner {
-                    if h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd) {
-                        return;
-                    }
-                }
-            }
-        }
-        arr.push(
-            json!({ "matcher": matcher, "hooks": [{ "type": "command", "command": hook_cmd }] }),
-        );
-    };
-
-    let pre_cmd = format!("{} --pre-hook", exe_path);
-    let post_cmd = format!("{} --post-hook", exe_path);
-    let compact_cmd = format!("{} --pre-compact", exe_path);
-
-    ensure_hook(
-        hooks.entry("PreToolUse").or_insert_with(|| json!([])),
-        "Bash",
-        &pre_cmd,
-    );
-    ensure_hook(
-        hooks.entry("PostToolUse").or_insert_with(|| json!([])),
-        "Bash",
-        &post_cmd,
-    );
-    ensure_hook(
-        hooks.entry("PreCompact").or_insert_with(|| json!([])),
-        "",
-        &compact_cmd,
-    );
 }
 
 pub fn remove_omni_hooks(val: &mut Value) {
@@ -283,57 +216,35 @@ pub fn remove_omni_hooks(val: &mut Value) {
 mod tests {
     use super::*;
 
+    /// #351: an upgrade must remove the `PreToolUse` / `PostToolUse` /
+    /// `PreCompact` entries an earlier version wrote. Cline never emits those
+    /// names, so they were config the host ignored while doctor called them
+    /// installed. Another tool's hooks in the same file must survive.
     #[test]
-    fn test_install_hooks_creates_valid_structure() {
-        let mut val = json!({});
-        install_omni_hooks(&mut val, "/usr/bin/omni");
-        let hooks = val.get("hooks").unwrap().as_object().unwrap();
-        assert!(hooks.contains_key("PreToolUse"));
-        assert!(hooks.contains_key("PostToolUse"));
-        assert!(hooks.contains_key("PreCompact"));
-    }
+    fn install_purges_the_hook_names_cline_never_emits() {
+        let mut val = json!({
+            "mcpServers": {},
+            "hooks": {
+                "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "/old/omni --pre-hook" }] }],
+                "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "/old/omni --post-hook" }] }],
+                "TaskStart": [{ "matcher": "", "hooks": [{ "type": "command", "command": "/other/tool.sh" }] }]
+            }
+        });
 
-    #[test]
-    fn test_install_hooks_idempotent() {
-        let mut val = json!({});
-        install_omni_hooks(&mut val, "/usr/bin/omni");
-        let count = |v: &Value, key: &str| -> usize {
-            v.get("hooks")
-                .unwrap()
-                .get(key)
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .len()
-        };
-        assert_eq!(count(&val, "PreToolUse"), 1);
-        install_omni_hooks(&mut val, "/usr/bin/omni");
-        assert_eq!(count(&val, "PreToolUse"), 1, "Should be idempotent");
-    }
-
-    #[test]
-    fn test_remove_hooks_cleans_entries() {
-        let mut val = json!({});
-        install_omni_hooks(&mut val, "/usr/bin/omni");
-        assert!(
-            !val.get("hooks")
-                .unwrap()
-                .get("PreToolUse")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
         remove_omni_hooks(&mut val);
-        assert_eq!(
-            val.get("hooks")
-                .unwrap()
-                .get("PreToolUse")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .len(),
-            0
+        let dumped = serde_json::to_string(&val).expect("json");
+
+        assert!(
+            !dumped.contains("--pre-hook"),
+            "stale hook survived: {dumped}"
+        );
+        assert!(
+            !dumped.contains("--post-hook"),
+            "stale hook survived: {dumped}"
+        );
+        assert!(
+            dumped.contains("/other/tool.sh"),
+            "another tool's hook must survive: {dumped}"
         );
     }
 }

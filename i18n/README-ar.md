@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-يقوم بتقطير مخرجات الأوامر في Claude Code. ويثبّت الخطافات وخادم MCP وحالة الجلسة المشتركة في Cursor وWindsurf وCodex وRoo، حيث تعتمد إعادة الكتابة على المضيف: لا يسمح Cursor للخطاف باستبدال مخرجات الأدوات المدمجة.
+يقطّر مخرجات الأوامر في Claude Code وCodex CLI وGemini CLI، وهي المضيفات التي تطبّق إعادة كتابة OMNI. وفي بقية المضيفات تحصل على خادم MCP وحالة الجلسة المشتركة و`omni_run` الذي يقطّر أي أمر تمرّره عبره. شغّل `omni doctor` لمعرفة مستوى كل مضيف.
 
 </br>
 <img src="../media/demo.gif" alt="‏OMNI يُقطّر تشغيل cargo test مزدحمًا بالضوضاء حتى الحكم النهائي، ثم يعرض omni stats" width="820" />

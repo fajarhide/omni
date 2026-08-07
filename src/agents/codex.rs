@@ -7,6 +7,10 @@ use std::path::PathBuf;
 pub struct CodexIntegration;
 
 impl AgentIntegration for CodexIntegration {
+    fn tier(&self) -> crate::agents::Tier {
+        crate::agents::Tier::Full
+    }
+
     fn id(&self) -> &'static str {
         "codex"
     }
@@ -27,7 +31,18 @@ impl AgentIntegration for CodexIntegration {
             String::new()
         };
 
-        if !content.contains("[mcp_servers.omni]") {
+        // A sub-table like `[mcp_servers.omni.tools.x]` declares `mcp_servers.omni`
+        // on its own. Without the parent block beside it the server has no
+        // transport, and Codex refuses to start at all:
+        //
+        //   Error: config.toml:45:14: invalid transport
+        //   Caused by: invalid transport in `mcp_servers.omni`
+        //
+        // The old test was `contains("[mcp_servers.omni]")`, which an orphaned
+        // sub-table does not satisfy, so install could not repair what uninstall
+        // had left behind (#351). Verified in a copied CODEX_HOME on 0.144.6:
+        // orphan alone and `codex features list` dies; parent restored and it runs.
+        if !declares_transport(&content) {
             content.push_str(&format!(
                 "\n[mcp_servers.omni]\ntype = \"stdio\"\ncommand = \"{}\"\nargs = [\"--mcp\"]\n",
                 exe_path
@@ -58,20 +73,8 @@ impl AgentIntegration for CodexIntegration {
         let config_path = codex_dir.join("config.toml");
         if config_path.exists() {
             let content = fs::read_to_string(&config_path)?;
-            if content.contains("[mcp_servers.omni]") {
-                let mut new_content = String::new();
-                let mut skip = false;
-                for line in content.lines() {
-                    if line.starts_with("[mcp_servers.omni]") {
-                        skip = true;
-                    } else if skip && line.starts_with('[') {
-                        skip = false;
-                    }
-                    if !skip {
-                        new_content.push_str(line);
-                        new_content.push('\n');
-                    }
-                }
+            if content.contains("[mcp_servers.omni") {
+                let new_content = strip_omni_server(&content);
                 fs::write(&config_path, new_content.trim_end().to_string() + "\n")?;
                 println!(
                     "  {} Removed MCP Server from ~/.codex/config.toml",
@@ -196,6 +199,48 @@ impl AgentIntegration for CodexIntegration {
     }
 }
 
+/// True when `mcp_servers.omni` is declared *with* a transport, which is the only
+/// state Codex will start from.
+///
+/// A bare `[mcp_servers.omni.tools.x]` also declares the server, so presence of
+/// the name says nothing. Codex needs the parent block carrying `command`, and
+/// rejects the whole config without it.
+fn declares_transport(config: &str) -> bool {
+    let mut in_parent = false;
+    for line in config.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            in_parent = t == "[mcp_servers.omni]";
+            continue;
+        }
+        if in_parent && t.starts_with("command") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Removes `[mcp_servers.omni]` **and every `[mcp_servers.omni.*]` sub-table**.
+///
+/// The old version stopped skipping at the next `[`, so a sub-table survived its
+/// own parent. Codex then read a server with no transport and refused to start,
+/// which is a working install turned into a dead one by running uninstall (#351).
+fn strip_omni_server(config: &str) -> String {
+    let mut out = String::with_capacity(config.len());
+    let mut skip = false;
+    for line in config.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            skip = t == "[mcp_servers.omni]" || t.starts_with("[mcp_servers.omni.");
+        }
+        if !skip {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn get_codex_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -294,6 +339,57 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #351: uninstall stopped skipping at the next `[`, so
+    /// `[mcp_servers.omni.tools.x]` outlived its own parent. Codex then reads a
+    /// server with no transport and refuses to start at all, which turns a
+    /// working install into a dead editor by running uninstall. Reproduced on
+    /// 0.144.6: `codex features list` dies with `invalid transport`, and comes
+    /// back the moment the parent block is restored.
+    #[test]
+    fn uninstall_removes_the_sub_tables_too() {
+        let config = "\
+model = \"x\"
+
+[mcp_servers.omni]
+type = \"stdio\"
+command = \"/usr/local/bin/omni\"
+args = [\"--mcp\"]
+
+[mcp_servers.omni.tools.omni_session]
+approval_mode = \"approve\"
+
+[model_providers.other]
+name = \"Other\"
+";
+        let out = strip_omni_server(config);
+        assert!(
+            !out.contains("mcp_servers.omni"),
+            "an orphaned sub-table bricks Codex:\n{out}"
+        );
+        assert!(
+            out.contains("[model_providers.other]") && out.contains("name = \"Other\""),
+            "unrelated config must survive:\n{out}"
+        );
+    }
+
+    /// The repair half: a config left holding only the sub-table must be
+    /// recognised as *missing* its transport, or install cannot fix what
+    /// uninstall broke. The old check was `contains("[mcp_servers.omni]")`,
+    /// which an orphan does not satisfy.
+    #[test]
+    fn an_orphaned_sub_table_counts_as_missing_a_transport() {
+        let orphan = "[mcp_servers.omni.tools.omni_session]\napproval_mode = \"approve\"\n";
+        assert!(!declares_transport(orphan));
+
+        let complete = "[mcp_servers.omni]\ntype = \"stdio\"\ncommand = \"/usr/local/bin/omni\"\nargs = [\"--mcp\"]\n";
+        assert!(declares_transport(complete));
+
+        // A `command` belonging to some other server is not ours.
+        let other =
+            "[mcp_servers.other]\ncommand = \"/bin/other\"\n\n[mcp_servers.omni.tools.x]\na = 1\n";
+        assert!(!declares_transport(other));
+    }
 
     #[test]
     fn test_install_hooks_creates_valid_json() {

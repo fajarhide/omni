@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
@@ -39,6 +40,10 @@ fn is_mutating_command(cmd: &str) -> bool {
 #[derive(Deserialize)]
 struct PreHookInput {
     tool_input: ToolInput,
+    /// Present on Gemini CLI (`BeforeTool`); absent on Claude Code and Codex,
+    /// which is what tells the reply which shape the caller reads.
+    #[serde(default)]
+    hook_event_name: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -90,6 +95,23 @@ fn process_payload(
     if let Some(rewritten) = crate::cli::rewrite::rewrite_logic(cmd_str) {
         let mut updated_input = parsed.tool_input.clone();
         updated_input.command = Some(rewritten);
+
+        // Gemini CLI names the event `BeforeTool` and reads the replacement
+        // arguments from `hookSpecificOutput.tool_input`, where Claude Code and
+        // Codex both name it `PreToolUse` and read `updatedInput`. The payload
+        // says which host is asking, so the reply shape is decided from the
+        // request rather than from an install-time flag that can drift out of
+        // step with the config that set it (#351).
+        // The reply echoes back the same field it read, so if a host names the
+        // shell argument something other than `command`, `cmd_str` is None above
+        // and this never runs. Failing open beats guessing an argument name.
+        if parsed.hook_event_name.as_deref() == Some("BeforeTool") {
+            return serde_json::to_string(&json!({
+                "hook_event_name": "BeforeTool",
+                "hookSpecificOutput": { "tool_input": updated_input },
+            }))
+            .ok();
+        }
 
         let output = PreHookOutput {
             hook_specific_output: HookSpecificOutput {
@@ -263,6 +285,78 @@ fn extract_target_file(cmd: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// #351: Codex CLI consumes the *same* pre-hook contract as Claude Code, so
+    /// command rewriting already reaches parity there and no per-host adapter is
+    /// needed. Its reference documents exactly this reply:
+    ///
+    /// ```json
+    /// {"hookSpecificOutput":{"hookEventName":"PreToolUse",
+    ///   "permissionDecision":"allow","updatedInput":{"command":"echo rewritten"}}}
+    /// ```
+    ///
+    /// Asserted here rather than assumed, because this is a host contract and
+    /// #158 is what happens when one is verified against our own field names.
+    /// Codex's `PostToolUse` deliberately is not used: its reference states
+    /// `updatedMCPToolOutput` is "parsed but not supported yet", so the *pre* hook
+    /// is the only path that changes what the model reads.
+    /// Gemini CLI reads replacement arguments from
+    /// `hookSpecificOutput.tool_input` under a `BeforeTool` event, where Claude
+    /// and Codex read `updatedInput` under `PreToolUse`. Emitting Claude's shape
+    /// to Gemini is a reply the host drops in silence, which is #158 again.
+    #[test]
+    fn emits_the_reply_gemini_documents_for_beforetool() {
+        let payload = json!({
+            "hook_event_name": "BeforeTool",
+            "tool_name": "run_shell_command",
+            "tool_input": {"command": "cargo test --all"},
+            "cwd": "/tmp"
+        });
+
+        let out = process_payload(&payload.to_string(), None)
+            .expect("a rewritable command must produce a reply");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+
+        assert_eq!(v["hook_event_name"], "BeforeTool");
+        let rewritten = v["hookSpecificOutput"]["tool_input"]["command"]
+            .as_str()
+            .expect("tool_input.command is the field Gemini merges");
+        assert!(
+            rewritten.contains(" exec ") && rewritten.ends_with("cargo test --all"),
+            "the original command must survive inside the wrapper: {rewritten}"
+        );
+        assert!(
+            v["hookSpecificOutput"]["updatedInput"].is_null(),
+            "Claude's field must not leak into a Gemini reply: {out}"
+        );
+    }
+
+    #[test]
+    fn emits_the_reply_codex_documents_for_pretooluse() {
+        let payload = json!({
+            "tool_name": "shell",
+            "tool_input": {"command": "cargo test --all"},
+            "cwd": "/tmp"
+        });
+
+        let out = process_payload(&payload.to_string(), None)
+            .expect("a rewritable command must produce a reply");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let h = &v["hookSpecificOutput"];
+
+        assert_eq!(h["hookEventName"], "PreToolUse");
+        assert_eq!(h["permissionDecision"], "allow");
+        let rewritten = h["updatedInput"]["command"]
+            .as_str()
+            .expect("updatedInput.command is the field Codex reads");
+        // Asserted on shape, not on the binary's name: under `cargo test`
+        // `current_exe()` is the test harness, so matching a literal "omni exec"
+        // would only ever pass by accident of the file name.
+        assert!(
+            rewritten.contains(" exec ") && rewritten.ends_with("cargo test --all"),
+            "the original command must survive inside the wrapper: {rewritten}"
+        );
+    }
 
     #[test]
     fn pre_hook_rewrites_git_status() {

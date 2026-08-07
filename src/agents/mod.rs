@@ -48,6 +48,41 @@ pub trait AgentIntegration {
     /// `fix_mode` determines whether the doctor should attempt auto-repair.
     /// Returns `true` if healthy or successfully repaired.
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool;
+
+    /// What this host actually lets OMNI do to the bytes the model reads.
+    ///
+    /// Defaults to `McpOnly` so a new integration has to *claim* distillation
+    /// rather than inherit the claim. Installing hooks is not the same as the
+    /// host calling them, and three integrations shipped that gap at once:
+    /// Cursor registered `afterFileEdit`, Cline registered Claude's
+    /// `PreToolUse`, and Gemini matched on `"Bash"`. All three printed
+    /// `[OK] installed` and recorded nothing (#351).
+    fn tier(&self) -> Tier {
+        Tier::McpOnly
+    }
+}
+
+/// How much of OMNI's job a host permits, stated once so `doctor` and the README
+/// cannot drift apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    /// The host applies OMNI's rewrite, so the model reads distilled output.
+    Full,
+    /// The host exposes no way to change what the model reads for built-in
+    /// tools. MCP, session memory and command rewriting may still work, and
+    /// `omni_run` distils anything routed through it, but the built-in shell
+    /// tool cannot be touched.
+    McpOnly,
+}
+
+impl Tier {
+    /// One line for `doctor`, phrased as the thing a user actually wants to know.
+    pub fn label(self) -> &'static str {
+        match self {
+            Tier::Full => "model-facing distill active",
+            Tier::McpOnly => "hooks/MCP only, built-in tool output not rewritten",
+        }
+    }
 }
 
 pub fn all_integrations() -> Vec<Box<dyn AgentIntegration>> {

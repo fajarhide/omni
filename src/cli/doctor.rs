@@ -191,6 +191,8 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     let mut any_agent_ok = false;
     let mut warnings = Vec::new();
     for agent in integrations {
+        // No tier line here: this is `doctor --json`, and a stray human-readable
+        // println would land in the middle of the JSON document.
         if agent.doctor_check(fix_mode, &mut warnings) {
             any_agent_ok = true;
         }
@@ -478,6 +480,15 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         if agent.doctor_check(fix_mode, &mut warnings) {
             any_agent_ok = true;
         }
+        // Printed for every host, configured or not. "Hooks installed" and "the
+        // model reads less" are different claims, and three integrations shipped
+        // the first while delivering none of the second (#351). This line is the
+        // one a user can act on.
+        println!(
+            "   {:<15} {}",
+            "Distill tier:".bright_black(),
+            agent.tier().label().bright_black()
+        );
         // Note: integrations are optional; "not configured" should not fail doctor
     }
     if !any_agent_ok {

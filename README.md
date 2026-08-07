@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-Distills command output on Claude Code. Installs hooks, the MCP server and shared session state on Cursor, Windsurf, Codex and Roo, where rewriting depends on the host: Cursor does not let a hook replace built-in tool output.
+Distills command output on Claude Code, Codex CLI and Gemini CLI, where the host applies OMNI's rewrite. Everywhere else you get the MCP server, shared session state, and `omni_run`, which distils any command you route through it. Run `omni doctor` to see which tier each installed host is on.
 
 </br>
 <img src="media/demo.gif" alt="OMNI distilling a noisy cargo test run down to the verdict, then omni stats" width="820" />
