@@ -1061,6 +1061,31 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// #335: `distill_grep_output` folds a repeated `path:` prefix into a header,
+    /// so 11 matches come back as 15 lines holding all 11. Nothing was dropped,
+    /// and the output still said `274 bytes omitted` under a `[Partial signal]`
+    /// banner. More lines out than in is a restructure, never a cut.
+    #[test]
+    fn claims_no_omission_when_the_distiller_added_lines() {
+        let content = "a.yaml:1:x\na.yaml:2:y\nb.yaml:3:z\n";
+        let (marker, hash) = rewind_marker(None, content, 5, content.len() - 20);
+        assert!(
+            marker.is_empty(),
+            "a restructure must not claim an omission: {marker}"
+        );
+        assert!(hash.is_empty());
+    }
+
+    /// The counterpart, and the reason the test above is `>` and not `>=`: an
+    /// in-place shortening leaves the line count equal and *is* real loss, so it
+    /// still reports its byte figure.
+    #[test]
+    fn still_reports_bytes_when_lines_were_shortened_in_place() {
+        let content = "a very long line indeed\nanother very long line\n";
+        let (marker, _) = rewind_marker(None, content, 2, 10);
+        assert!(marker.contains("bytes omitted"), "got: {marker}");
+    }
+
     /// #158. The host replaces what the model sees only when it finds
     /// `updatedToolOutput`; any other key is dropped without a word, and the
     /// agent silently keeps the raw output while OMNI records the saving.

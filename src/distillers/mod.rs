@@ -135,6 +135,33 @@ mod tests {
     use crate::pipeline::registry::passes_through_verbatim;
     use crate::pipeline::scorer;
 
+    /// #334: two JSON API responses printed beside a single `pod "vmq" deleted`
+    /// notice are not NDJSON, so the payload-level gate in `hooks::post_tool` did
+    /// not fire and the cloud distiller delivered 17 bytes of a 460 byte answer
+    /// with both result sets gone. A distiller re-parses raw input and never sees
+    /// the scorer's tiers, so format-safety has to reach the dispatch point.
+    #[test]
+    fn hands_back_a_payload_holding_a_json_line() {
+        let input = "{\"result\":[{\"cluster\":\"a\",\"v\":154},{\"cluster\":\"b\",\"v\":11}]}\n\
+                     {\"result\":[{\"cluster\":\"c\",\"v\":1}]}\n\
+                     pod \"vmq\" deleted\n";
+        let cmd =
+            "kubectl run vmq --image=curlimages/curl --rm -i --command -- sh -c 'curl a; curl b'";
+        assert_eq!(distill_with_command(&[], input, cmd, None), input);
+    }
+
+    /// The guard must stay strict, or a brace in prose stops compression
+    /// everywhere. It has to bracket *and* parse.
+    #[test]
+    fn a_brace_in_prose_is_not_a_json_line() {
+        assert!(!is_json_line("use crate::pipeline::{CollapseMode};"));
+        assert!(!is_json_line("{ this is not json }"));
+        assert!(!is_json_line("{\"truncated\": "));
+        assert!(!is_json_line("kubectl get pods -o json | jq ."));
+        assert!(is_json_line("  {\"a\": 1}  "));
+        assert!(is_json_line("[1, 2, 3]"));
+    }
+
     /// From #170: `cargo tree` prints a dependency tree that *is* the answer.
     /// Routing every `cargo` command to `BuildDistiller` summarised 21.4 KB of
     /// it as `Build: ok` — 9 bytes — and reported a 100% reduction as a win.

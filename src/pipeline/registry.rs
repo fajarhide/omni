@@ -1618,6 +1618,23 @@ mod tests {
         );
     }
 
+    /// #338: `kubectl logs … | awk … | sort | uniq -c` is a histogram by the time
+    /// it reaches OMNI. Routing it by the `kubectl` head handed an already
+    /// aggregated 40-row answer to the pod-table distiller, which delivered 10
+    /// rows and dropped both traffic spikes the query existed to find.
+    #[test]
+    fn a_uniq_c_tail_owns_the_payload_it_aggregated() {
+        assert_eq!(
+            sole_output_command("kubectl -n ns-a logs pod-a | awk '{print $1}' | sort | uniq -c"),
+            Some("uniq -c"),
+        );
+        // Without an aggregating tail the pipeline still belongs to its filter.
+        assert_eq!(
+            sole_output_command("kubectl -n ns-a logs pod-a | grep err"),
+            Some("grep err"),
+        );
+    }
+
     #[test]
     fn splits_on_newlines_and_double_pipes_too() {
         assert_eq!(sole_output_command("git status\nls -la"), None);
