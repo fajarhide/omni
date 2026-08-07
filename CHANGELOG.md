@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **An environment-variable prefix defeated profile routing, so `FOO=bar cargo test` was not recognised as a test run (#339)**: `is_assignment` already existed, but it only decided whether a whole chain *segment* was silent, and a single-segment command never reaches that branch. Every caller that reads a command head therefore read the assignment as the program: `OMNI_DB_PATH=/tmp/d.db kubectl get pods` resolved to `Generic` where the bare command resolves to `Infra`, `FOO=bar cargo test` lost the test profile entirely, and `sole_output_command` handed back the string with the prefix still attached, which no TOML filter keyed on `^kubectl\b` can match either. One shared helper strips leading assignments and the four places that read a head use it, rather than each re-deriving the rule. Two smaller defects found in the same probe went with it: `post_tool.rs` scored the payload with `resolve_profile_for_chain` and then re-read the profile with `resolve_profile` twenty lines later, so on `cd /tmp/x && kubectl get pods` the segment counts and the `queue_for_learn` decision were built from a profile that never ran; and `filter_name` recorded the raw first token, writing the assignment and its value into the column, 1,079 rows and 264 distinct values in one database. Measured before choosing the shape rather than to justify it afterwards: env-prefixed commands are 1,082 of 9,812 recorded locally and save 14.9% against 22.9% for the rest, worth about 112 KB across the corpus. Small, and a one-line strip rather than a parser is what that buys. The report also claimed compound `cd X && cmd` was misrouted; it is not, #264 already handles that, and the claim came from reading the broken `filter_name` column, which is the third defect demonstrating why it mattered.
+
 
 ## [0.6.13] - 2026-08-04
 

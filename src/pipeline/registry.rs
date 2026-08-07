@@ -241,7 +241,10 @@ pub(crate) fn strip_assignments(command: &str) -> &str {
         if !is_assignment(word) {
             break;
         }
-        rest = rest[word.len()..].trim_start();
+        // `rest` is left-trimmed, so `word` is exactly its prefix. `strip_prefix`
+        // rather than a range index because the crate denies `clippy::string_slice`
+        // and this needs no proof of a char boundary to be correct.
+        rest = rest.strip_prefix(word).unwrap_or(rest).trim_start();
     }
     rest
 }
