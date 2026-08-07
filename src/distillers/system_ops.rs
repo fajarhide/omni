@@ -520,6 +520,50 @@ fn distill_tree_output(input: &str) -> String {
 /// So it redacts rather than summarises. Nothing is lost but the secrets, which is
 /// what a security filter is supposed to do, and the byte saving on an `env` dump
 /// was never the point.
+/// The payload with every `SENSITIVE_KEY=value` line's value replaced, or `None`
+/// when there was nothing to hide.
+///
+/// Separate from `distill_env_output` because the redaction must not depend on
+/// which command produced the output. Measured over 5,733 recorded traces: 25
+/// carry an env-shaped payload, 17 of those hold a credential, and **not one of
+/// the 25 came from a command named `env`**. They arrive from `cd … && …`,
+/// `kubectl exec`, `sed`, `printf` and `export`, so a gate keyed on the command
+/// can only ever cover the case nobody actually runs (#344). The keys that went
+/// through unredacted include `DB_POSTGRESDB_PASSWORD` eight times, plus
+/// `API_KEY_N8N`, `SSH_PRIVATE_KEY` and an access token.
+pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
+    let mut out = String::with_capacity(input.len());
+    let mut hit = false;
+
+    for line in input.lines() {
+        let trimmed = line.trim_end();
+        match trimmed.find('=') {
+            Some(eq) if is_sensitive_key(&trimmed[..eq]) && eq + 1 < trimmed.len() => {
+                hit = true;
+                out.push_str(&trimmed[..eq]);
+                out.push_str("=[REDACTED]\n");
+            }
+            _ => {
+                out.push_str(trimmed);
+                out.push('\n');
+            }
+        }
+    }
+    hit.then_some(out)
+}
+
+/// A key whose *value* must never be delivered. Trimmed so an indented or
+/// `export`-prefixed assignment is still recognised, because that is how these
+/// arrive in a shell transcript.
+fn is_sensitive_key(key: &str) -> bool {
+    let k = key.trim().trim_start_matches("export ").trim();
+    if k.is_empty() || !k.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return false;
+    }
+    let upper = k.to_uppercase();
+    SENSITIVE_PATTERNS.iter().any(|p| upper.contains(p))
+}
+
 pub fn distill_env_output(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut redacted_count = 0u32;

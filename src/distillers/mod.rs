@@ -74,6 +74,24 @@ pub fn distill_with_command(
     if input.lines().any(is_json_line) {
         return input.to_string();
     }
+
+    // Gate 6, moved off the command and onto the payload. It used to live inside
+    // the env distiller, which only ran when the registry decided the command was
+    // an env command, so a bare `env` (`passes_through_verbatim`) and `printenv`
+    // both delivered their secrets as printed. Measured over 5,733 recorded
+    // traces: 25 carry an env-shaped payload and **none of them came from a
+    // command named `env`** (they arrive from `cd … && …`, `kubectl exec`, `sed`,
+    // `printf`, `export`), while 17 hold a credential that reached the model
+    // unredacted, `DB_POSTGRESDB_PASSWORD` eight times among them. Keying on the
+    // command could only ever have covered the case nobody runs (#344).
+    //
+    // It returns rather than continuing to a distiller: the redacted form is the
+    // input minus its secrets, so there is nothing a summariser could add that is
+    // worth the risk of it dropping the line instead.
+    if let Some(redacted) = system_ops::redact_sensitive_assignments(input) {
+        return redacted;
+    }
+
     route(segments, input, command, session).unwrap_or_else(|| input.to_string())
 }
 
@@ -148,6 +166,54 @@ mod tests {
         let cmd =
             "kubectl run vmq --image=curlimages/curl --rm -i --command -- sh -c 'curl a; curl b'";
         assert_eq!(distill_with_command(&[], input, cmd, None), input);
+    }
+
+    /// #344: the redaction used to live inside the env distiller, so it only ran
+    /// when the registry decided the command was an env command. A bare `env` is
+    /// `passes_through_verbatim` and `printenv` is not recognised at all, so both
+    /// delivered their secrets as printed. Of 25 env-shaped payloads in the
+    /// recorded corpus, none came from a command named `env`.
+    #[test]
+    fn redacts_a_secret_whatever_command_produced_it() {
+        let raw = "DB_HOST=db.svc.internal\n\
+                   DB_POSTGRESDB_PASSWORD=hunter2\n\
+                   APP_HOST=app.example.com\n";
+        for cmd in [
+            "env",
+            "command env",
+            "printenv",
+            "kubectl -n d exec p -- env",
+            "cd /tmp && ./show-config.sh",
+            "sed -n '1,20p' .env",
+        ] {
+            let out = distill_with_command(&[], raw, cmd, None);
+            assert!(
+                !out.contains("hunter2"),
+                "`{cmd}` delivered the secret:\n{out}"
+            );
+            assert!(
+                out.contains("db.svc.internal") && out.contains("app.example.com"),
+                "`{cmd}` lost a value that is not a secret:\n{out}"
+            );
+        }
+    }
+
+    /// A payload with no sensitive key must be untouched by the redactor, or every
+    /// `KEY=VALUE` listing stops being distilled.
+    #[test]
+    fn leaves_an_ordinary_assignment_alone() {
+        use crate::distillers::system_ops::redact_sensitive_assignments;
+        assert_eq!(
+            redact_sensitive_assignments("PATH=/usr/bin\nHOME=/root\n"),
+            None
+        );
+        // Not an assignment at all: a grep hit that happens to contain the word.
+        assert_eq!(
+            redact_sensitive_assignments("61-        PASS the value along\n"),
+            None
+        );
+        // An empty value has nothing to hide and must not grow a marker.
+        assert_eq!(redact_sensitive_assignments("API_KEY=\n"), None);
     }
 
     /// The guard must stay strict, or a brace in prose stops compression
@@ -570,7 +636,46 @@ mod tests {
         "find_project_output.txt",
         "find ."
     );
-    passthrough_test!(env_passes_through_verbatim, "env_output.txt", "env");
+    /// `env` was a `passthrough_test!` until #344. The fixture holds a real-shaped
+    /// `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY` and a
+    /// `DATABASE_URL` with a password in it, and the assertion required all four
+    /// to be delivered exactly as printed. That is #200's enumeration rule
+    /// outranking Gate 6, which is the wrong way round.
+    ///
+    /// The enumeration rule still holds for everything that is not a credential,
+    /// so this asserts the stronger property: every line survives, every ordinary
+    /// value survives, and only the secrets change.
+    #[test]
+    fn env_passes_through_verbatim_except_its_secrets() {
+        let input = include_str!("../../tests/fixtures/env_output.txt");
+        let segments = scorer::score_with_command(input, "env", None);
+        let output = distill_with_command(&segments, input, "env", None);
+
+        assert_eq!(
+            output.lines().count(),
+            input.lines().count(),
+            "every line must survive; env is still an enumeration (#200)"
+        );
+        for kept in [
+            "HOME=/Users/developer",
+            "SHELL=/bin/zsh",
+            "LANG=en_US.UTF-8",
+        ] {
+            assert!(output.contains(kept), "ordinary value lost: {kept}");
+        }
+        for secret in [
+            "sk-ant-api03",
+            "ghp_1a2b3c4d5e6f7g8h9i0jklmnopqrstuvwxyz",
+            "wJalrXUtnFEMI",
+            "s3cret-p",
+        ] {
+            assert!(
+                !output.contains(secret),
+                "a credential was delivered verbatim: {secret}"
+            );
+        }
+        assert!(output.contains("ANTHROPIC_API_KEY=[REDACTED]"));
+    }
 
     /// Review of #205: bare `env` and `command env` both leave `base` empty (the
     /// wrapper is stripped), so the guard matches on any `env` token. Locks that
