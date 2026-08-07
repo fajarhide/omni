@@ -36,6 +36,8 @@ Mendistilasi output perintah di Claude Code, Codex CLI, dan Gemini CLI, yaitu ho
 | **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Memori, recall, dan state sesi. Tidak ada distilasi shell, dan tidak diklaim ada. |
 
 `omni doctor` mencetak tier tiap host yang terpasang. Penghematan hanya dihitung ketika model benar-benar menerima lebih sedikit.
+
+Tier Full untuk Codex CLI masih dipertanyakan di 0.144.6: tidak ada hook buatan OMNI yang terbukti jalan, dan tidak ada baris `codex_cli` yang tertulis. Dilacak di [#359](https://github.com/fajarhide/omni/issues/359).
 </br>
 <img src="../media/demo.gif" alt="OMNI menyaring cargo test yang bising sampai ke verdict-nya, lalu omni stats" width="820" />
 </div>

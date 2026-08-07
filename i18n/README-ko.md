@@ -36,6 +36,8 @@ Claude Code, Codex CLI, Gemini CLI에서 명령 출력을 증류합니다. 이 �
 | **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | 메모리, 리콜, 세션 상태만. 셸 증류는 없으며 있다고 주장하지도 않습니다. |
 
 `omni doctor`가 설치된 호스트마다 티어를 출력합니다. 절감은 모델이 실제로 더 적게 받았을 때만 집계됩니다.
+
+Codex CLI의 Full 티어는 0.144.6에서 확인되지 않았습니다. OMNI가 설치한 훅이 실행된 정황이 없고 `codex_cli` 행도 기록되지 않았습니다. [#359](https://github.com/fajarhide/omni/issues/359)에서 추적 중입니다.
 </br>
 <img src="../media/demo.gif" alt="시끄러운 cargo test 실행을 판정 결과까지 정제한 뒤 omni stats를 보여주는 OMNI" width="820" />
 </div>

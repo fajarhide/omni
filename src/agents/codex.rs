@@ -51,16 +51,18 @@ impl AgentIntegration for CodexIntegration {
         }
 
         println!(
-            "  {} Configured MCP Server in ~/.codex/config.toml",
-            "✓".green()
+            "  {} Configured MCP Server in {}",
+            "✓".green(),
+            config_path.display()
         );
 
         // Install hooks in hooks.json
         install_omni_hooks(exe_path)?;
         println!(
-            "  {} Configured {} in ~/.codex/hooks.json",
+            "  {} Configured {} in {}",
             "✓".green(),
-            "Hooks".bold()
+            "Hooks".bold(),
+            codex_dir.join("hooks.json").display()
         );
 
         Ok(())
@@ -77,15 +79,20 @@ impl AgentIntegration for CodexIntegration {
                 let new_content = strip_omni_server(&content);
                 fs::write(&config_path, new_content.trim_end().to_string() + "\n")?;
                 println!(
-                    "  {} Removed MCP Server from ~/.codex/config.toml",
-                    "✓".yellow()
+                    "  {} Removed MCP Server from {}",
+                    "✓".yellow(),
+                    config_path.display()
                 );
             }
         }
 
         // Remove hooks from hooks.json
         remove_omni_hooks()?;
-        println!("  {} Removed Hooks from ~/.codex/hooks.json", "✓".yellow());
+        println!(
+            "  {} Removed Hooks from {}",
+            "✓".yellow(),
+            codex_dir.join("hooks.json").display()
+        );
 
         Ok(())
     }
@@ -107,7 +114,7 @@ impl AgentIntegration for CodexIntegration {
             println!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
-                "~/.codex/config.toml".bright_black(),
+                config_path.display().to_string().bright_black(),
                 "[OK]".green().bold()
             );
         } else {
@@ -241,10 +248,23 @@ fn strip_omni_server(config: &str) -> String {
     out
 }
 
+/// Codex reads its config from `$CODEX_HOME` and only falls back to `~/.codex`.
+/// Installing to the fallback while the host is using the override writes a
+/// config Codex never loads, and `doctor` then reports the file it wrote rather
+/// than the file in use. Seen on a machine where a launcher exported
+/// `CODEX_HOME` to its own runtime directory: `~/.codex/config.toml` held the
+/// MCP server, the live home did not, and OMNI reported healthy either way.
 fn get_codex_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codex")
+    codex_dir_from(std::env::var_os("CODEX_HOME"), dirs::home_dir())
+}
+
+/// The choice itself, kept free of the environment so it can be tested without
+/// a concurrently running test seeing the mutation.
+fn codex_dir_from(codex_home: Option<std::ffi::OsString>, home: Option<PathBuf>) -> PathBuf {
+    match codex_home {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => home.unwrap_or_else(|| PathBuf::from(".")).join(".codex"),
+    }
 }
 
 pub fn install_omni_hooks(exe_path: &str) -> anyhow::Result<()> {
@@ -339,6 +359,37 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Codex resolves its own config through `$CODEX_HOME`, so installing to
+    /// `~/.codex` regardless writes a file the running Codex never opens. Found
+    /// on a machine whose launcher points `CODEX_HOME` at its own runtime
+    /// directory: `omni init --codex` reported success into `~/.codex` while the
+    /// home actually in use kept no MCP server at all.
+    #[test]
+    fn installs_into_the_home_codex_is_actually_using() {
+        let dir = codex_dir_from(
+            Some("/somewhere/runtime-home".into()),
+            Some(PathBuf::from("/Users/x")),
+        );
+
+        assert_eq!(dir, PathBuf::from("/somewhere/runtime-home"));
+    }
+
+    /// An exported-but-empty `CODEX_HOME` is not a location; treating it as one
+    /// would install into the process's working directory.
+    #[test]
+    fn falls_back_to_the_default_home_when_the_override_is_absent_or_empty() {
+        let home = Some(PathBuf::from("/Users/x"));
+
+        assert_eq!(
+            codex_dir_from(None, home.clone()),
+            PathBuf::from("/Users/x/.codex")
+        );
+        assert_eq!(
+            codex_dir_from(Some("".into()), home),
+            PathBuf::from("/Users/x/.codex")
+        );
+    }
 
     /// #351: uninstall stopped skipping at the next `[`, so
     /// `[mcp_servers.omni.tools.x]` outlived its own parent. Codex then reads a

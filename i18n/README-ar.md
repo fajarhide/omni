@@ -36,6 +36,8 @@ brew install fajarhide/tap/omni && omni init
 | **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | الذاكرة والاسترجاع وحالة الجلسة فقط. لا تقطير للأوامر، ولا ادّعاء بوجوده. |
 
 يطبع `omni doctor` المستوى لكل مضيف مثبّت. لا تُحتسب الوفورات إلا عندما يتلقى النموذج فعليًا قدرًا أقل.
+
+مستوى Full الخاص بـ Codex CLI محل شك في 0.144.6: لم يُلاحظ تشغيل أي خطاف من إنشاء OMNI، ولم يُكتب أي صف `codex_cli`. متابَع في [#359](https://github.com/fajarhide/omni/issues/359).
 </br>
 <img src="../media/demo.gif" alt="‏OMNI يُقطّر تشغيل cargo test مزدحمًا بالضوضاء حتى الحكم النهائي، ثم يعرض omni stats" width="820" />
 </div>
