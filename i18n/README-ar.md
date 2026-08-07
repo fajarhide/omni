@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-يعمل مع Claude Code وCursor وWindsurf وCodex وRoo دون إعداد إضافي.
+يقوم بتقطير مخرجات الأوامر في Claude Code. ويثبّت الخطافات وخادم MCP وحالة الجلسة المشتركة في Cursor وWindsurf وCodex وRoo، حيث تعتمد إعادة الكتابة على المضيف: لا يسمح Cursor للخطاف باستبدال مخرجات الأدوات المدمجة.
 
 </br>
 <img src="../media/demo.gif" alt="‏OMNI يُقطّر تشغيل cargo test مزدحمًا بالضوضاء حتى الحكم النهائي، ثم يعرض omni stats" width="820" />

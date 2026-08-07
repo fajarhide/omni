@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-Chạy được ngay với Claude Code, Cursor, Windsurf, Codex và Roo.
+Chưng cất đầu ra lệnh trên Claude Code. Cài hook, máy chủ MCP và trạng thái phiên dùng chung trên Cursor, Windsurf, Codex và Roo, nơi việc ghi đè phụ thuộc vào host: Cursor không cho phép hook thay thế đầu ra của công cụ tích hợp.
 
 </br>
 <img src="../media/demo.gif" alt="OMNI chưng cất một lần chạy cargo test ồn ào xuống còn kết luận, rồi hiển thị omni stats" width="820" />

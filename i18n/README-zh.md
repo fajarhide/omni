@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-开箱即用，支持 Claude Code、Cursor、Windsurf、Codex 和 Roo。
+在 Claude Code 上蒸馏命令输出。在 Cursor、Windsurf、Codex 和 Roo 上安装钩子、MCP 服务器与共享会话状态；能否重写输出取决于宿主：Cursor 不允许钩子替换内置工具的输出。
 
 </br>
 <img src="../media/demo.gif" alt="OMNI 把嘈杂的 cargo test 蒸馏到只剩结论，随后展示 omni stats" width="820" />

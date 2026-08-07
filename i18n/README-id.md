@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-Bekerja dengan Claude Code, Cursor, Windsurf, Codex dan Roo tanpa konfigurasi tambahan.
+Mendistilasi output perintah di Claude Code. Memasang hook, server MCP, dan state sesi bersama di Cursor, Windsurf, Codex, dan Roo, di mana penulisan ulang bergantung pada host: Cursor tidak mengizinkan hook mengganti output tool bawaan.
 
 </br>
 <img src="../media/demo.gif" alt="OMNI menyaring cargo test yang bising sampai ke verdict-nya, lalu omni stats" width="820" />

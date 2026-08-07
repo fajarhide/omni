@@ -271,9 +271,34 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
 }
 
 // ── CURSOR / WINDSURF ─────────────────────────────────────────────────
+/// Reached only for a Claude-Code-shaped payload that happens to carry an array
+/// `tool_response.content`, which is what Windsurf sends. **Cursor itself never
+/// gets here, and distilling its command output is not possible at all.**
+///
+/// Cursor's own hook payloads are a different shape:
+///
+/// ```text
+/// postToolUse          { tool_name, tool_input, tool_output, tool_use_id, cwd, duration }
+/// afterShellExecution  { command, output, duration, sandbox }
+/// ```
+///
+/// The output is `tool_output` or `output` at the top level, never
+/// `tool_response`, so `detect_agent_id` does not route them here and the parser
+/// below could not read them if it did. Driven through the 0.6.13 release binary
+/// with both documented shapes: zero bytes returned, zero rows recorded.
+///
+/// Teaching this function those shapes would still change nothing, which is why
+/// it has not been. Cursor's only output-rewriting field is
+/// `updated_mcp_tool_output`, documented as "For MCP tools only", and
+/// `afterShellExecution` defines no output fields. A hook cannot replace the
+/// output of a Shell tool on Cursor, so there is nowhere for a distillation to
+/// go. `additional_context` exists and adds tokens, which is the opposite of the
+/// job. See #340; the README says this per host now rather than listing names
+/// under one verb (#349).
+///
+/// What the Cursor integration does deliver: the pre-hook on
+/// `beforeShellExecution`, the MCP server, and shared session state.
 fn normalize_cursor(input: &str, agent_id: String) -> Option<NormalizedInput> {
-    // Cursor mirip Claude Code tapi tool_response.content bisa array of {type,text}
-    // Parser yang sama, cuma route agent_id ke "cursor"
     let mut norm = normalize_claude_code(input, agent_id)?;
     norm.agent = AgentFormat::CursorWindsurf;
     Some(norm)

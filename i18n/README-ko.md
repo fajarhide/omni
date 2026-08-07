@@ -24,7 +24,7 @@
 brew install fajarhide/tap/omni && omni init
 ```
 
-Claude Code, Cursor, Windsurf, Codex, Roo에서 별도 설정 없이 동작합니다.
+Claude Code에서 명령 출력을 증류합니다. Cursor, Windsurf, Codex, Roo에는 훅과 MCP 서버, 공유 세션 상태를 설치하며, 출력 재작성 가능 여부는 호스트에 따라 다릅니다. Cursor는 훅이 내장 도구 출력을 대체하는 것을 허용하지 않습니다.
 
 </br>
 <img src="../media/demo.gif" alt="시끄러운 cargo test 실행을 판정 결과까지 정제한 뒤 omni stats를 보여주는 OMNI" width="820" />
