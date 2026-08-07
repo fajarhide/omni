@@ -4,7 +4,6 @@
 
 use crate::distillers::Distiller;
 use crate::pipeline::{OutputSegment, SignalTier};
-use std::collections::BTreeMap;
 
 pub struct SystemOpsDistiller;
 

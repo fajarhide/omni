@@ -851,7 +851,14 @@ pub fn process_payload(
     // The row is still recorded above, at its honest 0%. What is dropped here
     // is only the reply, and with it the savings footer — which had nothing to
     // report on a call that saved nothing.
-    if result.route == Route::Passthrough {
+    // A redaction is the one reply worth sending at 0% saved. Emitting nothing
+    // leaves the host's own bytes in place, which is exactly right for a no-op
+    // and exactly wrong once those bytes hold a password: the env distiller
+    // replaces a secret with `[REDACTED]` and saves nothing doing it, so this
+    // gate would have handed the plaintext to the model. Found by breaking the
+    // #342 guard and watching its test stay green, which is what a decorative
+    // test looks like.
+    if result.route == Route::Passthrough && !redacted_here {
         return None;
     }
 
@@ -1078,23 +1085,41 @@ mod tests {
     /// wrong; asserting on the distiller alone cannot see the restore.
     #[test]
     fn never_undoes_a_redaction_at_the_guardrail() {
+        // Nine lines, not four: `is_env_output` needs five `KEY=VALUE` lines
+        // before the payload reaches the redactor at all, and a fixture under
+        // that threshold made the first version of this test pass with the guard
+        // removed.
+        //
+        // The command ends in a `grep` on purpose. A bare `env` is
+        // `passes_through_verbatim`, so it never reaches a distiller and its
+        // secrets are delivered raw. That is a separate defect and has its own
+        // issue (#344); using it here would test nothing.
         let raw = "DB_TYPE=postgresdb\n\
                    DB_POSTGRESDB_HOST=db.svc.internal\n\
+                   DB_POSTGRESDB_PORT=5432\n\
+                   DB_POSTGRESDB_DATABASE=appdb\n\
+                   DB_POSTGRESDB_USER=appuser\n\
                    DB_POSTGRESDB_PASSWORD=hunter2\n\
+                   DB_POSTGRESDB_SCHEMA=public\n\
+                   DB_POSTGRESDB_SSL_ENABLED=false\n\
                    APP_HOST=app.example.com\n";
         let payload = json!({
             "session_id": "redaction-guard",
             "tool_name": "Bash",
-            "tool_input": {"command": "kubectl -n demo exec app-0 -- sh -c 'env | grep -E \"^DB_|APP_HOST\"'"},
+            "tool_input": {"command": "env | grep -E '^DB_|^APP_'"},
             "tool_response": {"stdout": raw, "stderr": "", "interrupted": false}
         });
 
-        if let Some(out) = process_payload(&payload.to_string(), None, None) {
-            assert!(
-                !out.contains("hunter2"),
-                "the guardrail restored the raw bytes and un-redacted the secret:\n{out}"
-            );
-        }
+        let out = process_payload(&payload.to_string(), None, None)
+            .expect("a redaction must always be delivered, even when it saves nothing");
+        assert!(
+            !out.contains("hunter2"),
+            "the secret reached the agent:\n{out}"
+        );
+        assert!(
+            out.contains("[REDACTED]"),
+            "the reply must carry the redacted form:\n{out}"
+        );
     }
 
     /// #335: `distill_grep_output` folds a repeated `path:` prefix into a header,
