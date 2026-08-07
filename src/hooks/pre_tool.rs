@@ -44,6 +44,13 @@ struct PreHookInput {
     /// which is what tells the reply which shape the caller reads.
     #[serde(default)]
     hook_event_name: Option<String>,
+    /// Codex numbers each turn and sends it; Claude Code's `PreToolUse` document
+    /// is otherwise identical and carries no such field. It is the only thing in
+    /// the payload that separates the two, and the environment cannot: Codex
+    /// exports nothing of its own to a hook, so a Codex session launched from a
+    /// Claude shell inherits `CLAUDECODE=1` and would answer `claude_code`.
+    #[serde(default)]
+    turn_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -85,6 +92,21 @@ pub fn run(session: Option<Arc<Mutex<crate::pipeline::SessionState>>>) -> Result
     Ok(())
 }
 
+/// Which host sent this pre-hook payload, from the payload alone.
+///
+/// The environment cannot answer it. Codex exports nothing identifying to a
+/// hook, so a Codex session started from a Claude Code shell inherits
+/// `CLAUDECODE=1`, and the rewritten command would file its work under
+/// `claude_code` (#360, #364). `None` means "say nothing", which leaves
+/// `omni exec` to fall back rather than record a guess.
+fn host_from_payload(hook_event_name: Option<&str>, has_turn_id: bool) -> Option<&'static str> {
+    match hook_event_name {
+        Some("BeforeTool") => Some("gemini"),
+        _ if has_turn_id => Some("codex_cli"),
+        _ => None,
+    }
+}
+
 fn process_payload(
     input_str: &str,
     session: Option<Arc<Mutex<crate::pipeline::SessionState>>>,
@@ -94,10 +116,7 @@ fn process_payload(
 
     // The payload already says which host is asking; naming it in the rewrite is
     // the only chance to tell the child, which inherits nothing else (#360).
-    let host = match parsed.hook_event_name.as_deref() {
-        Some("BeforeTool") => Some("gemini"),
-        _ => None,
-    };
+    let host = host_from_payload(parsed.hook_event_name.as_deref(), parsed.turn_id.is_some());
 
     if let Some(rewritten) = crate::cli::rewrite::rewrite_logic(cmd_str, host) {
         let mut updated_input = parsed.tool_input.clone();
@@ -290,6 +309,23 @@ fn extract_target_file(cmd: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// #364: Codex's `PreToolUse` document is byte-identical to Claude Code's
+    /// except for `turn_id`, and Codex exports nothing to the hook environment,
+    /// so a Codex run launched from a Claude shell inherited `CLAUDECODE=1` and
+    /// filed its distillations under `claude_code`.
+    #[test]
+    fn tells_codex_apart_from_claude_by_the_payload_alone() {
+        assert_eq!(host_from_payload(None, true), Some("codex_cli"));
+        assert_eq!(host_from_payload(None, false), None);
+    }
+
+    /// Gemini identifies itself by event name, and must keep doing so even
+    /// though it never sends `turn_id`.
+    #[test]
+    fn keeps_naming_gemini_from_its_event_name() {
+        assert_eq!(host_from_payload(Some("BeforeTool"), false), Some("gemini"));
+    }
     use super::*;
     use serde_json::json;
 

@@ -356,16 +356,13 @@ pub fn install_omni_hooks(exe_path: &str) -> anyhow::Result<()> {
     let post_cmd = format!("{} --post-hook", exe_path);
     let session_cmd = format!("{} --session-start", exe_path);
 
-    let ensure_hook = |arr_val: &mut Value, cmd: &str| {
-        let arr = arr_val.as_array_mut().unwrap();
-        // Check if already present
-        for v in arr.iter() {
-            if v.get("command").and_then(|c| c.as_str()) == Some(cmd) {
-                return;
-            }
-        }
-        arr.push(json!({ "command": cmd }));
-    };
+    // Codex reads a matcher group whose `hooks` array holds the handlers; a bare
+    // `{"command": ...}` entry is accepted by the parser and never executed, with
+    // no warning. Same home, same `--dangerously-bypass-hook-trust`, same script:
+    // the flat entry ran 0 times and this shape ran once (#364). Earlier shape
+    // probes missed it because they wrote to `~/.codex` while `CODEX_HOME`
+    // pointed elsewhere, so they were testing a file Codex never opened.
+    let ensure_hook = ensure_hook_entry;
 
     ensure_hook(
         hooks.entry("PreToolUse").or_insert_with(|| json!([])),
@@ -384,6 +381,43 @@ pub fn install_omni_hooks(exe_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Adds `cmd` to one event's entry list in the shape Codex executes, replacing
+/// an older flat entry for the same command rather than sitting beside it.
+fn ensure_hook_entry(arr_val: &mut Value, cmd: &str) {
+    let Some(arr) = arr_val.as_array_mut() else {
+        return;
+    };
+
+    // Drop our own entry in the old flat shape, so an upgrade repairs a config
+    // that has been silently doing nothing instead of adding a second copy.
+    arr.retain(|v| v.get("command").and_then(|c| c.as_str()) != Some(cmd));
+
+    let already = arr.iter().any(|v| {
+        v.get("hooks")
+            .and_then(|h| h.as_array())
+            .is_some_and(|inner| {
+                inner
+                    .iter()
+                    .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(cmd))
+            })
+    });
+    if already {
+        return;
+    }
+
+    arr.push(json!({
+        "hooks": [{ "type": "command", "command": cmd, "timeout": 10 }]
+    }));
+}
+
+/// True for a hook command this tool installed, in either shape it has written.
+fn is_omni_hook_command(cmd: &str) -> bool {
+    cmd.contains("omni")
+        && (cmd.contains("--pre-hook")
+            || cmd.contains("--post-hook")
+            || cmd.contains("--session-start"))
+}
+
 pub fn remove_omni_hooks() -> anyhow::Result<()> {
     let hooks_path = get_codex_dir().join("hooks.json");
     if !hooks_path.exists() {
@@ -400,13 +434,24 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
     {
         for (_key, arr_val) in hooks.iter_mut() {
             if let Some(arr) = arr_val.as_array_mut() {
+                // Entries live one level down in a matcher group's `hooks` array,
+                // and older installs wrote the command at the top level. Uninstall
+                // has to find both, or it leaves behind exactly the orphan that
+                // bricked `config.toml` in #351.
                 arr.retain(|v| {
-                    v.get("command").and_then(|c| c.as_str()).is_none_or(|c| {
-                        !(c.contains("omni")
-                            && (c.contains("--pre-hook")
-                                || c.contains("--post-hook")
-                                || c.contains("--session-start")))
-                    })
+                    let flat = v.get("command").and_then(|c| c.as_str());
+                    let nested = v
+                        .get("hooks")
+                        .and_then(|h| h.as_array())
+                        .map(|inner| {
+                            inner
+                                .iter()
+                                .filter_map(|h| h.get("command").and_then(|c| c.as_str()))
+                                .any(is_omni_hook_command)
+                        })
+                        .unwrap_or(false);
+
+                    !(flat.is_some_and(is_omni_hook_command) || nested)
                 });
             }
         }
@@ -419,6 +464,52 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #364: the installed entry was `{"command": "..."}`, which Codex accepts
+    /// and never runs. Same home, same `--dangerously-bypass-hook-trust`, same
+    /// script: flat ran 0 times, this shape ran once.
+    #[test]
+    fn writes_the_entry_shape_codex_actually_runs() {
+        let mut arr = json!([]);
+        ensure_hook_entry(&mut arr, "/bin/omni --pre-hook");
+
+        let entry = &arr.as_array().unwrap()[0];
+        let inner = entry
+            .get("hooks")
+            .and_then(|h| h.as_array())
+            .expect("handlers belong in a nested `hooks` array");
+        assert_eq!(inner[0]["type"], "command");
+        assert_eq!(inner[0]["command"], "/bin/omni --pre-hook");
+        assert!(
+            entry.get("command").is_none(),
+            "a top-level command is the shape Codex ignores: {entry}"
+        );
+    }
+
+    /// Upgrading over a config that has been silently doing nothing must repair
+    /// it, not leave the dead entry beside a working one.
+    #[test]
+    fn replaces_an_old_flat_entry_instead_of_duplicating_it() {
+        let mut arr = json!([{ "command": "/bin/omni --pre-hook" }]);
+
+        ensure_hook_entry(&mut arr, "/bin/omni --pre-hook");
+
+        let arr = arr.as_array().unwrap();
+        assert_eq!(arr.len(), 1, "expected one entry, got {arr:?}");
+        assert!(
+            arr[0].get("hooks").is_some(),
+            "flat entry survived: {arr:?}"
+        );
+    }
+
+    /// Uninstall has to find the command one level down too, or it leaves the
+    /// orphan behind, which is how #351 bricked `config.toml`.
+    #[test]
+    fn recognises_its_own_command_for_removal() {
+        assert!(is_omni_hook_command("/usr/local/bin/omni --post-hook"));
+        assert!(!is_omni_hook_command("/usr/local/bin/omni --mcp"));
+        assert!(!is_omni_hook_command("/opt/other-tool --pre-hook"));
+    }
 
     /// #359: `omni init --codex` wrote a valid hooks.json and every hook was
     /// ignored, because Codex runs only entries it has a trust record for and
