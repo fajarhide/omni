@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+Run shell commands with the `omni_run` MCP tool instead of the built-in shell tool.
+Its output is filtered to signal before it reaches you, which the built-in tool cannot do on this host.
