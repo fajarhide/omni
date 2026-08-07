@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.6.14] - 2026-08-07
+
 ### Changed
 - **The README says what each host can actually do, instead of listing five names under one verb (#349)**: it claimed OMNI "works with Claude Code, Cursor, Windsurf, Codex and Roo out of the box", and for the product's core function that is not true on Cursor. Established while closing #340: Cursor's only output-rewriting field is `updated_mcp_tool_output`, documented as "For MCP tools only", and `afterShellExecution` defines no output fields at all, so a hook cannot replace the output of a Shell, Read or Write tool there. `additional_context` is available and adds tokens, which is the opposite of the job. Driven through the 0.6.13 release binary with both documented Cursor payload shapes: zero bytes returned, zero rows recorded. `omni init --cursor` still installs and still does real work (the pre-hook on `beforeShellExecution`, the MCP server, shared session state); what cannot happen is distillation of command output. A reader was previously left to discover that by measuring. All six translations carry the corrected sentence, and `normalize_cursor` now records why teaching it Cursor's real payload shapes would change nothing.
 
