@@ -10,6 +10,7 @@ pub mod hermes;
 pub mod multiagent;
 pub mod openclaw;
 pub mod opencode;
+pub mod output;
 pub mod pi;
 pub mod roo_code;
 pub mod vscode;

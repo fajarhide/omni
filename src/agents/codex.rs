@@ -50,7 +50,7 @@ impl AgentIntegration for CodexIntegration {
             fs::write(&config_path, content)?;
         }
 
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in {}",
             "✓".green(),
             config_path.display()
@@ -58,7 +58,7 @@ impl AgentIntegration for CodexIntegration {
 
         // Install hooks in hooks.json
         install_omni_hooks(exe_path)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured {} in {}",
             "✓".green(),
             "Hooks".bold(),
@@ -67,7 +67,7 @@ impl AgentIntegration for CodexIntegration {
         // Codex will not run a hook it has not been told to trust, and says
         // nothing when it skips one, so writing the config is only half of the
         // install (#359).
-        println!(
+        crate::agent_report!(
             "  {} Start {} once and approve them under {}, or Codex skips them",
             "!".yellow(),
             "codex".bold(),
@@ -75,7 +75,7 @@ impl AgentIntegration for CodexIntegration {
         );
         // Codex keeps its bypass on the command line on purpose: it is rejected
         // from config.toml, so no installer can turn it on for you (#359).
-        println!(
+        crate::agent_report!(
             "    {} for unattended runs, pass {}",
             "or".bright_black(),
             "--dangerously-bypass-hook-trust".bright_black()
@@ -94,7 +94,7 @@ impl AgentIntegration for CodexIntegration {
             if content.contains("[mcp_servers.omni") {
                 let new_content = strip_omni_server(&content);
                 fs::write(&config_path, new_content.trim_end().to_string() + "\n")?;
-                println!(
+                crate::agent_report!(
                     "  {} Removed MCP Server from {}",
                     "✓".yellow(),
                     config_path.display()
@@ -104,7 +104,7 @@ impl AgentIntegration for CodexIntegration {
 
         // Remove hooks from hooks.json
         remove_omni_hooks()?;
-        println!(
+        crate::agent_report!(
             "  {} Removed Hooks from {}",
             "✓".yellow(),
             codex_dir.join("hooks.json").display()
@@ -119,7 +119,7 @@ impl AgentIntegration for CodexIntegration {
         let hooks_path = codex_dir.join("hooks.json");
         let mut all_ok = true;
 
-        println!("\n  {}", "Codex CLI:".cyan());
+        crate::agent_report!("\n  {}", "Codex CLI:".cyan());
 
         // Check MCP config
         if config_path.exists()
@@ -127,7 +127,7 @@ impl AgentIntegration for CodexIntegration {
                 .unwrap_or_default()
                 .contains("omni")
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
                 config_path.display().to_string().bright_black(),
@@ -139,13 +139,13 @@ impl AgentIntegration for CodexIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Config:".bright_black(),
                     "[FIXED] registered".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Config:".bright_black(),
                     "not configured".bright_black()
@@ -170,7 +170,7 @@ impl AgentIntegration for CodexIntegration {
         if has_pre && has_post && has_session {
             let fmt_hook = |name: &str, present: bool| {
                 if present {
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         name.bright_black(),
                         "[OK] installed".green()
@@ -187,7 +187,7 @@ impl AgentIntegration for CodexIntegration {
             let awaiting = hooks_awaiting_review(&config, &hooks_path.to_string_lossy());
             if !awaiting.is_empty() {
                 all_ok = false;
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Trust:".bright_black(),
                     format!("[WARNING] {} awaiting review in Codex", awaiting.join(", ")).yellow()
@@ -205,28 +205,28 @@ impl AgentIntegration for CodexIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = install_omni_hooks(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
                     "[FIXED] missing hooks installed".green().bold()
                 );
             } else {
                 if !has_pre {
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         "PreToolUse".bright_black(),
                         "[WARNING] missing".yellow()
                     );
                 }
                 if !has_post {
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         "PostToolUse".bright_black(),
                         "[WARNING] missing".yellow()
                     );
                 }
                 if !has_session {
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         "SessionStart".bright_black(),
                         "[WARNING] missing".yellow()

@@ -55,7 +55,7 @@ impl AgentIntegration for ZedIntegration {
         }
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in zed/settings.json",
             "✓".green()
         );
@@ -83,7 +83,7 @@ impl AgentIntegration for ZedIntegration {
         }
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server from zed/settings.json",
             "✓".yellow()
         );
@@ -93,13 +93,13 @@ impl AgentIntegration for ZedIntegration {
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let settings_path = Self::config_path();
 
-        println!("\n  {}", "Zed Editor:".cyan());
+        crate::agent_report!("\n  {}", "Zed Editor:".cyan());
         if settings_path.exists()
             && fs::read_to_string(&settings_path)
                 .unwrap_or_default()
                 .contains("\"omni\"")
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
                 "zed/settings.json".bright_black(),
@@ -110,14 +110,14 @@ impl AgentIntegration for ZedIntegration {
             if let Ok(exe_path) = std::env::current_exe() {
                 let _ = self.install(&exe_path.to_string_lossy());
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "[FIXED] registered".green().bold()
             );
             true
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()

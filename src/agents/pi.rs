@@ -170,25 +170,25 @@ impl AgentIntegration for PiIntegration {
         // Pi does not expose a reliable package-removal command.
         // Print actionable manual cleanup instructions instead of editing
         // Pi settings blindly.
-        println!(
+        crate::agent_report!(
             "  {} Pi does not expose a package-removal command.",
             "ℹ".blue()
         );
-        println!("  {} To remove the OMNI Pi package manually:", "→".cyan());
-        println!(
+        crate::agent_report!("  {} To remove the OMNI Pi package manually:", "→".cyan());
+        crate::agent_report!(
             "    1. Edit {} and remove the OMNI package entry.",
             pi_settings_path().display()
         );
-        println!("    2. Restart Pi to apply the changes.\n");
+        crate::agent_report!("    2. Restart Pi to apply the changes.\n");
         Ok(())
     }
 
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
-        println!("\n  {}", "Pi:".cyan());
+        crate::agent_report!("\n  {}", "Pi:".cyan());
 
         // 1. Pi binary
         if find_pi_binary().is_none() {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()
@@ -199,20 +199,20 @@ impl AgentIntegration for PiIntegration {
         // 2. Package registration
         let snapshot = PiSettingsSnapshot::load();
         if snapshot.has_omni_package() {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} installed",
                 "Extension:".bright_black(),
                 "[OK]".green().bold()
             );
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Extension:".bright_black(),
                 "[WARNING]".yellow().bold()
             );
             if fix_mode {
                 let source = package_source();
-                println!(
+                crate::agent_report!(
                     "   {:<15} installing OMNI Pi package...",
                     "Fix:".bright_black()
                 );
@@ -228,14 +228,14 @@ impl AgentIntegration for PiIntegration {
         // 3. Duplicate detection
         let duplicates = snapshot.duplicate_sources();
         if duplicates.len() > 1 {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} OMNI sources detected {}",
                 "Duplicates:".bright_black(),
                 duplicates.len().to_string().red(),
                 "[WARNING]".yellow().bold()
             );
             for src in &duplicates {
-                println!("     {} {}", "•".yellow(), src.bright_black());
+                crate::agent_report!("     {} {}", "•".yellow(), src.bright_black());
             }
             warnings.push(
                 "Multiple OMNI Pi sources detected. This may cause double-loading. Remove duplicates manually.".to_string(),
@@ -244,7 +244,7 @@ impl AgentIntegration for PiIntegration {
 
         // 4. Invalid settings JSON
         if snapshot.json.is_none() && pi_settings_path().exists() {
-            println!(
+            crate::agent_report!(
                 "   {:<15} invalid JSON {}",
                 "Settings:".bright_black(),
                 "[ERROR]".red().bold()
@@ -272,7 +272,7 @@ fn run_install(source: &str) -> anyhow::Result<()> {
     })?;
 
     let args = vec!["install".to_string(), source.to_string()];
-    println!("  {} Running: pi {}", "⟳".yellow(), args.join(" ").cyan());
+    crate::agent_report!("  {} Running: pi {}", "⟳".yellow(), args.join(" ").cyan());
 
     let output = Command::new(&pi_bin).args(&args).output()?;
 
@@ -290,11 +290,11 @@ fn run_install(source: &str) -> anyhow::Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !stdout.trim().is_empty() {
         for line in stdout.lines().take(10) {
-            println!("    {}", line.bright_black());
+            crate::agent_report!("    {}", line.bright_black());
         }
     }
 
-    println!(
+    crate::agent_report!(
         "  {} Pi package installed successfully.",
         "✓".green().bold()
     );
@@ -303,21 +303,21 @@ fn run_install(source: &str) -> anyhow::Result<()> {
     let snapshot = PiSettingsSnapshot::load();
     let duplicates = snapshot.duplicate_sources();
     if duplicates.len() > 1 {
-        println!(
+        crate::agent_report!(
             "  {} {} OMNI-related sources detected in Pi settings:",
             "⚠".yellow(),
             duplicates.len()
         );
         for src in &duplicates {
-            println!("    {} {}", "•".yellow(), src.bright_black());
+            crate::agent_report!("    {} {}", "•".yellow(), src.bright_black());
         }
-        println!(
+        crate::agent_report!(
             "  {} Remove duplicate entries to prevent double-loading.",
             "→".cyan()
         );
     }
 
-    println!(
+    crate::agent_report!(
         "  {} Restart Pi to activate the OMNI extension.\n",
         "✓".green().bold()
     );

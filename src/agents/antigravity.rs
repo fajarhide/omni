@@ -49,7 +49,7 @@ impl AgentIntegration for AntigravityIntegration {
         }
 
         fs::write(&config_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in ~/.gemini/antigravity/mcp_config.json",
             "✓".green()
         );
@@ -73,7 +73,7 @@ impl AgentIntegration for AntigravityIntegration {
         }
 
         fs::write(&config_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server from ~/.gemini/antigravity/mcp_config.json",
             "✓".yellow()
         );
@@ -82,14 +82,14 @@ impl AgentIntegration for AntigravityIntegration {
 
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let config_path = Self::config_path();
-        println!("\n  {}", "Antigravity IDE:".cyan());
+        crate::agent_report!("\n  {}", "Antigravity IDE:".cyan());
 
         if config_path.exists()
             && fs::read_to_string(&config_path)
                 .unwrap_or_default()
                 .contains("\"omni\"")
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
                 "~/.gemini/antigravity/mcp_config.json".bright_black(),
@@ -100,14 +100,14 @@ impl AgentIntegration for AntigravityIntegration {
             if let Ok(exe_path) = std::env::current_exe() {
                 let _ = self.install(&exe_path.to_string_lossy());
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "[FIXED] registered".green().bold()
             );
             true
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()

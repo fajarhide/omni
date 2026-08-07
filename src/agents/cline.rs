@@ -52,7 +52,7 @@ impl AgentIntegration for ClineIntegration {
         // agent recorded zero rows (#351). An upgrade removes them.
         remove_omni_hooks(&mut val);
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured {} in Cline settings (MCP tier: no per-tool hook on this host)",
             "✓".green(),
             "MCP Server".bold()
@@ -78,7 +78,7 @@ impl AgentIntegration for ClineIntegration {
         remove_omni_hooks(&mut val);
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server + Hooks from Cline settings",
             "✓".yellow()
         );
@@ -89,21 +89,21 @@ impl AgentIntegration for ClineIntegration {
         let settings_path = get_cline_path();
         let mut all_ok = true;
 
-        println!("\n  {}", "Cline AI:".cyan());
+        crate::agent_report!("\n  {}", "Cline AI:".cyan());
 
         if !settings_path.exists() {
             if fix_mode {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Config:".bright_black(),
                     "[FIXED] installed".green().bold()
                 );
                 return true;
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()
@@ -115,7 +115,7 @@ impl AgentIntegration for ClineIntegration {
 
         // Check MCP
         if content.contains("\"omni\"") {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "MCP Server:".bright_black(),
                 settings_path.display().to_string().bright_black(),
@@ -127,13 +127,13 @@ impl AgentIntegration for ClineIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP Server:".bright_black(),
                     "[FIXED] registered".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP Server:".bright_black(),
                     "[WARNING] not configured".yellow().bold()
@@ -153,7 +153,7 @@ impl AgentIntegration for ClineIntegration {
         // (#351).
         //
         // Reporting the tier is honest; reporting an installed hook is not.
-        println!(
+        crate::agent_report!(
             "   {:<15} {}",
             "Distill:".bright_black(),
             "MCP tier: no per-tool hook on this host".bright_black()

@@ -41,7 +41,7 @@ impl AgentIntegration for RooCodeIntegration {
         }
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in Roo Code settings",
             "✓".green()
         );
@@ -65,7 +65,7 @@ impl AgentIntegration for RooCodeIntegration {
         }
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server from Roo Code settings",
             "✓".yellow()
         );
@@ -74,14 +74,14 @@ impl AgentIntegration for RooCodeIntegration {
 
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let settings_path = get_roo_path();
-        println!("\n  {}", "Roo Code:".cyan());
+        crate::agent_report!("\n  {}", "Roo Code:".cyan());
 
         if settings_path.exists()
             && fs::read_to_string(&settings_path)
                 .unwrap_or_default()
                 .contains("\"omni\"")
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
                 settings_path.display(),
@@ -92,14 +92,14 @@ impl AgentIntegration for RooCodeIntegration {
             if let Ok(exe_path) = std::env::current_exe() {
                 let _ = self.install(&exe_path.to_string_lossy());
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "[FIXED] registered".green().bold()
             );
             true
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()

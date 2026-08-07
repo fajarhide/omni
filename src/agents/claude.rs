@@ -34,14 +34,14 @@ impl AgentIntegration for ClaudeIntegration {
         install_omni_hooks(&mut val, exe_path);
         let new_content = serde_json::to_string_pretty(&val)?;
         fs::write(&path, new_content)?;
-        println!(
+        crate::agent_report!(
             "  {} {} installed in Claude settings",
             "✓".green(),
             "Hooks".bold()
         );
 
         install_mcp_server(exe_path)?;
-        println!(
+        crate::agent_report!(
             "  {} {} registered in .claude.json",
             "✓".green(),
             "MCP Server".bold()
@@ -57,7 +57,7 @@ impl AgentIntegration for ClaudeIntegration {
             if let Ok(mut val) = serde_json::from_str::<Value>(&content) {
                 remove_omni_hooks(&mut val);
                 fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-                println!("  {} Removed Hooks from Claude settings", "✓".yellow());
+                crate::agent_report!("  {} Removed Hooks from Claude settings", "✓".yellow());
             }
         }
 
@@ -104,7 +104,7 @@ impl AgentIntegration for ClaudeIntegration {
 
                 if changed {
                     fs::write(&mcp_path, serde_json::to_string_pretty(&val)?)?;
-                    println!("  {} Removed MCP Server from .claude.json", "✓".yellow());
+                    crate::agent_report!("  {} Removed MCP Server from .claude.json", "✓".yellow());
                 }
             }
         }
@@ -115,7 +115,7 @@ impl AgentIntegration for ClaudeIntegration {
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let mut all_ok = true;
 
-        println!("  {}", "Claude Code:".cyan());
+        crate::agent_report!("  {}", "Claude Code:".cyan());
         let path = get_settings_path();
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
@@ -127,14 +127,14 @@ impl AgentIntegration for ClaudeIntegration {
                 {
                     let fmt_hook = |name: &str, tag: &str| {
                         if content.contains(tag) {
-                            println!(
+                            crate::agent_report!(
                                 "   {:<15} {}",
                                 name.bright_black(),
                                 "[OK] installed".green()
                             );
                             true
                         } else {
-                            println!(
+                            crate::agent_report!(
                                 "   {:<15} {}",
                                 name.bright_black(),
                                 "[WARNING] missing".yellow()
@@ -163,7 +163,7 @@ impl AgentIntegration for ClaudeIntegration {
                         if let Ok(exe_path) = std::env::current_exe() {
                             let _ = self.install(&exe_path.to_string_lossy());
                         }
-                        println!(
+                        crate::agent_report!(
                             "   {:<15} {}",
                             "Hooks:".bright_black(),
                             "[FIXED] missing hooks installed".green().bold()
@@ -177,13 +177,13 @@ impl AgentIntegration for ClaudeIntegration {
                     if let Ok(exe_path) = std::env::current_exe() {
                         let _ = self.install(&exe_path.to_string_lossy());
                     }
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         "Hooks:".bright_black(),
                         "[FIXED] installed".green().bold()
                     );
                 } else {
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         "Hooks:".bright_black(),
                         "[WARNING] no hooks found".yellow().bold()
@@ -196,13 +196,13 @@ impl AgentIntegration for ClaudeIntegration {
             if let Ok(exe_path) = std::env::current_exe() {
                 let _ = self.install(&exe_path.to_string_lossy());
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Hooks:".bright_black(),
                 "[FIXED] installed".green().bold()
             );
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Hooks:".bright_black(),
                 "[ERROR] settings.json missing".red()
@@ -225,7 +225,7 @@ impl AgentIntegration for ClaudeIntegration {
                 && (c.contains("omni --mcp") || c.contains("\"omni\":"))
             {
                 mcp_found = true;
-                println!(
+                crate::agent_report!(
                     "   {:<15} {} {}",
                     "MCP Server:".bright_black(),
                     p.display().to_string().bright_black(),
@@ -239,13 +239,13 @@ impl AgentIntegration for ClaudeIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP Server:".bright_black(),
                     "[FIXED] registered".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP Server:".bright_black(),
                     "[WARNING] no MCP server found".yellow().bold()
