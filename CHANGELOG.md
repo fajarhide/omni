@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`omni init --codex` hooked every command twice after the binary moved (#369)**: dedupe matched the exact command string, so repointing OMNI (a dev build to a stable copy, a changed Homebrew prefix, a relocated binary) left the previous entry beside the new one and both fired. Each `distillations` row was then written twice, which inflates that host's counts and savings in Agent Distribution, so the defect corrupts the measurement #351 asks for rather than merely duplicating a line. Installing now removes every prior OMNI entry for the event, in either shape and at any path, using the same `is_omni_hook_command` predicate uninstall already relies on; other tools' entries in the same file are left alone. Same family as #364: the install path recognised only the exact thing it wrote last time, so anything that changed underneath it accumulated instead of migrating. Found by repointing a real install, not by a test.
+
+### Fixed
 - **`omni doctor` reported Codex hooks `[OK]` when its own upgrade had just disabled them (#367)**: the Trust check asked whether a `hooks.state` record exists, and Codex also re-checks the entry's hash. `omni init --codex` has to rewrite the entries to migrate the dead shape from #364, which invalidates every approval that was working, and doctor then found the stale records and said nothing. Reproduced on a live install. The hash cannot be verified from the config, so doctor no longer implies it: a missing record is still a `[WARNING]`, and a present one now reads `recorded; Codex re-checks the hash, so re-approve after any upgrade`. `omni init --codex` says outright that the rewrite voided earlier approvals, because an upgrade that silently disables a working integration is worse than a fresh install that was never approved.
 
 ### Changed

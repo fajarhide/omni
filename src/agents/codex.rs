@@ -408,22 +408,26 @@ fn ensure_hook_entry(arr_val: &mut Value, cmd: &str) {
         return;
     };
 
-    // Drop our own entry in the old flat shape, so an upgrade repairs a config
-    // that has been silently doing nothing instead of adding a second copy.
-    arr.retain(|v| v.get("command").and_then(|c| c.as_str()) != Some(cmd));
-
-    let already = arr.iter().any(|v| {
-        v.get("hooks")
+    // Drop every prior entry of ours, in either shape and at any path, before
+    // adding the current one. Matching on the exact command was not enough:
+    // moving the binary (a dev build to a stable copy, or a Homebrew upgrade)
+    // left the old entry in place, so the hook ran twice per command and every
+    // distillation was recorded twice (#369). Third-party entries are untouched.
+    arr.retain(|v| {
+        let flat = v.get("command").and_then(|c| c.as_str());
+        let nested = v
+            .get("hooks")
             .and_then(|h| h.as_array())
-            .is_some_and(|inner| {
+            .map(|inner| {
                 inner
                     .iter()
-                    .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(cmd))
+                    .filter_map(|h| h.get("command").and_then(|c| c.as_str()))
+                    .any(is_omni_hook_command)
             })
+            .unwrap_or(false);
+
+        !(flat.is_some_and(is_omni_hook_command) || nested)
     });
-    if already {
-        return;
-    }
 
     arr.push(json!({
         "hooks": [{ "type": "command", "command": cmd, "timeout": 10 }]
@@ -483,6 +487,40 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// #369: dedupe matched the exact command string, so moving the binary left
+    /// the previous entry in place. Both fired, every command was distilled
+    /// twice and recorded twice. Reproduced by repointing a live install from a
+    /// build directory to a stable copy.
+    #[test]
+    fn replaces_an_entry_that_points_at_an_older_binary_path() {
+        let mut arr = json!([{
+            "hooks": [{ "type": "command", "command": "/old/path/omni --pre-hook" }]
+        }]);
+
+        ensure_hook_entry(&mut arr, "/new/path/omni --pre-hook");
+
+        let arr = arr.as_array().unwrap();
+        assert_eq!(arr.len(), 1, "the old path survived: {arr:?}");
+        assert_eq!(arr[0]["hooks"][0]["command"], "/new/path/omni --pre-hook");
+    }
+
+    /// The purge is scoped to OMNI's own entries. A launcher's hooks share the
+    /// file and must come through untouched.
+    #[test]
+    fn leaves_another_tools_entry_alone() {
+        let mut arr = json!([
+            { "hooks": [{ "type": "command", "command": "/opt/other/agent-hook.sh" }] },
+            { "hooks": [{ "type": "command", "command": "/old/omni --pre-hook" }] }
+        ]);
+
+        ensure_hook_entry(&mut arr, "/new/omni --pre-hook");
+
+        let arr = arr.as_array().unwrap();
+        assert_eq!(arr.len(), 2, "{arr:?}");
+        assert_eq!(arr[0]["hooks"][0]["command"], "/opt/other/agent-hook.sh");
+        assert_eq!(arr[1]["hooks"][0]["command"], "/new/omni --pre-hook");
+    }
 
     /// #367: the Trust check asks only whether a record exists, and Codex also
     /// re-checks the entry's hash. `omni init --codex` rewrites the entries, so
