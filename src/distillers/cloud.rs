@@ -23,13 +23,27 @@ impl Distiller for CloudDistiller<'_> {
         _session: Option<&crate::pipeline::SessionState>,
     ) -> Option<String> {
         match self.tool {
-            "docker" | "podman" => Some(if input.contains("CONTAINER ID") {
-                distill_docker_ps(input)
-            } else if input.contains("Step ") && input.contains(" : ") {
-                distill_docker_build(input)
-            } else {
-                distill_docker_logs(segments, input)
-            }),
+            "docker" | "podman" => {
+                if input.contains("CONTAINER ID") {
+                    Some(distill_docker_ps(input))
+                } else if input.contains("Step ") && input.contains(" : ") {
+                    Some(distill_docker_build(input))
+                } else if is_docker_logs(input) {
+                    Some(distill_docker_logs(segments, input))
+                } else {
+                    // `is_docker_logs` existed and was never consulted: every
+                    // docker/podman payload that was not a ps table or a build
+                    // fell through to the log summariser. A two-line
+                    // `podman run` failure came back as
+                    // `docker logs: 1 errors/warnings found`, keeping the socket
+                    // path and deleting the line that says how to fix it, under
+                    // a header naming a command that never ran (#354).
+                    //
+                    // A tool that cannot establish identity hands the payload
+                    // back. That is the same rule #105 and #112 arrived at.
+                    None
+                }
+            }
             "kubectl" => {
                 if is_kubectl_table(input) {
                     Some(distill_kubectl(input))
@@ -713,6 +727,38 @@ fn distill_fallback(segments: &[OutputSegment], input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #354: `podman run` with the machine stopped prints the fix on line one
+    /// and the symptom on line two. It came back as
+    /// `docker logs: 1 errors/warnings found`, keeping the socket path and
+    /// deleting the remediation, under a header naming a command that never ran.
+    /// `is_docker_logs` was already in this file and the dispatch never called
+    /// it.
+    #[test]
+    fn hands_back_a_podman_failure_instead_of_calling_it_docker_logs() {
+        let input = "Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start` to manage a new Linux VM\nError: unable to connect to Podman socket: dial unix /tmp/podman.sock: connect: no such file or directory\n";
+
+        let out = CloudDistiller { tool: "podman" }.distill(&[], input, None);
+
+        assert_eq!(
+            out, None,
+            "a payload this tool cannot identify must be handed back, got: {out:?}"
+        );
+    }
+
+    /// The other direction, so the gate is not just "never summarise": a real
+    /// log stream still reaches the summariser.
+    #[test]
+    fn still_summarises_a_real_docker_log_stream() {
+        let mut input = String::new();
+        for i in 0..12 {
+            input.push_str(&format!(
+                "2026-08-07T10:{i:02}:00.000000000Z worker ready and serving requests\n"
+            ));
+        }
+        let out = CloudDistiller { tool: "docker" }.distill(&[], &input, None);
+        assert!(out.is_some(), "a timestamped stream is docker logs");
+    }
 
     /// From issue #105: `kubectl get pvc -A` matched the pod fingerprint and
     /// every healthy `Bound` claim was reported as an error.
