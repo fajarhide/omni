@@ -191,9 +191,12 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     let mut any_agent_ok = false;
     let mut warnings = Vec::new();
     for agent in integrations {
-        // No tier line here: this is `doctor --json`, and a stray human-readable
-        // println would land in the middle of the JSON document.
-        if agent.doctor_check(fix_mode, &mut warnings) {
+        // The report is human-readable and this path owes stdout a single JSON
+        // document, so it is captured and dropped rather than printed (#353).
+        // Findings still reach the caller through `warnings` and the bool.
+        let (ok, _report) =
+            crate::agents::output::capture(|| agent.doctor_check(fix_mode, &mut warnings));
+        if ok {
             any_agent_ok = true;
         }
     }

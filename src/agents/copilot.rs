@@ -55,7 +55,7 @@ impl AgentIntegration for CopilotIntegration {
         }
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in ~/.copilot/mcp-config.json",
             "✓".green()
         );
@@ -81,7 +81,7 @@ impl AgentIntegration for CopilotIntegration {
         }
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server from ~/.copilot/mcp-config.json",
             "✓".yellow()
         );
@@ -91,13 +91,13 @@ impl AgentIntegration for CopilotIntegration {
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let settings_path = Self::config_path();
 
-        println!("\n  {}", "Copilot CLI:".cyan());
+        crate::agent_report!("\n  {}", "Copilot CLI:".cyan());
         if settings_path.exists()
             && fs::read_to_string(&settings_path)
                 .unwrap_or_default()
                 .contains("\"omni\"")
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
                 "~/.copilot/mcp-config.json".bright_black(),
@@ -108,14 +108,14 @@ impl AgentIntegration for CopilotIntegration {
             if let Ok(exe_path) = std::env::current_exe() {
                 let _ = self.install(&exe_path.to_string_lossy());
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "[FIXED] registered".green().bold()
             );
             true
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()

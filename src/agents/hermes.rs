@@ -416,13 +416,13 @@ def register(ctx):
         }
 
         for message in &actions {
-            println!("  {}", message);
+            crate::agent_report!("  {}", message);
         }
 
         if !warnings.is_empty() {
-            println!("\n  {}", "Warnings:".yellow());
+            crate::agent_report!("\n  {}", "Warnings:".yellow());
             for warning in &warnings {
-                println!("   - {}", warning);
+                crate::agent_report!("   - {}", warning);
             }
         }
 
@@ -433,7 +433,7 @@ def register(ctx):
         let dest = plugin_dir();
         if dest.exists() {
             fs::remove_dir_all(&dest)?;
-            println!(
+            crate::agent_report!(
                 "  {} Removed Hermes plugin from ~/.hermes/plugins/",
                 "✓".yellow()
             );
@@ -454,25 +454,25 @@ def register(ctx):
             .unwrap_or(false);
         let installed = directory_plugin_installed || configured_plugin.is_some();
 
-        println!("\n  {}", "Hermes Agent:".cyan());
+        crate::agent_report!("\n  {}", "Hermes Agent:".cyan());
 
         // Plugin status
         if directory_plugin_installed {
-            println!(
+            crate::agent_report!(
                 "   {:>15} {} {}",
                 "Plugin:".bright_black(),
                 "~/.hermes/plugins/omni-signal-engine/".bright_black(),
                 "[OK]".green().bold()
             );
         } else if let Some(plugin_name) = configured_plugin {
-            println!(
+            crate::agent_report!(
                 "   {:>15} {} {}",
                 "Plugin:".bright_black(),
                 format!("{} in ~/.hermes/config.yaml", plugin_name).bright_black(),
                 "[OK]".green().bold()
             );
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:>15} {}",
                 "Plugin:".bright_black(),
                 "not installed [MISSING]".red().bold()
@@ -481,7 +481,7 @@ def register(ctx):
         }
 
         // MCP status
-        println!(
+        crate::agent_report!(
             "   {:>15} {}",
             "MCP Server:".bright_black(),
             if mcp_configured {
@@ -495,7 +495,7 @@ def register(ctx):
         }
 
         // Compression status
-        println!(
+        crate::agent_report!(
             "   {:>15} {}",
             "Compression:".bright_black(),
             if compression_on {
@@ -512,7 +512,7 @@ def register(ctx):
         }
 
         // OMNI config section
-        println!(
+        crate::agent_report!(
             "   {:>15} {}",
             "OMNI Config:".bright_black(),
             if has_hermes_section {
@@ -533,14 +533,14 @@ def register(ctx):
         if fix_mode && (!installed || !mcp_configured || !compression_on || !has_hermes_section) {
             if let Ok(exe) = std::env::current_exe() {
                 let exe_str = exe.to_string_lossy().to_string();
-                println!(
+                crate::agent_report!(
                     "   {:>15} {}",
                     "Auto-fix:".bright_black(),
                     "Re-running omni init --hermes...".yellow()
                 );
                 match self.install(&exe_str) {
                     Ok(()) => {
-                        println!(
+                        crate::agent_report!(
                             "   {:>15} {}",
                             "".bright_black(),
                             "\u{2713} Auto-fix applied. Restart Hermes to activate."
@@ -549,7 +549,7 @@ def register(ctx):
                         );
                     }
                     Err(e) => {
-                        println!(
+                        crate::agent_report!(
                             "   {:>15} {}",
                             "".bright_black(),
                             format!("\u{2717} Auto-fix failed: {}", e).red().bold()
@@ -560,7 +560,7 @@ def register(ctx):
         }
 
         if installed && !mcp_configured {
-            println!(
+            crate::agent_report!(
                 "   {:>15} {}",
                 "Note:".bright_black(),
                 "MCP is optional; native Hermes plugin detection passed.".bright_black()

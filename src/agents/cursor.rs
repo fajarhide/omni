@@ -24,14 +24,14 @@ impl AgentIntegration for CursorIntegration {
         let (mcp_path, mut mcp_val) = initialize_mcp_config()?;
         install_mcp_server(&mut mcp_val, exe_path);
         fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in ~/.cursor/mcp.json",
             "✓".green()
         );
 
         // Install hooks
         install_omni_hooks(exe_path)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured {} in ~/.cursor/hooks.json",
             "✓".green(),
             "Hooks".bold()
@@ -49,7 +49,7 @@ impl AgentIntegration for CursorIntegration {
             if let Ok(mut val) = serde_json::from_str::<Value>(&content) {
                 remove_mcp_server(&mut val);
                 fs::write(&mcp_path, serde_json::to_string_pretty(&val)?)?;
-                println!(
+                crate::agent_report!(
                     "  {} Removed MCP Server from ~/.cursor/mcp.json",
                     "✓".yellow()
                 );
@@ -58,12 +58,12 @@ impl AgentIntegration for CursorIntegration {
 
         // Remove hooks
         remove_omni_hooks()?;
-        println!("  {} Removed Hooks from ~/.cursor/hooks.json", "✓".yellow());
+        crate::agent_report!("  {} Removed Hooks from ~/.cursor/hooks.json", "✓".yellow());
 
         let rule = project_rule_path();
         if rule.exists() && fs::read_to_string(&rule).unwrap_or_default() == CURSOR_RULE {
             let _ = fs::remove_file(&rule);
-            println!("  {} Removed .cursor/rules/omni.mdc", "✓".yellow());
+            crate::agent_report!("  {} Removed .cursor/rules/omni.mdc", "✓".yellow());
         }
         Ok(())
     }
@@ -73,7 +73,7 @@ impl AgentIntegration for CursorIntegration {
         let hooks_path = get_hooks_path();
         let mut all_ok = true;
 
-        println!("\n  {}", "Cursor AI:".cyan());
+        crate::agent_report!("\n  {}", "Cursor AI:".cyan());
 
         // Check MCP
         if mcp_path.exists()
@@ -81,7 +81,7 @@ impl AgentIntegration for CursorIntegration {
             && let Ok(val) = serde_json::from_str::<Value>(&content)
             && has_valid_omni_server(&val)
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "MCP: ".bright_black(),
                 "~/.cursor/mcp.json".bright_black(),
@@ -93,13 +93,13 @@ impl AgentIntegration for CursorIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP: ".bright_black(),
                     "[FIXED] registered".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP: ".bright_black(),
                     "not configured".bright_black()
@@ -123,7 +123,7 @@ impl AgentIntegration for CursorIntegration {
 
         if missing.is_empty() {
             for (event, flag) in REQUIRED_HOOKS {
-                println!(
+                crate::agent_report!(
                     "   {:<21} {}",
                     event.bright_black(),
                     format!("[OK] {flag}").green()
@@ -135,13 +135,13 @@ impl AgentIntegration for CursorIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = install_omni_hooks(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
                     "[FIXED] missing hooks installed".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
                     format!("[WARNING] missing: {}", missing.join(", "))
@@ -163,7 +163,7 @@ impl AgentIntegration for CursorIntegration {
         if in_a_project() {
             let rule = project_rule_path();
             if rule.exists() {
-                println!(
+                crate::agent_report!(
                     "   {:<21} {}",
                     "omni_run rule".bright_black(),
                     "[OK] .cursor/rules/omni.mdc".green()
@@ -173,7 +173,7 @@ impl AgentIntegration for CursorIntegration {
                 if fix_mode {
                     let _ = install_cursor_rule();
                 } else {
-                    println!(
+                    crate::agent_report!(
                         "   {:<21} {}",
                         "omni_run rule".bright_black(),
                         "[WARNING] missing: the agent will keep using the built-in shell"
@@ -236,18 +236,20 @@ fn in_a_project() -> bool {
 /// removes it again.
 fn install_cursor_rule() -> anyhow::Result<()> {
     if !in_a_project() {
-        println!(
+        crate::agent_report!(
             "\n  {} Not in a project, so the {} rule was not written.",
             "!".yellow().bold(),
             "omni_run".bold()
         );
-        println!("    Cursor cannot rewrite built-in tool output, so run `omni init --cursor`");
-        println!(
+        crate::agent_report!(
+            "    Cursor cannot rewrite built-in tool output, so run `omni init --cursor`"
+        );
+        crate::agent_report!(
             "    from a repository, or save this as {}:\n",
             ".cursor/rules/omni.mdc".bold()
         );
         for line in CURSOR_RULE.lines() {
-            println!("      {}", line.bright_black());
+            crate::agent_report!("      {}", line.bright_black());
         }
         return Ok(());
     }
@@ -257,13 +259,13 @@ fn install_cursor_rule() -> anyhow::Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(&path, CURSOR_RULE)?;
-    println!(
+    crate::agent_report!(
         "  {} Wrote {} so the agent reaches for {}",
         "✓".green(),
         ".cursor/rules/omni.mdc".bold(),
         "omni_run".bold()
     );
-    println!(
+    crate::agent_report!(
         "    {}",
         "(Cursor cannot rewrite built-in tool output; that tool is the only distill path here)"
             .bright_black()

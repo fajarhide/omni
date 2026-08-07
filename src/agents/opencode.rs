@@ -55,7 +55,7 @@ impl AgentIntegration for OpenCodeIntegration {
         }
 
         fs::write(&config_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured MCP Server in ~/.config/opencode/opencode.json",
             "✓".green()
         );
@@ -81,7 +81,7 @@ impl AgentIntegration for OpenCodeIntegration {
         }
 
         fs::write(&config_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server from ~/.config/opencode/opencode.json",
             "✓".yellow()
         );
@@ -91,13 +91,13 @@ impl AgentIntegration for OpenCodeIntegration {
     fn doctor_check(&self, fix_mode: bool, warnings: &mut Vec<String>) -> bool {
         let config_path = Self::config_path();
 
-        println!("\n  {}", "OpenCode:".cyan());
+        crate::agent_report!("\n  {}", "OpenCode:".cyan());
         if config_path.exists()
             && fs::read_to_string(&config_path)
                 .unwrap_or_default()
                 .contains("omni")
         {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Config:".bright_black(),
                 "~/.config/opencode/opencode.json".bright_black(),
@@ -108,14 +108,14 @@ impl AgentIntegration for OpenCodeIntegration {
             if let Ok(exe_path) = std::env::current_exe() {
                 let _ = self.install(&exe_path.to_string_lossy());
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "[FIXED] registered".green().bold()
             );
             true
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "not configured".bright_black()

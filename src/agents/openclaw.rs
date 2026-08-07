@@ -25,7 +25,7 @@ impl AgentIntegration for OpenClawIntegration {
         let dest = plugin_dir();
         fs::create_dir_all(&dest)?;
 
-        println!(
+        crate::agent_report!(
             "  {} Downloading OpenClaw plugin files from GitHub...",
             "↓".cyan()
         );
@@ -60,11 +60,11 @@ impl AgentIntegration for OpenClawIntegration {
             }
         }
 
-        println!(
+        crate::agent_report!(
             "  {} Installed OpenClaw plugin to ~/.openclaw/plugins/omni-signal-engine/",
             "✓".green()
         );
-        println!(
+        crate::agent_report!(
             "  {} Run {} to install dependencies",
             "→".cyan(),
             "cd ~/.openclaw/plugins/omni-signal-engine && npm install".bright_black()
@@ -76,7 +76,7 @@ impl AgentIntegration for OpenClawIntegration {
         let dest = plugin_dir();
         if dest.exists() {
             fs::remove_dir_all(&dest)?;
-            println!(
+            crate::agent_report!(
                 "  {} Removed OpenClaw plugin from ~/.openclaw/plugins/",
                 "✓".yellow()
             );
@@ -87,9 +87,9 @@ impl AgentIntegration for OpenClawIntegration {
     fn doctor_check(&self, _fix_mode: bool, _warnings: &mut Vec<String>) -> bool {
         let dest = plugin_dir();
 
-        println!("\n  {}", "OpenClaw:".cyan());
+        crate::agent_report!("\n  {}", "OpenClaw:".cyan());
         if dest.join("openclaw.plugin.json").exists() {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "Plugin:".bright_black(),
                 "~/.openclaw/plugins/omni-signal-engine/".bright_black(),
@@ -98,14 +98,14 @@ impl AgentIntegration for OpenClawIntegration {
 
             // Check if node_modules exists (npm install was run)
             if dest.join("node_modules").exists() {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {} {}",
                     "Dependencies:".bright_black(),
                     "installed".bright_black(),
                     "[OK]".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Dependencies:".bright_black(),
                     "run 'npm install' in plugin dir".yellow()
@@ -113,7 +113,7 @@ impl AgentIntegration for OpenClawIntegration {
             }
             true
         } else {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Plugin:".bright_black(),
                 "not installed".bright_black()

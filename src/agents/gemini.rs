@@ -58,7 +58,7 @@ impl AgentIntegration for GeminiIntegration {
         install_omni_hooks(&mut val, exe_path);
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Configured {} + {} in ~/.gemini/settings.json",
             "✓".green(),
             "MCP Server".bold(),
@@ -90,7 +90,7 @@ impl AgentIntegration for GeminiIntegration {
         remove_omni_hooks(&mut val);
 
         fs::write(&settings_path, serde_json::to_string_pretty(&val)?)?;
-        println!(
+        crate::agent_report!(
             "  {} Removed MCP Server + Hooks from ~/.gemini/settings.json",
             "✓".yellow()
         );
@@ -101,21 +101,21 @@ impl AgentIntegration for GeminiIntegration {
         let settings_path = get_settings_path();
         let mut all_ok = true;
 
-        println!("\n  {}", "Gemini CLI:".cyan());
+        crate::agent_report!("\n  {}", "Gemini CLI:".cyan());
 
         if !settings_path.exists() {
             if fix_mode {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Config:".bright_black(),
                     "[FIXED] installed".green().bold()
                 );
                 return true;
             }
-            println!(
+            crate::agent_report!(
                 "   {:<15} {}",
                 "Config:".bright_black(),
                 "[ERROR] settings.json missing".red()
@@ -129,7 +129,7 @@ impl AgentIntegration for GeminiIntegration {
 
         // Check MCP
         if content.contains("\"omni\"") {
-            println!(
+            crate::agent_report!(
                 "   {:<15} {} {}",
                 "MCP Server:".bright_black(),
                 "~/.gemini/settings.json".bright_black(),
@@ -141,13 +141,13 @@ impl AgentIntegration for GeminiIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP Server:".bright_black(),
                     "[FIXED] registered".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "MCP Server:".bright_black(),
                     "[WARNING] not configured".yellow().bold()
@@ -165,7 +165,7 @@ impl AgentIntegration for GeminiIntegration {
         if has_before && has_after {
             let fmt_hook = |name: &str, tag: &str| {
                 if content.contains(tag) {
-                    println!(
+                    crate::agent_report!(
                         "   {:<15} {}",
                         name.bright_black(),
                         "[OK] installed".green()
@@ -180,13 +180,13 @@ impl AgentIntegration for GeminiIntegration {
                 if let Ok(exe_path) = std::env::current_exe() {
                     let _ = self.install(&exe_path.to_string_lossy());
                 }
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
                     "[FIXED] missing hooks installed".green().bold()
                 );
             } else {
-                println!(
+                crate::agent_report!(
                     "   {:<15} {}",
                     "Hooks:".bright_black(),
                     "[WARNING] hooks not configured".yellow().bold()
