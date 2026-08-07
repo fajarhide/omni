@@ -73,6 +73,13 @@ impl AgentIntegration for CodexIntegration {
             "codex".bold(),
             "\"Hooks need review\"".bold()
         );
+        // Writing the entries changes their hashes, so any approval that already
+        // existed is void. An upgrade that silently disables a working install is
+        // worse than a fresh one that was never approved (#367).
+        crate::agent_report!(
+            "    {} this rewrote the entries, so earlier approvals no longer apply",
+            "note:".bright_black()
+        );
         // Codex keeps its bypass on the command line on purpose: it is rejected
         // from config.toml, so no installer can turn it on for you (#359).
         crate::agent_report!(
@@ -198,6 +205,19 @@ impl AgentIntegration for CodexIntegration {
                      `--dangerously-bypass-hook-trust` for unattended runs.",
                     awaiting.join(", ")
                 ));
+            } else {
+                // A record existing is not the same as it matching. Codex stores
+                // the entry's hash and re-checks it, and `omni init --codex`
+                // rewrites the entries, so an upgrade invalidates approvals that
+                // were working. The hash preimage is not derivable from the
+                // config, so this cannot be verified here and must not be
+                // reported as healthy (#367).
+                crate::agent_report!(
+                    "   {:<15} {}",
+                    "Trust:".bright_black(),
+                    "recorded; Codex re-checks the hash, so re-approve after any upgrade"
+                        .bright_black()
+                );
             }
         } else {
             all_ok = false;
@@ -463,6 +483,25 @@ pub fn remove_omni_hooks() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// #367: the Trust check asks only whether a record exists, and Codex also
+    /// re-checks the entry's hash. `omni init --codex` rewrites the entries, so
+    /// an upgrade invalidates approvals that were working while doctor still
+    /// printed nothing. The presence check stays useful for "never approved",
+    /// but it must not be read as "will run".
+    #[test]
+    fn a_recorded_approval_is_not_proof_the_hook_will_run() {
+        let hooks = "/h/hooks.json";
+        let config = format!(
+            "[hooks.state.\"{hooks}:pre_tool_use:0:0\"]\nenabled = true\n\
+             [hooks.state.\"{hooks}:post_tool_use:0:0\"]\nenabled = true\n\
+             [hooks.state.\"{hooks}:session_start:0:0\"]\nenabled = true\n"
+        );
+
+        // Nothing is awaiting review, and that is exactly the state in which the
+        // hash can still be stale, so callers must not treat this as healthy.
+        assert!(hooks_awaiting_review(&config, hooks).is_empty());
+    }
     use super::*;
 
     /// #364: the installed entry was `{"command": "..."}`, which Codex accepts
