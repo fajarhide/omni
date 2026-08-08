@@ -47,6 +47,26 @@ fn has_downstream_stage(cmd: &str) -> bool {
     false
 }
 
+/// Strips the `omni exec [--agent <id>] ` wrapper the pre-hook writes.
+///
+/// Both readers of a recorded command removed only the `omni exec ` prefix, so a
+/// rewritten command still arrived as `--agent gemini git status`. Anything
+/// keyed on the program name then missed: `^git\b` TOML filters stopped
+/// matching and routing fell through to the generic path. The flag is written by
+/// `rewrite_logic` below, so it is stripped here beside it (#366 review).
+pub fn strip_exec_wrapper(command: &str) -> &str {
+    let Some(rest) = command.strip_prefix("omni exec ") else {
+        return command;
+    };
+    let Some(after_flag) = rest.strip_prefix("--agent ") else {
+        return rest;
+    };
+    match after_flag.split_once(char::is_whitespace) {
+        Some((_agent, tail)) => tail.trim_start(),
+        None => rest,
+    }
+}
+
 pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>) -> Option<String> {
     let allow_list = [
         "git ",
@@ -94,6 +114,31 @@ pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    use super::strip_exec_wrapper;
+
+    /// Review finding: both readers stripped only `omni exec `, so a rewritten
+    /// command arrived as `--agent gemini git status` and anything keyed on the
+    /// program name stopped matching.
+    #[test]
+    fn strips_the_agent_flag_along_with_the_exec_wrapper() {
+        assert_eq!(
+            strip_exec_wrapper("omni exec --agent gemini git status"),
+            "git status"
+        );
+        assert_eq!(strip_exec_wrapper("omni exec git status"), "git status");
+        assert_eq!(strip_exec_wrapper("git status"), "git status");
+    }
+
+    /// A wrapper with the flag and nothing after it must not swallow the command
+    /// that is not there and return an empty string.
+    #[test]
+    fn leaves_a_flag_without_a_command_alone() {
+        assert_eq!(
+            strip_exec_wrapper("omni exec --agent gemini"),
+            "--agent gemini"
+        );
+    }
     use super::rewrite_logic;
 
     #[test]

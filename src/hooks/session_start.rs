@@ -33,6 +33,12 @@ struct HookInput {
     /// entire reply on Codex.
     #[serde(rename = "promptId", alias = "prompt_id", default)]
     prompt_id: Option<String>,
+    /// The other Claude Code marker, accepted because the documentation lists
+    /// `prompt_id` as common to all hooks but its `SessionStart` example does not
+    /// show it, and no recorded `SessionStart` payload was available to settle it.
+    /// Taking either keeps the gate working if one turns out to be absent.
+    #[serde(rename = "effort", default)]
+    effort: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -168,7 +174,7 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
 
     // Detect watch paths for file monitoring, but only for a host that will
     // accept the field (#364).
-    let watch_paths = if parsed.prompt_id.is_some() {
+    let watch_paths = if parsed.prompt_id.is_some() || parsed.effort.is_some() {
         detect_watch_paths(cwd_path, &new_state.toolchain_hints)
     } else {
         Vec::new()
@@ -452,6 +458,26 @@ pub fn read_pinned_files(cwd: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Review finding: the gate rested on `prompt_id` alone, and the documented
+    /// `SessionStart` example does not show it. `effort` is the other field only
+    /// Claude Code sends, so either one is enough and the watch list survives if
+    /// one is missing.
+    #[test]
+    fn accepts_either_claude_marker_for_watch_paths() {
+        let (store, _dir) = get_store();
+        let input = json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "cc2",
+            "effort": "high",
+            "cwd": env!("CARGO_MANIFEST_DIR"),
+        });
+
+        let out = process_payload(&input.to_string(), store, default_config())
+            .expect("a Rust repo has watch paths");
+
+        assert!(out.contains("watchPaths"), "{out}");
+    }
 
     /// #364: a fresh session emitted `watchPaths`, Codex's reply schema forbids
     /// any field beyond `additionalContext`, so it discarded the whole reply and
