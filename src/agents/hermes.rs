@@ -137,6 +137,27 @@ fn configured_omni_plugin(config_path: &Path) -> Option<&'static str> {
         .and_then(|config| config_mentions_omni_plugin(&config))
 }
 
+/// Adds a top-level YAML block without disturbing what is already there.
+///
+/// The previous version spliced the block in directly after the `plugins:` line.
+/// `mcp_servers:` is itself a top-level key, so that ended the `plugins` mapping
+/// and every plugin entry underneath became a child of `mcp_servers`. Loaded
+/// with a real YAML parser, a config with two enabled plugins came back as
+/// `plugins: None` and `mcp_servers: [omni, my-linter, my-formatter]`: the
+/// installer silently disabled every plugin the user had (#377).
+///
+/// Top-level keys are order-independent, so appending is both correct and the
+/// only placement that cannot capture someone else's entries.
+fn append_top_level_block(config: &str, block: &str) -> String {
+    let mut out = String::with_capacity(config.len() + block.len() + 1);
+    out.push_str(config);
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(block);
+    out
+}
+
 fn configured_omni_mcp(config_path: &Path) -> bool {
     fs::read_to_string(config_path)
         .map(|config| config_mentions_omni_mcp(&config))
@@ -292,34 +313,14 @@ def register(ctx):
                 let mcp_block = "\nmcp_servers:\n  omni:\n    command: \"{}\"\n    args: [\"--mcp\"]\n    env:\n      OMNI_AGENT_ID: \"hermes\"\n\n";
                 let mcp_block = mcp_block.replace("{}", exe_path);
 
-                let mut updated = String::new();
-                let mut inserted = false;
-                for line in config.lines() {
-                    updated.push_str(line);
-                    updated.push('\n');
-                    if !inserted && line.trim_start().starts_with("plugins:") {
-                        updated.push_str(&mcp_block);
-                        inserted = true;
-                        actions.push(
-                            format!(
-                                "{} Registered OMNI MCP server inside ~/.hermes/config.yaml",
-                                "✓".green()
-                            )
-                            .to_string(),
-                        );
-                    }
-                }
-
-                if !inserted {
-                    updated.push_str(&mcp_block);
-                    actions.push(
-                        format!(
-                            "{} Registered OMNI MCP server at the end of ~/.hermes/config.yaml",
-                            "✓".green()
-                        )
-                        .to_string(),
-                    );
-                }
+                let updated = append_top_level_block(&config, &mcp_block);
+                actions.push(
+                    format!(
+                        "{} Registered OMNI MCP server in ~/.hermes/config.yaml",
+                        "✓".green()
+                    )
+                    .to_string(),
+                );
 
                 fs::write(&config_path, updated)?;
             }
@@ -604,6 +605,43 @@ pub fn is_hermes_agent(agent_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::append_top_level_block;
+
+    /// #377: the block was spliced in directly after the `plugins:` line, which
+    /// ended that mapping and adopted every plugin entry underneath. A real YAML
+    /// load of the result gave `plugins: None`, so `omni init --hermes`
+    /// disabled every plugin the user had.
+    #[test]
+    fn appending_leaves_an_existing_plugins_block_intact() {
+        let config =
+            "plugins:\n  my-linter:\n    enabled: true\n  my-formatter:\n    enabled: true\n";
+        let block = "\nmcp_servers:\n  omni:\n    command: \"/usr/local/bin/omni\"\n";
+
+        let out = append_top_level_block(config, block);
+
+        // Every plugin line still sits under `plugins:`, before any new key.
+        let plugins_at = out.find("plugins:").expect("plugins kept");
+        let mcp_at = out.find("mcp_servers:").expect("block added");
+        assert!(
+            plugins_at < mcp_at,
+            "the block was placed above plugins:\n{out}"
+        );
+        for entry in ["my-linter", "my-formatter"] {
+            let at = out
+                .find(entry)
+                .unwrap_or_else(|| panic!("{entry} lost:\n{out}"));
+            assert!(at < mcp_at, "{entry} was captured by the new block:\n{out}");
+        }
+    }
+
+    /// A config without a trailing newline must not glue its last line onto the
+    /// new key, which would produce YAML that does not parse.
+    #[test]
+    fn separates_the_block_from_an_unterminated_last_line() {
+        let out = append_top_level_block("model: gpt-5", "\nmcp_servers:\n  omni: {}\n");
+
+        assert!(out.contains("model: gpt-5\n"), "{out}");
+    }
     use super::{config_mentions_omni_mcp, config_mentions_omni_plugin, configured_compression};
 
     #[test]
