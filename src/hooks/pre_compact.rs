@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize)]
+/// Same casing defect as `session_end`: Claude Code sends snake_case, so this
+/// struct never parsed a real payload and the handler was dead. `session_id` was
+/// also required, which would have failed a second time. The host names the
+/// cause `trigger`; camelCase spellings stay as aliases.
 struct HookInput {
-    #[serde(rename = "hookEventName")]
+    #[serde(rename = "hook_event_name", alias = "hookEventName")]
     hook_event_name: String,
-    #[serde(rename = "sessionId")]
+    #[serde(rename = "session_id", alias = "sessionId", default)]
     session_id: String,
-    #[serde(rename = "compactionReason")]
+    #[serde(rename = "trigger", alias = "compactionReason", default)]
     compaction_reason: Option<String>,
 }
 
@@ -317,9 +321,9 @@ mod tests {
         let session = Arc::new(Mutex::new(SessionState::new()));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "123",
-            "compactionReason": "context_limit_reached"
+            "hook_event_name": "PreCompact",
+            "session_id": "123",
+            "trigger": "context_limit_reached"
         });
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
@@ -342,8 +346,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "123"
+            "hook_event_name": "PreCompact",
+            "session_id": "123"
         });
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
@@ -364,8 +368,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "123"
+            "hook_event_name": "PreCompact",
+            "session_id": "123"
         });
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
@@ -381,8 +385,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "123"
+            "hook_event_name": "PreCompact",
+            "session_id": "123"
         });
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
@@ -397,8 +401,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": &session_id
+            "hook_event_name": "PreCompact",
+            "session_id": &session_id
         });
 
         // Trigger the hook
@@ -417,8 +421,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": &session_id
+            "hook_event_name": "PreCompact",
+            "session_id": &session_id
         });
 
         let _ = process_payload(&input.to_string(), store.clone(), session);
@@ -452,8 +456,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "engram-test"
+            "hook_event_name": "PreCompact",
+            "session_id": "engram-test"
         });
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
@@ -485,8 +489,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "tool-summary-test"
+            "hook_event_name": "PreCompact",
+            "session_id": "tool-summary-test"
         });
 
         let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
@@ -509,8 +513,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "delta-test"
+            "hook_event_name": "PreCompact",
+            "session_id": "delta-test"
         });
 
         // First compact: full snapshot
@@ -538,8 +542,8 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "PreCompact",
-            "sessionId": "delta-change-test"
+            "hook_event_name": "PreCompact",
+            "session_id": "delta-change-test"
         });
 
         // First compact: full snapshot

@@ -4,13 +4,23 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
+/// Claude Code sends snake_case and names the field `reason`.
+///
+/// `session_id` is deliberately absent: nothing reads it. The guard that did
+/// compared the host's UUID against OMNI's internal timestamp id, which are
+/// different namespaces, so it only ever dropped valid work.
+///
+/// This struct demanded `hookEventName`, so `from_str` failed on every real
+/// payload and the handler returned `None`: no session summary, no FTS row, no
+/// agent-session sync, for every session ever ended. The dispatcher's own peeker
+/// carries `alias = "hook_event_name"`, which is why routing worked and only the
+/// handler was dead. The camelCase spellings are kept as aliases so any host
+/// that does send them keeps working.
 #[derive(Deserialize)]
 struct HookInput {
-    #[serde(rename = "hookEventName")]
+    #[serde(rename = "hook_event_name", alias = "hookEventName")]
     hook_event_name: String,
-    #[serde(rename = "sessionId", default)]
-    session_id: String,
-    #[serde(rename = "exitReason", default)]
+    #[serde(rename = "reason", alias = "exitReason", default)]
     exit_reason: String,
 }
 
@@ -27,10 +37,13 @@ pub fn process_payload(
 
     let state = session.lock().unwrap_or_else(|p| p.into_inner()).clone();
 
-    if !parsed.session_id.is_empty() && parsed.session_id != state.session_id {
-        // Validation failure: prevents archiving a session under the wrong ID
-        return None;
-    }
+    // No id comparison here. The host's `session_id` is its own UUID, while
+    // `state.session_id` is OMNI's internal id, a millisecond timestamp from
+    // `SessionState::new`. They are different namespaces and never match, so the
+    // guard that used to sit here dropped every real `SessionEnd` on Claude Code
+    // even once the payload parsed. It also protected nothing: the summary is
+    // written under `state.session_id` below, so the host's id never reaches the
+    // row it was supposedly validating.
 
     let exit_reason = if parsed.exit_reason.is_empty() {
         "normal"
@@ -143,9 +156,9 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "SessionEnd",
-            "sessionId": "test-123",
-            "exitReason": "normal"
+            "hook_event_name": "SessionEnd",
+            "session_id": "test-123",
+            "reason": "normal"
         });
 
         let out = process_payload(&input.to_string(), store, session);
@@ -163,9 +176,9 @@ mod tests {
         let session = Arc::new(Mutex::new(state));
 
         let input = json!({
-            "hookEventName": "SessionEnd",
-            "sessionId": &session_id,
-            "exitReason": "normal"
+            "hook_event_name": "SessionEnd",
+            "session_id": &session_id,
+            "reason": "normal"
         });
 
         let _ = process_payload(&input.to_string(), store.clone(), session);
@@ -181,8 +194,8 @@ mod tests {
         let session = Arc::new(Mutex::new(SessionState::new()));
 
         let input = json!({
-            "hookEventName": "PostToolUse",
-            "sessionId": "test-456"
+            "hook_event_name": "PostToolUse",
+            "session_id": "test-456"
         });
 
         let out = process_payload(&input.to_string(), store, session);
