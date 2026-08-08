@@ -47,24 +47,67 @@ fn has_downstream_stage(cmd: &str) -> bool {
     false
 }
 
-/// Strips the `omni exec [--agent <id>] ` wrapper the pre-hook writes.
+/// Strips the `<omni> exec [--agent <id>] ` wrapper the pre-hook writes.
 ///
-/// Both readers of a recorded command removed only the `omni exec ` prefix, so a
-/// rewritten command still arrived as `--agent gemini git status`. Anything
-/// keyed on the program name then missed: `^git\b` TOML filters stopped
-/// matching and routing fell through to the generic path. The flag is written by
-/// `rewrite_logic` below, so it is stripped here beside it (#366 review).
+/// `rewrite_logic` writes `current_exe()`, an absolute path, so matching the
+/// literal prefix `"omni exec "` never fired: every rewritten command reached
+/// the registry and the TOML filters still wrapped, so `^git\b` and friends
+/// matched a path instead of the program and routing fell through to the
+/// generic path. The `--agent` flag added in #360 rode along for the same
+/// reason. Match the executable's file name instead, which is what stays
+/// constant across a dev build, a Homebrew prefix and `omni.exe` on Windows.
 pub fn strip_exec_wrapper(command: &str) -> &str {
-    let Some(rest) = command.strip_prefix("omni exec ") else {
+    let mut rest = command.trim_start();
+
+    let Some((program, after_program)) = split_token(rest) else {
         return command;
     };
-    let Some(after_flag) = rest.strip_prefix("--agent ") else {
-        return rest;
-    };
-    match after_flag.split_once(char::is_whitespace) {
-        Some((_agent, tail)) => tail.trim_start(),
-        None => rest,
+    let file_name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .trim_end_matches(".exe");
+    if file_name != "omni" {
+        return command;
     }
+
+    let Some((verb, after_verb)) = split_token(after_program) else {
+        return command;
+    };
+    if verb != "exec" {
+        return command;
+    }
+    let post_exec = after_verb;
+    rest = post_exec;
+
+    // `--agent <id>` only ever appears immediately after `exec`, written by our
+    // own pre-hook. Without an id behind it there is nothing to drop.
+    if let Some((flag, after_flag)) = split_token(rest)
+        && flag == "--agent"
+        && let Some((_id, after_id)) = split_token(after_flag)
+    {
+        rest = after_id;
+    }
+
+    // A wrapper with no command behind it is a malformed rewrite. Fall back to
+    // what followed `exec` rather than handing back the wrapper itself, which
+    // would send an absolute path into the registry.
+    if rest.is_empty() { post_exec } else { rest }
+}
+
+/// The first whitespace-delimited token and the remainder after it.
+fn split_token(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    // `split_once` rather than slicing by index: the boundary is a char boundary
+    // here, but the crate denies `clippy::string_slice` precisely so nobody has
+    // to re-derive that, and stdlib already does it.
+    Some(match s.split_once(char::is_whitespace) {
+        Some((token, rest)) => (token, rest.trim_start()),
+        None => (s, ""),
+    })
 }
 
 pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>) -> Option<String> {
@@ -117,25 +160,47 @@ mod tests {
 
     use super::strip_exec_wrapper;
 
-    /// Review finding: both readers stripped only `omni exec `, so a rewritten
-    /// command arrived as `--agent gemini git status` and anything keyed on the
-    /// program name stopped matching.
+    /// Audit finding: `rewrite_logic` writes `current_exe()`, an absolute path,
+    /// so matching the literal `"omni exec "` never fired on a real command.
+    /// The earlier fixtures used the bare word and passed on a shape the writer
+    /// never produces, which is why the defect survived two reviews.
     #[test]
-    fn strips_the_agent_flag_along_with_the_exec_wrapper() {
+    fn strips_the_wrapper_when_it_carries_a_full_path() {
         assert_eq!(
-            strip_exec_wrapper("omni exec --agent gemini git status"),
+            strip_exec_wrapper("/usr/local/bin/omni exec git status"),
             "git status"
         );
-        assert_eq!(strip_exec_wrapper("omni exec git status"), "git status");
-        assert_eq!(strip_exec_wrapper("git status"), "git status");
+        assert_eq!(
+            strip_exec_wrapper("/home/u/.omni/bin/omni exec --agent gemini git status"),
+            "git status"
+        );
+        assert_eq!(
+            strip_exec_wrapper("C:/Users/u/omni.exe exec --agent codex_cli cargo test"),
+            "cargo test"
+        );
     }
 
-    /// A wrapper with the flag and nothing after it must not swallow the command
-    /// that is not there and return an empty string.
+    /// A command that merely mentions omni, or another program entirely, must
+    /// come through untouched.
+    #[test]
+    fn leaves_a_command_that_is_not_our_wrapper() {
+        assert_eq!(strip_exec_wrapper("git status"), "git status");
+        assert_eq!(
+            strip_exec_wrapper("/usr/bin/other exec git status"),
+            "/usr/bin/other exec git status"
+        );
+        assert_eq!(
+            strip_exec_wrapper("omni doctor --json"),
+            "omni doctor --json"
+        );
+    }
+
+    /// The flag with nothing behind it is a malformed rewrite; dropping the id
+    /// would leave an empty command.
     #[test]
     fn leaves_a_flag_without_a_command_alone() {
         assert_eq!(
-            strip_exec_wrapper("omni exec --agent gemini"),
+            strip_exec_wrapper("/usr/local/bin/omni exec --agent gemini"),
             "--agent gemini"
         );
     }
