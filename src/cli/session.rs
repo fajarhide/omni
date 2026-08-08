@@ -670,11 +670,13 @@ pub(crate) fn build_inject(state: &crate::pipeline::SessionState) -> String {
         out.push('\n');
     }
 
+    // `add_command` inserts at 0, so index 0 is the newest. Reversing here served
+    // the three oldest commands in the window, telling a resuming chat what the
+    // session opened with instead of what it had just been doing.
     let recent = distinct(
         state
             .last_commands
             .iter()
-            .rev()
             .map(|c| one_line(&command_gist(c))),
         3,
     );
@@ -712,8 +714,9 @@ pub(crate) fn build_inject(state: &crate::pipeline::SessionState) -> String {
 
     let mut msg = out.trim_end().to_string();
     if msg.len() > INJECT_MAX_BYTES {
-        crate::util::text::safe_truncate(&mut msg, INJECT_MAX_BYTES - 30);
-        msg.push_str("\n[truncated, omni session --status]");
+        const MARKER: &str = "\n[truncated, omni session --status]";
+        crate::util::text::safe_truncate(&mut msg, INJECT_MAX_BYTES - MARKER.len());
+        msg.push_str(MARKER);
     }
     msg
 }
@@ -853,6 +856,62 @@ pub struct HotFileJson {
 
 #[cfg(test)]
 mod tests {
+
+    /// Review finding: `add_command` inserts at 0, so `.rev()` served the three
+    /// oldest commands in the window. A resuming chat was told what the session
+    /// opened with instead of what it had just been doing, which is the opposite
+    /// of the block's purpose. The earlier test added one command, so it could
+    /// not see the order at all.
+    #[test]
+    fn recent_commands_are_the_newest_not_the_oldest() {
+        let mut state = SessionState::new();
+        state.add_command("git status");
+        state.add_command("cargo build");
+        state.add_command("cargo test --lib");
+        state.add_command("cargo test parser");
+
+        let out = build_inject(&state);
+
+        assert!(out.contains("cargo test parser"), "newest missing:\n{out}");
+        assert!(
+            !out.contains("git status"),
+            "oldest should have fallen out of the three shown:\n{out}"
+        );
+    }
+
+    /// Review finding: the truncation marker was appended after cutting to
+    /// `MAX - 30`, and the marker is 35 bytes, so a truncated block came out at
+    /// 1005. The budget test never reached the branch because its fixture stayed
+    /// under the cap.
+    #[test]
+    fn the_truncation_marker_fits_inside_the_budget() {
+        // Commands and errors are capped per item and by count, so the only
+        // unbounded contributor is a file path. Five deep ones clear the budget.
+        let mut state = SessionState::new();
+        for i in 0..5 {
+            state.add_hot_file(&format!(
+                "crates/workspace_member_{i}/src/very/deeply/nested/module/tree/of/directories/that/keeps/going/handler_implementation_number_{i}.rs"
+            ));
+        }
+        for i in 0..3 {
+            state.add_command(&format!("cargo test case_{i} --features a,b,c,d,e,f,g,h"));
+        }
+        state.add_error("thread 'x' panicked at src/a.rs:1: assertion failed everywhere");
+        state.add_error("thread 'y' panicked at src/b.rs:2: a different assertion failed");
+
+        let out = build_inject(&state);
+
+        assert!(
+            out.contains("[truncated"),
+            "fixture never reached the truncation branch ({} bytes)",
+            out.len()
+        );
+        assert!(
+            out.len() <= INJECT_MAX_BYTES,
+            "{} bytes over budget",
+            out.len()
+        );
+    }
     use super::*;
     use crate::pipeline::SessionState;
     use tempfile::tempdir;

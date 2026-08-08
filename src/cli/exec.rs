@@ -21,7 +21,13 @@ pub fn run_exec(
     // the host that rewrote the command. It has to be consumed here or it would
     // be executed as part of the command line (#360).
     let rest = match args.get(2).map(String::as_str) {
-        Some("--agent") if args.len() > 4 => {
+        Some("--agent") => {
+            // The flag with no command behind it is a malformed rewrite, not a
+            // command named `--agent`. Falling through executed the flag itself.
+            if args.len() <= 4 {
+                eprintln!("Usage: omni exec [--agent <id>] <command> [args...]");
+                std::process::exit(1);
+            }
             crate::hooks::pipe::set_host_that_rewrote(&args[3]);
             &args[4..]
         }

@@ -82,7 +82,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     };
     let command_to_use = command_name
         .or(detected_cmd.as_deref())
-        .map(|c| c.strip_prefix("omni exec ").unwrap_or(c));
+        .map(crate::cli::rewrite::strip_exec_wrapper);
 
     // Phase 0.5: Streaming Distillation Check
     if let Some(filter) = command_to_use.and_then(stream_filter_for) {

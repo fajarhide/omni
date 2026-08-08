@@ -195,11 +195,25 @@ pub fn stats_agent_id(agent: &AgentFormat) -> String {
 /// It also stops the probe lying to you: run the naive check under Claude Code
 /// and `CLAUDECODE` is already set in the ambient environment, so a Codex
 /// payload answers `claude_code` and the fix looks broken when it is not.
+/// True when the environment identified a specific host rather than falling back.
+///
+/// `terminal` is the fallback `detect_agent_id` returns when it recognises
+/// nothing, and `unknown` is the same idea by another name. Treating either as
+/// an answer lets a guess overwrite what the payload's own shape established.
+fn names_a_host(from_env: &str) -> bool {
+    !matches!(from_env.trim(), "" | "unknown" | "terminal")
+}
+
 pub fn resolve_agent_id(agent: &AgentFormat, from_env: &str) -> String {
-    if matches!(agent, AgentFormat::ClaudeCode | AgentFormat::Unknown)
-        && !from_env.is_empty()
-        && from_env != "unknown"
-    {
+    // `detect_agent_id` never answers "unknown": its last resort is "terminal"
+    // (see `agents::multiagent`). The old guard therefore never fired, and a
+    // Codex session started from a plain shell, whose payload is shaped exactly
+    // like Claude Code's, was filed under `terminal`. That is the bucket #212
+    // showed inflates the savings headline, so the row both disappeared from
+    // Agent Distribution and corrupted the figure it landed in.
+    //
+    // The environment is only allowed to override when it actually names a host.
+    if matches!(agent, AgentFormat::ClaudeCode | AgentFormat::Unknown) && names_a_host(from_env) {
         return from_env.to_string();
     }
 
@@ -696,6 +710,33 @@ fn normalize_tool_name(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Review finding: the guard tested for "unknown", a value
+    /// `detect_agent_id` never produces. Its real fallback is "terminal", so a
+    /// Codex session from a plain shell (whose payload is shaped exactly like
+    /// Claude Code's) was filed under `terminal`: gone from Agent Distribution,
+    /// and dropped into the bucket #212 showed inflates the savings headline.
+    #[test]
+    fn a_generic_environment_does_not_overwrite_the_payloads_own_answer() {
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::ClaudeCode, "terminal"),
+            "claude_code"
+        );
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::Unknown, "terminal"),
+            "unknown"
+        );
+    }
+
+    /// A named host still wins, which is the whole point of consulting the
+    /// environment for payloads two hosts share.
+    #[test]
+    fn a_named_host_still_wins_over_an_ambiguous_payload() {
+        assert_eq!(
+            resolve_agent_id(&AgentFormat::ClaudeCode, "codex_cli"),
+            "codex_cli"
+        );
+    }
     use super::*;
 
     /// #351: Codex CLI sends Claude Code's exact payload document, so shape alone

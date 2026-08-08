@@ -78,6 +78,14 @@ pub struct DoctorJson {
     pub healthy: bool,
     pub checks: Vec<DoctorCheck>,
     pub fix_available: bool,
+    /// What the per-agent reports said that a check name cannot carry.
+    ///
+    /// These were collected and dropped. A Codex install whose hooks are
+    /// installed but awaiting review (#367) pushes its warning here and nowhere
+    /// else, so `--json` reported `hooks: installed`, `healthy: true`, and gave a
+    /// program no way to learn the hooks were being skipped.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -193,7 +201,8 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     for agent in integrations {
         // The report is human-readable and this path owes stdout a single JSON
         // document, so it is captured and dropped rather than printed (#353).
-        // Findings still reach the caller through `warnings` and the bool.
+        // The report is dropped; its findings travel in `warnings`, which is
+        // serialised below.
         let (ok, _report) =
             crate::agents::output::capture(|| agent.doctor_check(fix_mode, &mut warnings));
         if ok {
@@ -221,6 +230,7 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
         healthy: all_ok,
         checks,
         fix_available,
+        warnings,
     };
 
     println!("{}", serde_json::to_string_pretty(&output)?);

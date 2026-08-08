@@ -426,11 +426,7 @@ pub fn process_payload(
     let stats_agent = crate::hooks::normalize::stats_agent_id(&normalized.agent);
     let _agent_id = stats_agent.as_str();
 
-    let clean_command = if let Some(stripped) = command.strip_prefix("omni exec ") {
-        stripped
-    } else {
-        &command
-    };
+    let clean_command = crate::cli::rewrite::strip_exec_wrapper(&command);
 
     let start = Instant::now();
     let project_path = std::env::current_dir()

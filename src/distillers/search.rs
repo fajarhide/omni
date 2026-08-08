@@ -24,12 +24,16 @@ pub fn distill_grep(content: &str) -> Option<String> {
     }
 
     let mut files: Vec<&str> = file_counts.keys().copied().collect();
-    // Sort by count descending
+    // Count descending, then path, so equal counts do not fall back to `HashMap`
+    // iteration order. Now that the tail is listed too, an unstable order changed
+    // both the listing and which files were quoted, for identical input: it
+    // breaks the determinism CLAUDE.md requires and defeats prompt-cache reuse.
     files.sort_by(|a, b| {
         file_counts
             .get(b)
             .unwrap_or(&0)
             .cmp(file_counts.get(a).unwrap_or(&0))
+            .then_with(|| a.cmp(b))
     });
 
     let mut out = format!(
@@ -103,9 +107,9 @@ pub fn distill_grep(content: &str) -> Option<String> {
                 file_counts.get(file).copied().unwrap_or(0)
             ));
         }
-        // Phase 6: factual guard — match lines for these files are not shown.
+        // Phase 6: factual guard. Match lines for these files are not shown.
         out.push_str(
-            "[OMNI Guard: match lines shown for the 10 densest files only — use omni_retrieve for the rest]\n",
+            "[OMNI Guard: match lines shown for the 10 densest files only; use omni_retrieve for the rest]\n",
         );
     }
 
@@ -118,6 +122,39 @@ pub fn distill_grep(content: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Review finding: the sort compared counts only, so files with equal counts
+    /// fell back to `HashMap` iteration order. With the tail now listed, the same
+    /// input produced a different listing and different quoted files run to run.
+    ///
+    /// Calling it repeatedly proves nothing: `RandomState` is seeded per process,
+    /// so the order is stable within one test run and only varies between them.
+    /// The observable guarantee is the tiebreak itself, so assert that equal
+    /// counts come out in path order.
+    #[test]
+    fn breaks_ties_by_path_rather_than_hash_order() {
+        // Twelve files, forty matches each: every count ties, and the per-file
+        // cap leaves enough reduction to clear the guardrail so the distiller
+        // does not punt.
+        let input = (0..12)
+            .flat_map(|f| {
+                (0..40).map(move |m| format!("src/file_{f:02}.rs:{}:    pub fn thing()", m + 1))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let out = distill_grep(&input).expect("30 files should distill");
+
+        let listed: Vec<&str> = out
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .filter(|w| w.starts_with("src/file_"))
+            .collect();
+        let mut sorted = listed.clone();
+        sorted.sort_unstable();
+
+        assert_eq!(listed, sorted, "equal counts are not in path order:\n{out}");
+    }
     use super::distill_grep;
 
     /// File `i` gets `total - i` matches, so the ranking is strict. Equal counts
