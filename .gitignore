@@ -27,3 +27,8 @@ target/
 .agents
 # insta writes these when a snapshot fails; only the accepted .snap is reviewed
 *.snap.new
+
+# Written by `omni init --cursor` / `omni doctor --fix` when they run inside this
+# repo during testing. It is a per-project file for OMNI's users, not part of
+# OMNI's own source, and it was committed by accident once (#363).
+.cursor/
