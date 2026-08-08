@@ -807,7 +807,8 @@ pub fn process_payload(
             }
 
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
-            tracker.track_command(&command, &content, &result);
+            // A host hook only fires for output on its way to a model.
+            tracker.track_command(&command, &content, &result, true);
 
             // ── Implicit Engram Auto-Capture ────────────────
             // Zero-config: OMNI silently persists milestone memories.
