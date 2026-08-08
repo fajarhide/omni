@@ -4,9 +4,17 @@ use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize)]
+/// Same casing defect again, and the failure text is not where this looked.
+///
+/// Claude Code puts it in a top-level `error` string; `tool_response` is absent
+/// from the payload entirely, so even with the name fixed the handler recorded
+/// the literal "unknown error" instead of the message the error list exists for.
 struct HookInput {
-    #[serde(rename = "hookEventName")]
+    #[serde(rename = "hook_event_name", alias = "hookEventName")]
     hook_event_name: String,
+    /// Where the host actually puts the failure text.
+    #[serde(default)]
+    error: Option<String>,
     #[serde(rename = "tool_name", default)]
     tool_name: String,
     #[serde(rename = "tool_input")]
@@ -45,6 +53,10 @@ pub fn process_payload(
         .unwrap_or(&parsed.tool_name);
 
     // Extract error message
+    // The top-level `error` is where Claude Code puts it. `tool_response` is kept
+    // first because other hosts do send it, and it carries more detail when
+    // present; the flat field is the fallback that makes the Claude path work at
+    // all rather than recording "unknown error" for every failure.
     let error_msg = parsed
         .tool_response
         .as_ref()
@@ -55,6 +67,8 @@ pub fn process_payload(
                 .or(r.error.as_deref())
                 .or(r.content.as_deref())
         })
+        .or(parsed.error.as_deref())
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or("unknown error");
 
     let short_error = error_msg
@@ -104,7 +118,7 @@ mod tests {
         let session = Arc::new(Mutex::new(SessionState::new()));
 
         let input = json!({
-            "hookEventName": "PostToolUseFailure",
+            "hook_event_name": "PostToolUseFailure",
             "tool_name": "Bash",
             "tool_input": { "command": "cargo build" },
             "tool_response": { "stderr": "error[E0308]: mismatched types" }
@@ -122,7 +136,7 @@ mod tests {
     fn test_failure_ignores_wrong_event() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
-        let input = json!({ "hookEventName": "PostToolUse" });
+        let input = json!({ "hook_event_name": "PostToolUse" });
         let out = process_payload(&input.to_string(), store, session);
         assert!(out.is_none());
     }
