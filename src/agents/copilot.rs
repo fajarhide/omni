@@ -106,13 +106,13 @@ impl AgentIntegration for CopilotIntegration {
             true
         } else if fix_mode {
             if let Ok(exe_path) = std::env::current_exe() {
-                let _ = self.install(&exe_path.to_string_lossy());
+                crate::agents::report_fix(
+                    "Config:",
+                    "registered",
+                    self.install(&exe_path.to_string_lossy()),
+                    warnings,
+                );
             }
-            crate::agent_report!(
-                "   {:<15} {}",
-                "Config:".bright_black(),
-                "[FIXED] registered".green().bold()
-            );
             true
         } else {
             crate::agent_report!(

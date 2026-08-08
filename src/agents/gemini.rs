@@ -106,13 +106,13 @@ impl AgentIntegration for GeminiIntegration {
         if !settings_path.exists() {
             if fix_mode {
                 if let Ok(exe_path) = std::env::current_exe() {
-                    let _ = self.install(&exe_path.to_string_lossy());
+                    crate::agents::report_fix(
+                        "Config:",
+                        "installed",
+                        self.install(&exe_path.to_string_lossy()),
+                        warnings,
+                    );
                 }
-                crate::agent_report!(
-                    "   {:<15} {}",
-                    "Config:".bright_black(),
-                    "[FIXED] installed".green().bold()
-                );
                 return true;
             }
             crate::agent_report!(
@@ -139,13 +139,13 @@ impl AgentIntegration for GeminiIntegration {
             all_ok = false;
             if fix_mode {
                 if let Ok(exe_path) = std::env::current_exe() {
-                    let _ = self.install(&exe_path.to_string_lossy());
+                    crate::agents::report_fix(
+                        "MCP Server:",
+                        "registered",
+                        self.install(&exe_path.to_string_lossy()),
+                        warnings,
+                    );
                 }
-                crate::agent_report!(
-                    "   {:<15} {}",
-                    "MCP Server:".bright_black(),
-                    "[FIXED] registered".green().bold()
-                );
             } else {
                 crate::agent_report!(
                     "   {:<15} {}",
@@ -178,13 +178,13 @@ impl AgentIntegration for GeminiIntegration {
             all_ok = false;
             if fix_mode {
                 if let Ok(exe_path) = std::env::current_exe() {
-                    let _ = self.install(&exe_path.to_string_lossy());
+                    crate::agents::report_fix(
+                        "Hooks:",
+                        "missing hooks installed",
+                        self.install(&exe_path.to_string_lossy()),
+                        warnings,
+                    );
                 }
-                crate::agent_report!(
-                    "   {:<15} {}",
-                    "Hooks:".bright_black(),
-                    "[FIXED] missing hooks installed".green().bold()
-                );
             } else {
                 crate::agent_report!(
                     "   {:<15} {}",

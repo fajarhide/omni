@@ -1,3 +1,5 @@
+use colored::Colorize;
+
 pub mod antigravity;
 pub mod checker;
 pub mod claude;
@@ -30,6 +32,42 @@ pub use pi::PiIntegration;
 pub use roo_code::RooCodeIntegration;
 pub use vscode::VscodeIntegration;
 pub use zed::ZedIntegration;
+
+/// Reports the outcome of a `doctor --fix` repair attempt, honestly.
+///
+/// Every call site did `let _ = self.install(...)` and then printed `[FIXED]`
+/// unconditionally. Against an unwritable home, `omni doctor --json --fix`
+/// answered `healthy: true`, `hooks installed`, and **zero warnings**, while
+/// nothing had been written: in fix mode the `[FIXED]` line replaced the warning
+/// that would otherwise have been pushed, so the failure had nowhere to surface
+/// (#386). Nineteen sites across eleven integrations shared the pattern and not
+/// one checked the result.
+pub fn report_fix(
+    field: &str,
+    what: &str,
+    outcome: anyhow::Result<()>,
+    warnings: &mut Vec<String>,
+) -> bool {
+    match outcome {
+        Ok(()) => {
+            crate::agent_report!(
+                "   {:<15} {}",
+                field.bright_black(),
+                format!("[FIXED] {what}").green().bold()
+            );
+            true
+        }
+        Err(e) => {
+            crate::agent_report!(
+                "   {:<15} {}",
+                field.bright_black(),
+                format!("[FAILED] {what}: {e}").red().bold()
+            );
+            warnings.push(format!("Could not repair {field} {what}: {e}"));
+            false
+        }
+    }
+}
 
 pub trait AgentIntegration {
     /// CLI identifier used in `--[id]` (e.g. "vscode", "codex", "claude").
@@ -111,4 +149,52 @@ pub fn all_integrations() -> Vec<Box<dyn AgentIntegration>> {
         Box::new(pi::PiIntegration),
         Box::new(vscode::VscodeIntegration),
     ]
+}
+
+#[cfg(test)]
+mod fix_reporting_tests {
+    use super::report_fix;
+
+    /// #386: every site did `let _ = self.install(...)` and printed `[FIXED]`
+    /// unconditionally. Against an unwritable home, `doctor --json --fix`
+    /// answered `healthy: true`, `hooks installed` and zero warnings while
+    /// nothing had been written, because in fix mode the `[FIXED]` line replaced
+    /// the warning that would otherwise have been pushed.
+    #[test]
+    fn a_failed_repair_is_reported_and_warned_about() {
+        let mut warnings = Vec::new();
+
+        let (ok, printed) = crate::agents::output::capture(|| {
+            report_fix(
+                "Hooks:",
+                "missing hooks installed",
+                Err(anyhow::anyhow!("Permission denied (os error 13)")),
+                &mut warnings,
+            )
+        });
+
+        assert!(!ok, "a failed repair must not report success");
+        assert!(printed.contains("[FAILED]"), "{printed}");
+        assert!(printed.contains("Permission denied"), "{printed}");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "the failure must reach --json: {warnings:?}"
+        );
+    }
+
+    /// A repair that worked still says so, or the fix has swallowed the signal
+    /// it exists to give.
+    #[test]
+    fn a_successful_repair_still_reports_fixed() {
+        let mut warnings = Vec::new();
+
+        let (ok, printed) = crate::agents::output::capture(|| {
+            report_fix("Config:", "registered", Ok(()), &mut warnings)
+        });
+
+        assert!(ok);
+        assert!(printed.contains("[FIXED]"), "{printed}");
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
 }
