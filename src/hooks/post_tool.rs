@@ -417,6 +417,19 @@ pub fn process_payload(
         return None;
     }
 
+    // Output OMNI already produced is not distilled a second time.
+    //
+    // When the pre-hook rewrites a command into `omni exec`, that child distills
+    // the output itself; the host's PostToolUse then fires with the distilled
+    // text. Both paths inserted into `distillations`, so one rewritten command
+    // was recorded twice: a real row, plus a Passthrough of the summary. Agent
+    // Distribution counted double and the extra zero-saving row dragged the
+    // percentage down (#379). There is nothing to gain by re-reading our own
+    // summary, so the second pass stops here.
+    if carries_our_marker(&content) {
+        return None;
+    }
+
     let command = normalized.command.clone();
     // The row is filed under the host that is running, not under the payload
     // shape. Codex sends Claude Code's document, so keying the label off the
@@ -1012,6 +1025,18 @@ fn build_additional_context(
     }
 }
 
+/// True when this text is a summary OMNI wrote, rather than a tool's own output.
+///
+/// Every distilled block carries a bracketed marker line, which is the only
+/// signal available: by the time the post-hook sees it the text is just a
+/// string, with nothing to say which process produced it.
+fn carries_our_marker(content: &str) -> bool {
+    content.lines().any(|l| {
+        let l = l.trim_start();
+        l.starts_with("[OMNI:") || l.starts_with("[OMNI ")
+    })
+}
+
 fn wrap_hook_output(raw_response: Option<&serde_json::Value>, distilled: String) -> String {
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
@@ -1075,6 +1100,28 @@ fn strip_html_simple(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// #379: a rewritten command was recorded twice. `omni exec` distills the
+    /// output, then the host's PostToolUse fires with that summary and the
+    /// post-hook distilled it again, inserting a second Passthrough row. Agent
+    /// Distribution counted double and the extra zero-saving row pulled the
+    /// percentage down.
+    #[test]
+    fn recognises_a_summary_omni_wrote() {
+        // Exactly the shape `omni exec` emits: the marker on its own line.
+        let ours = "test result: ok. 600 passed; 0 failed;\n[OMNI: 600 lines omitted, omni_retrieve(\"abc123\") for full output]";
+
+        assert!(carries_our_marker(ours), "own summary not recognised");
+    }
+
+    /// The guard must not swallow a tool's own output, or the post-hook path
+    /// stops distilling anything on hosts that never rewrite the command.
+    #[test]
+    fn leaves_a_tools_own_output_alone() {
+        let theirs = "test result: ok. 600 passed; 0 failed;\nwarning: unused variable `x`\nnote: OMNI is mentioned here but not as a marker";
+
+        assert!(!carries_our_marker(theirs), "false positive on real output");
+    }
     use super::*;
     use serde_json::json;
 
