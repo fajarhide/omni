@@ -31,7 +31,10 @@ pub fn process_payload(
 ) -> Option<String> {
     let parsed: HookInput = serde_json::from_str(input_str).ok()?;
 
-    if parsed.hook_event_name != "SessionEnd" {
+    // The handler re-checks the name, so the dispatcher's mapping is not
+    // enough on its own: Cursor's own vocabulary reached here unchanged and
+    // was rejected one layer below the routing (#384).
+    if crate::hooks::dispatcher::canonical_event(&parsed.hook_event_name) != "SessionEnd" {
         return None;
     }
 

@@ -880,6 +880,32 @@ impl SqliteBackend {
         Ok(())
     }
 
+    /// Row counts used by the hook-routing integration tests.
+    ///
+    /// Exposed so a test can assert what a hook wrote without shelling out to
+    /// the `sqlite3` binary, which is not guaranteed on every CI runner.
+    pub fn session_summary_count(&self) -> usize {
+        self.count_rows("session_summaries")
+    }
+
+    pub fn session_count(&self) -> usize {
+        self.count_rows("sessions")
+    }
+
+    fn count_rows(&self, table: &str) -> usize {
+        let Ok(conn) = self.pool.get() else {
+            return 0;
+        };
+        let sql = match table {
+            "session_summaries" => "SELECT COUNT(*) FROM session_summaries",
+            "sessions" => "SELECT COUNT(*) FROM sessions",
+            _ => return 0,
+        };
+        conn.query_row(sql, [], |r| r.get::<_, i64>(0))
+            .map(|n| n as usize)
+            .unwrap_or(0)
+    }
+
     pub fn record_distillation(
         &self,
         session_id: &str,

@@ -49,6 +49,24 @@ pub fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Resu
     }
 }
 
+/// Maps a host's own event vocabulary onto the names the handlers below match.
+///
+/// The match is exact and case-sensitive, so Cursor's `stop`, `postToolUse` and
+/// `postToolUseFailure` fell to the wildcard and did nothing: no session
+/// summary, no error recorded, no distillation, while `omni doctor` reported
+/// them installed because the entries were present in the file (#384). Cursor
+/// has no `PreCompact`, and `stop` is its session flush; `save_session_summary`
+/// is an `INSERT OR REPLACE` keyed on the session, so firing it per turn
+/// refreshes the row rather than accumulating one per turn.
+pub fn canonical_event(event: &str) -> &str {
+    match event {
+        "stop" => "SessionEnd",
+        "postToolUse" => "PostToolUse",
+        "postToolUseFailure" => "PostToolUseFailure",
+        other => other,
+    }
+}
+
 pub fn process_payload(
     input_str: &str,
     store: Arc<Store>,
@@ -59,7 +77,7 @@ pub fn process_payload(
         Err(_) => return None,
     };
 
-    let event_name = peeker.hook_event_name.as_deref().unwrap_or("PostToolUse");
+    let event_name = canonical_event(peeker.hook_event_name.as_deref().unwrap_or("PostToolUse"));
 
     // Transcript: persist hook payload BEFORE dispatching
     {
