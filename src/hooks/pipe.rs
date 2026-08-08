@@ -325,7 +325,12 @@ fn stream_distill<R: Read, W: Write, E: Write>(
 
         if let Some(sess) = &session {
             let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
-            tracker.track_command(cmd, "[Streaming Mode - Input Omitted]", &distill_result);
+            tracker.track_command(
+                cmd,
+                "[Streaming Mode - Input Omitted]",
+                &distill_result,
+                !std::io::stdout().is_terminal(),
+            );
         }
     }
 
@@ -653,6 +658,9 @@ fn persist<E: Write>(
                 command_to_use.unwrap_or(""),
                 &result.input_text,
                 &distill_result,
+                // Same test `delivered_bytes` uses: a TTY on the other end means
+                // a human is reading and no context is billed for it.
+                !std::io::stdout().is_terminal(),
             );
         }
 

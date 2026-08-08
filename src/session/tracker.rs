@@ -15,6 +15,28 @@ static FILE_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     ).unwrap()
 });
 
+/// What this run contributes to the session's savings figure.
+///
+/// Zero when nothing reached a model. #212 excluded `agent_id='terminal'` rows
+/// from the token headline because they are TTY bytes nobody is billed for, and
+/// `sqlite.rs` has a test for it; the exclusion never reached `SessionState`, so
+/// `estimated_tokens_saved` (the session summary and `omni_context`) counted
+/// them anyway and overstated the saving.
+///
+/// Split out because `track_command` does its work on a spawned thread, which a
+/// test cannot observe without racing it.
+fn savings_counters(result: &DistillResult, reaches_a_model: bool) -> (u64, u64, u64, u64) {
+    if !reaches_a_model {
+        return (0, 0, 0, 0);
+    }
+    (
+        result.input_bytes as u64,
+        result.output_bytes as u64,
+        result.raw_tokens as u64,
+        result.filtered_tokens as u64,
+    )
+}
+
 pub struct SessionTracker {
     session: Arc<Mutex<SessionState>>,
     store: Arc<Store>,
@@ -25,7 +47,22 @@ impl SessionTracker {
         Self { session, store }
     }
 
-    pub fn track_command(&self, command: &str, output: &str, result: &DistillResult) {
+    /// `reaches_a_model` gates the savings counters only.
+    ///
+    /// #212 excluded `agent_id='terminal'` rows from the token headline because
+    /// they are TTY bytes no model reads, and `sqlite.rs` has a test for it. That
+    /// exclusion never reached `SessionState`: this tracker had no agent filter,
+    /// so `estimated_tokens_saved` (the session summary and `omni_context`) still
+    /// counted them and overstated what OMNI had saved. Commands, hot files and
+    /// errors are still tracked either way, because they feed relevance scoring
+    /// and `session --inject` regardless of who read the output.
+    pub fn track_command(
+        &self,
+        command: &str,
+        output: &str,
+        result: &DistillResult,
+        reaches_a_model: bool,
+    ) {
         let cmd = command.to_string();
         let out = output.to_string();
         let result_clone = result.clone();
@@ -44,11 +81,12 @@ impl SessionTracker {
 
             session_locked.add_command(&cmd);
 
-            // Update Distillation Telemetry
-            session_locked.cumulative_input_bytes += result_clone.input_bytes as u64;
-            session_locked.cumulative_output_bytes += result_clone.output_bytes as u64;
-            session_locked.cumulative_raw_tokens += result_clone.raw_tokens as u64;
-            session_locked.cumulative_filtered_tokens += result_clone.filtered_tokens as u64;
+            // Update Distillation Telemetry, for work a model actually read.
+            let (input, output, raw, filtered) = savings_counters(&result_clone, reaches_a_model);
+            session_locked.cumulative_input_bytes += input;
+            session_locked.cumulative_output_bytes += output;
+            session_locked.cumulative_raw_tokens += raw;
+            session_locked.cumulative_filtered_tokens += filtered;
 
             let savings_pct = result_clone.savings_pct() as f32;
             let current_top = session_locked
@@ -403,6 +441,46 @@ fn save_async(session: Arc<Mutex<SessionState>>, store: Arc<Store>) {
 
 #[cfg(test)]
 mod tests {
+
+    fn a_distillation() -> DistillResult {
+        DistillResult {
+            output: String::new(),
+            route: crate::pipeline::Route::Keep,
+            filter_name: "cargo".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 10_000,
+            output_bytes: 1_000,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 2_500,
+            filtered_tokens: 250,
+            delivered_bytes: 1_000,
+        }
+    }
+
+    /// #212 excluded `agent_id='terminal'` rows from the token headline because
+    /// they are TTY bytes nobody is billed for, and `sqlite.rs` has a test for
+    /// it. The exclusion never reached `SessionState`, so the session summary
+    /// and `omni_context` kept counting them: the same figure was reported two
+    /// ways depending on which path you read it from.
+    #[test]
+    fn output_no_model_read_adds_nothing_to_the_savings_figure() {
+        assert_eq!(savings_counters(&a_distillation(), false), (0, 0, 0, 0));
+    }
+
+    /// A run a model did read still counts, or the figure becomes zero for
+    /// everything and the exclusion has swallowed the metric it was protecting.
+    #[test]
+    fn output_a_model_read_still_counts() {
+        assert_eq!(
+            savings_counters(&a_distillation(), true),
+            (10_000, 1_000, 2_500, 250)
+        );
+    }
     use super::*;
     use tempfile::tempdir;
 
@@ -503,7 +581,7 @@ mod tests {
             delivered_bytes: 0,
         };
 
-        tracker.track_command("git status", "On branch main", &res);
+        tracker.track_command("git status", "On branch main", &res, true);
         let elapsed = start.elapsed();
         // Should be extremely fast because thread spawns
         assert!(elapsed.as_millis() < 200, "Took {} ms", elapsed.as_millis());
