@@ -300,7 +300,7 @@ Q: Should I keep OMNI on?
 
 ## 11. References
 
-- OMNI docs: `docs/HOW_TO_USE.md`, `docs/LOOP_ENGINEERING.md`
+- OMNI docs: `docs/FILTERS.md`, `docs/LOOP_ENGINEERING.md`
 - Hermes skill: `skill_view(name="hermes-agent")`
 - Hermes native MCP: `skill_view(name="hermes-agent", file_path="references/native-mcp.md")`
 - OMNI source: `src/hooks/pipe.rs`, `src/agents/hermes.rs`

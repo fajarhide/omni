@@ -4,7 +4,7 @@
 
 ## What is Loop Engineering?
 
-Loop Engineering is the practice of running AI agents in iterative loops where each iteration builds on the last until a goal is achieved. OMNI acts as the "Context Operating System" — managing token budgets, distilling outputs, and providing loop-aware intelligence.
+Loop Engineering is the practice of running AI agents in iterative loops where each iteration builds on the last until a goal is achieved. OMNI acts as the "Context Operating System", managing token budgets, distilling outputs, and providing loop-aware intelligence.
 
 ## Architecture
 
@@ -46,10 +46,15 @@ export OMNI_LOOP_BUDGET=100000
 
 ### 3. Run Your Loop
 
-See `autonomous-loops/` for ready-to-use templates:
-- `shell-loop.sh` — Generic shell loop
-- `claude-code-loop.md` — System prompt for Claude Code
-- `mastra-integration.ts` — TypeScript/Mastra orchestrator setup
+Any orchestrator works: a shell `while` loop, Mastra, your own runner. OMNI reads
+the variables above from the environment it is called in, so the orchestrator only
+has to export them and invoke the agent.
+
+Runnable templates used to live in `autonomous-loops/`. They were removed because
+nothing tested them: when `omni handoff` was deleted in #164, the shell template
+kept looping against a default it never computed, and the TypeScript one swallowed
+the same failure twice (#180). An example that silently reports a healthy loop from
+state it never read is the defect this project exists to stop.
 
 ## Environment Variables
 
@@ -65,21 +70,21 @@ See `autonomous-loops/` for ready-to-use templates:
 ## Token Budget Strategy
 
 OMNI tracks two types of token counts:
-1. **Raw tokens** — Total tokens before distillation
-2. **Filtered tokens** — Tokens after OMNI's compression pipeline
+1. **Raw tokens**: total tokens before distillation
+2. **Filtered tokens**: tokens after OMNI's compression pipeline
 
 The budget (`OMNI_LOOP_BUDGET`) refers to the **estimated context window usage** per iteration.
 
 ### Recommended Budgets by Task Type
 
-*   **Quick Fix (1–5 iterations)**: `200000` tokens
+*   **Quick Fix (1 to 5 iterations)**: `200000` tokens
     *   **Strategy**: High budget, no compactions expected. OMNI role: Passive tracking only.
-*   **Feature Development (5–20 iterations)**: `100000` tokens
-    *   **Strategy**: Balanced — compact at natural checkpoints. OMNI role: Active distillation, engram generation.
-*   **Large Refactor (20–100 iterations)**: `80000` tokens
-    *   **Strategy**: Conservative — frequent compactions. OMNI role: Aggressive distillation, predictive warnings.
+*   **Feature Development (5 to 20 iterations)**: `100000` tokens
+    *   **Strategy**: balanced, compact at natural checkpoints. OMNI role: Active distillation, engram generation.
+*   **Large Refactor (20 to 100 iterations)**: `80000` tokens
+    *   **Strategy**: conservative, frequent compactions. OMNI role: Aggressive distillation, predictive warnings.
 *   **Marathon Session (100+ iterations)**: `60000` tokens
-    *   **Strategy**: Ultra-conservative — maximize signal density. OMNI role: Maximum compression, loop memory persistence.
+    *   **Strategy**: ultra-conservative, maximize signal density. OMNI role: Maximum compression, loop memory persistence.
 
 ### Pressure Thresholds & Warnings
 
@@ -136,7 +141,7 @@ fi
 
 ### Maker-Checker Best Practices
 1. **Clear criteria**: Give the checker specific, measurable criteria
-2. **Limit scope**: Keep `last_n_calls` reasonable (5–20)
+2. **Limit scope**: Keep `last_n_calls` reasonable (5 to 20)
 3. **Fail fast**: If checker fails 3x, escalate to human
 4. **Audit trail**: OMNI logs all maker/checker interactions in SQLite
 
@@ -170,7 +175,7 @@ omni stats --json
 # Health check
 omni doctor
 
-# Check current session budget status — MCP only.
+# Check current session budget status. MCP only.
 # `omni handoff` was removed as a CLI subcommand in #164; the `omni_handoff`
 # MCP tool is unchanged, so this is reachable from an MCP client, not a shell.
 ```
