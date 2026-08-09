@@ -1,7 +1,7 @@
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize)]
@@ -18,20 +18,21 @@ struct HookInput {
     compaction_reason: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct HookOutput {
-    #[serde(rename = "hookSpecificOutput")]
-    pub hook_specific_output: HookSpecificOutput,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct HookSpecificOutput {
-    #[serde(rename = "hookEventName")]
-    pub hook_event_name: String,
-    #[serde(rename = "systemPromptAddition")]
-    pub system_prompt_addition: String,
-}
-
+/// `PreCompact` records the snapshot; it never replies with one.
+///
+/// The reply used to carry the snapshot as
+/// `hookSpecificOutput.systemPromptAddition`. Claude Code is the only host OMNI
+/// registers this hook with (`agents/claude.rs:485`), and its `PreCompact` reply
+/// contract has no content field at all, so renaming to `additionalContext`
+/// would not have helped either: the summary was discarded whatever it was
+/// called (#371, the same family as #364 and #158).
+///
+/// Nothing moved to another hook, because nothing had to. This handler already
+/// writes the snapshot to `session_events` and upserts the session before
+/// compaction runs, and Claude Code fires `SessionStart` again afterwards, where
+/// `session_start::process_payload` rebuilds its block from that row and returns
+/// it in `additionalContext`, the field that host does read. The summary still
+/// reaches the model after a compaction; only the dead reply is gone.
 pub fn process_payload(
     input_str: &str,
     store: Arc<Store>,
@@ -84,14 +85,9 @@ pub fn process_payload(
     if let Some(ref last_hash) = state.last_compact_hash
         && *last_hash == new_hash
     {
-        // No meaningful change since last compact — emit minimal snapshot
-        let out = HookOutput {
-            hook_specific_output: HookSpecificOutput {
-                hook_event_name: "PreCompact".to_string(),
-                system_prompt_addition: "⚡ OMNI: Context unchanged since last compaction. Continuing with prior snapshot.".to_string(),
-            },
-        };
-        return serde_json::to_string(&out).ok();
+        // Nothing changed since the last compaction, so re-indexing would store a
+        // duplicate snapshot for `SessionStart` to pick between.
+        return None;
     }
     state.last_compact_hash = Some(new_hash);
 
@@ -106,14 +102,7 @@ pub fn process_payload(
     state.last_active = Utc::now().timestamp();
     store.upsert_session(&state);
 
-    let out = HookOutput {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "PreCompact".to_string(),
-            system_prompt_addition: summary_str,
-        },
-    };
-
-    serde_json::to_string(&out).ok()
+    None
 }
 
 fn build_summary(state: &SessionState, _store: &Store) -> String {
@@ -315,8 +304,18 @@ mod tests {
         )
     }
 
+    /// The snapshot only exists in the store now, so every assertion about its
+    /// content has to read it back from there. Asserting on the return value
+    /// was what let the dead reply survive: it proved the struct serialised,
+    /// which was never in doubt, and said nothing about the host reading it.
+    fn recorded_snapshot(store: &Store, session_id: &str) -> String {
+        store
+            .search_session_events(session_id, "PreCompact", 10)
+            .join("\n")
+    }
+
     #[test]
-    fn pre_compact_output_is_valid_json() {
+    fn emits_no_reply_because_the_event_accepts_no_content() {
         let (store, _dir) = get_store();
         let session = Arc::new(Mutex::new(SessionState::new()));
 
@@ -326,15 +325,22 @@ mod tests {
             "trigger": "context_limit_reached"
         });
 
-        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
-        let parsed: HookOutput = serde_json::from_str(&out_str).expect("must succeed");
-        assert_eq!(parsed.hook_specific_output.hook_event_name, "PreCompact");
-        assert!(
-            parsed
-                .hook_specific_output
-                .system_prompt_addition
-                .contains("OMNI Context Snapshot")
-        );
+        assert_eq!(process_payload(&input.to_string(), store, session), None);
+    }
+
+    #[test]
+    fn records_the_snapshot_it_no_longer_returns() {
+        let (store, _dir) = get_store();
+        let session = Arc::new(Mutex::new(SessionState::new()));
+
+        let input = json!({
+            "hook_event_name": "PreCompact",
+            "session_id": "123",
+            "trigger": "context_limit_reached"
+        });
+
+        let _ = process_payload(&input.to_string(), store.clone(), session);
+        assert!(recorded_snapshot(&store, "123").contains("OMNI Context Snapshot"));
     }
 
     #[test]
@@ -350,10 +356,9 @@ mod tests {
             "session_id": "123"
         });
 
-        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
-        let parsed: HookOutput = serde_json::from_str(&out_str).expect("must succeed");
+        let _ = process_payload(&input.to_string(), store.clone(), session);
         let token_count = crate::util::token_estimate::estimate_tokens(
-            parsed.hook_specific_output.system_prompt_addition.len(),
+            recorded_snapshot(&store, "123").len(),
             crate::util::token_estimate::ContentHint::Json,
         );
         assert!(token_count <= 6100, "Token count was {}", token_count);
@@ -372,9 +377,10 @@ mod tests {
             "session_id": "123"
         });
 
-        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
-        assert!(out_str.contains("src/main.rs"));
-        assert!(out_str.contains("src/lib.rs"));
+        let _ = process_payload(&input.to_string(), store.clone(), session);
+        let snapshot = recorded_snapshot(&store, "123");
+        assert!(snapshot.contains("src/main.rs"));
+        assert!(snapshot.contains("src/lib.rs"));
     }
 
     #[test]
@@ -389,8 +395,8 @@ mod tests {
             "session_id": "123"
         });
 
-        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
-        assert!(out_str.contains("missing semicolon at line 42"));
+        let _ = process_payload(&input.to_string(), store.clone(), session);
+        assert!(recorded_snapshot(&store, "123").contains("missing semicolon at line 42"));
     }
 
     #[test]
@@ -460,16 +466,17 @@ mod tests {
             "session_id": "engram-test"
         });
 
-        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
+        let _ = process_payload(&input.to_string(), store.clone(), session);
+        let snapshot = recorded_snapshot(&store, "engram-test");
         assert!(
-            out_str.contains("Subtask Progress"),
+            snapshot.contains("Subtask Progress"),
             "expected engram section, got: {}",
-            out_str
+            snapshot
         );
         assert!(
-            out_str.contains("Fixed cargo test error"),
+            snapshot.contains("Fixed cargo test error"),
             "expected engram label, got: {}",
-            out_str
+            snapshot
         );
     }
 
@@ -493,16 +500,17 @@ mod tests {
             "session_id": "tool-summary-test"
         });
 
-        let out_str = process_payload(&input.to_string(), store, session).expect("must succeed");
+        let _ = process_payload(&input.to_string(), store.clone(), session);
+        let snapshot = recorded_snapshot(&store, "tool-summary-test");
         assert!(
-            out_str.contains("Tool Activity"),
+            snapshot.contains("Tool Activity"),
             "expected tool summary section, got: {}",
-            out_str
+            snapshot
         );
         assert!(
-            out_str.contains("cargo"),
+            snapshot.contains("cargo"),
             "expected cargo family, got: {}",
-            out_str
+            snapshot
         );
     }
 
@@ -517,26 +525,20 @@ mod tests {
             "session_id": "delta-test"
         });
 
-        // First compact: full snapshot
-        let out1 =
-            process_payload(&input.to_string(), store.clone(), session.clone()).expect("first");
-        assert!(
-            out1.contains("OMNI Context Snapshot"),
-            "first compact should be full"
-        );
+        let _ = process_payload(&input.to_string(), store.clone(), session.clone());
+        let _ = process_payload(&input.to_string(), store.clone(), session.clone());
 
-        // Second compact with same state: should detect unchanged
-        let out2 =
-            process_payload(&input.to_string(), store.clone(), session.clone()).expect("second");
-        assert!(
-            out2.contains("unchanged"),
-            "second compact should detect no change, got: {}",
-            out2
+        assert_eq!(
+            store
+                .search_session_events("delta-test", "PreCompact", 10)
+                .len(),
+            1,
+            "an unchanged second compaction should not record a duplicate snapshot"
         );
     }
 
     #[test]
-    fn delta_detection_emits_on_state_change() {
+    fn delta_detection_records_again_on_state_change() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
         let session = Arc::new(Mutex::new(state));
@@ -546,26 +548,26 @@ mod tests {
             "session_id": "delta-change-test"
         });
 
-        // First compact: full snapshot
         let _ = process_payload(&input.to_string(), store.clone(), session.clone());
 
-        // Modify state
         {
             let mut s = session.lock().unwrap_or_else(|p| p.into_inner());
             s.add_error("new error appeared");
             s.add_hot_file("src/new_file.rs");
         }
 
-        // Third compact: state changed, should emit full snapshot again
-        let out3 =
-            process_payload(&input.to_string(), store.clone(), session.clone()).expect("third");
-        assert!(
-            out3.contains("OMNI Context Snapshot"),
-            "changed state should produce full snapshot"
+        let _ = process_payload(&input.to_string(), store.clone(), session.clone());
+
+        let events = store.search_session_events("delta-change-test", "PreCompact", 10);
+        assert_eq!(
+            events.len(),
+            2,
+            "changed state should record a new snapshot"
         );
         assert!(
-            out3.contains("new error appeared"),
-            "should contain new error"
+            events.iter().any(|e| e.contains("new error appeared")),
+            "the new snapshot should carry the new error, got: {:?}",
+            events
         );
     }
 }

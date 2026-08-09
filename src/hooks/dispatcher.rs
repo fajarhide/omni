@@ -306,8 +306,13 @@ mod tests {
             "compactionReason": "context_limit_reached"
         });
 
-        let out = process_payload(&input.to_string(), store, session);
-        assert!(out.is_some());
-        assert!(out.expect("must succeed").contains("PreCompact"));
+        // `PreCompact` replies with nothing since #371, so routing is observable
+        // only through the snapshot the handler writes.
+        let _ = process_payload(&input.to_string(), store.clone(), session);
+        assert_eq!(
+            store.search_session_events("123", "PreCompact", 10).len(),
+            1,
+            "PreCompact must reach its handler, which records rather than replies"
+        );
     }
 }
