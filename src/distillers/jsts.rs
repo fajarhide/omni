@@ -137,7 +137,15 @@ fn is_tsc_output(lines: &[&str]) -> bool {
         l.contains("error TS")
             || l.contains("tsc --")
             || l.contains("Found errors")
-            || l.contains("Found ") && l.contains(" error")
+            // tsc closes with `Found 3 errors in 2 files.` and the ` in N files`
+            // half is what makes the line tsc's. Without it the arm claimed every
+            // tool that ends a run with `Found 3 errors.`, which biome and ruff
+            // both do, and biome output came back as `tsc: 3 errors in 0 files`
+            // with every path deleted (#430).
+            || (l.contains("Found ")
+                && l.contains(" error")
+                && l.contains(" in ")
+                && l.contains("file"))
     })
 }
 
@@ -449,6 +457,13 @@ fn distill_tsc(input: &str) -> String {
     }
 
     let file_count = by_file.len();
+    // Errors counted but none located. `0 files` beside a non-zero error count is
+    // self-contradictory on its face, and it is what a misrouted payload produces:
+    // the summary line parsed, no `error TS` line did, so there is nothing to point
+    // the reader at. Fail open rather than publish the contradiction (#430).
+    if file_count == 0 {
+        return super::require_parsed(false, input, String::new());
+    }
     let mut out = format!("tsc: {} errors in {} files", total_errors, file_count);
 
     let mut sorted: Vec<(String, Vec<String>)> = by_file.into_iter().collect();

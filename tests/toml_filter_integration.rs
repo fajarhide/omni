@@ -148,13 +148,32 @@ mod eslint {
     use super::*;
 
     #[test]
-    fn matches_eslint_biome_prettier() {
+    fn matches_eslint_and_prettier() {
         let filters = load_filters();
         let f = get_filter(&filters, "eslint");
         assert_matches(f, "eslint .");
         assert_matches(f, "eslint src/ --fix");
-        assert_matches(f, "biome check src/");
         assert_matches(f, "prettier --write .");
+    }
+
+    /// biome used to be claimed here and saved 0.0% on it: eslint prints a line
+    /// per problem and biome prints a block with a code frame, so the patterns
+    /// matched nothing. One owner now, and the assertion is the stronger one,
+    /// that the right filter claims it rather than merely that some filter does.
+    #[test]
+    fn biome_is_claimed_by_its_own_filter_and_not_by_eslint() {
+        let filters = load_filters();
+
+        assert_not_matches(get_filter(&filters, "eslint"), "biome check src/");
+
+        let f = get_filter(&filters, "biome");
+        assert_matches(f, "biome check src/");
+        assert_matches(f, "biome ci .");
+        assert_matches(f, "ultracite check");
+        assert_matches(f, "bunx biome check");
+        // A script name is not a claim: omni sees `bun run check` and cannot know
+        // it wraps biome, and guessing would shadow whatever else it wraps.
+        assert_not_matches(f, "bun run check");
     }
 
     #[test]
