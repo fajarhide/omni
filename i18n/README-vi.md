@@ -138,12 +138,12 @@ trong khoảng **3 đến 10 tháng 8 năm 2026 UTC**, tất cả đều là đ�
 Khoảng thời gian là một phần của con số: `execution_traces` bị cắt sau bảy ngày, nên
 một tập dữ liệu biến mất một tuần sau khi được đo.
 
-* Đầu ra build và test **87,9%**. Lớp lớn nhất là đọc lại tệp: bộ lọc lấy **0,0%**, ledger
-  lấy **24,6%**, và chính khoảng cách đó là lý do ledger tồn tại.
+* Đầu ra build và test **87,8%**. Lớp lớn nhất là đọc lại tệp: bộ lọc lấy **0,0%**, ledger
+  lấy **24,7%**, và chính khoảng cách đó là lý do ledger tồn tại.
 * **97,1% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
   phần còn lại đáng giá bao nhiêu. **Không lệnh gọi nào làm đầu ra lớn hơn**
-  ở lần chạy này, sau khi [#410](https://github.com/fajarhide/omni/issues/410) sửa hai
-  trường hợp từng như vậy.
+  trong lần đo này. Từng có 2 cho tới ([#398](https://github.com/fajarhide/omni/issues/398)), và chúng tôi đã công bố chúng suốt
+  thời gian đó.
 * **21 ms mỗi lệnh**, lớn dần theo lịch sử của bạn chứ không theo kích thước payload. Với
   cơ sở dữ liệu 205 MB con số là 61 ms.
 <div align="center">

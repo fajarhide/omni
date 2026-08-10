@@ -137,12 +137,12 @@ sepanjang **3 sampai 10 Agustus 2026 UTC**, semuanya output yang sampai ke model
 Jendela waktunya bagian dari angkanya: `execution_traces` dipangkas setelah tujuh
 hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 
-* Output build dan test: **87,9%**. Baca ulang berkas, kelas terbesar: **0,0%** dari
-  filter dan **24,6%** dari ledger, dan celah itulah alasan ledger ada.
+* Output build dan test: **87,8%**. Baca ulang berkas, kelas terbesar: **0,0%** dari
+  filter dan **24,7%** dari ledger, dan celah itulah alasan ledger ada.
 * **97,1% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
   itulah yang memberi tahu Anda seberapa berarti sisanya. **Tidak ada panggilan yang
-  justru membesar** pada putaran ini, setelah
-  [#410](https://github.com/fajarhide/omni/issues/410) memperbaiki dua yang dulu begitu.
+  justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
+  menerbitkannya selama keduanya masih ada.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.
 

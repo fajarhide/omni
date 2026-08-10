@@ -141,11 +141,11 @@ corpus cannot be checked by anyone, us included.
 On the 2026-08-03 to 08-10 UTC window, replayed on the release binary over real
 command executions that reached a model:
 
-* Build and test output: **87.9%**. File re-reads, the largest class: **0.0%** from
-  the filters and **24.6%** from the ledger, which is the gap the ledger exists for.
+* Build and test output: **87.8%**. File re-reads, the largest class: **0.0%** from
+  the filters and **24.7%** from the ledger, which is the gap the ledger exists for.
 * **97.1% of calls saved nothing at all**, and we publish that because it tells you
-  what the rest are worth. **No call came back larger** on this run, after
-  [#410](https://github.com/fajarhide/omni/issues/410) fixed the two that did.
+  what the rest are worth. **No call came back larger** in this measurement.
+  There were 2 until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
 
