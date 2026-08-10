@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Berhenti membayar Claude untuk membaca 10.000 baris noise terminal.</b> OMNI memangkas <code>git</code> 89%, <code>cargo</code> 91% dan <code>kubectl</code> 77% sebelum agen Anda sempat melihatnya. Selebihnya lewat tanpa disentuh. Tidak ada yang hilang, dan ia tidak pernah mengarang hasil.</em>
+    <em><b>Berhenti membayar Claude untuk membaca 10.000 baris noise terminal.</b> Selama satu minggu kerja nyata seorang developer, OMNI memangkas 88% output build dan test serta seperempat dari semua yang dibaca ulang agen, 15,7% di seluruh campuran perintah. Sisanya, 97% panggilan, lewat tanpa disentuh. Tidak ada yang hilang, dan ia tidak pernah mengarang hasil.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-<code>git</code> 89% &middot; <code>cargo</code> 91% &middot; <code>kubectl</code> 77% &middot; 21 ms per perintah &middot; 0 dari 9.965 panggilan pernah memperbesar output &middot; setiap potongan bisa dipulihkan byte demi byte &middot; memori lintas sesi </b>
+build dan test 88% &middot; baca ulang berkas 25% &middot; 15,7% di seluruh campuran &middot; 21 ms per perintah &middot; 2 dari 7.095 panggilan memperbesar output, dan kami menyebutkannya &middot; setiap potongan bisa dipulihkan byte demi byte &middot; memori lintas sesi </b>
 
 </br></br>
 
@@ -113,7 +113,7 @@ Kompresor lain meminta Anda *percaya* bahwa yang dipotong tidak penting. OMNI me
 | **Tidak pernah mengarang hasil** | distiller yang tidak berhasil mem-parse sinyal apa pun mengembalikan output mentah, bukan string hijau `no errors` atau `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Kegagalan tidak pernah ditutupi** | perintah yang keluar dengan status bukan nol diteruskan apa adanya | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Data terstruktur tidak pernah disentuh** | JSON / YAML / NDJSON / CSV lewat byte demi byte | `pipeline::format` |
-| **Angkanya diukur, bukan diharapkan** | 9.965 trace nyata diputar ulang di biner rilis, dan 90,0% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
+| **Angkanya diukur, bukan diharapkan** | 7.095 trace nyata diputar ulang di biner rilis, dan 97,1% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
 
 Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **aslinya selalu bisa Anda pulihkan, dan ia tidak akan pernah membohongi agen Anda.**
 
@@ -121,18 +121,24 @@ Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **asliny
 
 ## Tolok Ukur
 
-Diukur pada biner rilis dengan memutar ulang **9.965 eksekusi perintah nyata** dari
-penggunaan sehari-hari satu developer:
+Diukur pada biner rilis dengan memutar ulang **7.095 eksekusi perintah nyata**
+sepanjang **3 sampai 10 Agustus 2026 UTC**, semuanya output yang sampai ke model.
+Jendela waktunya bagian dari angkanya: `execution_traces` dipangkas setelah tujuh
+hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 
-* **Pada perintah yang memang menghasilkan noise, 76 sampai 91%.** `cargo` 91,4%,
-  `git` 89,2%, `kubectl` 76,5%. Di situlah anggaran konteks Anda habis, dan di situ
-  pula OMNI bekerja.
-* **OMNI bertindak pada 1 dari 10 perintah, dan menambahkan nol byte pada 9 sisanya.**
-  Ia filter, bukan peringkas. Kalau tidak ada yang bisa dipotong ia menyingkir
-  sepenuhnya.
-* **Tidak satu pun dari 9.965 panggilan membuat outputnya lebih besar.**
-* **43,3% lebih sedikit byte** di seluruh campuran perintah, yang bising dan yang
-  tenang sekaligus.
+* **Di tempat yang berisik, filternya mengambil hampir semuanya.** Output build dan
+  test 87,9%, dan 92,3% setelah ledger sesi ikut dihitung. Di tempat yang tidak
+  berisik mereka tidak mengambil apa pun, dan tabel `kubectl get pods` 0%, karena
+  setiap barisnya adalah data.
+* **Ledger menjangkau apa yang tidak bisa dijangkau penyaringan.** Baca ulang berkas
+  adalah kelas terbesar dengan 1,54 MB, filternya mengambil 0,0% dari situ, dan
+  mengembalikan baris yang sudah pernah ditunjukkan ke agen mengambil 24,6%.
+* **97,1% panggilan tidak menghemat apa pun** dan menyerahkan outputnya apa adanya.
+  Seluruh penghematan datang dari 2,9% sisanya.
+* **2 panggilan dari 7.095 justru membesar**, kami laporkan alih-alih dibulatkan
+  hilang ([#398](https://github.com/fajarhide/omni/issues/398)).
+* **15,7% lebih sedikit byte** di seluruh campuran perintah, 5,2% di antaranya dari
+  filter dan sisanya dari ledger. Dihitung dalam token, filternya saja 5,0%.
 * **21 ms per perintah** dari ujung ke ujung, tumbuh bersama riwayat Anda dan bukan
   bersama ukuran payload. Pada database 205 MB angkanya 61 ms.
 
@@ -140,7 +146,7 @@ penggunaan sehari-hari satu developer:
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Korpus lengkap, rincian per perintah, fixture dan tabel latensi:
+Korpus lengkap, rincian per kelas, fixture dan tabel latensi:
 **[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**. Reproduksi dengan
 `cargo test --release --test bench_replay -- --ignored`.
 
@@ -151,9 +157,9 @@ menentukan apakah angka itu berarti, dan jawaban kami:
 
 | Pertanyaan | Kenapa penting | OMNI |
 |---|---|---|
-| Berapa porsi panggilan yang **tidak** menghemat apa pun? | Tool yang menghemat pada setiap perintah sedang meringkas output yang Anda butuhkan | **90,0%**, kami terbitkan |
-| Adakah panggilan yang membuat output **lebih besar**? | Penanda dan header memakan byte, dan tidak ada yang melaporkan yang jadi bumerang | **0 dari 9.965** |
-| **Populasi** mana yang diukur? | Menghitung byte terminal yang tidak dibaca model menaikkan angka secara gratis | hanya yang sampai ke model, dan mengakuinya membuat kami kehilangan 36 poin |
+| Berapa porsi panggilan yang **tidak** menghemat apa pun? | Tool yang menghemat pada setiap perintah sedang meringkas output yang Anda butuhkan | **97,1%**, kami terbitkan |
+| Adakah panggilan yang membuat output **lebih besar**? | Penanda dan header memakan byte, dan tidak ada yang melaporkan yang jadi bumerang | **2 dari 7.095**, dan keduanya punya nomor issue |
+| **Populasi** mana yang diukur? | Menghitung byte terminal yang tidak dibaca model menaikkan angka secara gratis | hanya yang sampai ke model, yang menghabiskan 36 poin terakhir kali sebuah korpus memuat baris terminal |
 | Bisakah Anda **menjalankannya ulang**? | Angka yang tidak bisa direproduksi itu klaim, bukan pengukuran | satu perintah, pada data Anda sendiri |
 | Apakah potongannya **bisa dipulihkan**? | Lossy tidak masalah kalau reversibel, dan fatal kalau tidak | byte demi byte, lewat `omni_retrieve` |
 
@@ -224,7 +230,7 @@ sama, siap disalin.
 ## Selengkapnya
 
 * [Cara kerjanya, dan berapa biayanya](../docs/ARCHITECTURE.md): pipeline, RewindStore, Memory OS
-* [Tolok ukur lengkap](../docs/BENCHMARKS.md): korpus, per perintah, fixture, latensi
+* [Tolok ukur lengkap](../docs/BENCHMARKS.md): korpus, per kelas, fixture, latensi
 * [Kontribusi](../CONTRIBUTING.md): jalankan `make ci` dan Anda sudah ikut
 
 ---
