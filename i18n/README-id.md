@@ -140,8 +140,9 @@ hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 * Output build dan test: **87,9%**. Baca ulang berkas, kelas terbesar: **0,0%** dari
   filter dan **24,6%** dari ledger, dan celah itulah alasan ledger ada.
 * **97,1% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
-  itulah yang memberi tahu Anda seberapa berarti sisanya. **2 panggilan justru
-  membesar** ([#398](https://github.com/fajarhide/omni/issues/398)).
+  itulah yang memberi tahu Anda seberapa berarti sisanya. **Tidak ada panggilan yang
+  justru membesar** pada putaran ini, setelah
+  [#410](https://github.com/fajarhide/omni/issues/410) memperbaiki dua yang dulu begitu.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.
 

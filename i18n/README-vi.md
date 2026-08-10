@@ -141,8 +141,9 @@ một tập dữ liệu biến mất một tuần sau khi được đo.
 * Đầu ra build và test **87,9%**. Lớp lớn nhất là đọc lại tệp: bộ lọc lấy **0,0%**, ledger
   lấy **24,6%**, và chính khoảng cách đó là lý do ledger tồn tại.
 * **97,1% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
-  phần còn lại đáng giá bao nhiêu. **2 lệnh gọi làm đầu ra lớn hơn**
-  ([#398](https://github.com/fajarhide/omni/issues/398)).
+  phần còn lại đáng giá bao nhiêu. **Không lệnh gọi nào làm đầu ra lớn hơn**
+  ở lần chạy này, sau khi [#410](https://github.com/fajarhide/omni/issues/410) sửa hai
+  trường hợp từng như vậy.
 * **21 ms mỗi lệnh**, lớn dần theo lịch sử của bạn chứ không theo kích thước payload. Với
   cơ sở dữ liệu 205 MB con số là 61 ms.
 <div align="center">

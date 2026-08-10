@@ -144,8 +144,8 @@ command executions that reached a model:
 * Build and test output: **87.9%**. File re-reads, the largest class: **0.0%** from
   the filters and **24.6%** from the ledger, which is the gap the ledger exists for.
 * **97.1% of calls saved nothing at all**, and we publish that because it tells you
-  what the rest are worth. **2 calls came back larger**
-  ([#398](https://github.com/fajarhide/omni/issues/398)).
+  what the rest are worth. **No call came back larger** on this run, after
+  [#410](https://github.com/fajarhide/omni/issues/410) fixed the two that did.
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
 
