@@ -121,6 +121,20 @@ pub enum Tier {
 
 impl Tier {
     /// One line for `doctor`, phrased as the thing a user actually wants to know.
+    /// The tier alone, for the per-host line. `label()` carries the tier plus its
+    /// explanation, and printing that in full once per host meant ten identical
+    /// sentences on a machine with ten MCP-only hosts (#426). The line itself has
+    /// to stay per host: "hooks installed" and "the model reads less" are
+    /// different claims, and three integrations shipped the first while
+    /// delivering none of the second (#351).
+    pub fn name(self) -> &'static str {
+        match self {
+            Tier::Full => "Full",
+            Tier::HandoffFirst => "Handoff-first",
+            Tier::McpOnly => "MCP-only",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Tier::Full => "Full: model-facing distill active",

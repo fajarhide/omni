@@ -542,10 +542,21 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!(
             "   {:<15} {}",
             "Distill tier:".bright_black(),
-            agent.tier().label().bright_black()
+            agent.tier().name().bright_black()
         );
         // Note: integrations are optional; "not configured" should not fail doctor
     }
+    // The three tier sentences, once. They used to arrive in full on every host
+    // line, which on this machine meant the MCP-only explanation ten times in a
+    // block of a hundred lines (#426). The per-host line above still names the
+    // tier, so nothing #351 asked for is lost.
+    println!(
+        "   {:<15} {}",
+        "".bright_black(),
+        "Full = model-facing distill active · Handoff-first = built-in tool output not rewritten, omni_run distils what you route through it · MCP-only = memory and session state, no shell distill"
+            .bright_black()
+    );
+
     if !any_agent_ok {
         warnings.push(
             "No agent integrations are configured. Run `omni init` to set up hooks + MCP for your agent."
