@@ -241,8 +241,16 @@ fn stream_distill<R: Read, W: Write, E: Write>(
         raw_bytes += line_buffer.len();
 
         let line_str = String::from_utf8_lossy(&line_buffer);
-        let is_cr = line_str.ends_with('\r');
         let clean_line = line_str.trim_end_matches(['\n', '\r']);
+        // The line's own terminator, byte for byte, and empty when the input's
+        // last line had none. The old code chose between `\r` and `\n` and always
+        // wrote one, which did two things (#398). It appended a newline the input
+        // never had, so a passthrough came back one byte larger than it went in,
+        // against a published claim that no call ever grows: 2 of 7,032 replayed
+        // traces, both `podman run`, both exactly +1. And it rewrote every CRLF
+        // as LF, because `read_until(b'\n')` leaves the `\r` inside the trimmed
+        // part and the branch then only saw the `\n`.
+        let terminator = line_str.strip_prefix(clean_line).unwrap_or("");
 
         // We apply filter line by line, which is why this is `apply_line`: the
         // whole-payload `apply` ends in the `on_empty` zero-state, and answering
@@ -251,12 +259,7 @@ fn stream_distill<R: Read, W: Write, E: Write>(
         let filtered = filter.apply_line(clean_line);
         if !filtered.trim().is_empty() {
             truncated_output.write_all(filtered.as_bytes())?;
-
-            if is_cr {
-                truncated_output.write_all(b"\r")?;
-            } else {
-                truncated_output.write_all(b"\n")?;
-            }
+            truncated_output.write_all(terminator.as_bytes())?;
             truncated_output.flush()?;
         }
 
@@ -1068,6 +1071,46 @@ mod tests {
         let out_str = String::from_utf8(out).expect("must succeed");
 
         assert_eq!(out_str, input);
+    }
+
+    /// #398. Two of 7,032 replayed traces came back **one byte larger** than they
+    /// went in, against a published claim that no call ever grows. Both are
+    /// `podman run`, which `docker.toml` claims in stream mode.
+    ///
+    /// Neither line here matches a strip pattern, so the filter changes nothing
+    /// and the only difference the writer can make is the terminator. The
+    /// fixture deliberately ends without a newline, which is the case the old
+    /// writer could not represent: it chose between `\r` and `\n` and always
+    /// wrote one.
+    ///
+    /// This could not be written until #406 landed, because before it a stripped
+    /// line came back as the `on_empty` sentence and swamped a one byte delta.
+    ///
+    /// CRLF is deliberately not asserted here. The reader breaks a line on `\r`
+    /// as well as `\n`, on purpose, so a progress bar redraw is its own line;
+    /// that splits `\r\n` into two reads and drops the second. Pre-existing,
+    /// unchanged by this fix, and filed separately.
+    #[test]
+    fn adds_no_terminator_the_input_did_not_have() {
+        let input = "Resolved short name alpine\ndone";
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some("podman run --rm alpine true"),
+        )
+        .expect("must succeed");
+
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            input,
+            "the stream writer invented a line ending"
+        );
     }
 
     /// #406. `docker.toml` is stream-mode, strips `^Copying blob ` and sets
