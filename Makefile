@@ -13,9 +13,18 @@ clippy:
 
 test:
 	@echo "=== Running Tests ==="
-	cargo test --all
-	@echo "=== Verifying Snapshots ==="
-	cargo insta test
+	# One run, not two. `cargo insta test` is `cargo test` with insta's assertion
+	# mode changed, so running it after `cargo test --all` re-executed the whole
+	# suite and reported what the first run had already decided: 11s of the CI job
+	# and 44s to 55s of a warm local one. `--check` is the stricter of the two
+	# modes, since it refuses to write a `.snap.new` and fails instead, so this
+	# tightens the gate while halving its runs. Update snapshots the documented
+	# way, with `cargo insta review`.
+	#
+	# `--all` is insta's own flag, not cargo's. Behind a `--` it reaches libtest
+	# instead, which answers `Unrecognized option: 'all'` once per target and
+	# fails the phase.
+	cargo insta test --check --all
 
 security:
 	@echo "=== Running Security Audit ==="
@@ -48,9 +57,9 @@ security:
 
 binary-check:
 	@echo "=== Building Release Binary ==="
-	cargo build --release
+	cargo build --profile ci
 	@echo "=== Checking Binary Size ==="
-	@SIZE=$$(stat -c%s target/release/omni 2>/dev/null || stat -f%z target/release/omni); \
+	@SIZE=$$(stat -c%s target/ci/omni 2>/dev/null || stat -f%z target/ci/omni); \
 	SIZE_MB=$$((SIZE / 1048576)); \
 	echo "Binary size: $${SIZE_MB}MB ($${SIZE} bytes)"; \
 	if [ $$SIZE -gt 15728640 ]; then \
@@ -67,7 +76,7 @@ binary-check:
 	# session history feeds the scorer, so inheriting whatever `cargo test`
 	# left behind makes those assertions depend on test ordering.
 	rm -rf $(CURDIR)/target/omni-smoke
-	OMNI_HOME=$(CURDIR)/target/omni-smoke tests/smoke_test.sh ./target/release/omni
+	OMNI_HOME=$(CURDIR)/target/omni-smoke tests/smoke_test.sh ./target/ci/omni
 
 ci: fmt clippy test security binary-check
 	@echo "========================================"
