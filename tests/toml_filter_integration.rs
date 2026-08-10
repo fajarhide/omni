@@ -7,6 +7,13 @@
 //! To add tests for a new filter, add a new module below following the pattern.
 
 use std::path::Path;
+use std::sync::Mutex;
+
+/// `set_current_dir` is process-wide, and cargo runs tests in parallel. A test
+/// that changes it without holding this has broken a different test on a
+/// different machine before now, so every cwd-mutating test in this file takes
+/// it first and restores the directory before releasing it.
+static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -154,6 +161,52 @@ mod eslint {
         assert_matches(f, "eslint .");
         assert_matches(f, "eslint src/ --fix");
         assert_matches(f, "prettier --write .");
+    }
+
+    /// #433. Project-local signals are documented as the highest priority tier
+    /// and had never loaded: all three callers handed `is_trusted` the config
+    /// **file** where it expects the project **directory** and appends the name
+    /// itself, so the existence check failed before the trust registration was
+    /// ever consulted.
+    ///
+    /// Drives `load_all_filters` from inside a real project directory, because
+    /// that is the only level at which the defect is visible: every unit test on
+    /// `is_trusted` passed, since they call it the way it was meant to be called.
+    #[test]
+    fn a_trusted_project_can_add_its_own_signal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".omni").join("signals")).expect("dirs");
+        std::fs::write(
+            dir.path().join(".omni").join("signals").join("local.toml"),
+            "schema_version = 1\n\n[filters.project_only_probe]\ndescription = \"probe\"\nmatch_command = \"^probe-cmd\\\\b\"\nstrip_lines_matching = [\"^noise\"]\n",
+        )
+        .expect("write signal");
+        std::fs::write(dir.path().join("omni_config.json"), "{\"trusted\": true}").expect("cfg");
+
+        let guard = CWD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let previous = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir");
+
+        let untrusted = omni::pipeline::toml_filter::load_all_filters();
+        // Trust the path the loader will actually see. On macOS `tempdir()` hands
+        // back `/var/...` while `current_dir()` resolves the symlink to
+        // `/private/var/...`, and the trust registry is keyed on the string, so
+        // trusting the unresolved one registers a project nothing looks up.
+        let here = std::env::current_dir().expect("cwd");
+        omni::guard::trust::trust_project(&here).expect("trust");
+        let trusted = omni::pipeline::toml_filter::load_all_filters();
+
+        std::env::set_current_dir(previous).expect("restore cwd");
+        drop(guard);
+
+        let named = |fs: &[omni::pipeline::toml_filter::TomlFilter]| {
+            fs.iter().any(|f| f.name.contains("project_only_probe"))
+        };
+        assert!(
+            !named(&untrusted),
+            "an untrusted project must not be loaded"
+        );
+        assert!(named(&trusted), "a trusted project's own signal must load");
     }
 
     /// biome used to be claimed here and saved 0.0% on it: eslint prints a line
