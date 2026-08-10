@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Đừng trả tiền để Claude đọc 10.000 dòng nhiễu terminal nữa.</b> OMNI cắt <code>git</code> 89%, <code>cargo</code> 91% và <code>kubectl</code> 77% trước khi agent của bạn kịp nhìn thấy. Mọi thứ còn lại đi qua nguyên vẹn. Không mất gì cả, và nó không bao giờ bịa ra kết quả.</em>
+    <em><b>Đừng trả tiền để Claude đọc 10.000 dòng nhiễu terminal nữa.</b> Trong một tuần làm việc thật của một lập trình viên, OMNI cắt 88% đầu ra build và test cùng một phần tư mọi thứ agent đọc lại, 15,7% trên toàn bộ tổ hợp. 97% lệnh gọi còn lại đi qua nguyên vẹn. Không mất gì cả, và nó không bao giờ bịa ra kết quả.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-<code>git</code> 89% &middot; <code>cargo</code> 91% &middot; <code>kubectl</code> 77% &middot; 21 ms mỗi lệnh &middot; 0 trong 9.965 lệnh gọi làm đầu ra lớn hơn &middot; mọi phần bị cắt đều khôi phục được từng byte &middot; bộ nhớ xuyên phiên </b>
+build và test 88% &middot; đọc lại tệp 25% &middot; 15,7% trên toàn tổ hợp &middot; 21 ms mỗi lệnh &middot; 2 trong 7.095 lệnh gọi làm đầu ra lớn hơn, và chúng tôi nói ra &middot; mọi phần bị cắt đều khôi phục được từng byte &middot; bộ nhớ xuyên phiên </b>
 
 </br></br>
 
@@ -113,7 +113,7 @@ Các bộ nén khác đề nghị bạn *tin* rằng thứ họ cắt đi không
 | **Không bao giờ bịa kết quả** | bộ chưng cất không phân tích được tín hiệu nào sẽ trả về đầu ra thô, chứ không phải một dòng xanh `no errors` hay `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Thất bại không bao giờ bị che** | lệnh thoát với mã khác 0 được cho qua nguyên vẹn | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Dữ liệu có cấu trúc không bị chạm** | JSON / YAML / NDJSON / CSV đi qua từng byte một | `pipeline::format` |
-| **Số liệu là đo được, không phải kỳ vọng** | 9.965 trace thật phát lại trên bản binary phát hành, và 90,0% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
+| **Số liệu là đo được, không phải kỳ vọng** | 7.095 trace thật phát lại trên bản binary phát hành, và 97,1% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
 
 Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
 
@@ -121,16 +121,23 @@ Các bộ nén khác đề nghị bạn *tin* rằng thứ họ cắt đi không
 
 ## Đo đạc
 
-Đo trên bản binary phát hành bằng cách phát lại **9.965 lần thực thi lệnh thật** từ
-thói quen sử dụng của một lập trình viên:
+Đo trên bản binary phát hành bằng cách phát lại **7.095 lần thực thi lệnh thật**
+trong khoảng **3 đến 10 tháng 8 năm 2026 UTC**, tất cả đều là đầu ra tới được mô hình.
+Khoảng thời gian là một phần của con số: `execution_traces` bị cắt sau bảy ngày, nên
+một tập dữ liệu biến mất một tuần sau khi được đo.
 
-* **Trên những lệnh thực sự sinh nhiễu, 76 đến 91%.** `cargo` 91,4%, `git` 89,2%,
-  `kubectl` 76,5%. Đó là nơi ngân sách ngữ cảnh của bạn tiêu hết, và cũng là nơi OMNI
-  làm việc.
-* **OMNI ra tay với 1 lệnh trong 10, và thêm 0 byte vào 9 lệnh còn lại.** Nó là bộ lọc,
-  không phải bộ tóm tắt. Khi không có gì để cắt, nó tránh đường hoàn toàn.
-* **Không một lệnh gọi nào trong 9.965 làm đầu ra lớn hơn.**
-* **Giảm 43,3% số byte** trên toàn bộ tổ hợp, cả lệnh ồn ào lẫn lệnh yên tĩnh.
+* **Ở chỗ có nhiễu, bộ lọc lấy gần như toàn bộ.** Đầu ra build và test là 87,9%, và
+  92,3% khi tính cả ledger phiên. Ở chỗ không có nhiễu chúng không lấy gì, và bảng
+  `kubectl get pods` là 0%, vì mỗi dòng trong đó đều là dữ liệu.
+* **Ledger với tới phần mà lọc không với tới được.** Đọc lại tệp là lớp lớn nhất với
+  1,54 MB, bộ lọc lấy 0,0% trong đó, còn việc trả lại những dòng agent đã được xem
+  lấy 24,6%.
+* **97,1% lệnh gọi không tiết kiệm được gì** và trả nguyên đầu ra. Toàn bộ phần tiết
+  kiệm đến từ 2,9% còn lại.
+* **2 lệnh gọi trong 7.095 trở nên lớn hơn**, chúng tôi báo cáo thay vì làm tròn cho
+  mất ([#398](https://github.com/fajarhide/omni/issues/398)).
+* **Giảm 15,7% số byte** trên toàn bộ tổ hợp, trong đó bộ lọc là 5,2% và phần còn lại
+  là ledger. Tính theo token, riêng bộ lọc là 5,0%.
 * **21 ms mỗi lệnh** từ đầu tới cuối, lớn dần theo lịch sử của bạn chứ không theo kích
   thước payload. Với cơ sở dữ liệu 205 MB con số là 61 ms.
 
@@ -138,7 +145,7 @@ thói quen sử dụng của một lập trình viên:
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Toàn bộ tập dữ liệu, phân tích theo lệnh, fixture và bảng độ trễ:
+Toàn bộ tập dữ liệu, phân tích theo lớp lệnh, fixture và bảng độ trễ:
 **[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**. Tái lập bằng
 `cargo test --release --test bench_replay -- --ignored`.
 
@@ -149,9 +156,9 @@ Công cụ nào trong nhóm này cũng công bố một tỉ lệ phần trăm. 
 
 | Câu hỏi | Vì sao quan trọng | OMNI |
 |---|---|---|
-| Bao nhiêu phần trăm lệnh gọi **không** tiết kiệm được gì? | Công cụ tiết kiệm trên mọi lệnh là đang tóm tắt phần đầu ra bạn cần | **90,0%**, có công bố |
-| Có lệnh gọi nào làm đầu ra **lớn hơn** không? | Dấu và tiêu đề đều tốn byte, và không ai báo cáo những lần phản tác dụng | **0 trong 9.965** |
-| Đã đo trên **tập hợp** nào? | Đếm cả byte terminal không mô hình nào đọc là cách thổi phồng miễn phí | chỉ phần tới được mô hình, và nói ra điều đó khiến chúng tôi mất 36 điểm |
+| Bao nhiêu phần trăm lệnh gọi **không** tiết kiệm được gì? | Công cụ tiết kiệm trên mọi lệnh là đang tóm tắt phần đầu ra bạn cần | **97,1%**, có công bố |
+| Có lệnh gọi nào làm đầu ra **lớn hơn** không? | Dấu và tiêu đề đều tốn byte, và không ai báo cáo những lần phản tác dụng | **2 trong 7.095**, và chúng có số issue |
+| Đã đo trên **tập hợp** nào? | Đếm cả byte terminal không mô hình nào đọc là cách thổi phồng miễn phí | chỉ phần tới được mô hình, điều đã khiến chúng tôi mất 36 điểm lần gần nhất một tập dữ liệu có chứa dòng terminal |
 | Bạn có **chạy lại** được không? | Con số không tái lập được là một tuyên bố, không phải một phép đo | một lệnh, trên dữ liệu của chính bạn |
 | Phần bị cắt có **khôi phục** được không? | Có mất mát thì ổn nếu đảo ngược được, và chí mạng nếu không | từng byte một, qua `omni_retrieve` |
 
@@ -222,7 +229,7 @@ tiện sao chép.
 ## Tìm hiểu thêm
 
 * [Cách hoạt động và cái giá của nó](../docs/ARCHITECTURE.md): pipeline, RewindStore, Memory OS
-* [Đo đạc đầy đủ](../docs/BENCHMARKS.md): tập dữ liệu, theo lệnh, fixture, độ trễ
+* [Đo đạc đầy đủ](../docs/BENCHMARKS.md): tập dữ liệu, theo lớp lệnh, fixture, độ trễ
 * [Đóng góp](../CONTRIBUTING.md): chạy được `make ci` là xong
 
 ---

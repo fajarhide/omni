@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Stop paying Claude to read 10,000 lines of terminal noise.</b> OMNI cuts <code>git</code> by 89%, <code>cargo</code> by 91% and <code>kubectl</code> by 77% before your agent ever sees them. Everything else passes through untouched. Nothing is ever lost, and it never invents a result.</em>
+    <em><b>Stop paying Claude to read 10,000 lines of terminal noise.</b> Over one developer's real week, OMNI cut 88% of build and test output and a quarter of everything the agent re-read, 15.7% across the whole mix. The other 97% of calls passed through untouched. Nothing is ever lost, and it never invents a result.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -16,7 +16,7 @@
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 <b>
-<code>git</code> 89% &middot; <code>cargo</code> 91% &middot; <code>kubectl</code> 77% &middot; 21 ms per command &middot; 0 of 9,965 calls ever grew the output &middot; every cut recoverable byte for byte &middot; cross-session memory </b>
+build and test 88% &middot; file re-reads 25% &middot; 15.7% across the mix &middot; 21 ms per command &middot; 2 of 7,095 calls grew the output, and we say so &middot; every cut recoverable byte for byte &middot; cross-session memory </b>
 
 </br></br>
 
@@ -114,17 +114,24 @@ read.
 
 ## Benchmarks
 
-Measured on the release binary by replaying **9,965 real command executions** from
-one developer's actual usage:
+Measured on the release binary by replaying **7,095 real command executions**
+covering **2026-08-03 to 08-10 UTC**, every one of them output that reached a model.
+The window is part of the figure: `execution_traces` is pruned after seven days, so
+a corpus is gone a week after it is measured.
 
-* **On the commands that actually generate noise, 76 to 91%.** `cargo` 91.4%,
-  `git` 89.2%, `kubectl` 76.5%. That is where your context budget goes, and that
-  is where OMNI works.
-* **OMNI acts on 1 command in 10, and adds zero bytes to the other 9.** It is a
-  filter, not a summariser. When there is nothing to cut it gets out of the way
-  completely.
-* **Not one call in 9,965 made the output larger.**
-* **43.3% fewer bytes** across the entire mix, noisy and quiet commands together.
+* **Where there is noise, the filters take almost all of it.** Build and test
+  output is 87.9%, and 92.3% once the session ledger is counted. Where there is no
+  noise they take nothing, and a `kubectl get pods` table is 0%, because every row
+  in it is a datum.
+* **The ledger reaches what filtering cannot.** File re-reads are the largest class
+  at 1.54 MB, the filters take 0.0% of them, and handing back lines the agent has
+  already been shown takes 24.6%.
+* **97.1% of calls saved nothing at all** and handed the output straight back.
+  Every byte of the saving comes from the other 2.9%.
+* **2 calls of 7,095 came back larger**, reported rather than rounded away
+  ([#398](https://github.com/fajarhide/omni/issues/398)).
+* **15.7% fewer bytes** across the whole mix, of which the filters are 5.2% and the
+  ledger is the rest. Counted in tokens the filters alone are 5.0%.
 * **21 ms per command** end to end, growing with your history rather than with the
   payload. On a 205 MB database it is 61 ms.
 
@@ -132,7 +139,7 @@ one developer's actual usage:
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Full corpus, per-command breakdown, fixtures and latency tables:
+Full corpus, per-class breakdown, fixtures and latency tables:
 **[docs/BENCHMARKS.md](docs/BENCHMARKS.md)**. Reproduce them with
 `cargo test --release --test bench_replay -- --ignored`.
 
@@ -143,9 +150,9 @@ decide whether it means anything, and our answers:
 
 | Question | Why it matters | OMNI |
 |---|---|---|
-| What share of calls saved **nothing**? | A tool that saves on every command is summarising output you needed | **90.0%**, published |
-| Did any call make the output **larger**? | Markers and headers cost bytes; nobody reports the ones that backfire | **0 of 9,965** |
-| Which **population** was measured? | Counting terminal bytes no model reads inflates the number for free | model-facing only, and saying so costs us 36 points |
+| What share of calls saved **nothing**? | A tool that saves on every command is summarising output you needed | **97.1%**, published |
+| Did any call make the output **larger**? | Markers and headers cost bytes; nobody reports the ones that backfire | **2 of 7,095**, and they have an issue number |
+| Which **population** was measured? | Counting terminal bytes no model reads inflates the number for free | model-facing only, which cost 36 points the last time a corpus carried terminal rows |
 | Can you **re-run** it? | A number you cannot reproduce is a claim, not a measurement | one command, on your own data |
 | Is the cut **recoverable**? | Lossy is fine when it is reversible, and fatal when it is not | byte for byte, via `omni_retrieve` |
 
