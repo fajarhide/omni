@@ -1,8 +1,10 @@
 schema_version = 1
 
 [filters.eslint]
-description = "Filter noise from eslint, biome, and prettier check output"
-match_command = "(eslint|biome|prettier)"
+# `biome` moved to its own filter: this one claimed it and saved 0.0% on it,
+# because biome prints a block per diagnostic where eslint prints a line.
+description = "Filter noise from eslint and prettier check output"
+match_command = "(eslint|prettier)"
 strip_ansi = true
 strip_lines_matching = [
     "^✓ ",
