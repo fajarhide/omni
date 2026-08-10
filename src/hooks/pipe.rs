@@ -244,8 +244,11 @@ fn stream_distill<R: Read, W: Write, E: Write>(
         let is_cr = line_str.ends_with('\r');
         let clean_line = line_str.trim_end_matches(['\n', '\r']);
 
-        // We apply filter line by line
-        let filtered = filter.apply(clean_line);
+        // We apply filter line by line, which is why this is `apply_line`: the
+        // whole-payload `apply` ends in the `on_empty` zero-state, and answering
+        // "this filtered down to nothing" once per stripped line turned every
+        // piece of noise into a success sentence (#406).
+        let filtered = filter.apply_line(clean_line);
         if !filtered.trim().is_empty() {
             truncated_output.write_all(filtered.as_bytes())?;
 
@@ -1065,6 +1068,60 @@ mod tests {
         let out_str = String::from_utf8(out).expect("must succeed");
 
         assert_eq!(out_str, input);
+    }
+
+    /// #406. `docker.toml` is stream-mode, strips `^Copying blob ` and sets
+    /// `on_empty`. The stream loop applies the filter one line at a time, so the
+    /// whole-payload zero-state fired for every stripped line and each piece of
+    /// noise came back as `docker: image operation completed successfully`.
+    ///
+    /// Both halves matter: the output grew where it was meant to shrink, and it
+    /// asserted a successful image operation once per line it recognised nothing
+    /// in.
+    #[test]
+    fn never_answers_the_payload_zero_state_for_a_single_stripped_line() {
+        let input = "Resolved short name alpine\n\
+                     Copying blob sha256:aaa111\n\
+                     Copying blob sha256:bbb222\n\
+                     Copying config sha256:ccc333\n\
+                     done\n";
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some("podman run --rm alpine true"),
+        )
+        .expect("must succeed");
+
+        let out_str = String::from_utf8_lossy(&out);
+        assert!(
+            !out_str.contains("image operation completed successfully"),
+            "a stripped line was reported as a completed operation: {out_str:?}"
+        );
+        assert!(
+            out.len() <= input.len(),
+            "stripping three lines grew the output: {out_str:?}"
+        );
+    }
+
+    /// The zero-state still exists for the payload it was written for, or the
+    /// fix above would have deleted a real feature instead of scoping it.
+    #[test]
+    fn still_answers_the_zero_state_for_a_whole_payload() {
+        let filter = toml_filter::load_all_filters()
+            .into_iter()
+            .find(|f| f.matches("podman run --rm alpine true"))
+            .expect("docker.toml must claim this command");
+
+        assert_eq!(
+            filter.apply("Copying blob sha256:aaa111\nCopying config sha256:ccc333"),
+            "docker: image operation completed successfully"
+        );
     }
 
     /// The pipe path shares batch TOML filtering with PostToolUse. When every

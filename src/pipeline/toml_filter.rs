@@ -343,7 +343,27 @@ impl TomlFilter {
         }
     }
 
+    /// Applies the filter to a whole payload, zero-state included.
     pub fn apply(&self, input: &str) -> String {
+        self.apply_inner(input, true)
+    }
+
+    /// Applies the filter to **one line of a stream**, where `on_empty` must not
+    /// fire.
+    ///
+    /// `on_empty` answers "this payload filtered down to nothing, say so once".
+    /// `stream_distill` calls the filter per line, so the whole-payload version
+    /// answered it once per stripped line: `docker.toml` strips 16 noise
+    /// patterns, so a `podman build` emitting ten `Copying blob ...` lines came
+    /// back as ten copies of `docker: image operation completed successfully`
+    /// (#406). That grows the output it was meant to shrink and asserts a
+    /// successful image operation for each line it recognised nothing in, which
+    /// is the #224 defect wearing a different filter's name.
+    pub fn apply_line(&self, input: &str) -> String {
+        self.apply_inner(input, false)
+    }
+
+    fn apply_inner(&self, input: &str, zero_state: bool) -> String {
         let mut text = input.to_string();
 
         // 1. strip_ansi
@@ -411,8 +431,9 @@ impl TomlFilter {
             ));
         }
 
-        // 6. on_empty
-        if result.trim().is_empty()
+        // 6. on_empty, for a payload and never for a line (#406).
+        if zero_state
+            && result.trim().is_empty()
             && let Some(fallback) = &self.on_empty
         {
             return fallback.clone();
