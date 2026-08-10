@@ -5,6 +5,7 @@ mod distillers;
 mod graph;
 mod guard;
 mod hooks;
+mod ledger;
 mod mcp;
 mod paths;
 pub mod pipeline;

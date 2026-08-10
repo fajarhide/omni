@@ -548,8 +548,7 @@ fn distill(
                 input_text.len(),
                 crate::guard::limits::MAX_REWIND_BYTES
             )
-        } else if let Some(s) = store {
-            let hash = s.store_rewind(&input_text);
+        } else if let Some(hash) = store.and_then(|s| s.store_rewind(&input_text)) {
             let marker = if std::io::stdout().is_terminal() {
                 format!(
                     "\n{} {} {} {}. The hash {} stores the full output in RewindStore for retrieval.\n",
@@ -565,7 +564,9 @@ fn distill(
             r_hash = Some(hash);
             marker
         } else {
-            format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n")
+            // No store, or the insert did not land. Both leave the content
+            // unretrievable, so neither may print a handle for it (#388).
+            format!("\n[OMNI: {lost} omitted, full output not archived]\n")
         };
 
         // A marker that pushes the reply back over the guardrail costs

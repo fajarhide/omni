@@ -411,6 +411,51 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 all_ok = false;
             }
 
+            // Dead pages. Deleting rows does not shrink the file: SQLite keeps
+            // the pages on a freelist for reuse, and with `auto_vacuum = 0` they
+            // are never handed back. One prune left 142 MB of a 196 MB file
+            // holding 54 MB of data (#393). Reported always, reclaimed only when
+            // asked, because `VACUUM` rewrites the whole file.
+            if let Some((pages, free)) = store.page_stats() {
+                let share = 100 * free / pages.max(1);
+                if share < 40 {
+                    println!(
+                        "  {:<15} {share}% of {pages} pages free {}",
+                        "DB Space:".bright_black(),
+                        "[OK]".green().bold()
+                    );
+                } else if fix_mode {
+                    match store.vacuum() {
+                        Ok(()) => {
+                            let reclaimed = store.page_stats().map_or(free, |(_, f)| free - f);
+                            println!(
+                                "  {:<15} reclaimed {reclaimed} of {pages} pages {}",
+                                "DB Space:".bright_black(),
+                                "[FIXED]".green().bold()
+                            );
+                        }
+                        Err(e) => {
+                            println!(
+                                "  {:<15} vacuum failed: {e} {}",
+                                "DB Space:".bright_black(),
+                                "[WARNING]".yellow().bold()
+                            );
+                            warnings.push(format!("Could not reclaim database space: {e}"));
+                        }
+                    }
+                } else {
+                    println!(
+                        "  {:<15} {share}% of {pages} pages free {}",
+                        "DB Space:".bright_black(),
+                        "[WARNING]".yellow().bold()
+                    );
+                    warnings.push(
+                        "Most of the database file is dead space. Run `omni doctor --fix` to reclaim it."
+                            .to_string(),
+                    );
+                }
+            }
+
             if store.check_fts5() {
                 println!(
                     "  {:<15} available {}",

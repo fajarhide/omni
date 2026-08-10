@@ -13,6 +13,19 @@ use crate::pipeline::SessionState;
 
 /// Customizes each pooled connection with required PRAGMA settings.
 /// WAL mode is database-level and persists, but synchronous and foreign_keys are per-connection.
+///
+/// The last three are the in-process cache tier (#393). Asked whether omni should
+/// gain Redis-class caching, and the answer is that SQLite already has one and it
+/// was left at defaults: `cache_size` was `-2000`, two megabytes, against a 54 MB
+/// working set, so roughly 500 pages of 50,226 were cached. `mmap_size` and
+/// `temp_store` were unset, so a read-heavy projection paid syscall overhead and
+/// spilled temporary results to disk. None of this needs a second daemon.
+///
+/// **`busy_timeout` is deliberately absent.** rusqlite calls
+/// `sqlite3_busy_timeout(db, 5000)` itself in `inner_connection.rs`, so there is
+/// nothing to add here and setting it can only lower it. A source grep for the
+/// pragma finds nothing in this tree and reads like a missing setting, which is
+/// how an earlier attempt talked itself into shortening the wait.
 #[derive(Debug)]
 struct PragmaCustomizer;
 
@@ -21,7 +34,10 @@ impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
-             PRAGMA foreign_keys = ON;",
+             PRAGMA foreign_keys = ON;
+             PRAGMA cache_size = -65536;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA temp_store = MEMORY;",
         )?;
         Ok(())
     }
@@ -446,6 +462,20 @@ impl SqliteBackend {
             );
             CREATE INDEX IF NOT EXISTS idx_rewind_ts ON rewind_store(ts);
 
+            -- 4b. Session ledger: which lines a scope has already been shown.
+            -- Hashes only. The content of a run goes to `rewind_store` and only
+            -- when a handle is actually issued, so recording every emitted block
+            -- costs 16 bytes a line rather than a second copy of the corpus.
+            -- WITHOUT ROWID because every read is a primary-key probe and the
+            -- table is nothing but its key.
+            CREATE TABLE IF NOT EXISTS ledger_lines (
+                scope     TEXT NOT NULL,
+                line_hash TEXT NOT NULL,
+                ts        INTEGER NOT NULL,
+                PRIMARY KEY (scope, line_hash)
+            ) WITHOUT ROWID;
+            CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger_lines(ts);
+
             -- 5. FTS5 for session events
             CREATE VIRTUAL TABLE IF NOT EXISTS session_events USING fts5(
                 session_id UNINDEXED,
@@ -783,24 +813,14 @@ impl SqliteBackend {
             tx.commit()?;
         }
 
-        let migration_drop_ctx = "2026_08_drop_write_only_context_turns";
-        let ctx_applied: Option<i64> = conn
-            .query_row(
-                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
-                params![migration_drop_ctx],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if ctx_applied.is_none() {
-            let tx = conn.unchecked_transaction()?;
-            tx.execute("DROP INDEX IF EXISTS idx_ctx_session", [])?;
-            tx.execute("DROP TABLE IF EXISTS context_turns", [])?;
-            tx.execute(
-                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
-                params![migration_drop_ctx, chrono::Utc::now().timestamp()],
-            )?;
-            tx.commit()?;
-        }
+        // Unconditional, not migration-gated. Gated, the drop ran once, recorded
+        // itself as applied, and then a concurrently installed older binary
+        // recreated the table 12 seconds later. The migration never re-runs, so
+        // the table survived its own removal permanently (#379). A mixed-version
+        // machine is the normal case during an upgrade, and `DROP TABLE IF
+        // EXISTS` against a table that is already gone costs a catalogue lookup.
+        conn.execute("DROP INDEX IF EXISTS idx_ctx_session", [])?;
+        conn.execute("DROP TABLE IF EXISTS context_turns", [])?;
 
         let migration_id2 = "2026_05_token_backfill";
         let already_applied2: Option<i64> = conn
@@ -1039,7 +1059,8 @@ impl SqliteBackend {
             .unwrap_or_default()
     }
 
-    /// Archives `content` under its own hash and returns the key.
+    /// Archives `content` under its own hash and returns the key, or `None` when
+    /// the row did not land.
     ///
     /// The key is the content address and nothing else. It used to carry a
     /// nanosecond prefix, `{ts_ns}_{hash}`, which made every key unique and so
@@ -1051,28 +1072,33 @@ impl SqliteBackend {
     /// A repeat refreshes `ts` rather than being ignored, so content that is
     /// still being produced does not age out of the retention window on the
     /// strength of when it was first seen. `retrieved` is left alone.
-    pub fn store_rewind(&self, content: &str) -> String {
+    ///
+    /// The return used to be a bare `String` handed back on every path,
+    /// including a pool-get failure and a swallowed `execute`. The caller then
+    /// printed `omni_retrieve("<key>")` for content that is not in the table,
+    /// which is the one promise this store exists to keep (#388). Rare while the
+    /// archive fired on 139 of 14,962 calls; routine once the ledger records
+    /// every emitted block.
+    pub fn store_rewind(&self, content: &str) -> Option<String> {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         let rewind_key =
             crate::util::text::safe_slice(&hex::encode(hasher.finalize()), 16).to_string();
 
-        let conn = match self.pool.get() {
-            Ok(c) => c,
-            Err(_) => return rewind_key,
-        };
+        let conn = self.pool.get().ok()?;
 
         let ts = chrono::Utc::now().timestamp();
         let original_len = content.len() as i64;
 
-        let _ = conn.execute(
+        conn.execute(
             "INSERT INTO rewind_store (hash, content, ts, original_len, retrieved)
              VALUES (?1, ?2, ?3, ?4, 0)
              ON CONFLICT(hash) DO UPDATE SET ts = excluded.ts",
             params![rewind_key, content, ts, original_len],
-        );
+        )
+        .ok()?;
 
-        rewind_key
+        Some(rewind_key)
     }
 
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
@@ -1484,6 +1510,111 @@ impl SqliteBackend {
         );
     }
 
+    /// Which of `hashes` this scope has already been shown.
+    ///
+    /// Asked as a bounded `IN` probe rather than by loading the scope's whole
+    /// line set, because each hook is its own process: a session with 100,000
+    /// recorded lines would pay to read all of them to ask about 200. Chunked
+    /// under SQLite's default 32,766 parameter ceiling with room to spare.
+    ///
+    /// Fails to an empty set. A ledger that cannot read is a ledger that has
+    /// seen nothing, which costs a missed reduction and never a false claim.
+    pub fn ledger_seen(&self, scope: &str, hashes: &[String]) -> std::collections::HashSet<String> {
+        let mut found = std::collections::HashSet::new();
+        let Ok(conn) = self.pool.get() else {
+            return found;
+        };
+        // Distinct first: a payload that repeats a line inside itself would
+        // otherwise ask about it once per occurrence.
+        let unique: Vec<&String> = hashes
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        for chunk in unique.chunks(500) {
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT line_hash FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
+            );
+            let Ok(mut stmt) = conn.prepare_cached(&sql) else {
+                continue;
+            };
+            let params: Vec<&dyn rusqlite::ToSql> = std::iter::once(&scope as &dyn rusqlite::ToSql)
+                .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
+                .collect();
+            if let Ok(rows) = stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0)) {
+                found.extend(rows.flatten());
+            }
+        }
+        found
+    }
+
+    /// Records every line of an emitted block against a scope.
+    ///
+    /// Unconditional by design. The old archive gate demanded more than 40% noise
+    /// across more than 20 segments and fired on 139 of 14,962 calls, under 1%,
+    /// which is the right bound for "was this worth compressing" and the wrong
+    /// one for "might the agent see this again". A block is worth remembering
+    /// because it may recur.
+    ///
+    /// One transaction and one cached statement for the whole batch: this is the
+    /// loop where `prepare_cached` actually pays, unlike the one-shot statements
+    /// a hook process runs once each.
+    pub fn ledger_record(&self, scope: &str, hashes: &[String]) {
+        let Ok(mut conn) = self.pool.get() else {
+            return;
+        };
+        let ts = chrono::Utc::now().timestamp();
+        let Ok(tx) = conn.transaction() else {
+            return;
+        };
+        {
+            let Ok(mut stmt) = tx.prepare_cached(
+                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts) VALUES (?1, ?2, ?3)",
+            ) else {
+                return;
+            };
+            for h in hashes {
+                let _ = stmt.execute(params![scope, h, ts]);
+            }
+        }
+        let _ = tx.commit();
+    }
+
+    /// Pages in the file and how many of them are free, or `None` when the
+    /// database cannot be read.
+    ///
+    /// Measured 2026-08-09 on the maintainer's install: 50,226 pages with 36,264
+    /// on the freelist, a 196 MB file holding 54 MB of data. `cleanup_old` and
+    /// the trace pruning in #285 delete rows, and SQLite keeps their pages for
+    /// reuse rather than returning them, so a database that has been pruned once
+    /// stays large forever with `auto_vacuum = 0`.
+    pub fn page_stats(&self) -> Option<(i64, i64)> {
+        let conn = self.pool.get().ok()?;
+        let pages = conn.query_row("PRAGMA page_count", [], |r| r.get(0)).ok()?;
+        let free = conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))
+            .ok()?;
+        Some((pages, free))
+    }
+
+    /// Rewrites the file without its freelist.
+    ///
+    /// Operator-triggered, never on the hook path: it rewrites the whole
+    /// database, holds a write lock for the duration and needs free disk equal
+    /// to the file. `auto_vacuum = INCREMENTAL` was the alternative and is worse
+    /// here, because enabling it on an existing database needs a full `VACUUM`
+    /// first and then taxes every commit thereafter, to reclaim space this
+    /// workload loses in one prune a year.
+    pub fn vacuum(&self) -> Result<()> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        conn.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
     pub fn cleanup_old(&self, days: u32) {
         let conn = match self.pool.get() {
             Ok(c) => c,
@@ -1510,6 +1641,13 @@ impl SqliteBackend {
         );
         let _ = conn.execute(
             "DELETE FROM session_events WHERE ts < ?1",
+            params![ts_threshold],
+        );
+        // The ledger is per session and a session does not outlive the retention
+        // window, so its rows expire with everything else. Left unpruned it is
+        // the one table whose row count grows with every line ever shown.
+        let _ = conn.execute(
+            "DELETE FROM ledger_lines WHERE ts < ?1",
             params![ts_threshold],
         );
 
@@ -2978,6 +3116,40 @@ mod tests {
         assert_eq!(indexes, 0, "its index costs write latency too");
     }
 
+    /// #379. The drop was gated on a `schema_migrations` row, so once it had run
+    /// the table could be recreated by a concurrently installed older binary and
+    /// never be removed again. Seeding both the marker row and the table is that
+    /// machine, and the drop has to run anyway.
+    #[test]
+    fn drops_context_turns_even_when_its_migration_is_already_recorded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open");
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER);
+                 INSERT INTO schema_migrations (id, applied_at)
+                   VALUES ('2026_08_drop_write_only_context_turns', 0);
+                 CREATE TABLE context_turns (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL);
+                 INSERT INTO context_turns (session_id) VALUES ('resurrected');",
+            )
+            .expect("seed");
+        }
+
+        let _store = Store::open_path(&db).expect("store");
+
+        let conn = rusqlite::Connection::open(&db).expect("reopen");
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'context_turns'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(tables, 0, "a recorded migration must not protect the table");
+    }
+
     /// #274. The key carried a nanosecond prefix, so every key was unique and
     /// the `INSERT OR IGNORE` under it could never fire: the same output was
     /// archived again on every run. Harmless while the archive never fired at
@@ -2987,8 +3159,8 @@ mod tests {
         let (store, _dir) = get_temp_store();
         let content = "the same 200 lines of output";
 
-        let first = store.store_rewind(content);
-        let second = store.store_rewind(content);
+        let first = store.store_rewind(content).expect("archived");
+        let second = store.store_rewind(content).expect("archived");
 
         assert_eq!(first, second, "the key is the content, so it cannot differ");
         assert_eq!(
@@ -2999,14 +3171,34 @@ mod tests {
         assert_eq!(store.retrieve_rewind(&first), Some(content.to_string()));
     }
 
+    /// #388. The key used to come back on every path, including a swallowed
+    /// insert, so the caller printed `omni_retrieve("<key>")` for a row that was
+    /// never written. The archive's whole promise is that the handle resolves.
+    #[test]
+    fn reports_an_archive_write_that_did_not_land() {
+        let (store, _dir) = get_temp_store();
+        store
+            .pool
+            .get()
+            .expect("conn")
+            .execute("DROP TABLE rewind_store", [])
+            .expect("drop");
+
+        assert_eq!(store.store_rewind("content nobody can retrieve"), None);
+    }
+
     /// Different content still gets its own row, so the deduplication is by
     /// identity rather than by collapsing everything into one key.
     #[test]
     fn keeps_distinct_content_apart() {
         let (store, _dir) = get_temp_store();
 
-        let a = store.store_rewind("output of the first command");
-        let b = store.store_rewind("output of the second command");
+        let a = store
+            .store_rewind("output of the first command")
+            .expect("archived");
+        let b = store
+            .store_rewind("output of the second command")
+            .expect("archived");
 
         assert_ne!(a, b);
         assert_eq!(store.rewind_metrics().expect("metrics").0, 2);
@@ -3020,7 +3212,7 @@ mod tests {
     fn rewinds_and_retrieves_content() {
         let (store, _dir) = get_temp_store();
         let content = "this is some compressed content";
-        let hash = store.store_rewind(content);
+        let hash = store.store_rewind(content).expect("archived");
 
         // A content address and nothing else. The nanosecond prefix this used to
         // carry is what made `INSERT OR IGNORE` decoration (#274).
@@ -3053,8 +3245,8 @@ mod tests {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
 
-        let hash1 = store.store_rewind(content);
-        let hash2 = store.store_rewind(content);
+        let hash1 = store.store_rewind(content).expect("archived");
+        let hash2 = store.store_rewind(content).expect("archived");
 
         assert_eq!(store.retrieve_rewind(&hash1), Some(content.to_string()));
         assert_eq!(store.retrieve_rewind(&hash2), Some(content.to_string()));

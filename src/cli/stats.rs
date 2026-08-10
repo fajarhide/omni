@@ -690,6 +690,25 @@ fn run_default(store: &Store) -> Result<()> {
         .bright_magenta()
     );
 
+    // The fidelity alarm. An expansion request is an agent saying the view it
+    // was given was not enough, so a rising share of archived blocks being
+    // fetched back means the projection is cutting too much. The number was
+    // already being acted on silently: `post_tool` raises the route thresholds
+    // once a command family passes 25%. This makes the same signal visible
+    // rather than only effective.
+    if let Some(rate) = (100 * rewind_retrieved).checked_div(rewind_stored)
+        && rate >= 25
+    {
+        println!(
+            "  {:<20} {}",
+            "Fidelity:".bright_black(),
+            format!(
+                "{rate}% of archived blocks were fetched back, so distillation is cutting too much"
+            )
+            .yellow()
+        );
+    }
+
     print_separator();
     println!(
         "  {} for full breakdown",
