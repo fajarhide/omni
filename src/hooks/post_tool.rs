@@ -591,7 +591,9 @@ pub fn process_payload(
     // missed saving. No host id, no ledger.
     if let (Some(s), Some(scope)) = (store.as_ref(), normalized.host_session_id.as_deref())
         && crate::pipeline::format::sniff(&final_out).is_none()
-        && let Some(view) = crate::ledger::Ledger::new(s, scope).project(&final_out)
+        && let Some(view) = crate::ledger::Ledger::new(s, scope)
+            .with_project(&project_path)
+            .project(&final_out)
     {
         final_out = view;
     }

@@ -403,7 +403,11 @@ fn replay_execution_traces_net_savings() {
         let after_ledger = ledger_store
             .as_ref()
             .filter(|_| omni::pipeline::format::sniff(&distilled).is_none())
-            .and_then(|s| omni::ledger::Ledger::new(s, &t.session).project(&distilled));
+            .and_then(|s| {
+                omni::ledger::Ledger::new(s, &t.session)
+                    .with_project(&t.project)
+                    .project(&distilled)
+            });
         let l = match after_ledger {
             Some(view) => {
                 ledger_calls += 1;
