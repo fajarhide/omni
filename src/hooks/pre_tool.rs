@@ -51,6 +51,12 @@ struct PreHookInput {
     /// Claude shell inherits `CLAUDECODE=1` and would answer `claude_code`.
     #[serde(default)]
     turn_id: Option<String>,
+    /// The host's own session id. Forwarded to the rewritten child so `omni exec`
+    /// has a trustworthy ledger scope; without it that path ran no ledger stage
+    /// at all (#416). Claude Code sends it on every hook event, which is the same
+    /// field `hooks::normalize` reads for the post-hook.
+    #[serde(rename = "session_id", alias = "sessionId", default)]
+    session_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -118,7 +124,9 @@ fn process_payload(
     // the only chance to tell the child, which inherits nothing else (#360).
     let host = host_from_payload(parsed.hook_event_name.as_deref(), parsed.turn_id.is_some());
 
-    if let Some(rewritten) = crate::cli::rewrite::rewrite_logic(cmd_str, host) {
+    if let Some(rewritten) =
+        crate::cli::rewrite::rewrite_logic(cmd_str, host, parsed.session_id.as_deref())
+    {
         let mut updated_input = parsed.tool_input.clone();
         updated_input.command = Some(rewritten);
 

@@ -524,6 +524,22 @@ fn distill(
             )
         };
 
+    // The ledger stage, which this path did not have until #416. `post_tool`
+    // has run it since #397 and `pipe` never did, so a command the pre-hook
+    // rewrote into `omni exec` got the filters and nothing else. Same two
+    // gates as the other hook: structured payloads are never projected, and
+    // the scope is the host's session id and never `SessionState::session_id`,
+    // which is a wall-clock stamp that covered 16 projects in one value (#118).
+    // No forwarded id, no ledger, which is why the pre-hook now passes one.
+    if let (Some(s), Some(scope)) = (store, host_session())
+        && crate::pipeline::format::sniff(&output).is_none()
+        && let Some(view) = crate::ledger::Ledger::new(s, scope)
+            .with_project(&project_path)
+            .project(&output)
+    {
+        output = view;
+    }
+
     // Rewind decision, the same question `hooks::post_tool` asks and for
     // the same reason: is the reply about to be emitted missing bytes the
     // command produced? The old gate wanted more than 40% noise across
@@ -757,6 +773,29 @@ pub fn set_host_that_rewrote(agent: &str) {
     if !agent.trim().is_empty() {
         let _ = HOST_THAT_REWROTE.set(agent.to_string());
     }
+}
+
+/// The host's session id for this run, when the pre-hook passed one through.
+///
+/// The ledger cannot key on `SessionState::session_id`: that is a wall-clock
+/// stamp on globally persisted state and one such id covered 16 project paths and
+/// 3,739 commands (#118). Scoping by it would let the ledger tell one session it
+/// had been shown output that went to another, which is a false claim rather than
+/// a missed saving. So `omni exec` had no ledger at all until the pre-hook started
+/// forwarding this, which is what #416's check turned up: the two hooks were
+/// running different chains and only one of them had the stage.
+static HOST_SESSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Records the host session id this run belongs to. First call wins, for the same
+/// reason `set_host_that_rewrote` works that way.
+pub fn set_host_session(id: &str) {
+    if !id.trim().is_empty() {
+        let _ = HOST_SESSION.set(id.to_string());
+    }
+}
+
+fn host_session() -> Option<&'static str> {
+    HOST_SESSION.get().map(String::as_str)
 }
 
 /// Bytes from this run that reach a model's context.

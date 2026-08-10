@@ -197,6 +197,64 @@ fn trace_class(cmd: &str) -> &'static str {
     }
 }
 
+/// The rtk `pipe` filter that governs a command, if any.
+///
+/// Deliberately **generous to rtk**: it is handed the exact filter name, which
+/// its own hook has to infer from the command line. Anything unmapped gets its
+/// bytes back, which is what `rtk pipe` with no filter does anyway, and is the
+/// same treatment omni's passthrough gives.
+///
+/// Names come from `resolve_filter` in rtk's `cmds/system/pipe_cmd.rs`.
+fn rtk_filter(cmd: &str) -> Option<&'static str> {
+    let producer = omni::pipeline::registry::sole_output_command(cmd).unwrap_or(cmd);
+    let mut words = producer.split_whitespace();
+    let base = words.next().unwrap_or("").rsplit('/').next().unwrap_or("");
+    let sub = words.next().unwrap_or("");
+    Some(match (base, sub) {
+        ("cargo", _) => "cargo",
+        ("git", "log") => "git-log",
+        ("git", "diff") => "git-diff",
+        ("git", "status") => "git-status",
+        ("go", "test") => "go-test",
+        ("go", "build") => "go-build",
+        ("grep", _) | ("rg", _) => "grep",
+        ("find", _) | ("fd", _) => "find",
+        ("pytest", _) => "pytest",
+        ("mypy", _) => "mypy",
+        ("tsc", _) => "tsc",
+        ("vitest", _) => "vitest",
+        ("prettier", _) => "prettier",
+        ("phpunit", _) => "phpunit",
+        ("phpstan", _) => "phpstan",
+        ("pint", _) => "pint",
+        _ => return None,
+    })
+}
+
+/// Runs one payload through rtk, or hands it back when nothing claims it.
+fn rtk_bytes(rtk: &str, cmd: &str, raw: &str) -> u64 {
+    let Some(filter) = rtk_filter(cmd) else {
+        return raw.len() as u64;
+    };
+    use std::io::Write;
+    let Ok(mut child) = std::process::Command::new(rtk)
+        .args(["pipe", "--filter", filter])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return raw.len() as u64;
+    };
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(raw.as_bytes());
+    }
+    match child.wait_with_output() {
+        Ok(o) => o.stdout.len() as u64,
+        Err(_) => raw.len() as u64,
+    }
+}
+
 fn base_command(cmd: &str) -> String {
     cmd.split_whitespace()
         .find(|t| !t.contains('=') && !t.starts_with('-'))
@@ -326,6 +384,10 @@ fn replay_execution_traces_net_savings() {
     let ledger_store =
         omni::store::sqlite::Store::open_path(&ledger_dir.path().join("ledger.db")).ok();
     let (mut ledger_total, mut ledger_calls) = (0u64, 0u64);
+    // P4's head-to-head. Off unless `OMNI_BENCH_RTK` names an rtk binary, so CI
+    // never needs a competitor installed to run this benchmark.
+    let rtk = std::env::var("OMNI_BENCH_RTK").ok();
+    let (mut rtk_total, mut rtk_claimed) = (0u64, 0u64);
 
     let counter = Counter::new();
     let (mut n, mut raw_total, mut out_total) = (0u64, 0u64, 0u64);
@@ -416,6 +478,13 @@ fn replay_execution_traces_net_savings() {
             None => o,
         };
         ledger_total += l;
+
+        if let Some(rtk) = &rtk {
+            rtk_total += rtk_bytes(rtk, &t.command, &t.raw);
+            if rtk_filter(&t.command).is_some() {
+                rtk_claimed += 1;
+            }
+        }
 
         let c = per_class.entry(trace_class(&t.command)).or_default();
         c.0 += 1;
@@ -528,6 +597,34 @@ fn replay_execution_traces_net_savings() {
         saved(raw_total, out_total),
         saved(raw_total, ledger_total)
     );
+
+    // P4. One corpus, two tools, one command that reproduces it. rtk is handed
+    // the exact filter name for each command, which its own hook has to infer, so
+    // the comparison is tilted in its favour rather than ours.
+    if let Some(_r) = &rtk {
+        println!("\n--- head to head, same corpus (rtk given its filter name) ---");
+        println!(
+            "{:<22} {:>12} -> {:>12}  {:>7}",
+            "omni, filters only",
+            raw_total,
+            out_total,
+            format!("{:.1}%", saved(raw_total, out_total))
+        );
+        println!(
+            "{:<22} {:>12} -> {:>12}  {:>7}",
+            "omni, with ledger",
+            raw_total,
+            ledger_total,
+            format!("{:.1}%", saved(raw_total, ledger_total))
+        );
+        println!(
+            "{:<22} {:>12} -> {:>12}  {:>7}   ({rtk_claimed} of {n} claimed by a filter)",
+            "rtk pipe",
+            raw_total,
+            rtk_total,
+            format!("{:.1}%", saved(raw_total, rtk_total))
+        );
+    }
 
     // #395's gate. Printed next to the classes rather than in place of them,
     // because the question P2 asks is whether the shape a command was typed in

@@ -17,22 +17,27 @@ pub fn run_exec(
         std::process::exit(1);
     }
 
-    // `--agent <id>` is written by our own pre-hook, never by a user, and names
-    // the host that rewrote the command. It has to be consumed here or it would
-    // be executed as part of the command line (#360).
-    let rest = match args.get(2).map(String::as_str) {
-        Some("--agent") => {
-            // The flag with no command behind it is a malformed rewrite, not a
-            // command named `--agent`. Falling through executed the flag itself.
-            if args.len() <= 4 {
-                eprintln!("Usage: omni exec [--agent <id>] <command> [args...]");
-                std::process::exit(1);
-            }
-            crate::hooks::pipe::set_host_that_rewrote(&args[3]);
-            &args[4..]
+    // `--agent <id>` and `--session <id>` are written by our own pre-hook, never
+    // by a user. They name the host that rewrote the command and the session it
+    // belongs to, and both have to be consumed here or they run as part of the
+    // command line (#360). A loop rather than a match on one position, because
+    // there are two of them now and their order is the writer's business.
+    let mut i = 2;
+    while let (Some(flag), Some(value)) = (args.get(i).map(String::as_str), args.get(i + 1)) {
+        match flag {
+            "--agent" => crate::hooks::pipe::set_host_that_rewrote(value),
+            "--session" => crate::hooks::pipe::set_host_session(value),
+            _ => break,
         }
-        _ => &args[2..],
-    };
+        i += 2;
+    }
+    // A flag with no command behind it is a malformed rewrite, not a command
+    // named `--agent`. Falling through executed the flag itself.
+    if args.len() <= i {
+        eprintln!("Usage: omni exec [--agent <id>] [--session <id>] <command> [args...]");
+        std::process::exit(1);
+    }
+    let rest = &args[i..];
 
     let cmd = &rest[0];
     let cmd_args = &rest[1..];
