@@ -80,10 +80,13 @@ pub fn strip_exec_wrapper(command: &str) -> &str {
     let post_exec = after_verb;
     rest = post_exec;
 
-    // `--agent <id>` only ever appears immediately after `exec`, written by our
-    // own pre-hook. Without an id behind it there is nothing to drop.
-    if let Some((flag, after_flag)) = split_token(rest)
-        && flag == "--agent"
+    // `--agent <id>` and `--session <id>` only ever appear immediately after
+    // `exec`, written by our own pre-hook. A loop rather than one `if`, because
+    // there are two of them now: stripping only the first left `--session <uuid>`
+    // on the front of the command the registry reads, which is #375 exactly
+    // (`^git\b` stops matching) with a different flag.
+    while let Some((flag, after_flag)) = split_token(rest)
+        && matches!(flag, "--agent" | "--session")
         && let Some((_id, after_id)) = split_token(after_flag)
     {
         rest = after_id;
@@ -110,7 +113,7 @@ fn split_token(s: &str) -> Option<(&str, &str)> {
     })
 }
 
-pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>) -> Option<String> {
+pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>, session: Option<&str>) -> Option<String> {
     let allow_list = [
         "git ",
         "cargo ",
@@ -146,10 +149,20 @@ pub fn rewrite_logic(cmd_str: &str, agent: Option<&str>) -> Option<String> {
         // ambient environment (#360). A flag rather than an `OMNI_AGENT_ID=`
         // prefix: the prefix is shell dependent, and the command string is later
         // read back by the registry, which would have to strip it again.
-        return Some(match agent {
-            Some(id) if !id.is_empty() => format!("{} exec --agent {} {}", exe_name, id, cmd_str),
-            _ => format!("{} exec {}", exe_name, cmd_str),
-        });
+        // The session id rides the same mechanism, and for a sharper reason than
+        // the agent id: without it the child has no trustworthy scope for the
+        // ledger, so `omni exec` ran no ledger stage at all while the post-hook
+        // ran one (#416).
+        let mut wrapped = format!("{exe_name} exec");
+        if let Some(id) = agent.filter(|i| !i.is_empty()) {
+            wrapped.push_str(&format!(" --agent {id}"));
+        }
+        if let Some(id) = session.filter(|i| !i.is_empty()) {
+            wrapped.push_str(&format!(" --session {id}"));
+        }
+        wrapped.push(' ');
+        wrapped.push_str(cmd_str);
+        return Some(wrapped);
     }
 
     None
@@ -206,10 +219,40 @@ mod tests {
     }
     use super::rewrite_logic;
 
+    /// #416. The session id rides the same mechanism as `--agent`, so the
+    /// stripper has to drop **both** or the registry reads a command that starts
+    /// with a flag. That is #375 exactly, where an unstripped wrapper stopped
+    /// `^git\b` filters matching, one flag later.
+    #[test]
+    fn strips_every_flag_the_pre_hook_writes() {
+        assert_eq!(
+            strip_exec_wrapper("/opt/omni exec --agent claude_code --session abc-123 git status"),
+            "git status"
+        );
+        assert_eq!(
+            strip_exec_wrapper("/opt/omni exec --session abc-123 git status"),
+            "git status"
+        );
+    }
+
+    /// The pre-hook writes the session id only when the host sent one, and a
+    /// missing one is not an error: it costs the child its ledger stage, which is
+    /// a missed reduction rather than a wrong claim.
+    #[test]
+    fn carries_the_session_id_only_when_there_is_one() {
+        let with = rewrite_logic("git status", Some("claude_code"), Some("abc-123"))
+            .expect("git should rewrite");
+        assert!(with.contains(" --session abc-123 git status"), "{with}");
+
+        let without =
+            rewrite_logic("git status", Some("claude_code"), None).expect("git should rewrite");
+        assert!(!without.contains("--session"), "{without}");
+    }
+
     #[test]
     fn rewrites_a_plain_command() {
         assert_eq!(
-            rewrite_logic("git status", None)
+            rewrite_logic("git status", None, None)
                 .expect("git should rewrite")
                 .split(" exec ")
                 .nth(1),
@@ -223,7 +266,8 @@ mod tests {
     /// once that was stripped, never `gemini`.
     #[test]
     fn names_the_host_that_asked_for_the_rewrite() {
-        let rewritten = rewrite_logic("cargo tree", Some("gemini")).expect("cargo should rewrite");
+        let rewritten =
+            rewrite_logic("cargo tree", Some("gemini"), None).expect("cargo should rewrite");
 
         assert!(
             rewritten.contains(" exec --agent gemini cargo tree"),
@@ -235,7 +279,7 @@ mod tests {
     /// guessed one, so `omni exec` falls back instead of recording a lie.
     #[test]
     fn omits_the_flag_when_the_host_is_unknown() {
-        let rewritten = rewrite_logic("cargo tree", None).expect("cargo should rewrite");
+        let rewritten = rewrite_logic("cargo tree", None, None).expect("cargo should rewrite");
 
         assert!(
             !rewritten.contains("--agent"),
@@ -249,23 +293,29 @@ mod tests {
     /// `tail` ever saw it.
     #[test]
     fn leaves_a_command_that_pipes_into_its_own_stage() {
-        assert_eq!(rewrite_logic("bash tidy.sh 2>&1 | tail -3", None), None);
-        assert_eq!(rewrite_logic("git log | head -5", None), None);
+        assert_eq!(
+            rewrite_logic("bash tidy.sh 2>&1 | tail -3", None, None),
+            None
+        );
+        assert_eq!(rewrite_logic("git log | head -5", None, None), None);
     }
 
     /// #170 / #207: `npm run build > build.log 2>&1` wrote a truncated log plus
     /// OMNI's banner into the file the shell was told to write.
     #[test]
     fn leaves_a_command_that_redirects_to_a_file() {
-        assert_eq!(rewrite_logic("npm run build > build.log 2>&1", None), None);
-        assert_eq!(rewrite_logic("cargo tree > tree.log", None), None);
-        assert_eq!(rewrite_logic("make ci >> ci.log", None), None);
+        assert_eq!(
+            rewrite_logic("npm run build > build.log 2>&1", None, None),
+            None
+        );
+        assert_eq!(rewrite_logic("cargo tree > tree.log", None, None), None);
+        assert_eq!(rewrite_logic("make ci >> ci.log", None, None), None);
     }
 
     #[test]
     fn leaves_a_chained_command() {
-        assert_eq!(rewrite_logic("npm ci && npm test", None), None);
-        assert_eq!(rewrite_logic("git fetch; git status", None), None);
+        assert_eq!(rewrite_logic("npm ci && npm test", None, None), None);
+        assert_eq!(rewrite_logic("git fetch; git status", None, None), None);
     }
 
     /// An operator inside quotes is data, not a stage — blocking on it would
@@ -278,7 +328,7 @@ mod tests {
             "git commit -m \"escaped \\\" quote; still one arg\"",
         ] {
             assert!(
-                rewrite_logic(cmd, None).is_some(),
+                rewrite_logic(cmd, None, None).is_some(),
                 "quoted operator should not block the rewrite: {cmd}"
             );
         }
@@ -289,7 +339,7 @@ mod tests {
     fn test_rewrite_uses_forward_slashes_on_windows() {
         // On Windows, the rewritten command must not contain backslashes from
         // the omni exe path; Git Bash strips them as escape characters.
-        let rewritten = rewrite_logic("git status", None).expect("git should rewrite");
+        let rewritten = rewrite_logic("git status", None, None).expect("git should rewrite");
         let exe_part = rewritten.trim_end_matches(" exec git status");
         assert!(
             !exe_part.contains('\\'),

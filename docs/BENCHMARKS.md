@@ -58,6 +58,33 @@ Two numbers a byte figure cannot express, both new in #392:
 The byte-sink ranking and the token-sink ranking **disagree**: `grep` and `ls` move
 up when counted in tokens, `sed` and `cargo` move down.
 
+## Head to head, one corpus
+
+P4 of the direction spec asked for this and set the bar: if omni does not win, the
+claim does not ship. It wins, and the half it loses is published with it.
+
+`OMNI_BENCH_RTK=/path/to/rtk` adds the arm; without it the harness runs as before, so
+CI never needs a competitor installed.
+
+| | bytes | saved |
+|---|---|---|
+| omni, filters only | 7,129,776 to 6,761,683 | **5.2%** |
+| rtk `pipe` | 7,129,776 to 6,547,573 | **8.2%** |
+| omni, with the ledger | 7,129,776 to 5,980,828 | **16.1%** |
+
+**rtk's filters are better than ours**, by 3 points on the same bytes, and it reached
+that on 931 of 7,198 traces. That is not a rounding difference and it is not going to
+be argued away here: on the commands both tools claim, theirs cut more.
+
+**The ledger is the difference**, roughly double rtk's figure, and it is the thing
+neither tool's filters can do: it removes bytes because the agent has already been
+shown them, not because a pattern says they are noise.
+
+Two things that make this comparison tilt **towards rtk**, stated because a benchmark
+that only lists its own handicaps is an advertisement. rtk is handed the exact filter
+name for every command, which its own hook has to infer from the command line, and
+anything it has no filter for is counted as a passthrough rather than as a miss.
+
 ## Which population was measured
 
 The corpus counts only calls whose result reached a model. Terminal output is
