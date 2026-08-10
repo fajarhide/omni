@@ -331,6 +331,7 @@ fn replay_execution_traces_net_savings() {
     let (mut n, mut raw_total, mut out_total) = (0u64, 0u64, 0u64);
     let (mut raw_tokens, mut out_tokens) = (0u64, 0u64);
     let (mut shrank, mut unchanged, mut grew, mut errored) = (0u64, 0u64, 0u64, 0u64);
+    let mut grew_detail: Vec<String> = Vec::new();
     // Separate ledgers: the filtered stream must not be told a line is a repeat
     // because the raw stream saw it.
     let (mut seen_raw, mut seen_out) = (Seen::default(), Seen::default());
@@ -377,7 +378,14 @@ fn replay_execution_traces_net_savings() {
         match o.cmp(&r) {
             std::cmp::Ordering::Less => shrank += 1,
             std::cmp::Ordering::Equal => unchanged += 1,
-            std::cmp::Ordering::Greater => grew += 1,
+            // Named, not counted. "2 calls grew" is a number nobody can act on,
+            // and the published claim it contradicts stood for months (#398).
+            std::cmp::Ordering::Greater => {
+                grew += 1;
+                if grew_detail.len() < 10 {
+                    grew_detail.push(format!("  +{} bytes  {:.90}", o - r, t.command));
+                }
+            }
         }
         let e = per_cmd.entry(base_command(&t.command)).or_default();
         e.0 += 1;
@@ -453,6 +461,9 @@ fn replay_execution_traces_net_savings() {
     );
     println!("actually shrank:   {:.1}% ({shrank})", pct(shrank));
     println!("ADDED BYTES:       {grew} calls");
+    for line in &grew_detail {
+        println!("{line}");
+    }
 
     // #392. Tokens, not bytes divided by anything. The ranking below is by
     // tokens for the same reason: a byte sink and a token sink are not
