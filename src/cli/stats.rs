@@ -247,7 +247,11 @@ const FLAGS: super::Flags = &[
         "Full technical breakdown (commands, routes, sessions, agents)",
     ),
     ("--hour, -H", "Scope to the last 60 minutes"),
-    ("--today, -d", "Scope to today only"),
+    // `--day` exists so the window family reads `--day/-d`, `--week/-w`,
+    // `--month/-m`. `-d` was the only member whose long form did not share its
+    // letter, sitting next to a `--detail` that does, which is a collision a
+    // reader hits before the docs do (#428). `--today` still works.
+    ("--day, --today, -d", "Scope to today only"),
     ("--week, -w", "Scope to last 7 days"),
     ("--month, -m", "Scope to last 30 days (the default)"),
     (
@@ -278,12 +282,12 @@ const FLAGS: super::Flags = &[
 /// being the fall-through in one of them, and silently ignored in the other.
 fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
-    if has(args, "--hour", "-H") {
+    if has(args, &["--hour", "-H"]) {
         ("last hour", now - 3600)
-    } else if has(args, "--today", "-d") {
+    } else if has(args, &["--day", "--today", "-d"]) {
         // Calendar day, not a rolling 24h: "today" means since midnight.
         ("today", now - (now % 86400))
-    } else if has(args, "--week", "-w") {
+    } else if has(args, &["--week", "-w"]) {
         ("last 7 days", now - 7 * 86400)
     } else {
         // `--month` / `-m` and the no-flag default are the same window.
@@ -291,8 +295,10 @@ fn scope(args: &[String]) -> (&'static str, i64) {
     }
 }
 
-fn has(args: &[String], long: &str, short: &str) -> bool {
-    args.iter().any(|a| a == long || a == short)
+/// A slice rather than a `(long, short)` pair, because `--today` gained a
+/// `--day` spelling and the pair could not carry a third name (#428).
+fn has(args: &[String], names: &[&str]) -> bool {
+    args.iter().any(|a| names.iter().any(|n| a == n))
 }
 
 fn print_help() {
@@ -341,10 +347,10 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let project_flag = args.iter().any(|a| a == "--project");
     let context_flag = args.iter().any(|a| a == "--context");
     let rerun_flag = args.iter().any(|a| a == "--rerun");
-    let filter_flag = has(args, "--hour", "-H")
-        || has(args, "--today", "-d")
-        || has(args, "--week", "-w")
-        || has(args, "--month", "-m")
+    let filter_flag = has(args, &["--hour", "-H"])
+        || has(args, &["--day", "--today", "-d"])
+        || has(args, &["--week", "-w"])
+        || has(args, &["--month", "-m"])
         || args.iter().any(|a| a == "--all-commands");
 
     let mode = if card_flag {
@@ -1772,6 +1778,23 @@ mod tests {
         let args: Vec<String> = vec!["stats".into()];
         let result = run(&args, &store);
         assert!(result.is_ok());
+    }
+
+    /// #428. `-d` sits next to `--detail` and used to have no long form that
+    /// shared its letter, so the family read `--today/-d`, `--week/-w`,
+    /// `--month/-m`. `--day` closes that; both spellings must pick one window.
+    #[test]
+    fn day_and_today_select_the_same_window() {
+        let day = scope(&["--day".to_string()]);
+        let today = scope(&["--today".to_string()]);
+        let short = scope(&["-d".to_string()]);
+
+        assert_eq!(day.0, today.0, "--day and --today must name one window");
+        assert_eq!(short.0, today.0, "-d must stay the short form of today");
+        assert_eq!(day.0, "today");
+        // `--detail` is a view, not a window, so it must not move the scope off
+        // the default. This is the collision the issue was actually about.
+        assert_eq!(scope(&["--detail".to_string()]).0, "last 30 days");
     }
 
     #[test]
