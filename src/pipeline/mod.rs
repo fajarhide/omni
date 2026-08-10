@@ -1,6 +1,8 @@
 pub mod analyzer;
 pub mod collapse;
 pub mod format;
+pub mod gate;
+pub mod producer;
 pub mod registry;
 pub mod scorer;
 pub mod semantic;

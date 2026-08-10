@@ -43,22 +43,74 @@ use std::collections::HashSet;
 use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_BYTES, MIN_LEDGER_RUN_LINES};
 use crate::store::sqlite::Store;
 
-/// Addresses the ledger for one session.
+/// Which history a run was found in, because the two cannot make the same claim.
 ///
-/// `scope` is the session id today. Widening it to the project is what would
-/// reach cross-session repetition, measured at 3.7% of post-filter bytes against
-/// 19.1% within a session. A fifth of the value for a new eviction policy is why
-/// that is a later phase and not this one.
+/// This distinction is the whole of the project scope. An earlier draft cancelled
+/// it on the grounds that a handle for another session's content is a lie, which
+/// was right about the wording and wrong about the remedy: the fix is to stop
+/// saying "already shown", not to stop remembering.
+///
+/// - `Session` means the agent is still holding those bytes, so the handle is
+///   free unless it chooses to re-read them.
+/// - `Project` means the bytes went to a different session of this project and
+///   this agent has **never seen them**. The marker says so, and the trade stops
+///   being free: it is a handle plus a possible retrieval against the block
+///   itself, which is the same bet `store_rewind` already makes everywhere else.
+///   That is why it carries its own, much higher floor.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Origin {
+    Session,
+    Project,
+}
+
+impl Origin {
+    /// What a replaced run is worth saying about itself.
+    fn marker(self, lines: usize, handle: &str) -> String {
+        match self {
+            Self::Session => format!(
+                "[OMNI: {lines} lines already shown this session, omni_retrieve(\"{handle}\") for them]"
+            ),
+            Self::Project => format!(
+                "[OMNI: {lines} lines shown in an earlier session of this project, not in this one, omni_retrieve(\"{handle}\") for them]"
+            ),
+        }
+    }
+
+    /// The bytes a run has to carry before replacing it is worth the trade.
+    ///
+    /// Session scope pays a marker. Project scope pays a marker **and** the
+    /// expected cost of a retrieval the agent has no choice about if it needs
+    /// the content, so the block has to be large enough that the bytes saved
+    /// cover it. Six times the session floor is a starting point, and the replay
+    /// is what decides whether it stays.
+    fn min_run_bytes(self) -> usize {
+        match self {
+            Self::Session => MIN_LEDGER_RUN_BYTES,
+            Self::Project => MIN_LEDGER_RUN_BYTES * 6,
+        }
+    }
+}
+
+/// Addresses the ledger for one session, and optionally for its project.
+///
+/// Cross-session repetition measures 3.7% of post-filter bytes against 19.1%
+/// within a session, so the project scope is worth about a fifth of the session
+/// scope at best, and less than that after its higher floor. It is built anyway
+/// because the plan asks for it and because the data is what settles whether the
+/// trade is worth taking.
 pub struct Ledger<'a> {
     store: &'a Store,
     scope: String,
+    /// `None` disables project scope entirely, which is what every caller that
+    /// cannot name a project passes.
+    project: Option<String>,
 }
 
-/// One stretch of output and whether it was already shown.
+/// One stretch of output, and where it was seen before if it was.
 struct Run {
     start: usize,
     end: usize,
-    seen: bool,
+    seen: Option<Origin>,
 }
 
 impl<'a> Ledger<'a> {
@@ -66,7 +118,14 @@ impl<'a> Ledger<'a> {
         Self {
             store,
             scope: scope.into(),
+            project: None,
         }
+    }
+
+    /// Adds the project history to what this ledger can draw on.
+    pub fn with_project(mut self, project: impl Into<String>) -> Self {
+        self.project = Some(project.into());
+        self
     }
 
     /// The view of `text` this session has earned, or `None` when there is
@@ -79,6 +138,13 @@ impl<'a> Ledger<'a> {
     /// asks for, and it is why the recording is unconditional while the
     /// substitution is not.
     pub fn project(&self, text: &str) -> Option<String> {
+        // The gain gate wraps the projection rather than being re-derived inside
+        // it (spec 5.4). `MIN_LEDGER_INPUT` is this projection's own floor and is
+        // higher than the gate's, so both apply and the stricter one decides.
+        crate::pipeline::gate::gain(text, |text| self.project_inner(text))
+    }
+
+    fn project_inner(&self, text: &str) -> Option<String> {
         if text.len() < MIN_LEDGER_INPUT {
             return None;
         }
@@ -90,7 +156,25 @@ impl<'a> Ledger<'a> {
         // construction rather than by promise (CLAUDE.md cross-platform rule 2).
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
         let hashes: Vec<String> = lines.iter().map(|l| line_key(l)).collect();
-        let seen = self.store.ledger_seen(&self.scope, &hashes);
+
+        // Session first, and the project scope only answers for what the session
+        // did not. A line in both belongs to the session: that is the claim that
+        // is free, and taking the weaker one would cost the agent a retrieval for
+        // content it is holding.
+        let in_session = self.store.ledger_seen(&self.scope, &hashes);
+        let in_project = match &self.project {
+            Some(p) => self.store.ledger_seen(p, &hashes),
+            None => HashSet::new(),
+        };
+        let origin_of = |h: &String| {
+            if in_session.contains(h) {
+                Some(Origin::Session)
+            } else if in_project.contains(h) {
+                Some(Origin::Project)
+            } else {
+                None
+            }
+        };
 
         // Record before projecting. The order matters only for a line that
         // repeats inside this very payload: recording first would let the second
@@ -98,8 +182,13 @@ impl<'a> Ledger<'a> {
         // in front of the agent already. Recording after keeps the projection a
         // function of what *earlier commands* showed, which is what makes it
         // deterministic for a caller replaying the same session.
-        let projected = self.substitute(&lines, &hashes, &seen);
+        let projected = self.substitute(&lines, &hashes, &origin_of);
         self.store.ledger_record(&self.scope, &hashes);
+        // The project history is written too, so a later session can draw on this
+        // one. Same rows, a second scope key.
+        if let Some(p) = &self.project {
+            self.store.ledger_record(p, &hashes);
+        }
 
         projected.filter(|p| p.len() < text.len())
     }
@@ -108,10 +197,10 @@ impl<'a> Ledger<'a> {
         &self,
         lines: &[&str],
         hashes: &[String],
-        seen: &HashSet<String>,
+        origin_of: &dyn Fn(&String) -> Option<Origin>,
     ) -> Option<String> {
-        let runs = group_runs(hashes, seen);
-        if !runs.iter().any(|r| r.seen) {
+        let runs = group_runs(hashes, origin_of);
+        if !runs.iter().any(|r| r.seen.is_some()) {
             return None;
         }
 
@@ -119,22 +208,21 @@ impl<'a> Ledger<'a> {
         let mut replaced_any = false;
         for run in runs {
             let body = lines[run.start..run.end].concat();
-            let long_enough =
-                run.end - run.start >= MIN_LEDGER_RUN_LINES && body.len() >= MIN_LEDGER_RUN_BYTES;
+            let long_enough = run.seen.is_some_and(|o| {
+                run.end - run.start >= MIN_LEDGER_RUN_LINES && body.len() >= o.min_run_bytes()
+            });
 
             // A handle is only offered for content that is provably retrievable.
             // `store_rewind` returns `None` when the row did not land, and the
             // run then stays verbatim rather than becoming a promise nobody can
             // keep (#388).
-            match (run.seen && long_enough)
+            match long_enough
                 .then(|| self.store.store_rewind(&body))
                 .flatten()
+                .zip(run.seen)
             {
-                Some(handle) => {
-                    out.push_str(&format!(
-                        "[OMNI: {} lines already shown this session, omni_retrieve(\"{handle}\") for them]",
-                        run.end - run.start
-                    ));
+                Some((handle, origin)) => {
+                    out.push_str(&origin.marker(run.end - run.start, &handle));
                     // The run carried its own terminator, so the marker needs one
                     // only when the text it replaced ended a line. A run at the
                     // very end of an output with no trailing newline does not.
@@ -150,17 +238,21 @@ impl<'a> Ledger<'a> {
     }
 }
 
-/// Consecutive lines that agree about having been seen.
-fn group_runs(hashes: &[String], seen: &HashSet<String>) -> Vec<Run> {
+/// Consecutive lines that agree about where they were seen.
+///
+/// Grouping by `Option<Origin>` rather than by a boolean is what stops a session
+/// run and a project run merging into one marker, which would have to pick one of
+/// two claims for content that is half and half.
+fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Origin>) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::new();
     for (i, h) in hashes.iter().enumerate() {
-        let is_seen = seen.contains(h);
+        let seen = origin_of(h);
         match runs.last_mut() {
-            Some(last) if last.seen == is_seen => last.end = i + 1,
+            Some(last) if last.seen == seen => last.end = i + 1,
             _ => runs.push(Run {
                 start: i,
                 end: i + 1,
-                seen: is_seen,
+                seen,
             }),
         }
     }
@@ -265,6 +357,90 @@ mod tests {
         Ledger::new(&store, "s1").project(&text);
 
         assert_eq!(Ledger::new(&store, "s2").project(&text), None);
+    }
+
+    /// The whole licence for the project scope. A second session may reuse the
+    /// first session's history, but it has **not seen those bytes**, so the
+    /// marker must not say it has. An earlier draft cancelled this phase over
+    /// exactly that wording; the remedy was the wording.
+    #[test]
+    fn never_tells_a_new_session_it_has_already_seen_the_project_history() {
+        let (store, _d) = temp_store();
+        // Six times the session floor, so it clears the project scope's own bar.
+        let text: String = (0..200)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .project(&text);
+
+        let view = Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .project(&text)
+            .expect("a project repeat above the floor is projectable");
+
+        assert!(
+            view.contains("shown in an earlier session of this project, not in this one"),
+            "the marker claimed a sighting this session never had: {view}"
+        );
+        assert!(
+            !view.contains("already shown this session"),
+            "a project repeat was reported as a session repeat: {view}"
+        );
+    }
+
+    /// The project scope pays a retrieval the session scope does not, so it
+    /// carries its own floor. A run that clears the session bar and not the
+    /// project one stays verbatim rather than costing the agent a round trip.
+    #[test]
+    fn holds_a_project_repeat_to_its_own_higher_floor() {
+        let (store, _d) = temp_store();
+        // Sized to land between the two floors on purpose: over the input floor
+        // and the session run floor, under the project one. `payload()` is over
+        // all three, which is what the guard below caught when this test first
+        // reached for it.
+        let text: String = (0..9)
+            .map(|i| format!("2026-08-10T00:00:0{i}Z  handler finished request {i}\n"))
+            .collect();
+        assert!(
+            text.len() > MIN_LEDGER_INPUT && text.len() > MIN_LEDGER_RUN_BYTES,
+            "fixture must clear the session floors, or it tests the early return"
+        );
+        assert!(
+            text.len() < Origin::Project.min_run_bytes(),
+            "fixture must sit between the two floors, or it tests neither"
+        );
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .project(&text);
+
+        // Same session: over the session floor, so it projects.
+        assert!(Ledger::new(&store, "s1").project(&text).is_some());
+        // New session: only the project history has it, and it is too small.
+        assert_eq!(
+            Ledger::new(&store, "s2")
+                .with_project("/repo")
+                .project(&text),
+            None
+        );
+    }
+
+    /// A line in both histories belongs to the session, because that is the
+    /// claim that costs the agent nothing. Taking the weaker one would buy a
+    /// retrieval for content already in the context window.
+    #[test]
+    fn prefers_the_session_claim_when_a_line_is_in_both() {
+        let (store, _d) = temp_store();
+        let text: String = (0..200)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        let ledger = Ledger::new(&store, "s1").with_project("/repo");
+        ledger.project(&text);
+
+        let view = ledger.project(&text).expect("projectable");
+
+        assert!(view.contains("already shown this session"), "{view}");
+        assert!(!view.contains("earlier session of this project"), "{view}");
     }
 
     /// Everything the ledger does not replace comes back byte for byte, line

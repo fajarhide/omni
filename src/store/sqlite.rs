@@ -1659,9 +1659,21 @@ impl SqliteBackend {
             "DELETE FROM session_events WHERE ts < ?1",
             params![ts_threshold],
         );
-        // The ledger is per session and a session does not outlive the retention
-        // window, so its rows expire with everything else. Left unpruned it is
-        // the one table whose row count grows with every line ever shown.
+        // The ledger's eviction policy, defined before the project scope shipped
+        // rather than after it, which is what the direction spec asks for.
+        //
+        // **Time, not size, and one window for both scopes.** A session scope
+        // cannot outlive the session, so the ordinary retention window already
+        // bounds it. The project scope is the one that could grow without limit,
+        // and the honest bound on it is the same window: content nobody has
+        // produced in 30 days is content this project has stopped emitting, and a
+        // handle for it buys a retrieval of something the agent will not
+        // recognise either. A size cap was the alternative and is worse here,
+        // because evicting by size evicts the oldest rows of the *busiest*
+        // project first, which is exactly where the repeats are.
+        //
+        // Rows are 16 bytes of hash plus a scope key, so the cost is bounded by
+        // distinct lines emitted in the window rather than by bytes shown.
         let _ = conn.execute(
             "DELETE FROM ledger_lines WHERE ts < ?1",
             params![ts_threshold],
