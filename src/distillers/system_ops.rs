@@ -47,7 +47,11 @@ const SENSITIVE_PATTERNS: &[&str] = &[
     "PASSWORD",
     "PASS",
     "AUTH",
-    "CRED",
+    // `CRED` was a stem, and a stem only works under substring matching. Segment
+    // matching needs the words themselves (#408).
+    "CREDS",
+    "CREDENTIAL",
+    "CREDENTIALS",
     "API_",
     "AWS_",
     "GITHUB_",
@@ -555,13 +559,45 @@ pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
 /// A key whose *value* must never be delivered. Trimmed so an indented or
 /// `export`-prefixed assignment is still recognised, because that is how these
 /// arrive in a shell transcript.
+///
+/// Matching is per underscore-delimited segment rather than by substring. The old
+/// `upper.contains(p)` made `PASSED` a password, `AUTHORS` an auth token and
+/// `MONKEYS` an API key, and since this runs on every command's output it deleted
+/// the value of each of them wherever they appeared (#408). These names are
+/// SCREAMING_SNAKE environment keys, so the segment is the unit that carries
+/// meaning, not the character run.
+///
+/// Three shapes, because the list holds three. A pattern ending in `_` is a vendor
+/// prefix and anchors to the first segment. A pattern containing `_` spans segments
+/// and has to match a consecutive run of them. Everything else matches a segment
+/// outright or the tail of one, so an undelimited `MYPASSWORD` is still caught
+/// while `PASSED` is not.
+///
+/// `BYPASS` is a known false positive under the tail rule and is left in place:
+/// hiding a value that did not need hiding is recoverable, printing a secret is
+/// not. The defect being fixed here is the other direction, where a measurement
+/// was destroyed and nothing said so.
 fn is_sensitive_key(key: &str) -> bool {
     let k = key.trim().trim_start_matches("export ").trim();
     if k.is_empty() || !k.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return false;
     }
     let upper = k.to_uppercase();
-    SENSITIVE_PATTERNS.iter().any(|p| upper.contains(p))
+    let segments: Vec<&str> = upper.split('_').filter(|s| !s.is_empty()).collect();
+    let Some(first) = segments.first() else {
+        return false;
+    };
+
+    SENSITIVE_PATTERNS
+        .iter()
+        .any(|p| match p.strip_suffix('_') {
+            Some(prefix) => *first == prefix,
+            None if p.contains('_') => {
+                let want: Vec<&str> = p.split('_').collect();
+                segments.windows(want.len()).any(|w| w == want.as_slice())
+            }
+            None => segments.iter().any(|s| s == p || s.ends_with(p)),
+        })
 }
 
 pub fn distill_env_output(input: &str) -> String {
@@ -580,8 +616,10 @@ pub fn distill_env_output(input: &str) -> String {
         };
         parsed_any = true;
         let key = &trimmed[..eq_pos];
-        let key_upper = key.to_uppercase();
-        if SENSITIVE_PATTERNS.iter().any(|p| key_upper.contains(p)) {
+        // One predicate, not two. This arm carried its own copy of the substring
+        // match, so fixing only `is_sensitive_key` would have left `env` output
+        // redacting `passed=` while every other command stopped (#408).
+        if is_sensitive_key(key) {
             redacted_count += 1;
             out.push_str(key);
             out.push_str("=[REDACTED]\n");
@@ -662,6 +700,48 @@ mod tests {
     /// back as `DB(8) APP(1)` plus the password line: the eight values anyone runs
     /// the command for were gone, and the one value shown by name was the only one
     /// that must never be printed.
+    /// #408. `upper.contains(p)` made every one of these a credential and deleted
+    /// its value, on every command's output rather than only on `env`. The one that
+    /// surfaced it was a `make ci` timing line reading `passed=3208`.
+    #[test]
+    fn leaves_ordinary_words_that_merely_contain_a_pattern() {
+        for key in [
+            "passed", "elapsed", "bypassed", "authors", "monkeys", "keywords", "credits", "author",
+        ] {
+            assert!(
+                !is_sensitive_key(key),
+                "{key} is not a credential and its value must survive"
+            );
+        }
+    }
+
+    /// The other half of #408, and the half that must not regress: the keys #342
+    /// and #344 found going out unredacted, plus the undelimited spellings the
+    /// segment rule has to reach by its tail.
+    #[test]
+    fn still_hides_every_key_that_names_a_credential() {
+        for key in [
+            "DB_POSTGRESDB_PASSWORD",
+            "API_KEY_N8N",
+            "SSH_PRIVATE_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+            "ANTHROPIC_API_KEY",
+            "GITHUB_TOKEN",
+            "DATABASE_URL",
+            "REDIS_URL",
+            "CLIENT_SECRET",
+            "GOOGLE_CREDENTIALS",
+            "MYPASSWORD",
+            "APIKEY",
+            "export SECRET_VALUE",
+        ] {
+            assert!(
+                is_sensitive_key(key),
+                "{key} names a value that must not ship"
+            );
+        }
+    }
+
     #[test]
     fn keeps_every_value_and_redacts_only_the_secret() {
         let input = "DB_TYPE=postgresdb\n\
