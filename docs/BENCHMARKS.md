@@ -3,12 +3,19 @@
 The short version lives in the [README](../README.md#benchmarks). This is the rest
 of it, including the parts that do not flatter us.
 
-Measured on the release binary by replaying **9,965 real command executions** from
+Measured on the release binary by replaying every recorded command execution from
 one developer's actual usage:
 
 ```bash
-cargo test --release --test bench_replay -- --ignored
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
 ```
+
+**Every figure below states the window it covers, and the reason is not pedantry.**
+`execution_traces` is pruned to `TRACE_RETENTION_DAYS`, seven days, so a corpus is
+gone a week after it is measured. The 9,965-trace run that earlier releases quoted
+cannot be re-derived by anyone, including us. Numbers that outlive their corpus are
+the thing this document exists to stop.
 
 ## Method
 
@@ -26,18 +33,39 @@ cargo test --release --test bench_replay -- --ignored
 
 ## The headline
 
-* **43.3% fewer bytes** across the entire mix, noisy and quiet commands together
-  (40.1 MB → 22.7 MB).
-* **90.0% of calls saved nothing at all.** OMNI handed the output straight back and
-  added zero bytes. Every byte of the saving comes from the other 10%.
-* **Not one call in 9,965 made the output larger.**
+Replayed 2026-08-10 over **7,095 traces covering 2026-08-03 to 08-10 UTC**, every one
+of them `agent_id='claude_code'`.
+
+* **15.7% fewer bytes** across the whole mix (6.95 MB → 5.86 MB), of which the
+  filters are 5.2% and the session ledger is the rest.
+* **5.0% fewer tokens** from the filters alone (1,960,286 → 1,862,166 by
+  `cl100k_base`). Terminal output measures **3.545 bytes per token** here, which is
+  what `util::token_estimate`'s shipped 3.6 was calibrated against.
+* **97.1% of calls saved nothing at all** and handed the output straight back. Every
+  byte of the saving comes from the other 2.9%.
+* **2 calls of 7,095 came back larger.** Reported rather than rounded away; earlier
+  releases published "not one call in 9,965", which was true of a corpus that no
+  longer exists. Filed as fajarhide/omni#398.
+
+Two numbers a byte figure cannot express, both new in #392:
+
+* **25.4% of raw bytes are lines the agent had already been shown**, and **22.9%
+  still are after every distiller has run.** Filtering and repetition are orthogonal,
+  which is the entire argument for the ledger.
+* Of that repetition, 19.1% is within one session and 3.8% is from an earlier
+  session of the same project.
+
+The byte-sink ranking and the token-sink ranking **disagree**: `grep` and `ls` move
+up when counted in tokens, `sed` and `cargo` move down.
 
 ## Which population was measured
 
 The corpus counts only calls whose result reached a model. Terminal output is
-excluded: it is 68% of the raw bytes on this installation, and including it would let
-us print 79.1% instead of 43.3%. We don't, because that number is measuring a
-population no model ever read.
+excluded: on an installation that carries it, it was 68% of the raw bytes, and
+including it printed 79.1% where the model-facing population printed 43.3%. We don't,
+because that number is measuring a population no model ever read. The current window
+happens to hold no terminal rows at all, and the harness says so on its own line
+rather than leaving it to be inferred.
 
 This was a real defect, not a hypothetical. `tests/bench_replay.rs` counted terminal
 bytes until #324; `omni stats` had the same bug until #212. Both are fixed and both
@@ -45,21 +73,34 @@ now print which population they used.
 
 ## Where the saving comes from
 
-| Command | Calls | Input | Output | Saved |
-|---------|-------|-------|--------|-------|
-| `cargo` | 124 | 1.5 MB | 127 KB | **91.4%** |
-| `git` | 931 | 12.0 MB | 1.3 MB | **89.2%** |
-| `kubectl` | 456 | 5.5 MB | 1.3 MB | **76.5%** |
-| `az` | 62 | 264 KB | 176 KB | **33.6%** |
-| `grep` | 938 | 2.4 MB | 2.0 MB | **18.1%** |
-| `gh` | 232 | 534 KB | 509 KB | **4.6%** |
-| `cd` | 2,963 | 5.6 MB | 5.5 MB | **2.2%** |
-| `cat`, `ls`, `find`, `sed`, `python3` | 1,235 | 4.2 MB | 4.2 MB | **0%** |
+Same run, by command class, with what the filters take and what the ledger adds on
+top of them:
 
-`git`, `cargo` and `kubectl` carry the entire result. The last row is the point of
-the table: five of the most-run commands are deliberate passthroughs, because their
-output is an enumeration where every line is a datum. They used to report savings,
-and each of those savings was a row someone needed.
+| Class | Calls | Input | Filters | + ledger |
+|---|---|---|---|---|
+| other | 4,541 | 3.20 MB | 0.5% | **5.4%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 668 | 1.54 MB | 0.0% | **24.6%** |
+| search (`grep`, `rg`, `find`) | 801 | 1.03 MB | 4.8% | **12.0%** |
+| `git`, `gh` | 710 | 672 KB | 4.6% | **19.1%** |
+| build and test | 80 | 292 KB | 87.9% | **92.3%** |
+| infra (`kubectl`, `az`, `docker`) | 295 | 214 KB | 4.0% | **6.7%** |
+| **aggregate** | **7,095** | **6.95 MB** | **5.2%** | **15.7%** |
+
+Two things this table says that the old one could not.
+
+**The filters are excellent where there is noise and irrelevant where there is not.**
+Build and test output is 87.9% and it is 292 KB. File reads are 1.54 MB and the
+filters take **0.0%** of them, which is correct behaviour: you cannot strip lines from
+a file the agent asked to see without guessing which parts it meant, and guessing is
+what the trust floor forbids.
+
+**The ledger reaches what filtering cannot**, because a run of lines the agent has
+already been shown can be handed back as a handle without guessing anything. That is
+where 24.6% on the largest class comes from.
+
+The mix also moves. `cargo` is 94.7% in this window across 16 calls and 267 KB, where
+an earlier window had 124 calls and 1.5 MB. A per-command figure describes the week
+it was measured in as much as it describes the distiller.
 
 ## Single fixtures
 

@@ -50,6 +50,15 @@ pub fn process_payload(
         return None;
     }
 
+    // The ledger's whole licence is that the agent is still holding the bytes a
+    // handle replaces. Compaction is where that stops being true inside a
+    // session, so the shown-set goes with it (#401). Deliberately before the
+    // summary work below, because that path can return early on an unchanged
+    // delta and the forgetting must not depend on it.
+    if !parsed.session_id.is_empty() {
+        store.ledger_forget(&parsed.session_id);
+    }
+
     let mut state = session.lock().unwrap_or_else(|p| p.into_inner());
 
     // L1-04: Add LoopCheckpoint engram if in a loop
@@ -312,6 +321,41 @@ mod tests {
         store
             .search_session_events(session_id, "PreCompact", 10)
             .join("\n")
+    }
+
+    /// #401. The ledger may only hand back a handle for content the agent is
+    /// still holding, and compaction is where that stops being true inside a
+    /// session. Asserted through the ledger's own answer rather than through a
+    /// row count, because what matters is that the next payload is no longer
+    /// projected.
+    #[test]
+    fn forgets_what_the_agent_lost_to_compaction() {
+        let (store, _dir) = get_store();
+        let session = Arc::new(Mutex::new(SessionState::new()));
+        let text: String = (0..60)
+            .map(|i| format!("2026-08-10T00:00:{i:02}Z  handler finished request {i}\n"))
+            .collect();
+
+        // A session that has been shown this once will project it the second time.
+        let ledger = crate::ledger::Ledger::new(&store, "sess-compact");
+        ledger.project(&text);
+        assert!(
+            ledger.project(&text).is_some(),
+            "the fixture must reach the substitution before compaction"
+        );
+
+        let input = json!({
+            "hook_event_name": "PreCompact",
+            "session_id": "sess-compact",
+        })
+        .to_string();
+        process_payload(&input, Arc::clone(&store), session);
+
+        assert_eq!(
+            crate::ledger::Ledger::new(&store, "sess-compact").project(&text),
+            None,
+            "a compacted context does not hold what the ledger would hand back"
+        );
     }
 
     #[test]
