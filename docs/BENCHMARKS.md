@@ -11,7 +11,13 @@ OMNI_BENCH_DB=~/.omni/omni.db \
   cargo test --release --test bench_replay -- --ignored --nocapture
 ```
 
-**Every figure below states the window it covers, and the reason is not pedantry.**
+**Every figure in this file comes from one run**, the 7,221 trace replay dated below.
+That is stricter than it sounds and it was not true before: the head-to-head and the
+headline once came from two replays a day apart, so the file published 15.7% and 16.1%
+without saying they were different measurements (#420). One run, or each figure names
+its own.
+
+**Every figure also states the window it covers, and the reason is not pedantry.**
 `execution_traces` is pruned to `TRACE_RETENTION_DAYS`, seven days, so a corpus is
 gone a week after it is measured. The 9,965-trace run that earlier releases quoted
 cannot be re-derived by anyone, including us. Numbers that outlive their corpus are
@@ -33,27 +39,27 @@ the thing this document exists to stop.
 
 ## The headline
 
-Replayed 2026-08-10 over **7,095 traces covering 2026-08-03 to 08-10 UTC**, every one
+Replayed 2026-08-10 over **7,221 traces covering 2026-08-03 08:45 to 08-10 12:51 UTC**, every one
 of them `agent_id='claude_code'`.
 
-* **15.7% fewer bytes** across the whole mix (6.95 MB → 5.86 MB), of which the
+* **16.1% fewer bytes** across the whole mix (7.15 MB → 6.00 MB), of which the
   filters are 5.2% and the session ledger is the rest.
-* **5.0% fewer tokens** from the filters alone (1,960,286 → 1,862,166 by
-  `cl100k_base`). Terminal output measures **3.545 bytes per token** here, which is
+* **5.0% fewer tokens** from the filters alone (2,006,138 → 1,906,541 by
+  `cl100k_base`). Terminal output measures **3.562 bytes per token** here, which is
   what `util::token_estimate`'s shipped 3.6 was calibrated against.
 * **97.1% of calls saved nothing at all** and handed the output straight back. Every
   byte of the saving comes from the other 2.9%.
-* **2 calls of 7,095 came back larger.** Reported rather than rounded away; earlier
-  releases published "not one call in 9,965", which was true of a corpus that no
-  longer exists. Filed as fajarhide/omni#398.
+* **Not one call of 7,221 came back larger.** Two did until #398, which was a line
+  ending the stream writer invented; the count was published while it stood rather
+  than rounded away.
 
 Two numbers a byte figure cannot express, both new in #392:
 
-* **25.4% of raw bytes are lines the agent had already been shown**, and **22.9%
+* **25.0% of raw bytes are lines the agent had already been shown**, and **22.6%
   still are after every distiller has run.** Filtering and repetition are orthogonal,
   which is the entire argument for the ledger.
-* Of that repetition, 19.1% is within one session and 3.8% is from an earlier
-  session of the same project.
+* Of that repetition, 18.7% is within one session and 3.9% is from an earlier
+  session of the same project, which is the share the project scope reaches.
 
 The byte-sink ranking and the token-sink ranking **disagree**: `grep` and `ls` move
 up when counted in tokens, `sed` and `cargo` move down.
@@ -68,12 +74,12 @@ CI never needs a competitor installed.
 
 | | bytes | saved |
 |---|---|---|
-| omni, filters only | 7,129,776 to 6,761,683 | **5.2%** |
-| rtk `pipe` | 7,129,776 to 6,547,573 | **8.2%** |
-| omni, with the ledger | 7,129,776 to 5,980,828 | **16.1%** |
+| omni, filters only | 7,146,553 to 6,778,460 | **5.2%** |
+| rtk `pipe` | 7,146,553 to 6,564,350 | **8.1%** |
+| omni, with the ledger | 7,146,553 to 5,995,835 | **16.1%** |
 
 **rtk's filters are better than ours**, by 3 points on the same bytes, and it reached
-that on 931 of 7,198 traces. That is not a rounding difference and it is not going to
+that on 932 of 7,221 traces. That is not a rounding difference and it is not going to
 be argued away here: on the commands both tools claim, theirs cut more.
 
 **The ledger is the difference**, roughly double rtk's figure, and it is the thing
@@ -105,13 +111,13 @@ top of them:
 
 | Class | Calls | Input | Filters | + ledger |
 |---|---|---|---|---|
-| other | 4,541 | 3.20 MB | 0.5% | **5.4%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 668 | 1.54 MB | 0.0% | **24.6%** |
-| search (`grep`, `rg`, `find`) | 801 | 1.03 MB | 4.8% | **12.0%** |
-| `git`, `gh` | 710 | 672 KB | 4.6% | **19.1%** |
-| build and test | 80 | 292 KB | 87.9% | **92.3%** |
-| infra (`kubectl`, `az`, `docker`) | 295 | 214 KB | 4.0% | **6.7%** |
-| **aggregate** | **7,095** | **6.95 MB** | **5.2%** | **15.7%** |
+| other | 4,608 | 3.28 MB | 0.7% | **5.7%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 723 | 1.63 MB | 0.0% | **24.7%** |
+| search (`grep`, `rg`, `find`) | 863 | 1.07 MB | 4.6% | **12.0%** |
+| `git`, `gh` | 690 | 679 KB | 4.6% | **22.2%** |
+| build and test | 81 | 292 KB | 87.8% | **92.3%** |
+| infra (`kubectl`, `az`, `docker`) | 256 | 193 KB | 4.3% | **5.9%** |
+| **aggregate** | **7,221** | **7.15 MB** | **5.2%** | **16.1%** |
 
 Two things this table says that the old one could not.
 
