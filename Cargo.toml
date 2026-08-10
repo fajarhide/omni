@@ -3,7 +3,12 @@ name = "omni"
 version = "0.6.15"
 edition = "2024"
 authors = ["Fajar Hidayat"]
-description = "Semantic Signal Engine for AI agents: 58.9% fewer tokens on a real command mix, measured."
+# No ratio here on purpose. A crates.io description cannot carry the window and the
+# population a savings figure is only true inside, and the last two ratios that
+# shipped without them (58.9% here, 89% in the repo description) both descend from a
+# corpus that seven-day pruning has since deleted. The reproducible numbers live in
+# docs/BENCHMARKS.md next to the command that regenerates them.
+description = "Semantic Signal Engine for AI agents: decides what your agent reads, keeps a receipt for every byte it removes, and never invents a result."
 license = "MIT"
 homepage = "https://omni.weekndlabs.com"
 repository = "https://github.com/fajarhide/omni"

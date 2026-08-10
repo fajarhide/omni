@@ -2,7 +2,7 @@
 #![allow(clippy::string_slice)]
 
 use crate::store::sqlite::Store;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use colored::*;
 use std::collections::HashMap;
 
@@ -259,6 +259,10 @@ const FLAGS: super::Flags = &[
         "--share",
         "A copy-pasteable summary of your own measured savings",
     ),
+    (
+        "--card",
+        "Write that summary as an image, sized for social posts",
+    ),
     ("--project", "Display breakdown per project path"),
     ("--context", "Show context composition signals"),
     (
@@ -333,6 +337,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let detail_flag = args.iter().any(|a| a == "--detail");
     let json_flag = args.iter().any(|a| a == "--json");
     let share_flag = args.iter().any(|a| a == "--share");
+    let card_flag = args.iter().any(|a| a == "--card");
     let project_flag = args.iter().any(|a| a == "--project");
     let context_flag = args.iter().any(|a| a == "--context");
     let rerun_flag = args.iter().any(|a| a == "--rerun");
@@ -342,7 +347,9 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         || has(args, "--month", "-m")
         || args.iter().any(|a| a == "--all-commands");
 
-    let mode = if share_flag {
+    let mode = if card_flag {
+        "card"
+    } else if share_flag {
         "share"
     } else if rerun_flag {
         "rerun"
@@ -361,6 +368,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     };
 
     match mode {
+        "card" => run_card(store),
         "share" => run_share(store),
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
@@ -440,6 +448,50 @@ fn run_context_stats(store: &Store) -> Result<()> {
 
 // ─── Default Mode: Gain-Focused Multi-Period ────────────
 
+/// What both share cards are built from.
+///
+/// One computation, two renderers. The text card and the image card quoting
+/// different numbers for the same installation would be the `omni stats` version
+/// of the defect this project files issues about.
+struct ShareFigures {
+    saved: u64,
+    pct: f64,
+    unit: &'static str,
+    calls: u64,
+    top: Vec<(String, u64, f64, u64)>,
+}
+
+fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
+    let periods = store.multi_period_stats()?;
+    let Some((_, calls, input, output, raw_tok, filt_tok)) = periods
+        .iter()
+        .find(|(label, ..)| label == "All Time")
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    if calls == 0 {
+        return Ok(None);
+    }
+
+    let (saved, total) = if raw_tok > 0 {
+        (raw_tok.saturating_sub(filt_tok), raw_tok)
+    } else {
+        (input.saturating_sub(output), input)
+    };
+    Ok(Some(ShareFigures {
+        saved,
+        pct: if total > 0 {
+            100.0 * saved as f64 / total as f64
+        } else {
+            0.0
+        },
+        unit: if raw_tok > 0 { "tokens" } else { "bytes" },
+        calls,
+        top: get_top_commands(store, 0, 3),
+    }))
+}
+
 /// A copy-pasteable summary of what OMNI measured on *this* installation.
 ///
 /// Deliberately plain text and deliberately not a marketing number. It reuses
@@ -456,34 +508,17 @@ fn run_context_stats(store: &Store) -> Result<()> {
 ///   and it is the difference between 64.5% and a headline that counted 86 MB
 ///   of TTY bytes no model ever read.
 fn run_share(store: &Store) -> Result<()> {
-    let periods = store.multi_period_stats()?;
-    let Some((_, calls, input, output, raw_tok, filt_tok)) = periods
-        .iter()
-        .find(|(label, ..)| label == "All Time")
-        .cloned()
+    let Some(ShareFigures {
+        saved,
+        pct,
+        unit,
+        calls,
+        top,
+    }) = share_figures(store)?
     else {
         println!("No data yet. Run a few commands and try again.");
         return Ok(());
     };
-
-    if calls == 0 {
-        println!("No data yet. Run a few commands and try again.");
-        return Ok(());
-    }
-
-    let (saved, total) = if raw_tok > 0 {
-        (raw_tok.saturating_sub(filt_tok), raw_tok)
-    } else {
-        (input.saturating_sub(output), input)
-    };
-    let pct = if total > 0 {
-        100.0 * saved as f64 / total as f64
-    } else {
-        0.0
-    };
-    let unit = if raw_tok > 0 { "tokens" } else { "bytes" };
-
-    let top = get_top_commands(store, 0, 3);
 
     println!();
     // The command count is written out, not abbreviated: `6K` is a rounder
@@ -506,6 +541,261 @@ fn run_share(store: &Store) -> Result<()> {
     println!();
     println!("Measured, not estimated: net across every command, terminal output excluded.");
     println!("https://github.com/fajarhide/omni");
+    println!();
+
+    Ok(())
+}
+
+/// The canvases people actually post into, and what each one is for.
+///
+/// Three rather than one because a 16:9 card posted to a story is letterboxed
+/// into illegibility, and cropping a square to 9:16 loses the number the card
+/// exists to show.
+const CARD_SIZES: &[(&str, u32, u32, &str)] = &[
+    ("square", 1080, 1080, "Instagram feed, LinkedIn"),
+    (
+        "story",
+        1080,
+        1920,
+        "Instagram and WhatsApp stories, TikTok",
+    ),
+    ("wide", 1200, 675, "X, Threads, Facebook"),
+];
+
+/// SVG, not PNG, and the reason is a dependency rather than a preference.
+///
+/// A real renderer (`resvg` plus a font crate) is roughly 2 MB against the
+/// binary-size gate in `make ci`, paid by every user for a command almost nobody
+/// runs. A hand-rolled PNG encoder needs no dependency and needs a hand-written
+/// bitmap font, which is a lot of code and looks it. SVG is a text format this
+/// binary can already produce, it keeps real typography, and every conversion
+/// tool reads it.
+fn card_svg(f: &ShareFigures, w: u32, h: u32) -> String {
+    // Everything scales off the short edge, so the square and the story share one
+    // layout instead of a per-size table of offsets.
+    let scale = w.min(h) as f64 / 1080.0;
+    let px = |v: f64| v * scale;
+    let pad = px(80.0);
+    let right = w as f64 - pad;
+
+    // Longest line in the card decides the body size, because the renderer will
+    // not reflow and a clipped number is worse than a smaller one. Monospace is
+    // close enough to 0.6 em per character to size against, and the widest line
+    // is the one carrying the command count.
+    let widest = format!(
+        "{:.1}% of my terminal output, {} commands",
+        f.pct,
+        format_number(f.calls)
+    )
+    .chars()
+    .count() as f64;
+    // Floored, not rounded. Rounding the fitted size up is how a size that was
+    // computed to fit stops fitting: 34.8 became 35 and put the last character
+    // four pixels past the right edge.
+    let body = (px(38.0)).min((right - pad) / (widest * 0.6)).floor();
+
+    let rows = f.top.len() as f64;
+    let block = px(300.0) + rows * px(56.0);
+    let mut y = (h as f64 - block) / 2.0 + px(30.0);
+
+    let mut s = String::with_capacity(2048);
+    // No `letter-spacing`, and the font stack ends in a generic. ImageMagick's
+    // renderer honoured neither a CSS font keyword nor the tracking, and rendered
+    // a serif italic with 200px gaps between the wordmark's letters.
+    s.push_str(&format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+<rect width="{w}" height="{h}" fill="#0b0f14"/>
+<rect x="0" y="0" width="{bar}" height="{h}" fill="#22d3a6"/>
+<g font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-style="normal" fill="#e6edf3">
+<text x="{x}" y="{ty}" font-size="{wm}" font-weight="700" fill="#22d3a6">OMNI</text>
+"##,
+        bar = px(10.0).round(),
+        x = pad.round(),
+        ty = px(110.0).round(),
+        wm = px(44.0).round()
+    ));
+
+    s.push_str(&format!(
+        r##"<text x="{x}" y="{y}" font-size="{fs}" font-weight="700">{saved}</text>
+"##,
+        x = pad.round(),
+        y = y.round(),
+        fs = px(120.0).round(),
+        saved = xml_escape(&format_exact_tokens(f.saved))
+    ));
+    y += px(70.0);
+    s.push_str(&format!(
+        r##"<text x="{x}" y="{y}" font-size="{fs}" fill="#8b98a5">{unit} never sent to the model</text>
+"##,
+        x = pad.round(),
+        y = y.round(),
+        fs = (body * 1.05).round(),
+        unit = f.unit
+    ));
+    y += px(96.0);
+    s.push_str(&format!(
+        r##"<text x="{x}" y="{y}" font-size="{fs}">{pct:.1}% of my terminal output, {calls} commands</text>
+"##,
+        x = pad.round(),
+        y = y.round(),
+        fs = body,
+        pct = f.pct,
+        calls = xml_escape(&format_number(f.calls))
+    ));
+
+    // The percentage and the count are anchored to the right edge rather than to
+    // a fixed offset from the left. A fixed column put `99.8%` on top of
+    // `kubectl kustomize`, and command names are user data: there is no offset
+    // that is safe for all of them.
+    y += px(90.0);
+    for (cmd, count, cmd_pct, _) in &f.top {
+        s.push_str(&format!(
+            r##"<text x="{x}" y="{y}" font-size="{fs}" fill="#8b98a5">{cmd}</text><text x="{xp}" y="{y}" font-size="{fs}" fill="#22d3a6" text-anchor="end">{cmd_pct:.1}%</text><text x="{xc}" y="{y}" font-size="{fs}" fill="#5c6b7a" text-anchor="end">{count}x</text>
+"##,
+            x = pad.round(),
+            xp = (right - px(120.0)).round(),
+            xc = right.round(),
+            y = y.round(),
+            fs = (body * 0.92).round(),
+            cmd = xml_escape(cmd)
+        ));
+        y += px(56.0);
+    }
+
+    s.push_str(&format!(
+        r##"<text x="{x}" y="{fy}" font-size="{fs}" fill="#5c6b7a">Measured, not estimated. Terminal output excluded.</text>
+<text x="{x}" y="{fy2}" font-size="{fs}" fill="#5c6b7a">github.com/fajarhide/omni</text>
+</g>
+</svg>
+"##,
+        x = pad.round(),
+        fy = (h as f64 - pad - px(44.0)).round(),
+        fy2 = (h as f64 - pad).round(),
+        fs = (body * 0.72).round()
+    ));
+    s
+}
+
+/// Five characters, because an SVG is XML and a command can carry any of them.
+/// `sed 's/<a>/&/'` in a top-commands list would otherwise produce a file no
+/// converter will open.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// Converts one SVG, returning the tool that did it.
+///
+/// Nothing is installed and nothing is suggested for installation. If none of
+/// these is already on the machine the SVG still exists and the caller prints
+/// the command, which is a better outcome than a hard failure on a cosmetic
+/// feature.
+fn svg_to_png(svg: &std::path::Path, png: &std::path::Path, w: u32) -> Option<&'static str> {
+    let attempts: [(&str, Vec<String>); 4] = [
+        (
+            "rsvg-convert",
+            vec![
+                "-w".into(),
+                w.to_string(),
+                "-o".into(),
+                png.to_string_lossy().into_owned(),
+                svg.to_string_lossy().into_owned(),
+            ],
+        ),
+        (
+            "magick",
+            vec![
+                "-background".into(),
+                "none".into(),
+                svg.to_string_lossy().into_owned(),
+                png.to_string_lossy().into_owned(),
+            ],
+        ),
+        (
+            "convert",
+            vec![
+                "-background".into(),
+                "none".into(),
+                svg.to_string_lossy().into_owned(),
+                png.to_string_lossy().into_owned(),
+            ],
+        ),
+        (
+            "inkscape",
+            vec![
+                "--export-type=png".into(),
+                format!("--export-filename={}", png.to_string_lossy()),
+                format!("-w{w}"),
+                svg.to_string_lossy().into_owned(),
+            ],
+        ),
+    ];
+
+    for (tool, args) in attempts {
+        let ran = std::process::Command::new(tool)
+            .args(&args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if matches!(ran, Ok(st) if st.success()) && png.exists() {
+            return Some(tool);
+        }
+    }
+    None
+}
+
+fn run_card(store: &Store) -> Result<()> {
+    let Some(figures) = share_figures(store)? else {
+        println!("No data yet. Run a few commands and try again.");
+        return Ok(());
+    };
+
+    let dir = crate::paths::omni_home().join("cards");
+    std::fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
+
+    println!();
+    let mut converted = None;
+    for (name, w, h, used_for) in CARD_SIZES {
+        let svg_path = dir.join(format!("omni-{name}.svg"));
+        std::fs::write(&svg_path, card_svg(&figures, *w, *h))
+            .with_context(|| format!("failed to write {}", svg_path.display()))?;
+
+        let png_path = dir.join(format!("omni-{name}.png"));
+        let tool = svg_to_png(&svg_path, &png_path, *w);
+        converted = converted.or(tool);
+        let made = if tool.is_some() { "svg + png" } else { "svg" };
+        println!(
+            "  {:<9} {w}x{h}  {made:<9}  {}",
+            name.bright_white(),
+            used_for.bright_black()
+        );
+    }
+
+    println!("\n  {}", dir.display().to_string().bright_cyan());
+    match converted {
+        Some(tool) => println!("  PNG rendered with {}", tool.bright_white()),
+        None => {
+            println!(
+                "  {}",
+                "No SVG converter found, so only the SVGs were written. Any of these renders them:"
+                    .bright_black()
+            );
+            println!(
+                "    rsvg-convert -w 1080 {}/omni-square.svg > {}/omni-square.png",
+                dir.display(),
+                dir.display()
+            );
+        }
+    }
+    // The card carries the user's own top commands, which on a work machine can
+    // be the one thing on it that should not be public.
+    println!(
+        "\n  {}",
+        "The card names your top commands. Read it before you post it.".yellow()
+    );
     println!();
 
     Ok(())
@@ -1361,6 +1651,63 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+
+    fn card_figures(top: Vec<(String, u64, f64, u64)>) -> ShareFigures {
+        ShareFigures {
+            saved: 5_500_000,
+            pct: 54.2,
+            unit: "tokens",
+            calls: 12_624,
+            top,
+        }
+    }
+
+    /// A card is an XML document built from the user's own command strings, and
+    /// `sh -c 'a && b > c'` carries three characters that end it. An unescaped
+    /// one produces a file no converter will open, which reads as "the feature is
+    /// broken" rather than "that command has an ampersand in it".
+    #[test]
+    fn escapes_command_names_that_would_break_the_document() {
+        let f = card_figures(vec![("sh -c 'a && b>c'".to_string(), 3, 40.0, 100)]);
+
+        let svg = card_svg(&f, 1080, 1080);
+
+        assert!(svg.contains("&amp;&amp;"), "unescaped ampersand: {svg}");
+        assert!(!svg.contains("b>c"), "unescaped angle bracket: {svg}");
+        assert!(svg.contains("&apos;"), "unescaped apostrophe: {svg}");
+    }
+
+    /// The card exists to show one number. Every size has to carry it, and the
+    /// long line has to stay inside the canvas: the renderer does not reflow, so
+    /// a body size that overflows is a silently clipped card.
+    #[test]
+    fn every_size_carries_the_figures_inside_its_canvas() {
+        let f = card_figures(vec![("cargo test".to_string(), 54, 95.1, 900)]);
+
+        for (_, w, h, _) in CARD_SIZES {
+            let svg = card_svg(&f, *w, *h);
+            assert!(svg.contains("5.5M"), "{w}x{h} lost the headline: {svg}");
+            assert!(svg.contains("12,624"), "{w}x{h} lost the call count");
+            assert!(svg.contains("cargo test"), "{w}x{h} lost the top command");
+            // The widest line is the one sized against, so its right edge is the
+            // one that can overflow.
+            let widest = format!("{:.1}% of my terminal output, {} commands", f.pct, "12,624")
+                .chars()
+                .count() as f64;
+            let body = svg
+                .split("commands</text>")
+                .next()
+                .and_then(|s| s.rsplit("font-size=\"").next())
+                .and_then(|s| s.split('"').next())
+                .and_then(|s| s.parse::<f64>().ok())
+                .expect("a body font size");
+            let pad = *w.min(h) as f64 / 1080.0 * 80.0;
+            assert!(
+                pad + widest * body * 0.6 <= *w as f64 - pad + 1.0,
+                "{w}x{h} overflows: {body}px body over {widest} chars"
+            );
+        }
+    }
 
     #[test]
     fn aligns_period_columns_across_mixed_number_widths() {

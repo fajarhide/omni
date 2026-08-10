@@ -1584,6 +1584,22 @@ impl SqliteBackend {
         let _ = tx.commit();
     }
 
+    /// Forgets everything a scope was shown, and answers how many lines that was.
+    ///
+    /// Called at compaction. The ledger's licence to replace a run with a handle
+    /// is that the agent is still holding those bytes, and compaction is the
+    /// moment inside a session where that stops being true. Forgetting costs a
+    /// missed reduction; not forgetting means telling an agent it has content its
+    /// context no longer contains, which is the same defect that cancelled the
+    /// project-scoped ledger (#401).
+    pub fn ledger_forget(&self, scope: &str) -> usize {
+        let Ok(conn) = self.pool.get() else {
+            return 0;
+        };
+        conn.execute("DELETE FROM ledger_lines WHERE scope = ?1", params![scope])
+            .unwrap_or(0)
+    }
+
     /// Pages in the file and how many of them are free, or `None` when the
     /// database cannot be read.
     ///
