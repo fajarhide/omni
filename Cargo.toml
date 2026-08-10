@@ -102,3 +102,19 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# The profile `make ci` builds, and the only difference from release is that
+# codegen is allowed to use the other seven cores. `codegen-units = 1` costs 355s
+# to rebuild this one crate against 89s at 16, measured back to back on the same
+# machine, and it is 4 minutes every developer pays on every gate round.
+#
+# What it buys, also measured: 9,941,888 bytes against 11,466,880, so the gate
+# binary runs 15.3% larger than the one users get. The size check stays at 15 MB
+# and is therefore a tighter gate here than on the real artifact, not a looser
+# one, which is the direction a proxy is allowed to be wrong in.
+#
+# Nothing ships from this profile. `release.yml` builds
+# `cargo build --release --target <triple>` itself and never calls `make`.
+[profile.ci]
+inherits = "release"
+codegen-units = 16
