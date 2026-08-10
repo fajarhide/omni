@@ -4,7 +4,7 @@
 use anyhow::Result;
 use colored::Colorize;
 use is_terminal::IsTerminal;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -225,7 +225,24 @@ fn stream_distill<R: Read, W: Write, E: Write>(
                 Ok(_) => {
                     let ch = b[0];
                     line_buffer.push(ch);
-                    if ch == b'\n' || ch == b'\r' {
+                    if ch == b'\n' {
+                        break;
+                    }
+                    if ch == b'\r' {
+                        // Splitting on a bare `\r` is deliberate, so a progress
+                        // bar redraw is its own line. A `\r` followed straight by
+                        // `\n` is not a redraw, it is one Windows line ending, and
+                        // reading it as two put the `\n` on a line of its own,
+                        // where it trimmed to empty and was dropped: every CRLF
+                        // payload came out as CR (#411). Peek rather than read, so
+                        // a `\r` that is a redraw leaves the next byte for the
+                        // next line.
+                        if let Ok(next) = reader.fill_buf()
+                            && next.first() == Some(&b'\n')
+                        {
+                            line_buffer.push(b'\n');
+                            reader.consume(1);
+                        }
                         break;
                     }
                 }
@@ -1150,6 +1167,56 @@ mod tests {
             input,
             "the stream writer invented a line ending"
         );
+    }
+
+    /// #411, and the test that was written for #410 and deliberately withheld,
+    /// because the defect it caught was a different one in the same two lines.
+    ///
+    /// The reader splits on a bare `\r` on purpose, so a progress bar redraw is
+    /// its own line. That turned `\r\n` into two reads: the first ended `...\r`
+    /// and the second was a lone `\n`, which trims to empty and is dropped, so
+    /// every CRLF payload came out as CR.
+    #[test]
+    fn keeps_the_line_endings_the_input_arrived_with() {
+        let input = "Resolved short name alpine\r\ndone\r\n";
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some("podman run --rm alpine true"),
+        )
+        .expect("must succeed");
+
+        assert_eq!(String::from_utf8_lossy(&out), input, "CRLF was rewritten");
+    }
+
+    /// The `\r` split has to survive the fix, or a progress bar redraw stops
+    /// being its own line and the reader buffers a whole download in one.
+    #[test]
+    fn still_breaks_a_line_on_a_carriage_return_that_is_a_redraw() {
+        // Not `Downloading ...`: `docker.toml` strips that prefix, so those lines
+        // would vanish for a correct reason and the test would pass on the wrong
+        // one. These match no strip pattern, so only the reader can lose them.
+        let input = "layer a 10%\rlayer a 90%\rdone\n";
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some("podman run --rm alpine true"),
+        )
+        .expect("must succeed");
+
+        assert_eq!(String::from_utf8_lossy(&out), input);
     }
 
     /// #406. `docker.toml` is stream-mode, strips `^Copying blob ` and sets
