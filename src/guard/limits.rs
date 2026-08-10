@@ -43,6 +43,37 @@ pub const HOST_OUTPUT_CAP: usize = 30_000;
 /// the agent instead of being implied.
 pub const MAX_REWIND_BYTES: usize = 64 * 1024;
 
+/// Below this an output is not worth taking to the ledger.
+///
+/// The ledger's cost is a membership query and a batched insert per call, and
+/// its gain is bounded by what a handle can replace. The marker is about 88
+/// bytes, so on a small reply it is a measurable share of the payload.
+pub const MIN_LEDGER_INPUT: usize = 400;
+
+/// A run of already-shown lines shorter than this stays verbatim.
+///
+/// Both bounds have to hold, because either one alone admits a bad trade: four
+/// one-word lines are shorter than the marker that would replace them, and one
+/// 400 byte line replaced by a handle costs the agent a round trip to read
+/// something it could have read in place.
+///
+/// **All three constants were chosen by replay, not by taste.** Aggregate net
+/// savings over 7,019 model-facing traces, filters alone at 5.2%:
+///
+/// | input floor / run lines / run bytes | aggregate | file read | calls projected |
+/// |---|---|---|---|
+/// | 2000 / 8 / 240 | 12.4% | 20.2% | 159 |
+/// | **400 / 4 / 200** | **15.7%** | **24.8%** | **512** |
+/// | 200 / 2 / 150 | 16.6% | 25.2% | 840 |
+///
+/// The middle row is the knee. The first loosening bought 3.3 points for 353
+/// more markers; the second bought 0.9 for 328 more, and those markers are two
+/// line substitutions that make the output choppier and invite an expansion
+/// request for barely more than the marker costs. The fidelity alarm exists, but
+/// spending it on 0.9 points is the wrong trade.
+pub const MIN_LEDGER_RUN_LINES: usize = 4;
+pub const MIN_LEDGER_RUN_BYTES: usize = 200;
+
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking — e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that

@@ -9,6 +9,7 @@ pub mod distillers;
 pub mod graph;
 pub mod guard;
 pub mod hooks;
+pub mod ledger;
 pub mod mcp;
 pub mod paths;
 pub mod pipeline;

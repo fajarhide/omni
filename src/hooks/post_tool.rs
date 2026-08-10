@@ -180,16 +180,18 @@ fn rewind_marker(
             String::new(),
         );
     }
-    match store {
-        Some(s) => {
-            let hash = s.store_rewind(content);
-            (
-                format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n"),
-                hash,
-            )
-        }
+    // A failed write reads the same as no store at all, because what the reader
+    // can do about it is the same: the bytes are gone and there is no handle.
+    // The old code took the key `store_rewind` returned on every path, including
+    // a swallowed insert, and printed `omni_retrieve("<key>")` for a row that was
+    // never written (#388).
+    match store.and_then(|s| s.store_rewind(content)) {
+        Some(hash) => (
+            format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n"),
+            hash,
+        ),
         None => (
-            format!("\n[OMNI: {lost} omitted, full output not archived: no store]\n"),
+            format!("\n[OMNI: {lost} omitted, full output not archived]\n"),
             String::new(),
         ),
     }
@@ -569,6 +571,30 @@ pub fn process_payload(
     // Check for rewind decision
     let mut final_out = final_out;
     let mut rewind_hash = String::new();
+
+    // The session ledger (#394). It runs on what the filters produced rather
+    // than on the raw output, because the two mechanisms are orthogonal:
+    // replayed over 7,067 model-facing traces, 25.1% of raw bytes were lines
+    // already shown and 22.6% still were after every distiller had run.
+    //
+    // Two gates, both narrow on purpose.
+    //
+    // `format::sniff` is the same gate collapse sits behind. Replacing a run of
+    // lines inside a JSON document corrupts what the next step parses, and the
+    // rule is that unsure means structured.
+    //
+    // The scope is the **host's** session id and never the local fallback.
+    // `SessionState::session_id` is a wall-clock stamp on globally persisted
+    // state: one such id covered 16 project paths and 3,739 commands (#118).
+    // Scoping the ledger by that would let it tell a session it had already been
+    // shown output that went to a different one, which is a false claim, not a
+    // missed saving. No host id, no ledger.
+    if let (Some(s), Some(scope)) = (store.as_ref(), normalized.host_session_id.as_deref())
+        && crate::pipeline::format::sniff(&final_out).is_none()
+        && let Some(view) = crate::ledger::Ledger::new(s, scope).project(&final_out)
+    {
+        final_out = view;
+    }
 
     // Re-check segments from content for metadata/learning. Same resolver the
     // distillation above used: the direct one disagrees on a chain, so on
@@ -2052,6 +2078,45 @@ INFO:jean.server:startup complete in 4.2s
             count(&db, "SELECT COUNT(*) FROM rewind_store"),
             0,
             "the cap has to hold, or it is not a cap"
+        );
+    }
+
+    /// #388. A write that does not land is the same to the reader as no store at
+    /// all, so it gets the same honest wording. It used to get a handle instead,
+    /// because `store_rewind` returned the content key on every path including a
+    /// swallowed insert. Dropping the table is the cheapest real write failure.
+    #[test]
+    fn declines_to_hand_out_a_handle_when_the_archive_write_fails() {
+        // Arrange: under the rewind cap, so this reaches the archive branch.
+        let content = lossy_content(400);
+        assert!(content.len() < crate::guard::limits::MAX_REWIND_BYTES);
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo test"},
+            "tool_response": {"content": content},
+        })
+        .to_string();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+        store
+            .pool
+            .get()
+            .expect("conn")
+            .execute("DROP TABLE rewind_store", [])
+            .expect("drop");
+
+        // Act
+        let out = process_payload(&payload, Some(store), None).expect("a reduced result is sent");
+
+        // Assert
+        assert!(
+            !out.contains("omni_retrieve("),
+            "a handle was promised for content that was never archived: {out}"
+        );
+        assert!(
+            out.contains("not archived"),
+            "the reader has to be told the bytes are gone: {out}"
         );
     }
 
