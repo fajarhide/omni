@@ -8,6 +8,14 @@ use std::sync::LazyLock;
 /// calls for every line, so a single 64-character line cost 660 µs and an 80-line
 /// payload spent 52 ms deciding what it was. That is five times the whole hook
 /// budget in `AGENTS.md`, spent compiling the same pattern eighty times (#283).
+/// A test tally in the shape reporters print outside the cargo world:
+/// ` 7 pass`, `1 fail`, `12 skipped`. Anchored to a count so an ordinary sentence
+/// containing the word cannot match.
+static TALLY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*\d+\s+(pass|passed|fail|failed|skip|skipped|todo)\b")
+        .expect("static tally pattern")
+});
+
 static PATH_WITH_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[\w\./\-]+\.\w+:\d+(:\d+)?").expect("the path regex is a literal and must compile")
 });
@@ -168,6 +176,16 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         }
     }
 
+    // A runner that prints a glyph instead of a word. `bun test`, and the whole
+    // family of reporters that mark results with `✓` and `✗`, carried no failure
+    // signal at all: `✗ router > returns 404 for an unknown channel` tiered as
+    // ordinary context and the distiller dropped it, while three passing tests
+    // survived. The agent got an error message with no idea which test produced
+    // it (#425).
+    if has_fail_glyph(lower_text) {
+        return true;
+    }
+
     // Generic critical markers
     lower_text.contains("error:")
         || lower_text.contains("error[")
@@ -177,7 +195,38 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.starts_with("error ")
         || lower_text.contains("build failed")
         || lower_text.contains("--- fail")
-        || mentions_failure(lower_text)
+        || mentions_failure_as_a_verdict(lower_text)
+}
+
+/// The verdict glyphs runners print instead of words.
+///
+/// Lowercasing does not touch them, so these are compared against `lower_text`
+/// directly. Kept narrow: only glyphs that carry a verdict in a test reporter,
+/// not every tick and cross a tool might print decoratively.
+const FAIL_GLYPHS: &[char] = &['✗', '✘', '❌'];
+const PASS_GLYPHS: &[char] = &['✓', '✔', '✅'];
+
+/// Whether any line announces a failure with a glyph.
+///
+/// Line-wise rather than on the whole text, because `classify_block` judges a
+/// block and a failing line can sit anywhere inside one.
+fn has_fail_glyph(text: &str) -> bool {
+    text.lines()
+        .any(|l| l.trim_start().starts_with(FAIL_GLYPHS))
+}
+
+/// `mentions_failure`, but never for a line that has already announced a pass.
+///
+/// `✓ queue > retries a failed job` was tiered Critical because the word appears
+/// with a space on either side, which is neither of the two exclusions below. A
+/// test name is prose and can say anything; what settles it is that the line
+/// carries a pass marker, and a line reporting a pass is not reporting a failure
+/// however it is named (#425). This is #210 arriving through a second door: that
+/// fix protected tallies, and a name is not a tally.
+fn mentions_failure_as_a_verdict(text: &str) -> bool {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with(PASS_GLYPHS))
+        .any(mentions_failure)
 }
 
 /// Whether `failed` appears as a *verdict* rather than incidentally.
@@ -191,16 +240,29 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
 /// Two exclusions. An identifier character on *either* side means the word is
 /// part of a name rather than a report, and a preceding count of exactly zero
 /// means the runner is reporting none.
-// Safety: `match_indices` yields byte offsets that are always char boundaries,
-// so slicing at one cannot split a UTF-8 character.
-#[allow(clippy::string_slice)]
 fn mentions_failure(lower_text: &str) -> bool {
-    const WORD: &str = "failed";
-    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    // Both spellings, longest first. A runner reports `1 failed` or `1 fail`
+    // depending on whose reporter it is, and bun says `fail`, so knowing only the
+    // past tense left a real failure tally invisible (#425). Scanning for `fail`
+    // alone would not do: in `failed` it is followed by `ed`, which the
+    // identifier guard below correctly rejects as part of a word.
+    const WORDS: [&str; 2] = ["failed", "fail"];
 
-    lower_text.match_indices(WORD).any(|(i, _)| {
+    WORDS.iter().any(|word| mentions(lower_text, word))
+}
+
+fn is_ident(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+// Safety: `match_indices` yields byte offsets that are always char boundaries,
+// so slicing at one cannot split a UTF-8 character. This is where the slicing
+// moved when `mentions_failure` gained a second spelling to scan for (#425).
+#[allow(clippy::string_slice)]
+fn mentions(lower_text: &str, word: &str) -> bool {
+    lower_text.match_indices(word).any(|(i, _)| {
         let before = &lower_text[..i];
-        let after = &lower_text[i + WORD.len()..];
+        let after = &lower_text[i + word.len()..];
 
         // Inside an identifier, so it names something rather than reporting it.
         // Both sides, because a name can start with the word (`failed_to_parse`)
@@ -209,18 +271,26 @@ fn mentions_failure(lower_text: &str) -> bool {
             return false;
         }
 
-        // A tally reporting none: `0 failed`, `; 0 failed;`. The digit run is read
-        // back-to-front, so it comes out reversed — `10 failed` yields `"01"`.
-        // Only an exact zero matters here and `"0"` reversed is itself, so the
-        // comparison holds; anything else, including a multi-digit count, is a
-        // real failure.
-        let digits_reversed: String = before
+        // A tally reporting none, and the count sits on whichever side the
+        // reporter chose: `0 failed` for cargo, `# fail 0` for TAP. Reading only
+        // the left made TAP's green summary a failure, which is #210 again in a
+        // second dialect and is what `a_green_tap_run_keeps_its_verdict` caught.
+        //
+        // The leading run is read back-to-front, so it comes out reversed:
+        // `10 failed` yields `"01"`. Only an exact zero matters and `"0"`
+        // reversed is itself, so the comparison holds either way.
+        let leading: String = before
             .trim_end()
             .chars()
             .rev()
             .take_while(|c| c.is_ascii_digit())
             .collect();
-        digits_reversed != "0"
+        let trailing: String = after
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        leading != "0" && trailing != "0"
     })
 }
 
@@ -246,6 +316,12 @@ fn is_diagnostic(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.contains("deprecated:")
         || lower_text.contains("deprecation warning")
         || lower_text.contains("test result:")
+        // The summary of a run, in the shapes reporters other than cargo print.
+        // Losing it costs the one line that says whether anything passed, and
+        // bun's survived only by accident until #425: it was riding a positional
+        // boost from a passing test that had been wrongly tiered Critical.
+        || (lower_text.starts_with("ran ") && lower_text.contains(" test"))
+        || TALLY.is_match(lower_text)
         || lower_text.contains("--- pass")
         || lower_text.contains("diff --git")
         || lower_text.starts_with("warning[")
@@ -291,6 +367,64 @@ fn is_data(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #425. `bun test` and every reporter in that family announce the verdict
+    /// with a glyph. Without it the failing line carried no failure signal, tiered
+    /// as ordinary context, and the distiller dropped **the name of the test that
+    /// failed** while keeping three passing ones.
+    #[test]
+    fn reads_a_cross_as_a_failure_verdict() {
+        let (class, _) = classify_block(&["✗ router > returns 404 for an unknown channel"], None);
+
+        assert_eq!(class, SemanticClass::Critical);
+    }
+
+    /// The other half of #425, and #210 arriving through a second door. That fix
+    /// protected tallies from the bare substring; a test *name* is prose and can
+    /// say anything. What settles it is the pass marker on the same line.
+    #[test]
+    fn a_passing_test_named_after_failure_is_not_a_failure() {
+        let (class, _) = classify_block(&["✓ queue > retries a failed job [1.02ms]"], None);
+
+        assert_ne!(class, SemanticClass::Critical);
+    }
+
+    /// A run's tally is the one line that says whether anything passed. Bun's
+    /// survived only by accident before #425: it was riding a positional boost
+    /// from a passing test that had been wrongly tiered Critical, so fixing that
+    /// would have silently dropped the summary.
+    #[test]
+    fn keeps_a_tally_a_reporter_other_than_cargo_printed() {
+        for line in [
+            " 7 pass",
+            " 12 skipped",
+            "Ran 8 tests across 3 files. [412.00ms]",
+        ] {
+            let (class, _) = classify_block(&[line], None);
+            assert_ne!(
+                class,
+                SemanticClass::Context,
+                "{line} is the summary, not context"
+            );
+        }
+    }
+
+    /// `fail` and `failed` are the same verdict wearing different reporters, and
+    /// zero of either is still not a failure.
+    #[test]
+    fn reads_fail_and_failed_alike_and_zero_of_neither() {
+        assert!(mentions_failure("1 fail"));
+        assert!(mentions_failure("1 failed"));
+        assert!(!mentions_failure("0 fail"));
+        assert!(!mentions_failure("0 failed"));
+        // TAP puts the count on the other side, and zero is still zero.
+        assert!(!mentions_failure("# fail 0"));
+        assert!(mentions_failure("# fail 2"));
+        // Still a name, not a verdict.
+        assert!(!mentions_failure(
+            "test guard::preserves_failed_lines ... ok"
+        ));
+    }
 
     /// #210: `contains("failed")` made every green cargo tally Critical, and a
     /// passing test named after failure with it. Both directions are asserted,
