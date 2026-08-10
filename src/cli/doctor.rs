@@ -679,7 +679,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             } else {
                 "filters"
             };
-            if crate::guard::trust::is_trusted(&cwd.join("omni_config.json")) {
+            // The directory, not the file inside it (#433). Doctor agreed with the
+            // defect rather than exposing it, reporting the project untrusted for
+            // the same reason the loader skipped it.
+            if crate::guard::trust::is_trusted(&cwd) {
                 println!(
                     "   {:<15} .omni/{dir_label}/ ({} signals, TRUSTED) {}",
                     "Project:".bright_black(),

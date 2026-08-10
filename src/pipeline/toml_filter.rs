@@ -898,8 +898,12 @@ fn load_all_filters_uncached() -> Vec<TomlFilter> {
     if let Ok(cwd) = std::env::current_dir() {
         let local_signals_dir = resolve_signal_dir(&cwd);
         if local_signals_dir.exists() {
-            let config_path = cwd.join("omni_config.json");
-            if crate::guard::trust::is_trusted(&config_path) {
+            // The directory, not the file inside it. `is_trusted` appends
+            // `omni_config.json` itself, so passing the file made it look for
+            // `<cwd>/omni_config.json/omni_config.json` and return false at the
+            // existence check every time: project-local signals, documented as the
+            // highest priority tier, had never loaded (#433).
+            if crate::guard::trust::is_trusted(&cwd) {
                 let report = load_from_dir(&local_signals_dir);
                 for f in report.filters {
                     if !seen.contains(&f.name) {
@@ -942,7 +946,10 @@ fn compute_filters_fingerprint() -> u64 {
     // 1) project-local (include trust decision + config mtime)
     if let Ok(cwd) = std::env::current_dir() {
         let config_path = cwd.join("omni_config.json");
-        let is_trusted = crate::guard::trust::is_trusted(&config_path);
+        // Same correction as the loader: the directory, not the file (#433). The
+        // fingerprint has to agree with the loader or a newly trusted project
+        // would keep serving a cached filter set that excluded its own signals.
+        let is_trusted = crate::guard::trust::is_trusted(&cwd);
         is_trusted.hash(&mut hasher);
         hash_path_metadata(&config_path, &mut hasher);
 
