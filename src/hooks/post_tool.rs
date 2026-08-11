@@ -219,37 +219,39 @@ fn archive_tool_reply(
     (distilled.len() + marker.len() < content.len()).then(|| distilled + &marker)
 }
 
-pub fn process_payload(
-    input_str: &str,
-    store: Option<Arc<Store>>,
-    session: Option<Arc<Mutex<SessionState>>>,
-) -> Option<String> {
-    let normalized = crate::hooks::normalize::normalize(input_str)?;
-
+/// Whether this payload is one OMNI must not touch, and the recording of why.
+///
+/// Six gates, each of which used to sit inline at the top of `process_payload`.
+/// They are here rather than there because they answer a different question from
+/// the pipeline below them: not "how should this be distilled" but "may it be".
+///
+/// `true` means the caller returns `None`, which means the host keeps the
+/// original bytes at zero marker cost.
+fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option<&Store>) -> bool {
     // #120: a command that exited non-zero passes through verbatim, never distilled.
     // Distillation must never turn a failed command into output that reads as success
     // (a fabricated success terminates investigation; a fabricated error only costs a
     // retry). Emit nothing: the host keeps the original bytes at zero marker cost.
     if normalized.failed {
-        return None;
+        return true;
     }
 
     if crate::guard::env::is_passthrough() {
-        return None;
+        return true;
     }
 
     // Format-safe gate: structured payloads are parsed by whatever reads them next,
     // so every lossy stage below, including the >2MB head/tail trim, would corrupt
     // them. Emit nothing: the host keeps the original bytes at zero marker cost.
     if let Some(kind) = format::sniff(&normalized.content) {
-        if let Some(ref s) = store {
+        if let Some(s) = store {
             s.record_passthrough(
                 &normalized.command,
                 normalized.content.len(),
                 &format::passthrough_reason(kind),
             );
         }
-        return None;
+        return true;
     }
 
     // The host capped this payload, which means the command produced more than
@@ -275,53 +277,61 @@ pub fn process_payload(
         .is_some_and(|s| s.len() >= crate::guard::limits::HOST_OUTPUT_CAP);
 
     if normalized.agent_id == "claude_code" && host_capped_stdout {
-        if let Some(ref s) = store {
+        if let Some(s) = store {
             s.record_passthrough(
                 &normalized.command,
                 normalized.content.len(),
                 "host output cap",
             );
         }
-        return None;
+        return true;
     }
 
-    // L1-03: Streaming Distillation Support (Buffer warning & chunked processing)
-    // Prevent OMNI from blocking memory if output is extremely large (> 2MB)
-    let content = if normalized.content.len() > 2_000_000 {
-        let lines: Vec<&str> = normalized.content.lines().collect();
-        let total_lines = lines.len();
-        let head_lines = 5000;
-        let tail_lines = 1000;
+    false
+}
 
-        if total_lines > head_lines + tail_lines {
-            let head = lines
-                .iter()
-                .take(head_lines)
-                .copied()
-                .collect::<Vec<&str>>()
-                .join("\n");
-            let tail = lines
-                .iter()
-                .skip(total_lines.saturating_sub(tail_lines))
-                .copied()
-                .collect::<Vec<&str>>()
-                .join("\n");
-            format!(
-                "{}\n\n... [OMNI: ⚠️ {} lines omitted due to extreme length (>2MB)] ...\n\n{}",
-                head,
-                total_lines - (head_lines + tail_lines),
-                tail
-            )
-        } else {
-            normalized.content
-        }
-    } else {
-        normalized.content
-    };
+/// Head and tail of a payload too large to hold whole, with the omission marked.
+///
+/// Above 2 MB the pipeline stops being worth its memory, and every stage below
+/// would be working on bytes no reader reaches. The cut is announced in the
+/// output rather than being silent, which is the rule #111 set for every stage
+/// that drops bytes.
+fn trim_enormous(content: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    const CAP: usize = 2_000_000;
+    const HEAD_LINES: usize = 5000;
+    const TAIL_LINES: usize = 1000;
 
-    let config = crate::guard::config::load_config();
-    let agent_config = config.for_agent(&normalized.agent_id);
+    if content.len() <= CAP {
+        return Cow::Borrowed(content);
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= HEAD_LINES + TAIL_LINES {
+        return Cow::Borrowed(content);
+    }
 
+    let head = lines[..HEAD_LINES].join("\n");
+    let tail = lines[lines.len() - TAIL_LINES..].join("\n");
+    Cow::Owned(format!(
+        "{head}\n\n... [OMNI: {} lines omitted due to extreme length (>2MB)] ...\n\n{tail}",
+        lines.len() - (HEAD_LINES + TAIL_LINES)
+    ))
+}
+
+/// The non-Bash tools, each of which returns its own reply and never reaches the
+/// Bash pipeline below.
+///
+/// `Some` means this payload belonged to one of them and is finished with. Every
+/// arm that shortens its reply archives it through `archive_tool_reply` first,
+/// because returning before the Bash rewind block means each one owes the same
+/// guarantee itself: no bytes dropped without a marker and a recoverable copy
+/// (#271 closed that for Bash, #273 found it still open here).
+fn distil_tool_reply(
+    normalized: &crate::hooks::normalize::NormalizedInput,
+    content: &str,
+    store: Option<&Arc<Store>>,
+    agent_config: &crate::guard::config::AgentConfig,
+) -> Option<Option<String>> {
     // Route based on tool_name: handle non-Bash tools with specialized distillation.
     //
     // Every arm below returns before the Bash pipeline's rewind block, so each one
@@ -333,7 +343,7 @@ pub fn process_payload(
         "Bash" => { /* fall through to existing pipeline below */ }
         "Read" => {
             if !agent_config.readfile_enabled() {
-                return None;
+                return Some(None);
             }
             let filepath = if normalized.command.is_empty() {
                 "unknown"
@@ -353,34 +363,40 @@ pub fn process_payload(
                     .unwrap_or(0)
             };
 
-            return crate::distillers::readfile::distill_readfile_with_context(
-                &content,
-                filepath,
-                count_dependents,
-            )
-            .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
-            .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
+            return Some(
+                crate::distillers::readfile::distill_readfile_with_context(
+                    content,
+                    filepath,
+                    count_dependents,
+                )
+                .and_then(|d| archive_tool_reply(store, content, d))
+                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+            );
         }
         "Grep" => {
             if !agent_config.grep_enabled() {
-                return None;
+                return Some(None);
             }
-            return distill_grep(&content)
-                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
-                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
+            return Some(
+                distill_grep(content)
+                    .and_then(|d| archive_tool_reply(store, content, d))
+                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+            );
         }
         "WebFetch" => {
             if !agent_config.webfetch_enabled() {
-                return None;
+                return Some(None);
             }
-            return process_web_content(&content)
-                .and_then(|d| archive_tool_reply(store.as_ref(), &content, d))
-                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
+            return Some(
+                process_web_content(content)
+                    .and_then(|d| archive_tool_reply(store, content, d))
+                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+            );
         }
         "Edit" | "Write" | "Create" | "Move" | "Delete" | "Replace" => return None,
         "MultiEdit" => {
             if content.len() < 200 {
-                return None;
+                return Some(None);
             }
             let lines: Vec<&str> = content.lines().collect();
             let summary = format!(
@@ -389,13 +405,15 @@ pub fn process_payload(
                 lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
             );
             if summary.len() < content.len() * 8 / 10 {
-                return archive_tool_reply(store.as_ref(), &content, summary)
-                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
+                return Some(
+                    archive_tool_reply(store, content, summary)
+                        .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+                );
             }
-            return None;
+            return Some(None);
         }
         _ => {
-            if let Some(ref s) = store {
+            if let Some(s) = store {
                 s.record_unhandled_tool(&normalized.tool_name);
             }
             if content.len() > 2000 {
@@ -406,11 +424,40 @@ pub fn process_payload(
                     lines.len(),
                     lines.into_iter().take(30).collect::<Vec<&str>>().join("\n")
                 );
-                return archive_tool_reply(store.as_ref(), &content, summary)
-                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d));
+                return Some(
+                    archive_tool_reply(store, content, summary)
+                        .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+                );
             }
-            return None;
+            return Some(None);
         }
+    }
+
+    None
+}
+
+pub fn process_payload(
+    input_str: &str,
+    store: Option<Arc<Store>>,
+    session: Option<Arc<Mutex<SessionState>>>,
+) -> Option<String> {
+    let normalized = crate::hooks::normalize::normalize(input_str)?;
+
+    // Six reasons to hand the payload straight back, each with its own history,
+    // lifted out of a 701 line function so the entry conditions can be read
+    // without scrolling past the pipeline (#442). Every one of them records why
+    // it declined, which is the column #441 added.
+    if declined(&normalized, store.as_deref()) {
+        return None;
+    }
+
+    let content = trim_enormous(&normalized.content);
+
+    let config = crate::guard::config::load_config();
+    let agent_config = config.for_agent(&normalized.agent_id);
+
+    if let Some(reply) = distil_tool_reply(&normalized, &content, store.as_ref(), &agent_config) {
+        return reply;
     }
 
     if content.len() < 50 {
@@ -700,7 +747,7 @@ pub fn process_payload(
         // and empty, and the banner told the agent not to re-run (#229). Under
         // a tenth saved there is nothing here worth a deletion, so hand back
         // what the command produced.
-        final_out = content.clone();
+        final_out = content.to_string();
         route = Route::Passthrough;
     }
 
@@ -737,7 +784,7 @@ pub fn process_payload(
                 route = Route::Rewind;
             }
         } else {
-            final_out = content.clone();
+            final_out = content.to_string();
             route = Route::Passthrough;
             rewind_hash.clear();
         }
