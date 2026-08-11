@@ -26,6 +26,10 @@ const FLAGS: super::Flags = &[
         "Validate a TOML filter file (syntax and tests)",
     ),
     ("--json", "Machine-readable JSON output"),
+    (
+        "--detail",
+        "Print every integration row, not just the ones needing attention",
+    ),
 ];
 
 fn print_help() {
@@ -237,6 +241,58 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One host's report, trimmed to what a diagnostic is read for.
+///
+/// #426: doctor answered one question in a hundred lines, 34 of which said
+/// `[OK]`. A row confirming that something is fine is not what a diagnostic is
+/// read for. A host with nothing wrong collapses to a single line naming its
+/// distill tier and how many checks passed; a host with anything to say keeps
+/// its heading, every row that is not `[OK]`, and the same count. `--detail`
+/// returns the whole report, and a row that is not `[OK]` is never hidden in
+/// either mode.
+fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
+    let heading = report
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .to_string();
+    let tier_row = format!("   {:<15} {}\n", "Distill tier:", tier);
+    if detail {
+        return format!("{report}{tier_row}");
+    }
+
+    let body: Vec<&str> = report
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .skip(1)
+        .collect();
+    let hidden = body.iter().filter(|l| l.contains("[OK]")).count();
+    let kept: Vec<&&str> = body
+        .iter()
+        .filter(|l| !l.contains("[OK]") && !l.trim().is_empty())
+        .collect();
+
+    if kept.is_empty() {
+        let checks = if hidden == 1 { "check" } else { "checks" };
+        return format!("{heading} {tier}, {hidden} {checks} [OK]\n");
+    }
+
+    let mut out = format!("{heading}\n");
+    for line in kept {
+        out.push_str(line);
+        out.push('\n');
+    }
+    if hidden > 0 {
+        let checks = if hidden == 1 { "check" } else { "checks" };
+        out.push_str(&format!(
+            "   {:<15} {hidden} more {checks} [OK], omni doctor --detail to see them\n",
+            ""
+        ));
+    }
+    out.push_str(&tier_row);
+    out
+}
+
 pub fn run(args: &[String]) -> anyhow::Result<()> {
     if args
         .iter()
@@ -274,6 +330,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     }
 
     let fix_mode = args.iter().any(|a| a == "--fix");
+    let detail = args.iter().any(|a| a == "--detail");
 
     let mut all_ok = true;
     let mut warnings: Vec<String> = Vec::new();
@@ -532,17 +589,23 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     let integrations = crate::agents::all_integrations();
     let mut any_agent_ok = false;
     for agent in integrations {
-        if agent.doctor_check(fix_mode, &mut warnings) {
+        // #426. doctor answered one question in a hundred lines, 34 of which
+        // said [OK]. A row that says a thing is fine is not what a diagnostic is
+        // read for, so by default each host keeps only the rows that need
+        // attention plus a count of the rest. `--detail` prints all of them, and
+        // anything that is not [OK] always prints, in either mode.
+        let (ok, report) =
+            crate::agents::output::capture(|| agent.doctor_check(fix_mode, &mut warnings));
+        if ok {
             any_agent_ok = true;
         }
-        // Printed for every host, configured or not. "Hooks installed" and "the
-        // model reads less" are different claims, and three integrations shipped
-        // the first while delivering none of the second (#351). This line is the
-        // one a user can act on.
-        println!(
-            "   {:<15} {}",
-            "Distill tier:".bright_black(),
-            agent.tier().name().bright_black()
+        // The tier is printed for every host, configured or not. "Hooks
+        // installed" and "the model reads less" are different claims, and three
+        // integrations shipped the first while delivering none of the second
+        // (#351). It survives the condensing for that reason.
+        print!(
+            "{}",
+            condense_agent_report(&report, agent.tier().name(), detail)
         );
         // Note: integrations are optional; "not configured" should not fail doctor
     }
@@ -927,4 +990,41 @@ fn run_validate(path_str: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::condense_agent_report;
+
+    const REPORT: &str = "  Claude Code:\n   PreToolUse      [OK] installed\n   MCP Server:     ~/.claude.json [OK]\n";
+
+    /// #426: 34 of doctor's hundred lines said [OK]. A host with nothing to
+    /// report is one line now, and the tier #351 asked for is still on it.
+    #[test]
+    fn collapses_a_healthy_host_to_one_line() {
+        let out = condense_agent_report(REPORT, "Full", false);
+
+        assert_eq!(out, "  Claude Code: Full, 2 checks [OK]\n");
+    }
+
+    /// The rows that matter are never the ones hidden.
+    #[test]
+    fn keeps_every_row_that_is_not_ok() {
+        let report = format!("{REPORT}   Plugin:         not installed\n");
+
+        let out = condense_agent_report(&report, "MCP-only", false);
+
+        assert!(out.contains("Plugin:         not installed"), "{out}");
+        assert!(out.contains("2 more checks [OK]"), "{out}");
+        assert!(out.contains("Distill tier:"), "{out}");
+    }
+
+    #[test]
+    fn detail_returns_the_whole_report() {
+        let out = condense_agent_report(REPORT, "Full", true);
+
+        assert!(out.contains("PreToolUse"), "{out}");
+        assert!(out.contains("MCP Server:"), "{out}");
+        assert!(out.contains("Distill tier:"), "{out}");
+    }
 }
