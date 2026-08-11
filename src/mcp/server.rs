@@ -212,7 +212,7 @@ pub struct OmniLoopMemoryParams {
     pub key: Option<String>,
     /// Memory value (required for set)
     pub value: Option<String>,
-    /// Confidence score 0.0–1.0 (default 0.7)
+    /// Confidence score 0.0-1.0 (default 0.7)
     pub confidence: Option<f64>,
 }
 
@@ -358,7 +358,7 @@ impl OmniServer {
 
         if candidates.is_empty() {
             return "No significant noise patterns detected. \
-                    Input has high signal diversity — no filter needed."
+                    Input has high signal diversity, no filter needed."
                 .to_string();
         }
 
@@ -366,7 +366,7 @@ impl OmniServer {
         let mut report = format!("Detected {} noise patterns:\n\n", candidates.len());
         for (i, c) in candidates.iter().enumerate() {
             report.push_str(&format!(
-                "  [{}] \"{}\" — {} occurrences (confidence: {:.0}%)\n      Action: {:?}\n      Sample: {}\n\n",
+                "  [{}] \"{}\", {} occurrences (confidence: {:.0}%)\n      Action: {:?}\n      Sample: {}\n\n",
                 i + 1,
                 c.trigger_prefix,
                 c.count,

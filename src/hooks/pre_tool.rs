@@ -255,7 +255,7 @@ fn process_payload(
         return serde_json::to_string(&output).ok();
     }
 
-    // Phase 6: mutating command without specific file target — still check if any hot file is implicated
+    // Phase 6: mutating command without specific file target, still check if any hot file is implicated
     if is_mutating_command(cmd_str)
         && let Some(ref lock) = session
         && let Ok(state) = lock.lock()

@@ -20,7 +20,7 @@ struct HookSpecificOutput {
     /// The key the host reads to replace what the model sees.
     ///
     /// This was `updatedResponse` from the first day of the Rust rewrite until
-    /// #158 — a key Claude Code does not recognise. Unknown keys are dropped
+    /// #158, a key Claude Code does not recognise. Unknown keys are dropped
     /// silently, so the agent received the raw output for the whole life of the
     /// hook while OMNI recorded `Route::Keep` and printed a savings footer for
     /// each one. The sibling `additionalContext` *was* spelled correctly, which
@@ -36,7 +36,7 @@ struct HookSpecificOutput {
     additional_context: Option<String>,
 }
 
-/// The replacement tool result. There is no single shape — the host validates
+/// The replacement tool result. There is no single shape, the host validates
 /// this value against **the schema of the tool that ran**, so it has one shape
 /// per host tool, not one shape per hook.
 ///
@@ -44,7 +44,7 @@ struct HookSpecificOutput {
 /// Claude Code parsed `updatedToolOutput`, rejected `{status, result}` against
 /// Bash's schema (`stdout`/`stderr`/`interrupted` "expected string, received
 /// undefined"), restored the original output, and rendered
-/// `PostToolUse:Bash hook warning` — while the sibling `additionalContext` went
+/// `PostToolUse:Bash hook warning`, while the sibling `additionalContext` went
 /// through and printed a saving for a distillation that had just been discarded.
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -61,7 +61,7 @@ enum ToolOutput {
     /// how the first was got wrong.
     ///
     /// `status` is always `success` because a failed command returns `None` well
-    /// before this point (#120) and never reaches here — so this cannot assert a
+    /// before this point (#120) and never reaches here, so this cannot assert a
     /// success for a command that failed.
     Mcp {
         status: &'static str,
@@ -74,7 +74,7 @@ enum ToolOutput {
 /// Verified against Claude Code 2.1.218's own dispatch: it runs
 /// `tool.outputSchema.safeParse(value)` and falls back to
 /// `tool.mapToolResultToToolResultBlockParam(value)`, both keyed on the tool
-/// that ran — which is why this reads the shape off the payload that arrived
+/// that ran, which is why this reads the shape off the payload that arrived
 /// instead of asserting one. The rule is "reply in the shape you were spoken
 /// to in", and it needs no table of per-tool schemas to stay correct.
 fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -> ToolOutput {
@@ -86,7 +86,7 @@ fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -
     //                          "numLines":420,"startLine":1,"totalLines":420}}
     //
     // `numLines` counts the lines *in this payload*, so swapping the content and
-    // leaving it alone would have the host report 420 lines for a shorter one —
+    // leaving it alone would have the host report 420 lines for a shorter one -
     // a fabricated number, which is the defect this project exists to stop
     // emitting. `totalLines` and `startLine` describe the file and the request,
     // not the payload, so they stay (#172).
@@ -226,7 +226,7 @@ pub fn process_payload(
 ) -> Option<String> {
     let normalized = crate::hooks::normalize::normalize(input_str)?;
 
-    // #120: a command that exited non-zero passes through verbatim — never distilled.
+    // #120: a command that exited non-zero passes through verbatim, never distilled.
     // Distillation must never turn a failed command into output that reads as success
     // (a fabricated success terminates investigation; a fabricated error only costs a
     // retry). Emit nothing: the host keeps the original bytes at zero marker cost.
@@ -239,7 +239,7 @@ pub fn process_payload(
     }
 
     // Format-safe gate: structured payloads are parsed by whatever reads them next,
-    // so every lossy stage below — including the >2MB head/tail trim — would corrupt
+    // so every lossy stage below, including the >2MB head/tail trim, would corrupt
     // them. Emit nothing: the host keeps the original bytes at zero marker cost.
     if let Some(kind) = format::sniff(&normalized.content) {
         if let Some(ref s) = store {
@@ -256,7 +256,7 @@ pub fn process_payload(
     }
 
     // The host capped this payload, which means the command produced more than
-    // arrived here — and above that size Claude Code persists the **raw** output
+    // arrived here, and above that size Claude Code persists the **raw** output
     // to a file, previews the **raw** first 2 KB, and drops whatever the hook
     // returns. Distilling it is work nobody reads, and booking the result is a
     // saving that never happened: one such row claimed 93% compression and 6,194
@@ -462,7 +462,7 @@ pub fn process_payload(
     };
 
     // A TOML filter only gets to short-circuit the distiller if it actually beat
-    // the guardrail — the same rule `hooks::pipe` already applies. Without it the
+    // the guardrail, the same rule `hooks::pipe` already applies. Without it the
     // broad `signals/domains/*.toml` filters win the alphabetical `find()` race
     // for cargo, npm, docker, kubectl and terraform while stripping only a few
     // lines, shadowing the distiller that would have summarised the same input
@@ -473,7 +473,7 @@ pub fn process_payload(
                 // The filter matched but produced no explicit zero-state.
                 // Returning `None` is the hook protocol's fail-open path: the
                 // host keeps its original bytes. Falling through here would
-                // hand the same payload to another distiller — `black` turned
+                // hand the same payload to another distiller, `black` turned
                 // 200 all-stripped rows into the fabricated `Build: ok` (#224).
                 if let Some(ref s) = store {
                     s.record_passthrough(
@@ -501,7 +501,7 @@ pub fn process_payload(
 
         // Score and distill the tool's REAL output. #116: `collapse` rewrites
         // repeated lines into `[N similar lines collapsed]` markers, and a
-        // distiller that parses columns reads those markers as data — a 35-pod
+        // distiller that parses columns reads those markers as data, a 35-pod
         // table came out as `k8s: 2 pods | [5 (lines)`, built entirely from
         // OMNI's own scaffolding. A distiller is a later stage that parses its
         // input, exactly what `format::sniff` already protects structured
@@ -521,8 +521,8 @@ pub fn process_payload(
             session_guard.as_deref(),
         );
 
-        // When no distiller meaningfully reduced the raw output — it punted
-        // (returned the input) or produced a near-copy that misses the guardrail —
+        // When no distiller meaningfully reduced the raw output, it punted
+        // (returned the input) or produced a near-copy that misses the guardrail -
         // fall back to the collapsed form for its line savings. A distiller that
         // earned its summary keeps it; the lossy markers never reached a distiller.
         // Enumeration commands (`ls`/`find`/`ps`/…) deliberately pass through
@@ -646,11 +646,11 @@ pub fn process_payload(
     if let Some(ref s) = store {
         let retrieve_rate = s.get_retrieve_rate(&cmd_family, 7);
         if retrieve_rate > 0.25 {
-            // High retrieve rate — significantly harder compression thresholds (require more compression to keep)
+            // High retrieve rate, significantly harder compression thresholds (require more compression to keep)
             keep_threshold = (keep_threshold + 0.15).min(0.95);
             soft_threshold = (soft_threshold + 0.10).min(0.85);
         } else if retrieve_rate > 0.05 {
-            // Moderate retrieve rate — slightly harder thresholds
+            // Moderate retrieve rate, slightly harder thresholds
             keep_threshold = (keep_threshold + 0.05).min(0.90);
             soft_threshold = (soft_threshold + 0.03).min(0.80);
         }
@@ -778,9 +778,9 @@ pub fn process_payload(
         raw_tokens,
         filtered_tokens,
         // The hook hands this string to the host as the replacement tool result,
-        // and since #187 the host accepts it. The one path where it did not —
+        // and since #187 the host accepts it. The one path where it did not -
         // output above the host's own cap, where the raw output is persisted and
-        // the hook's reply dropped — now returns before reaching here, so this
+        // the hook's reply dropped, now returns before reaching here, so this
         // is what the model receives (#212).
         delivered_bytes: final_out.len(),
     };
@@ -791,7 +791,7 @@ pub fn process_payload(
         // "whenever OMNI last started" rather than by session: one such id
         // covered 16 project paths and 3,739 commands, which is what makes the
         // banner and every per-session slice of `omni stats` wrong (#118).
-        // Fall back to it rather than dropping the row — pipe mode and hosts
+        // Fall back to it rather than dropping the row, pipe mode and hosts
         // that send no id still have to be recorded.
         let session_id = normalized
             .host_session_id
@@ -840,7 +840,7 @@ pub fn process_payload(
 
             // ── Implicit Engram Auto-Capture ────────────────
             // Zero-config: OMNI silently persists milestone memories.
-            // No user action required — fires automatically on key events.
+            // No user action required, fires automatically on key events.
             if let Ok(state) = sess.lock() {
                 let had_errors = state.active_errors.len() > 1; // proxy: had errors before this call
                 let has_errors_now = !state.active_errors.is_empty();
@@ -881,7 +881,7 @@ pub fn process_payload(
     }
 
     // Safety truncation, shared with `hooks::pipe` so the cap and its marker
-    // cannot drift apart — this path spelled the limit `50_000` inline (#219).
+    // cannot drift apart, this path spelled the limit `50_000` inline (#219).
     crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
 
     // A passthrough hands back exactly what the command produced, so there is
@@ -893,7 +893,7 @@ pub fn process_payload(
     // host-cap and TOML zero-state gates earlier in this function already do.
     //
     // The row is still recorded above, at its honest 0%. What is dropped here
-    // is only the reply, and with it the savings footer — which had nothing to
+    // is only the reply, and with it the savings footer, which had nothing to
     // report on a call that saved nothing.
     // A redaction is the one reply worth sending at 0% saved. Emitting nothing
     // leaves the host's own bytes in place, which is exactly right for a no-op
@@ -930,7 +930,7 @@ fn build_additional_context(
     // and on the reported call the banner said 6,194 tokens where the row said
     // 16,983 - 1,209 = 15,774. Two live estimators, neither reconciled, one of
     // them printed into the agent's context (#212). `raw_tokens` and
-    // `filtered_tokens` are already counted for this result — use them.
+    // `filtered_tokens` are already counted for this result, use them.
     let saved_this_call = result.raw_tokens.saturating_sub(result.filtered_tokens);
 
     let mut session_total = 0;
@@ -1246,7 +1246,7 @@ mod tests {
 
     /// #229: `Passthrough` names a route, and the route is what the caller acts
     /// on. The banner was prefixed onto the *distilled* string, so it announced
-    /// "OMNI changed nothing" over bytes that had already lost lines — four data
+    /// "OMNI changed nothing" over bytes that had already lost lines, four data
     /// rows of a markdown table, with the header and separator left standing so
     /// the table read as present and empty. An agent that trusts the label does
     /// not re-run the command.
@@ -1256,7 +1256,7 @@ mod tests {
     /// through.
     ///
     /// Since #118 item 5 there is no banner. A passthrough declines, the host
-    /// keeps its own bytes, and the guarantee is stronger than it was — the
+    /// keeps its own bytes, and the guarantee is stronger than it was, the
     /// agent cannot receive altered bytes under a "changed nothing" label
     /// because it receives nothing from OMNI at all. The recorded
     /// `passthrough_events` row is what proves this input really reached that
@@ -1442,7 +1442,7 @@ mod tests {
     /// it persists the **raw** output to a file, previews the **raw** first 2 KB,
     /// and drops whatever the hook returns. A payload arriving at the cap is
     /// therefore work nobody will read, and booking it is a saving that never
-    /// happened — the reported row claimed 93% compression and 6,194 tokens for
+    /// happened, the reported row claimed 93% compression and 6,194 tokens for
     /// 2,129 bytes that appear nowhere in the transcript.
     #[test]
     fn declines_a_payload_the_host_already_capped() {
@@ -1504,7 +1504,7 @@ mod tests {
 
     /// Found by self-review before merge. `normalize` folds a non-empty stderr
     /// into `content`, so measuring the cap there would decline an *uncapped*
-    /// result whose stdout and stderr merely add up past 30 KB — losing
+    /// result whose stdout and stderr merely add up past 30 KB, losing
     /// compression on ordinary output, silently. The host caps `stdout`, so
     /// that is the field the guard reads.
     #[test]
@@ -1539,7 +1539,7 @@ mod tests {
     }
 
     /// #212: the banner and the `distillations` row describe the same call and
-    /// disagreed about it — the banner ran a bytes-per-token heuristic over the
+    /// disagreed about it, the banner ran a bytes-per-token heuristic over the
     /// byte delta while the row ran a real tokenizer over each string. On the
     /// reported call the banner said 6,194 tokens and the row said
     /// 16,983 - 1,209 = 15,774. The banner is the copy that enters the agent's
@@ -1574,13 +1574,13 @@ mod tests {
 
     /// #172: the `Read` arm had never run on Claude Code, because the hook was
     /// registered for `Bash` alone. Enabling it means replying in `Read`'s own
-    /// result shape — captured from a live transcript, not assumed — and the
+    /// result shape, captured from a live transcript, not assumed, and the
     /// captured shape carries `numLines` *beside* the content it describes.
     ///
     /// Swapping the content and leaving that number is the defect this project
     /// exists to stop emitting: the host would report 420 lines for a payload
     /// that has 2. `totalLines` describes the file rather than the payload, so it
-    /// must survive untouched — asserting both directions is what makes this a
+    /// must survive untouched, asserting both directions is what makes this a
     /// test rather than a restatement of the code.
     #[test]
     fn replies_in_the_hosts_read_result_shape() {
@@ -1686,7 +1686,7 @@ mod tests {
 
     /// #118 item 5: a passthrough replaced the host's output with the same
     /// bytes plus a marker, so every no-op *cost* tokens to announce that
-    /// nothing had changed — 33,762 across the reporting database, at a modal
+    /// nothing had changed, 33,762 across the reporting database, at a modal
     /// 10 tokens a call. The hook must decline instead.
     #[test]
     fn adds_no_bytes_when_it_changes_nothing() {
@@ -2261,7 +2261,7 @@ INFO:jean.server:startup complete in 4.2s
     }
 
     /// #187. The key was right after #158 and the **value shape** was not, so the
-    /// symptom — savings reported for output the agent never received — survived
+    /// symptom, savings reported for output the agent never received, survived
     /// the fix that was supposed to end it.
     ///
     /// The assertion that matters is the negative one. `status`/`result` is a
@@ -2269,7 +2269,7 @@ INFO:jean.server:startup complete in 4.2s
     /// happy with; the only thing wrong with it is that **Claude Code's Bash
     /// schema rejects it**. So this test is written from the host's schema
     /// (`stdout: string`, `stderr: string`, `interrupted: boolean`) and not from
-    /// OMNI's struct — asserting on the same field names we serialised is what
+    /// OMNI's struct, asserting on the same field names we serialised is what
     /// let both halves of this bug through.
     #[test]
     fn replies_in_the_hosts_bash_result_shape() {
@@ -2370,7 +2370,7 @@ INFO:jean.server:startup complete in 4.2s
         });
 
         let Some(out) = process_payload(&input.to_string(), None, None) else {
-            return; // emitted nothing at all — also a shape the host cannot reject
+            return; // emitted nothing at all, also a shape the host cannot reject
         };
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
         let updated = &v["hookSpecificOutput"]["updatedToolOutput"];
@@ -2588,7 +2588,7 @@ INFO:jean.server:startup complete in 4.2s
             "tool_response": { "content": content }
         });
         let out = process_payload(&input.to_string(), None, None);
-        // If return Some, must contain OMNI label — never silently drops
+        // If return Some, must contain OMNI label, never silently drops
         if let Some(res) = out {
             assert!(
                 res.contains("OMNI") || res.contains("Passthrough"),
@@ -2659,7 +2659,7 @@ INFO:jean.server:startup complete in 4.2s
     /// than `{content}`. The command was `ls -la`, which OMNI passes through
     /// verbatim by design (#200), so once a passthrough stopped emitting a
     /// banner the test had nothing left to assert. A reducible command keeps
-    /// the original intent — this payload shape is parsed and distilled.
+    /// the original intent, this payload shape is parsed and distilled.
     #[test]
     fn processes_claude_code_stdout_format() {
         let mut big_output = String::new();
@@ -2748,7 +2748,7 @@ INFO:jean.server:startup complete in 4.2s
         let input = r#"{"type":"tool_result","tool":"shell","output":"pytest\n5 passed in 2.1s","command":"pytest"}"#;
         // OpenCode format should be processed same as Claude Code
         let _out = process_payload(input, None, None);
-        // If content < threshold, can be None — but don't crash
+        // If content < threshold, can be None, but don't crash
         // This test verifies there is no panic
     }
 
@@ -2771,7 +2771,7 @@ INFO:jean.server:startup complete in 4.2s
 
     #[test]
     fn test_claude_code_still_works_after_refactor() {
-        // REGRESSION TEST — CRITICAL
+        // REGRESSION TEST: CRITICAL
         //
         // The input was 50 repeated `error[E0382]` lines. `BuildDistiller`
         // keeps error blocks by design, so that output was never reduced and

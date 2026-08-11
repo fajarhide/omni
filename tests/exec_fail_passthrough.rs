@@ -1,5 +1,5 @@
 //! #122: `omni exec` must pass a failed command's stdout through verbatim and
-//! never distill it — the same invariant #120 enforced on the hook path, applied
+//! never distill it, the same invariant #120 enforced on the hook path, applied
 //! where the exit code comes from the wrapped child rather than the agent JSON.
 //!
 //! Unix-only: the reproduction drives a POSIX `sh` loop. On Windows `omni exec`
@@ -72,7 +72,7 @@ fn run_exec_args(args: &[&str]) -> String {
         .args(args)
         .env("OMNI_DB_PATH", db.path())
         .env("OMNI_QUIET", "1")
-        .env("OMNI_PASSTHROUGH", "1") // isolate from distillation — this is about which command ran
+        .env("OMNI_PASSTHROUGH", "1") // isolate from distillation, this is about which command ran
         .output()
         .expect("spawn omni exec");
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -81,7 +81,7 @@ fn run_exec_args(args: &[&str]) -> String {
 #[test]
 fn exec_sh_c_runs_verbatim_without_double_wrapping() {
     // #125: `omni exec sh -c '<script>'` used to re-prepend a second `sh -c` and
-    // space-join argv, so `echo A; echo B` ran as `sh -c "sh -c echo A; echo B"` —
+    // space-join argv, so `echo A; echo B` ran as `sh -c "sh -c echo A; echo B"` -
     // dropping the first statement (output was `\nB`) and destroying quoting along
     // the way. Each argv element belongs to the program, not to a second shell, so
     // it must run verbatim.

@@ -84,7 +84,7 @@ pub fn process_payload(
 
     let summary_str = build_summary(&state, &store);
 
-    // Phase 2: Delta detection — skip re-emission if content unchanged
+    // Phase 2: Delta detection, skip re-emission if content unchanged
     let new_hash = {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -140,12 +140,12 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
     //   - Footer:           ~100 tokens
 
     let mut out = format!(
-        "⚡ OMNI Context Snapshot — preserved before compaction\n\
-        CRITICAL: This is injected context. Do NOT re-read files listed here — \n\
+        "⚡ OMNI Context Snapshot, preserved before compaction\n\
+        CRITICAL: This is injected context. Do NOT re-read files listed here, \n\
         use this summary directly. File contents below are accurate as of this session.\n\
         \n\
         ## Active Task\n\
-        {} — working in {}\n\
+        {}, working in {}\n\
         Confidence: {}%\n",
         task, domain, confidence
     );
@@ -275,7 +275,7 @@ fn build_summary(state: &SessionState, _store: &Store) -> String {
     out.push_str(&crate::hooks::session_start::read_pinned_files(&cwd));
 
     out.push_str(
-        "\nREMINDER: The above is OMNI's session context snapshot. Trust this data — \n\
+        "\nREMINDER: The above is OMNI's session context snapshot. Trust this data, \n\
         it was computed from actual command outputs. Do not re-run commands \n\
         to verify information already present here.\n",
     );

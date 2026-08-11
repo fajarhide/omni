@@ -1,4 +1,4 @@
-/// [BIZ-03] omni goal — North Star Context Pinning
+/// [BIZ-03] omni goal: North Star Context Pinning
 ///
 /// Stores the project goal as a special reserved key `__omni_goal__`
 /// in `project_knowledge`. The goal is injected into every SessionStart
@@ -44,7 +44,7 @@ pub fn cmd_show(store: &Store) -> Result<()> {
     match store.get_knowledge(&ph, GOAL_KEY) {
         Some(goal) => {
             println!(
-                "\n{} {} — Current goal\n",
+                "\n{} {}: Current goal\n",
                 "omni".bold().cyan(),
                 "goal".bold().yellow()
             );
@@ -117,7 +117,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
 fn print_help() {
     println!(
-        "\n{} {} — North Star context pinning",
+        "\n{} {}: North Star context pinning",
         "omni".bold().cyan(),
         "goal".bold().yellow()
     );

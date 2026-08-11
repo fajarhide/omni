@@ -31,7 +31,7 @@ pub fn run_engram(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         .iter()
         .any(|a| a == "--help" || a == "-h" || a == "help")
     {
-        println!("\nomni engram — View engrams (subtask digests)\n");
+        println!("\nomni engram: View engrams (subtask digests)\n");
         println!("USAGE:\n  omni engram [list] [FLAGS]\n");
         super::print_flags(FLAGS);
         return Ok(());

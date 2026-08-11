@@ -1,10 +1,10 @@
-//! Guards against pathological slowdowns — a hang, a deadlock, an accidental
+//! Guards against pathological slowdowns, a hang, a deadlock, an accidental
 //! O(n²). Not benchmarks: these run under `cargo test` on shared CI runners,
 //! where wall-clock time measures the runner's load as much as our code.
 //!
 //! So every bound here is **catastrophic-only**: orders of magnitude above the
 //! design target named in each test. A tight bound cannot tell "the code got
-//! slower" from "the runner was busy" — the since-deleted
+//! slower" from "the runner was busy", the since-deleted
 //! `bench_handoff_export_latency` proved it, failing at 100ms on Windows and
 //! passing on a rerun of the same commit, reddening an unrelated PR.
 //!
@@ -15,7 +15,7 @@ use omni::pipeline::scorer;
 use std::time::Instant;
 
 /// Upper bound for every timing assertion here. Anything this slow is broken,
-/// not merely unlucky — these operations are all designed to run in ~milliseconds.
+/// not merely unlucky, these operations are all designed to run in ~milliseconds.
 const CATASTROPHIC_MS: u128 = 2000;
 
 #[test]

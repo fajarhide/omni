@@ -104,7 +104,7 @@ pub fn process_payload(
         export_session_csv(&state, &project_path);
     }
 
-    // SessionEnd returns nothing to Claude — it's a cleanup event
+    // SessionEnd returns nothing to Claude, it's a cleanup event
     None
 }
 

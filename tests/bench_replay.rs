@@ -1,4 +1,4 @@
-//! #184 — the reproducible net-savings benchmark.
+//! #184, the reproducible net-savings benchmark.
 //!
 //! Replays every `execution_traces.raw_input` through the CURRENT pipeline and
 //! aggregates raw vs distilled bytes, so the published headline (docs/BENCHMARKS.md,
@@ -12,7 +12,7 @@
 //! divisor. Both are printed for raw input and for post-filter output, because the
 //! whole claim of the ledger is that the two mechanisms are orthogonal.
 //!
-//! Ignored by default — it needs a populated trace DB. Run it explicitly:
+//! Ignored by default, it needs a populated trace DB. Run it explicitly:
 //!
 //!   OMNI_BENCH_DB=~/.omni/omni.db \
 //!     cargo test --release --test bench_replay -- --ignored --nocapture
@@ -349,7 +349,7 @@ fn since_ts() -> i64 {
 fn replay_execution_traces_net_savings() {
     // Resolve the corpus DB from the REAL home before we repoint HOME below.
     // Build the path with PathBuf, not a hardcoded `/` (CLAUDE.md cross-platform
-    // rule 1) — review of #202.
+    // rule 1), review of #202.
     let db = std::env::var("OMNI_BENCH_DB").unwrap_or_else(|_| {
         std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
             .join(".omni")
@@ -433,7 +433,7 @@ fn replay_execution_traces_net_savings() {
     assert!(!rows.is_empty(), "trace DB has no rows to replay");
     assert!(
         rows.iter().any(|t| !t.raw.is_empty()),
-        "all trace rows have empty raw_input — nothing to measure"
+        "all trace rows have empty raw_input, nothing to measure"
     );
 
     // The ledger's gate (#394) needs the ledger in the loop, and `run_inner`
@@ -490,7 +490,7 @@ fn replay_execution_traces_net_savings() {
         let mut err = std::io::sink();
         // None store + None session = fresh, deterministic, no persistence. A
         // failed replay would leave `out` empty and be counted as 100% savings,
-        // inflating the honest figure (review of #202) — exclude it entirely and
+        // inflating the honest figure (review of #202), exclude it entirely and
         // report the count instead.
         if omni::hooks::pipe::run_inner(
             Cursor::new(t.raw.as_bytes()),

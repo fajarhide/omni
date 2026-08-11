@@ -579,7 +579,7 @@ mod ansible {
 // a commit subject from a body line (both are 4-space indented), so on a verbose
 // multi-commit log it kept the bodies, blew past `max_lines = 20`, and dropped the
 // older commits with no marker. Verbose `git log` now falls through to the Rust
-// `distill_log`, which keeps one compact `hash subject` line per commit — every
+// `distill_log`, which keeps one compact `hash subject` line per commit, every
 // commit survives. `--oneline` already relied on the Rust distiller.
 
 mod make {

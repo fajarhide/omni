@@ -201,7 +201,7 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
 
 /// `unknown` is **not** folded into `Terminal` (#160). "a human ran this in a
 /// shell" and "OMNI could not tell who ran this" are different facts and only
-/// one is actionable — collapsing them is what hid the missing Claude Code
+/// one is actionable, collapsing them is what hid the missing Claude Code
 /// branch in `agents::multiagent::detect_agent_id` for the life of the feature.
 /// A detection gap now shows up in the table as `Unknown` instead of looking
 /// like ordinary shell usage.
@@ -271,14 +271,14 @@ const FLAGS: super::Flags = &[
     ("--context", "Show context composition signals"),
     (
         "--rerun",
-        "Which distillers cost a re-run — the check reduction % cannot make",
+        "Which distillers cost a re-run, the check reduction % cannot make",
     ),
 ];
 
 /// The time window the scope flags select, as `(label, since_unix)`.
 ///
 /// One resolver for every mode. `run_detail` and `run_project_stats` each had
-/// their own copy and neither matched `--month` at all — it was honoured only by
+/// their own copy and neither matched `--month` at all, it was honoured only by
 /// being the fall-through in one of them, and silently ignored in the other.
 fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
@@ -303,7 +303,7 @@ fn has(args: &[String], names: &[&str]) -> bool {
 
 fn print_help() {
     println!(
-        "\n{} {} — Token savings analytics",
+        "\n{} {}: Token savings analytics",
         "omni".bold().cyan(),
         "stats".bold().yellow()
     );
@@ -389,7 +389,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 fn run_context_stats(store: &Store) -> Result<()> {
     println!();
     print_separator();
-    println!(" {}", "OMNI Signal Report — Context".bold().bright_white());
+    println!(" {}", "OMNI Signal Report: Context".bold().bright_white());
     print_separator();
 
     if let Some(session) = store.find_latest_session() {
@@ -1084,7 +1084,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     print_separator();
     println!(
         " {}",
-        format!("OMNI Signal Report — Detail ({})", period_label.bold()).bright_white()
+        format!("OMNI Signal Report: Detail ({})", period_label.bold()).bright_white()
     );
     print_separator();
 
@@ -1151,7 +1151,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         );
     }
 
-    // By Command — top 10 (or all if requested), filter 0% savings
+    // By Command, top 10 (or all if requested), filter 0% savings
     let raw_filters = store.filter_breakdown(since)?;
     let all_flag = args.iter().any(|a| a == "--all-commands");
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
@@ -1381,14 +1381,14 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                     "   {:<16} {:>5}x  {}",
                     "".bright_black(),
                     u,
-                    "not counted — never applied (#158), or read at a terminal (#212)"
+                    "not counted, never applied (#158), or read at a terminal (#212)"
                         .bright_black()
                 );
             }
         }
     }
 
-    // Session insights — always shown in detail mode
+    // Session insights, always shown in detail mode
     let hot_files = store.hot_files_global(since)?;
     if !hot_files.is_empty() {
         println!("\n {}", "Session Insights:".bold().bright_white());
@@ -1542,7 +1542,7 @@ fn run_json(store: &Store) -> Result<()> {
     Ok(())
 }
 
-/// `omni stats --rerun` — the check reduction % cannot make (#109).
+/// `omni stats --rerun`, the check reduction % cannot make (#109).
 ///
 /// Reduction measures bytes removed. A distiller that emitted `""` for every
 /// input would score 100%. This measures whether the agent had to run the
@@ -1553,7 +1553,7 @@ fn run_rerun(args: &[String], store: &Store) -> Result<()> {
     let rows = store.rerun_breakdown(since)?;
 
     println!(
-        "\n  {} — {}",
+        "\n  {}, {}",
         "OMNI Re-run Analysis".bold().bright_white(),
         period_label
     );
@@ -1580,7 +1580,7 @@ fn run_rerun(args: &[String], store: &Store) -> Result<()> {
         let delta = r.delta_pp();
         let label = format!("{:+.1}pp", delta);
         // Only a *comparable* pair earns a verdict. A skewed one prints its
-        // numbers and is sent to the caveat list — never coloured as a finding.
+        // numbers and is sent to the caveat list, never coloured as a finding.
         let shown = if r.is_confounded() {
             confounded.push(r);
             "  n/a".normal()
@@ -1637,7 +1637,7 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
 
     let projects = store.get_project_stats(since)?;
     println!(
-        "\n  {} — {} Breakdown",
+        "\n  {}, {} Breakdown",
         "OMNI Project Analytics".bold().bright_white(),
         period_label
     );
@@ -1756,7 +1756,7 @@ mod tests {
 
     #[test]
     fn aligns_period_columns_across_mixed_number_widths() {
-        // Arrange: the widths that broke the old hardcoded layout — a 3-digit
+        // Arrange: the widths that broke the old hardcoded layout, a 3-digit
         // count beside a 5-digit one, and a K-scale total beside an M-scale one.
         let rows = [
             PeriodRow {

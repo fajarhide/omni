@@ -61,12 +61,12 @@ pub fn distill_readfile_with_context(
             "[OMNI ReadFile: {} → distilled ({} lines)]\n{}",
             filepath, line_count, distilled
         );
-        // Phase 6: factual guard — file has many dependents. The walk happens
+        // Phase 6: factual guard, file has many dependents. The walk happens
         // here or not at all.
         let imported_by_count = imported_by();
         if imported_by_count > 3 {
             out.push_str(&format!(
-                "\n[OMNI Guard: {} is imported by {} files — changes here may have wide impact. Call omni_context(\"{}\") for full dependency map.]",
+                "\n[OMNI Guard: {} is imported by {} files, changes here may have wide impact. Call omni_context(\"{}\") for full dependency map.]",
                 filepath, imported_by_count, filepath
             ));
         }
@@ -78,7 +78,7 @@ pub fn distill_readfile_with_context(
 
 /// What a code distiller must say about the lines it dropped (#176).
 ///
-/// These distillers keep selected lines — imports, signatures, risk markers —
+/// These distillers keep selected lines, imports, signatures, risk markers -
 /// and discard everything else, function bodies included. The never-drop
 /// invariant requires the output to say so with a count; a skeleton returned
 /// silently is data loss wearing a compression badge, the #111 shape.
@@ -94,7 +94,7 @@ fn omitted_note(total_lines: usize, kept_lines: usize) -> String {
         return String::new();
     }
     format!(
-        "\n\n... [{omitted} of {total_lines} lines omitted — bodies and comments not shown. \
+        "\n\n... [{omitted} of {total_lines} lines omitted, bodies and comments not shown. \
          Re-read with offset/limit for the full file.] ..."
     )
 }
@@ -321,7 +321,7 @@ fn distill_json_file(content: &str) -> String {
     }
     let head: Vec<&str> = lines.iter().take(15).copied().collect();
     format!(
-        "{}\n... [{} more lines — full JSON omitted]",
+        "{}\n... [{} more lines, full JSON omitted]",
         head.join("\n"),
         total - 15
     )
@@ -358,7 +358,7 @@ fn distill_config_file(content: &str, ext: &str) -> String {
     // container spec had ever been below the fold (#246).
     let kept = out.lines().count();
     format!(
-        "[Config structure — {} lines total]\n{}{}",
+        "[Config structure, {} lines total]\n{}{}",
         total,
         out.trim(),
         omitted_note(total, kept)
@@ -543,7 +543,7 @@ mod tests {
         }
     }
 
-    /// The count is the point — "output was truncated" does not let a reader
+    /// The count is the point, "output was truncated" does not let a reader
     /// judge whether to re-read, a number does.
     #[test]
     fn states_the_omitted_line_count_against_the_file_total() {
@@ -633,7 +633,7 @@ mod tests {
     }
 
     /// The section scans the whole file, including the lines it then drops, so
-    /// an empty section means absent from the file — not merely absent from
+    /// an empty section means absent from the file, not merely absent from
     /// what is shown. Next to a visibly truncated body a bare `None` cannot
     /// convey which.
     #[test]

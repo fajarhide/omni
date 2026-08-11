@@ -19,9 +19,9 @@ pub trait Distiller: Send + Sync {
     /// distiller did not parse.
     ///
     /// The return type carries the invariant on purpose (#250). Nine releases
-    /// shipped the same defect — `Build: ok` for a `python3` script, `Tests: 0
+    /// shipped the same defect, `Build: ok` for a `python3` script, `Tests: 0
     /// passed` for a package with no tests, `grep: 20 matches` for a search that
-    /// found nothing — because the rule lived in a helper each distiller had to
+    /// found nothing, because the rule lived in a helper each distiller had to
     /// remember to call, and the nine that forgot are where every instance
     /// landed. A verdict a distiller synthesised for input it never recognised
     /// is worse than no compression: it is shorter, plausible, and wrong, and
@@ -37,7 +37,7 @@ pub trait Distiller: Send + Sync {
 /// The same zero-state rule as `Distiller::distill`'s `None`, for the helpers
 /// several layers below it that still hand a `String` back to their caller.
 ///
-/// The trait is where the invariant is enforced now (#250) — it applies whether
+/// The trait is where the invariant is enforced now (#250), it applies whether
 /// a distiller remembers this function or not. This stays because converting an
 /// entire helper chain to `Option` would be a large diff for an identical
 /// outcome: a helper returning the input and the boundary returning the input
@@ -230,7 +230,7 @@ mod tests {
 
     /// From #170: `cargo tree` prints a dependency tree that *is* the answer.
     /// Routing every `cargo` command to `BuildDistiller` summarised 21.4 KB of
-    /// it as `Build: ok` — 9 bytes — and reported a 100% reduction as a win.
+    /// it as `Build: ok`, 9 bytes, and reported a 100% reduction as a win.
     #[test]
     fn hands_back_the_output_of_cargo_commands_that_are_not_builds() {
         let tree = "omni v0.6.3 (/repo)\n\
@@ -249,7 +249,7 @@ mod tests {
             assert_eq!(
                 distill_with_command(&[], tree, cmd, None),
                 tree,
-                "`{cmd}` output is data, not build progress — it must survive"
+                "`{cmd}` output is data, not build progress, it must survive"
             );
         }
     }
@@ -331,7 +331,7 @@ mod tests {
 
     /// From #190: a `python3 -c "..."` script prints arbitrary output that *is*
     /// the answer. Routing bare interpreters to `BuildDistiller` fabricated
-    /// `Build: ok` for any script with no error/warning line — inventing success
+    /// `Build: ok` for any script with no error/warning line, inventing success
     /// for a verification command whose real answer was the printed text.
     #[test]
     fn hands_back_the_output_of_bare_script_interpreters() {
@@ -342,7 +342,7 @@ mod tests {
             "python audit.py",
             "ruby check.rb",
             // The substring "test" inside a `-c` arg or a path segment must NOT
-            // route to TestDistiller — it fabricates `Tests: 1 passed` on this
+            // route to TestDistiller, it fabricates `Tests: 1 passed` on this
             // output, which is #190 via a different distiller. Boundary locked.
             "python3 -c \"testing_flag = True; print('config ok')\"",
             "ruby /projects/contest/verify.rb",
@@ -351,7 +351,7 @@ mod tests {
             let out = distill_with_command(&segments, script_out, cmd, None);
             assert_eq!(
                 out, script_out,
-                "`{cmd}` output is data, not build progress — it must survive verbatim"
+                "`{cmd}` output is data, not build progress, it must survive verbatim"
             );
             assert_ne!(
                 out.trim(),
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn tsc_zero_parse_passes_through_instead_of_no_errors() {
         // `tsc --` command echo trips is_tsc_output, but there is no `error TS`
-        // line to parse — the #106 shape.
+        // line to parse, the #106 shape.
         let input = "> tsc --noEmit\nresolving project references, nothing to compile\n";
         let segments = scorer::score_with_command(input, "tsc", None);
         let output = distill_with_command(&segments, input, "tsc", None);
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn eslint_zero_parse_passes_through_instead_of_no_problems() {
         // A banner naming an eslint rule id trips is_eslint_output, but there is no
-        // finding line or `problems (` summary to parse — the #114 shape.
+        // finding line or `problems (` summary to parse, the #114 shape.
         let input = "Oxc linter v0.15\nusing preset @typescript-eslint/recommended\n";
         let segments = scorer::score_with_command(input, "eslint", None);
         let output = distill_with_command(&segments, input, "eslint", None);
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn docker_logs_zero_parse_passes_through_instead_of_no_errors_detected() {
         // A manifest that merely mentions "docker logs" routes to distill_docker_logs
-        // but is not log-shaped (is_docker_logs false) — the #112 misroute.
+        // but is not log-shaped (is_docker_logs false), the #112 misroute.
         let input =
             "apiVersion: v1\nkind: Pod\n# inspect with: docker logs app\nmetadata:\n  name: app\n";
         let segments = scorer::score_with_command(input, "docker", None);
@@ -566,7 +566,7 @@ mod tests {
     );
     // #107: `--oneline` puts the hash and subject on one line. The distiller used
     // to keep 7 chars of hash and drop the subject, joining every commit into a
-    // wall of hashes. This locks the whole line surviving — there was no git_log
+    // wall of hashes. This locks the whole line surviving, there was no git_log
     // snapshot before, which is why the regression shipped unseen.
     snapshot_test!(
         test_git_log_oneline_distillation,
@@ -608,8 +608,8 @@ mod tests {
     );
     snapshot_test!(test_systemops_grep, "grep_recursive_output.txt", "grep -r");
 
-    // #198/#200: `ls`, `find` and `env` are enumerations — every line is the
-    // answer, not noise — so they must pass through verbatim, never be summarised
+    // #198/#200: `ls`, `find` and `env` are enumerations, every line is the
+    // answer, not noise, so they must pass through verbatim, never be summarised
     // or truncated. (These replaced snapshot tests that asserted the old lossy
     // distillation; `grep` above stays snapshotted because its hoisting is
     // lossless.)
@@ -679,7 +679,7 @@ mod tests {
 
     /// Review of #205: bare `env` and `command env` both leave `base` empty (the
     /// wrapper is stripped), so the guard matches on any `env` token. Locks that
-    /// in — a narrowing back to "first word only" would silently drop `command
+    /// in, a narrowing back to "first word only" would silently drop `command
     /// env` passthrough.
     #[test]
     fn treats_bare_and_wrapped_env_as_enumeration() {
@@ -720,7 +720,7 @@ mod tests {
 
     /// #236: a prose document that happens to quote a directory layout was
     /// classified by the one line holding a box-drawing character and delivered
-    /// as `tree: N entries` — a different *kind* of thing, asserted with no
+    /// as `tree: N entries`, a different *kind* of thing, asserted with no
     /// marker. Reading a file is not a grammar, so the readers pass through.
     #[test]
     fn hands_back_a_document_that_quotes_a_directory_tree() {
@@ -737,7 +737,7 @@ mod tests {
                    └── distillers/\n\
                    ```\n\
                    \n\
-                   ## Verification — run these yourself, CI does not\n\
+                   ## Verification, run these yourself, CI does not\n\
                    \n\
                    Run `yamllint` and `kubeconform` before committing manifests.\n\
                    CI validates changed files individually and never builds an overlay.\n";
@@ -758,7 +758,7 @@ mod tests {
     }
 
     /// #231: `--stat` exists only to produce the file list, and `distill_log`
-    /// dropped every row of it while keeping the `--oneline` subject — so the
+    /// dropped every row of it while keeping the `--oneline` subject, so the
     /// output stayed well-formed, got shorter, and read as a complete answer to
     /// a question it no longer answered. The reporter was checking whether
     /// `git add -A` had swept three screenshots into a commit; it came back
@@ -791,7 +791,7 @@ mod tests {
     /// chose, so there is nothing to cut. The reported loss was 37 of 56 lines,
     /// under a marker suggesting a `--limit` flag neither command has.
     ///
-    /// The reported pipeline leads with `gh`, so `VcsDistiller` claimed it — the
+    /// The reported pipeline leads with `gh`, so `VcsDistiller` claimed it, the
     /// bare `sed` form goes through the reader arm. Both are covered here
     /// because either alone leaves the reproduction broken.
     #[test]
@@ -870,7 +870,7 @@ mod tests {
     snapshot_test!(test_jsts_vitest, "vitest_mixed.txt", "vitest");
     snapshot_test!(test_jsts_tsc, "tsc_errors.txt", "tsc");
     // #106: a composite `npm run <script>` (an `&&` chain) must NOT be claimed by a
-    // single tool distiller — `tsc --` in npm's echo used to collapse the whole thing
+    // single tool distiller, `tsc --` in npm's echo used to collapse the whole thing
     // to `tsc: no errors`. jsts declines composites (returns them for the pipeline's
     // generic collapse), so every gate's verdict survives.
     snapshot_test!(
@@ -885,7 +885,7 @@ mod tests {
     );
     snapshot_test!(test_jsts_eslint, "eslint_errors.txt", "eslint");
     // #114: `prettier --write` (via `npm run format`) used to report `eslint: no
-    // problems found` — `is_eslint_output` matched the filename `eslint.config.js`
+    // problems found`, `is_eslint_output` matched the filename `eslint.config.js`
     // in prettier's file list. It must now be recognised as prettier and summarised
     // per real prettier output (both modes), never as a clean run of another tool.
     snapshot_test!(
@@ -905,7 +905,7 @@ mod tests {
         "psql -U postgres mydb"
     );
     // #216: the generic arm answered a schema dump with `DB: ok (N lines
-    // output)` — a verdict invented in the success direction over a payload it
+    // output)`, a verdict invented in the success direction over a payload it
     // never read. With no error segment and nothing tabular parsed it must hand
     // the DDL back verbatim.
     snapshot_test!(

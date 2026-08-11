@@ -15,7 +15,7 @@ pub fn safe_truncate(s: &mut String, max_bytes: usize) {
 
 /// Cut `s` to `max_bytes` and say what went.
 ///
-/// Every other cut in this codebase states a count — `… and N more`,
+/// Every other cut in this codebase states a count, `… and N more`,
 /// `[N similar lines collapsed]`, `... [N more rows]`, `+N more files`. The
 /// hooks' final safety truncation said only `[OMNI: output truncated]`, so a
 /// two-line cut and a 416-line one read identically and no caller could tell
@@ -135,7 +135,7 @@ mod tests {
     fn truncation_never_leaves_a_partial_line() {
         let mut s: String = (0..100).map(|i| format!("row {i:04}\n")).collect();
 
-        // 9 bytes per row, so 58 lands four bytes into the seventh — far enough
+        // 9 bytes per row, so 58 lands four bytes into the seventh, far enough
         // in that the fragment still reads as a row and a `starts_with` filter
         // cannot quietly drop it.
         truncate_with_marker(&mut s, 58);

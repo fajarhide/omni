@@ -33,7 +33,7 @@ impl Distiller for JsTsDistiller {
         // concatenates several tools' output into one buffer. npm echoes the chained
         // command it runs, so a `> … && …` line is the tell. Without this guard the
         // single-tool detectors below each match a fragment and the FIRST wins the
-        // whole buffer — `tsc --` inside npm's own echo made `npm run verify` distil
+        // whole buffer, `tsc --` inside npm's own echo made `npm run verify` distil
         // to `tsc: no errors`, discarding four of five gates (#106). No per-tool
         // distiller can safely own a composite (there is no delimiter between the
         // tools' outputs), so decline: return it unchanged and let the pipeline's
@@ -71,7 +71,7 @@ fn is_composite_command(lines: &[&str]) -> bool {
     // npm/yarn/pnpm echo the script they run; a `> a && b && c` echo means several
     // tools chained, their outputs about to be concatenated with no delimiter. The
     // per-tool detectors can't safely claim such a buffer. (`make`/`npm-run-all`
-    // composites without an `&&` echo aren't covered yet — add when one is reported.)
+    // composites without an `&&` echo aren't covered yet, add when one is reported.)
     lines
         .iter()
         .any(|l| l.trim_start().starts_with('>') && l.contains("&&"))
@@ -159,7 +159,7 @@ fn is_playwright_output(lines: &[&str]) -> bool {
 }
 
 fn is_eslint_output(lines: &[&str]) -> bool {
-    // Anchor on eslint's real output shape, never the bare word "eslint" — that
+    // Anchor on eslint's real output shape, never the bare word "eslint", that
     // matched a *filename* (`eslint.config.js`) in prettier's file list and sent a
     // `prettier --write` run to `distill_eslint`, which reported the wrong tool
     // finding nothing (#114). Same substring-in-data trap as #105/#106.
@@ -188,7 +188,7 @@ fn is_eslint_finding_line(l: &str) -> bool {
 
 fn is_prettier_output(lines: &[&str]) -> bool {
     // Prettier's real output is capitalised (`Checking formatting…`, `[warn] …`),
-    // so the old lowercase `checking `/`reformatted ` never fired on it — the
+    // so the old lowercase `checking `/`reformatted ` never fired on it, the
     // detector was dead (#114). Match what prettier actually prints, in either mode.
     lines.iter().any(|l| {
         l.contains("Checking formatting")     // --check header
@@ -707,7 +707,7 @@ fn distill_eslint(input: &str) -> String {
             let file_path = &t[..colon_idx];
             if file_path.contains('/') || file_path.contains('.') || file_path.contains('\\') {
                 files_affected.insert(file_path.to_string());
-                // `path:line:col` — everything after the path is the location.
+                // `path:line:col`, everything after the path is the location.
                 if let Some(at) = t[colon_idx + 1..].split_whitespace().next() {
                     problems.push(EslintProblem {
                         file: file_path.to_string(),
@@ -786,7 +786,7 @@ fn distill_eslint(input: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn distill_prettier(input: &str) -> String {
-    // The old body parsed black's `reformatted N files` summary — prettier prints no
+    // The old body parsed black's `reformatted N files` summary, prettier prints no
     // such line, so both counters stayed 0 and a *failing* `--check` and a
     // *successful* `--write` both rendered as "0 files reformatted, 0 unchanged"
     // (#114). Parse prettier's real output per mode; if neither is recognisable,
@@ -1098,7 +1098,7 @@ Error: Transform failed with 1 error:
     }
 
     /// One `Important` segment per line, which is what the scorer produces for a
-    /// wall of undifferentiated log output — the shape that hit #188.
+    /// wall of undifferentiated log output, the shape that hit #188.
     fn important_segments(lines: &[String]) -> Vec<OutputSegment> {
         lines
             .iter()
@@ -1159,7 +1159,7 @@ Error: Transform failed with 1 error:
     }
 
     /// #188. The fallback stopped at 30 lines with a bare `break` and returned
-    /// `out.trim()` — no marker on any path. 270 of 300 lines disappeared and the
+    /// `out.trim()`, no marker on any path. 270 of 300 lines disappeared and the
     /// result was published as a 90% saving, so nothing downstream could tell a
     /// 30-warning install from a 300-warning one.
     ///
@@ -1183,7 +1183,7 @@ Error: Transform failed with 1 error:
         );
     }
 
-    /// The tail must not appear when the cap did not bite — a marker claiming
+    /// The tail must not appear when the cap did not bite, a marker claiming
     /// zero omissions is its own small false claim.
     #[test]
     fn stays_silent_when_nothing_was_dropped() {

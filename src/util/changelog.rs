@@ -12,7 +12,7 @@
 ///
 /// Only lines starting with `- ` at column zero count. The section nests
 /// `### Added` / `### Fixed` groups and wraps long entries across lines, and
-/// neither should inflate the number — a wrong count here becomes a wrong claim
+/// neither should inflate the number, a wrong count here becomes a wrong claim
 /// in `omni doctor`, which is the thing this project exists to avoid.
 // Dead in the `omni` binary by design: the binary reads the *result* through
 // `OMNI_UNRELEASED_ENTRIES`, which `build.rs` computed by calling this at
@@ -23,7 +23,7 @@ pub fn count_unreleased_entries(changelog: &str) -> usize {
     let mut in_section = false;
     let mut n = 0;
     for line in changelog.lines() {
-        // Any `## [` heading ends the section — the assignment does that on its
+        // Any `## [` heading ends the section, the assignment does that on its
         // own, so there is no `break` here. An earlier draft had one and no test
         // could be made to fail without it, which is what showed it was dead.
         if line.starts_with("## [") {
@@ -71,7 +71,7 @@ mod tests {
         assert_eq!(count_unreleased_entries(c), 0);
     }
 
-    /// Released entries sit below the next heading and must never be added in —
+    /// Released entries sit below the next heading and must never be added in -
     /// counting them would tell a released binary it had unreleased work.
     #[test]
     fn stops_at_the_next_version_heading() {
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn parses_the_repository_changelog() {
         let c = include_str!("../../CHANGELOG.md");
-        // Not asserting a fixed count — it changes every merge. Asserting the
+        // Not asserting a fixed count, it changes every merge. Asserting the
         // parser terminates and stays within the section.
         let total_bullets = c.lines().filter(|l| l.starts_with("- ")).count();
         assert!(count_unreleased_entries(c) <= total_bullets);

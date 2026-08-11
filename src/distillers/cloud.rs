@@ -9,7 +9,7 @@ use crate::pipeline::{OutputSegment, SignalTier};
 /// `docker logs`), but they cannot establish identity. `is_docker_logs` matches
 /// any timestamped log, so sniffing routed `kubectl exec` output into the docker
 /// summariser, which then reported `docker logs: 9 lines, no errors detected`
-/// over an `ls: … No such file or directory` — a tool that never ran, denying an
+/// over an `ls: … No such file or directory`, a tool that never ran, denying an
 /// error that was right there.
 pub struct CloudDistiller<'a> {
     pub tool: &'a str,
@@ -60,7 +60,7 @@ impl Distiller for CloudDistiller<'_> {
             "helm" => Some(distill_helm(input)),
             "terraform" | "tofu" => Some(distill_terraform(input)),
             "aws" => Some(distill_aws(segments, input)),
-            // gcloud, az, doctl, … — no dedicated parser, so keep the signal
+            // gcloud, az, doctl, …, no dedicated parser, so keep the signal
             // tiers rather than guessing at a format.
             _ => Some(distill_fallback(segments, input)),
         }
@@ -73,7 +73,7 @@ impl Distiller for CloudDistiller<'_> {
 
 /// A pod table is fingerprinted by `READY` + `RESTARTS`, which no other
 /// `kubectl get` resource prints. `NAMESPACE NAME STATUS` is *not* a
-/// fingerprint — it is the common prefix of nearly every `-A` listing (pvc, pv,
+/// fingerprint, it is the common prefix of nearly every `-A` listing (pvc, pv,
 /// namespaces, certificates, …), and matching on it routed those into the pod
 /// distiller, which then reported healthy objects as errors.
 fn is_kubectl_table(input: &str) -> bool {
@@ -185,7 +185,7 @@ const POD_PENDING: &[&str] = &[
 ];
 
 /// Pod phases/reasons that mean "broken". Anything outside these three lists is
-/// counted as `unknown`, never as an error — a status this distiller has never
+/// counted as `unknown`, never as an error, a status this distiller has never
 /// heard of is not evidence of a failure.
 const POD_FAILED: &[&str] = &[
     "CrashLoopBackOff",
@@ -412,7 +412,7 @@ fn distill_docker_build(input: &str) -> String {
 
     if let Some((step, msg)) = error_step {
         format!(
-            "docker build: ✗ failed at step {}/{} — {}",
+            "docker build: ✗ failed at step {}/{}, {}",
             step, steps_total, msg
         )
     } else if success {
@@ -447,7 +447,7 @@ fn distill_docker_logs(_segments: &[OutputSegment], input: &str) -> String {
         let total = input.lines().count();
         // Zero-state guard (#143): "no errors detected" is only truthful about
         // real logs. The dispatch reaches here on a weak content sniff too
-        // (`input.contains("docker logs")`, #112), so require the log shape —
+        // (`input.contains("docker logs")`, #112), so require the log shape -
         // otherwise a misrouted payload (kubectl exec, a manifest) passes through
         // instead of being falsely certified clean.
         return super::require_parsed(
@@ -598,7 +598,7 @@ fn distill_helm(input: &str) -> String {
             if parts.len() >= 4 {
                 let name = parts[0];
                 // Helm table: NAME NAMESPACE REVISION UPDATED STATUS CHART APP VERSION
-                // Find STATUS col — typically index 4
+                // Find STATUS col, typically index 4
                 let status = if parts.len() >= 5 { parts[4] } else { parts[3] };
                 match status.to_lowercase().as_str() {
                     "deployed" => deployed += 1,
@@ -715,7 +715,7 @@ fn distill_fallback(segments: &[OutputSegment], input: &str) -> String {
         }
     }
 
-    // Nothing survived scoring — returning "" would delete the output entirely
+    // Nothing survived scoring, returning "" would delete the output entirely
     // and report it as a 100% saving.
     super::require_parsed(!out.trim().is_empty(), input, out.trim().to_string())
 }
@@ -784,8 +784,8 @@ kube-系统   auth-5d4f6c8b99-abc12    0/1     CrashLoopBackOff   15         2h"
         distill_as("kubectl", input)
     }
 
-    /// From issue #112: `is_docker_logs` is a pure shape heuristic — five
-    /// timestamped lines — so `kubectl exec` output was routed into the docker
+    /// From issue #112: `is_docker_logs` is a pure shape heuristic, five
+    /// timestamped lines, so `kubectl exec` output was routed into the docker
     /// summariser, which erased a real `ls:` error and asserted there was none.
     #[test]
     fn routes_by_command_not_by_content_shape() {

@@ -16,7 +16,7 @@ pub const MAX_OUTPUT_BYTES: usize = 50_000;
 /// against it is measured against a number the host already chose, not against
 /// what the command produced. Above roughly the same threshold the host also
 /// writes the **raw** output to a file, previews the **raw** first 2 KB, and
-/// discards whatever the hook returns — so on that path OMNI's work is thrown
+/// discards whatever the hook returns, so on that path OMNI's work is thrown
 /// away and the saving it booked never happened. 43 rows in the maintainer's DB
 /// sit at exactly this size, from 2026-07-08 onward, one of them booked as
 /// 93% compression and 6,194 tokens for a distillation the model never saw
@@ -101,7 +101,7 @@ pub const MIN_LEDGER_INPUT: usize = 264;
 pub const MIN_LEDGER_RUN_GAIN: usize = 150;
 
 /// Output must be under this percentage of the input to count as a real
-/// reduction. Anything above it is not compression worth taking — e.g. a TOML
+/// reduction. Anything above it is not compression worth taking, e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that
 /// would summarise the same input.
 pub const MIN_REDUCTION_PCT: usize = 95;

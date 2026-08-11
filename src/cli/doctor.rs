@@ -30,7 +30,7 @@ const FLAGS: super::Flags = &[
 
 fn print_help() {
     println!(
-        "\n{} {} — Installation diagnostics",
+        "\n{} {}: Installation diagnostics",
         "omni".bold().cyan(),
         "doctor".bold().yellow()
     );
@@ -283,10 +283,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             .bright_black()
             .bold()
     );
-    println!(
-        " {} — Installation Diagnostics",
-        "OMNI Doctor".bold().cyan()
-    );
+    println!(" {}: Installation Diagnostics", "OMNI Doctor".bold().cyan());
     println!(
         "{}",
         "─────────────────────────────────────────"
@@ -317,7 +314,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     // #137: `[LATEST]` above answers "is there a newer release than mine". It
     // cannot see fixes that were never released, because then the newest
-    // release *is* the running version — exactly the state #127 filed, where
+    // release *is* the running version, exactly the state #127 filed, where
     // six correctness fixes sat merged and unshipped while doctor said
     // `[LATEST]`. This is the other question, answered from the tree the binary
     // was built from.
@@ -328,7 +325,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             format!("[{} UNRELEASED]", unreleased_entries())
                 .yellow()
                 .bold(),
-            "changes built into this binary are in no release — cut a tag".bright_black()
+            "changes built into this binary are in no release, cut a tag".bright_black()
         );
     }
 

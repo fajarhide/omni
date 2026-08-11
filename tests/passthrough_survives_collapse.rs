@@ -1,7 +1,7 @@
 //! #214: a passthrough returns its input, so it can never beat the size
 //! guardrail, so the hooks treated it as a distiller that punted and collapsed
 //! it anyway. `python3` printing 40 distinct data rows came back as one
-//! `[40 similar lines collapsed]` marker at a reported 95.7% saving — the #190
+//! `[40 similar lines collapsed]` marker at a reported 95.7% saving, the #190
 //! fix undone one stage later.
 //!
 //! The defect is only visible in composition, so this drives the built binary

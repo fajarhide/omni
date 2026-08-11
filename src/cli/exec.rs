@@ -43,7 +43,7 @@ pub fn run_exec(
     let cmd_args = &rest[1..];
 
     // A shell is needed only when the whole command arrived as a SINGLE string
-    // (`omni exec 'a; b'`) — then the metacharacters and word boundaries are the
+    // (`omni exec 'a; b'`), then the metacharacters and word boundaries are the
     // shell's to interpret. When argv is already split (`omni exec sh -c '…'`,
     // `omni exec npm run dev`), each element belongs to the program being run;
     // re-joining and wrapping it in a second `sh -c` corrupts the command (#125).
@@ -116,7 +116,7 @@ pub fn run_exec(
         // Buffered path: drain stdout first (draining before wait() avoids the
         // classic full-pipe deadlock), then gate on the real exit code. #122: a
         // command that exited non-zero passes its stdout through verbatim and is
-        // never distilled — distillation must not turn a failure into output that
+        // never distilled, distillation must not turn a failure into output that
         // reads as success.
         let mut buf = Vec::new();
         child_stdout.read_to_end(&mut buf)?;

@@ -91,7 +91,7 @@ pub fn validate_startup() -> Option<String> {
         None
     } else {
         Some(format!(
-            "\n  [OMNI × Hermes Startup Validation — {} issue(s)]\n{}\n\
+            "\n  [OMNI × Hermes Startup Validation, {} issue(s)]\n{}\n\
              → Fix all: `omni init --hermes && hermes gateway restart`\n",
             warnings.len(),
             warnings
@@ -574,7 +574,7 @@ def register(ctx):
 
 /// Hermes-optimized agent config defaults.
 ///
-/// Hermes agent uses pipe mode with `OMNI_CMD` env var — no PreToolUse hook.
+/// Hermes agent uses pipe mode with `OMNI_CMD` env var, no PreToolUse hook.
 /// Sessions tend to be longer and Hermes benefits from more aggressive
 /// compression since it manages its own context summarization.
 pub fn hermes_default_config() -> crate::guard::config::AgentConfig {

@@ -55,8 +55,8 @@ impl PipelineResult {
 }
 
 /// The stream-mode TOML filter that governs `cmd`, if any. Stream-mode filters
-/// emit distilled output line-by-line as it arrives — before a wrapped command's
-/// exit code is known — so callers that gate on exit status (`omni exec`, #122)
+/// emit distilled output line-by-line as it arrives, before a wrapped command's
+/// exit code is known, so callers that gate on exit status (`omni exec`, #122)
 /// must treat a stream-mode command as un-gateable and keep it streaming.
 /// Semantics match Phase 0.5: the first filter that matches, and only if it is
 /// stream-mode.
@@ -102,7 +102,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
 
     if let crate::guard::limits::InputCheck::Empty = input_check {
         // Silent passthrough: command produced no output (e.g. failed upstream).
-        // Don't error — just exit cleanly so we don't pollute Claude Code's stderr.
+        // Don't error, just exit cleanly so we don't pollute Claude Code's stderr.
         return Ok(());
     } else if matches!(
         input_check,
@@ -416,7 +416,7 @@ fn distill(
     // the guardrail. `sys_build_domain` matches every `cargo` invocation but strips
     // only `Compiling`-style lines, so on `cargo test` it won the `find()` race,
     // shadowed TestDistiller, cut 1%, and had that cut thrown away by best_output()
-    // — reporting 0% on output the distiller reduces by 94%. Weak filter, fall
+    //, reporting 0% on output the distiller reduces by 94%. Weak filter, fall
     // through; a filter that earns its match still wins, user filters included.
     let toml_hit = matched_toml.and_then(|f| match f.apply_batch(&input_text) {
         toml_filter::BatchFilterOutcome::Passthrough => {
@@ -462,9 +462,9 @@ fn distill(
                 session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
             );
 
-            // When no distiller meaningfully reduced the raw output — it punted
+            // When no distiller meaningfully reduced the raw output, it punted
             // (returned the input) or produced a near-copy that misses the
-            // guardrail — fall back to the collapsed form for its line savings.
+            // guardrail, fall back to the collapsed form for its line savings.
             // `best_output` still drops back to raw if even the collapse is too
             // weak, so this only ever helps. A distiller that earned its summary
             // keeps it; the markers never reached the distiller in the first place.
@@ -741,7 +741,7 @@ fn persist<E: Write>(
 /// Who ran this, on the `omni exec` / pipe path.
 ///
 /// This used to be a third, private set of rules (#160). It knew only
-/// `OMNI_AGENT_ID`, then guessed **`aider`** for anything with `OMNI_CMD` set —
+/// `OMNI_AGENT_ID`, then guessed **`aider`** for anything with `OMNI_CMD` set -
 /// a variable OMNI documents for its own pipe mode and that any caller may set,
 /// so 3,296 rows on one machine were filed under an agent that had not run.
 /// Everything else became `terminal`, which is why work done inside Claude Code
@@ -821,7 +821,7 @@ fn host_session() -> Option<&'static str> {
 /// that bills tokens is on the other end is decided by what stdout is attached
 /// to: a TTY means a human is reading and no context holds the result, while a
 /// pipe or a captured tool result means something downstream does. That
-/// distinction is the whole of #212's first finding — `agent_id='terminal'` rows
+/// distinction is the whole of #212's first finding, `agent_id='terminal'` rows
 /// were 73.4% of every byte OMNI claimed to have saved, folded into one headline
 /// with the rows that really are tokens.
 ///

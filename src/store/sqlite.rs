@@ -140,7 +140,7 @@ impl SqliteBackend {
     /// How many distillations the database holds.
     ///
     /// `stats` counts sessions and rewinds, and `doctor` printed the session
-    /// count under the label "records" — so a database holding 8,260
+    /// count under the label "records", so a database holding 8,260
     /// distillations announced itself as "24 records" (#118).
     pub fn distillation_count(&self) -> usize {
         self.pool
@@ -165,7 +165,7 @@ impl SqliteBackend {
             .flatten();
         // Read from `distillations`, not `rewind_store`. The rewind table only
         // gains a row when a distillation had content worth storing for
-        // retrieval, which on a real installation is rare — 0 rows beside 8,260
+        // retrieval, which on a real installation is rare, 0 rows beside 8,260
         // distillations on the reporting machine. `doctor` uses this for its
         // "Last distill" line, so it read `None` forever and printed
         // "never [IDLE]" two seconds after a distilled command (#118). That is
@@ -257,11 +257,11 @@ impl SqliteBackend {
     /// Claude Code rows from before `POST_HOOK_FIX_TS` are excluded: on that
     /// path nothing was applied, so their `Keep` rows are controls wearing a
     /// treatment label. Keeping them does not just add noise, it can zero out a
-    /// true finding — see the constant. This is not a call on what `omni stats`
+    /// true finding, see the constant. This is not a call on what `omni stats`
     /// does with those rows for *savings* (#163); it is this comparison
     /// refusing rows that were never the experiment it is running.
     ///
-    /// ponytail: correlated `EXISTS` per row — O(n²) worst case. Fine at the
+    /// ponytail: correlated `EXISTS` per row: O(n²) worst case. Fine at the
     /// ~7k rows this table holds in practice; if it ever gets slow, materialise
     /// the window join into a temp table keyed on `(session_id, cmd)`.
     pub fn rerun_breakdown(&self, since: i64) -> Result<Vec<RerunRow>> {
@@ -322,7 +322,7 @@ impl SqliteBackend {
             .filter_map(|r| r.ok())
             .collect();
 
-        // Worst offender first — that is the one worth reading a distiller for.
+        // Worst offender first, that is the one worth reading a distiller for.
         rows.sort_by(|a, b| {
             b.delta_pp()
                 .partial_cmp(&a.delta_pp())
@@ -522,7 +522,7 @@ impl SqliteBackend {
             CREATE INDEX IF NOT EXISTS idx_retrieve_cmd ON retrieve_events(command_prefix);
             CREATE INDEX IF NOT EXISTS idx_retrieve_ts  ON retrieve_events(ts);
 
-            -- 9. Project knowledge — cross-session semantic memory 
+            -- 9. Project knowledge, cross-session semantic memory 
             CREATE TABLE IF NOT EXISTS project_knowledge (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_hash TEXT NOT NULL,
@@ -535,7 +535,7 @@ impl SqliteBackend {
             );
             CREATE INDEX IF NOT EXISTS idx_pk_project ON project_knowledge(project_hash);
 
-            -- 10. Multi-agent sessions — shared state across agents 
+            -- 10. Multi-agent sessions, shared state across agents 
             CREATE TABLE IF NOT EXISTS agent_sessions (
                 agent_id     TEXT NOT NULL,
                 session_id   TEXT NOT NULL,
@@ -546,7 +546,7 @@ impl SqliteBackend {
             );
             CREATE INDEX IF NOT EXISTS idx_as_project ON agent_sessions(project_hash);
 
-            -- 11b. Pattern memory — cross-session error pattern tracking
+            -- 11b. Pattern memory, cross-session error pattern tracking
             CREATE TABLE IF NOT EXISTS pattern_memory (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 pattern_hash    TEXT NOT NULL UNIQUE,
@@ -568,7 +568,7 @@ impl SqliteBackend {
             );
 
 
-            -- 14. Loop Memory — cross-session persistent knowledge (L2-02)
+            -- 14. Loop Memory, cross-session persistent knowledge (L2-02)
             CREATE TABLE IF NOT EXISTS loop_memory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 loop_goal_hash TEXT NOT NULL,
@@ -581,7 +581,7 @@ impl SqliteBackend {
                 ttl_days INTEGER DEFAULT 30,
                 UNIQUE(loop_goal_hash, key)
             );
-            -- 15a. Retrieval Feedback — adaptive scoring (INT-01)
+            -- 15a. Retrieval Feedback, adaptive scoring (INT-01)
             CREATE TABLE IF NOT EXISTS retrieval_feedback (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 query        TEXT NOT NULL,
@@ -748,7 +748,7 @@ impl SqliteBackend {
         // #212: `output_bytes` is what the distiller returned, which is not the
         // same as what a model read. Rows written before this column exists keep
         // the default of -1, which `omni stats` reads as "unknown" rather than as
-        // "nothing was delivered" — backfilling them from `output_bytes` would
+        // "nothing was delivered", backfilling them from `output_bytes` would
         // restate the old assumption as if it had been measured.
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN delivered_bytes INTEGER DEFAULT -1",
@@ -847,7 +847,7 @@ impl SqliteBackend {
         // One-time data migration: collapse distillations that were recorded
         // twice for one command (#118).
         //
-        // On the reporting installation 1,231 of 8,272 rows are second copies —
+        // On the reporting installation 1,231 of 8,272 rows are second copies -
         // 15% of the table, inflating every count and every top-command tally
         // `omni stats` publishes. They stop at 2026-07-17 and 1,229 of them are
         // `aider`, so whatever produced them is long closed; feeding one payload
@@ -856,8 +856,8 @@ impl SqliteBackend {
         //
         // The key is every column except `id` and `latency_ms`. Measured on that
         // data, `latency_ms` is the *only* column that ever varies inside a
-        // duplicate group — `session_id`, `project_path` and the byte counts
-        // never do — which is the fingerprint of the same input distilled twice
+        // duplicate group, `session_id`, `project_path` and the byte counts
+        // never do, which is the fingerprint of the same input distilled twice
         // rather than of two separate commands. Grouping on it as well would
         // leave 947 of the 1,231 in place.
         //
@@ -868,7 +868,7 @@ impl SqliteBackend {
         //
         // Deliberately no UNIQUE index behind this. The write that produced the
         // duplicates no longer happens, and an index over these columns would
-        // reject the legitimate case above from then on — trading a closed bug
+        // reject the legitimate case above from then on, trading a closed bug
         // for a permanent silent under-count.
         let migration_id3 = "2026_07_dedupe_double_recorded_distillations";
         let already_applied3: Option<i64> = conn
@@ -1312,7 +1312,7 @@ impl SqliteBackend {
     /// Per-agent totals, with the unapplied rows counted but not added in (#163).
     ///
     /// `calls` / `input_bytes` / `output_bytes` cover only rows that reached an
-    /// agent. `unverified` counts the ones excluded — pre-#158 Claude Code rows
+    /// agent. `unverified` counts the ones excluded, pre-#158 Claude Code rows
     /// whose savings the host discarded, and rows whose result no model read
     /// (#212). They are reported rather than dropped so a shrinking call count
     /// reads as the correction it is, instead of looking like OMNI stopped
@@ -1930,7 +1930,7 @@ impl SqliteBackend {
         .unwrap_or(0)
     }
 
-    /// Returns retrieve_rate for a command prefix (0.0 – 1.0)
+    /// Returns retrieve_rate for a command prefix (0.0, 1.0)
     /// High rate = OMNI too aggressive for this command type
     pub fn get_retrieve_rate(&self, command_prefix: &str, window_days: i64) -> f64 {
         let conn = match self.pool.get() {
@@ -2251,7 +2251,7 @@ pub struct DistillationRow {
 
 /// One filter's re-run comparison: distilled output against raw output (#109).
 ///
-/// `Passthrough` rows are the control arm — the agent read the original bytes —
+/// `Passthrough` rows are the control arm, the agent read the original bytes -
 /// so the two arms differ only in whether OMNI changed what was read. A filter
 /// whose distilled arm is re-run more often than its raw arm removed something
 /// the agent needed, whatever its reduction percentage claims.
@@ -2318,12 +2318,12 @@ pub struct AgentRow {
 /// agent (#163).
 ///
 /// A `claude_code` row written before `POST_HOOK_FIX_TS` records a distillation
-/// that was computed, scored, routed and stored — and then dropped by the host,
+/// that was computed, scored, routed and stored, and then dropped by the host,
 /// because the hook emitted `updatedResponse`, a key Claude Code ignores (#158).
 /// The agent read the raw bytes. Those rows are indistinguishable from the
 /// `omni exec` and pipe rows where the same numbers are true.
 ///
-/// The rest of such a row is still good evidence — latency, command, project and
+/// The rest of such a row is still good evidence, latency, command, project and
 /// file access all really happened. Only the byte and token columns are fiction,
 /// so this gates **sums over those columns**, not the row. Deleting the rows
 /// would destroy true history to remove a false column, which is what the
@@ -2333,7 +2333,7 @@ pub struct AgentRow {
 /// the shell pipe write to a TTY: a human reads the result, no context holds it,
 /// nothing is billed. Compressing it may still help readability, but counting it
 /// as *tokens saved* and folding it into one headline makes the headline
-/// meaningless — those rows were **73.4% of every byte OMNI claimed to have
+/// meaningless, those rows were **73.4% of every byte OMNI claimed to have
 /// saved all-time**, and stripping them took the figure from 66.3% to the 29.3%
 /// that Claude Code actually saw. Rows written since `delivered_bytes` exists say
 /// so themselves; older `terminal` rows are excluded by name, because the column
@@ -2790,8 +2790,8 @@ mod tests {
     }
 
     /// #212: `terminal` rows were 73.4% of every byte OMNI claimed to have
-    /// saved. That path writes to a TTY — a human reads it, no context holds it,
-    /// nothing is billed — so folding it into a *token* headline made the
+    /// saved. That path writes to a TTY, a human reads it, no context holds it,
+    /// nothing is billed, so folding it into a *token* headline made the
     /// headline describe nothing. Stripping it took the all-time figure from
     /// 66.3% to the 29.3% Claude Code actually saw.
     #[test]
@@ -2852,7 +2852,7 @@ mod tests {
     /// gains a row when a distillation had content worth storing for later
     /// retrieval. On a real installation that table was empty beside 8,260
     /// distillations, so `doctor` printed "never [IDLE]" seconds after
-    /// distilling — the wrong answer to the one question it is asked.
+    /// distilling, the wrong answer to the one question it is asked.
     #[test]
     fn reports_the_last_distillation_not_the_last_rewind() {
         // Arrange
@@ -3421,7 +3421,7 @@ mod tests {
 
     #[test]
     fn treats_a_skew_at_the_limit_as_comparable() {
-        // Exactly 3× — the limit is exclusive, so this still compares.
+        // Exactly 3×, the limit is exclusive, so this still compares.
         assert!(!row(10, 10, 3_000, 1_000).is_confounded());
         assert!(row(10, 10, 3_001, 1_000).is_confounded());
     }
@@ -3796,7 +3796,7 @@ mod tests {
         assert_eq!(cc.input_bytes, 1000, "excluded bytes stay out of the sum");
     }
 
-    /// The rows survive — only their byte columns are disowned. Deleting them
+    /// The rows survive, only their byte columns are disowned. Deleting them
     /// would destroy true latency and command history to remove a false sum.
     #[test]
     fn keeps_the_unapplied_rows_in_the_table() {

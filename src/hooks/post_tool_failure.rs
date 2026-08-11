@@ -99,7 +99,7 @@ pub fn process_payload(
         store.index_event(&state.session_id, "PostToolUseFailure", &index_msg);
     }
 
-    // PostToolUseFailure never needs to return a response — just side effects
+    // PostToolUseFailure never needs to return a response, just side effects
     None
 }
 

@@ -89,7 +89,7 @@ struct FilterConfig {
     /// to pay attention to its output.
     agent_hint: Option<String>,
 
-    /// Target compression ratio (0.0–1.0). A value of 0.3 means "try to keep
+    /// Target compression ratio (0.0-1.0). A value of 0.3 means "try to keep
     /// only 30% of the original output". Used by adaptive compression.
     compress_ratio_target: Option<f32>,
 

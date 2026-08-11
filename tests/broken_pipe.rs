@@ -1,7 +1,7 @@
 //! #155: a reader that closes early must not make OMNI panic.
 //!
 //! Rust sets `SIGPIPE` to `SIG_IGN` before `main`, so a write to a closed pipe
-//! returns `EPIPE` and `println!` panics on it — `omni --help | head -1` printed
+//! returns `EPIPE` and `println!` panics on it, `omni --help | head -1` printed
 //! a panic and a backtrace note where `ls | head` prints nothing. `main` now
 //! restores `SIG_DFL`, which is what every other Unix tool does.
 //!
@@ -56,7 +56,7 @@ fn help_does_not_panic_when_the_reader_closes() {
 }
 
 /// The fix is at the entry point, not in the help printer, because the panic was
-/// never specific to help — every command that outwrites its reader hit it.
+/// never specific to help, every command that outwrites its reader hit it.
 /// `doctor`, `stats` and `session` all reproduced on the released binary.
 #[test]
 fn no_command_panics_when_the_reader_closes() {

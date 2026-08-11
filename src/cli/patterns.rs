@@ -98,7 +98,7 @@ fn hint_adds_something(hint: &str, tool_family: &str) -> bool {
 
 fn print_help() {
     println!(
-        "\n{} {} — View recurring cross-session error patterns",
+        "\n{} {}: View recurring cross-session error patterns",
         "omni".bold().cyan(),
         "patterns".bold().yellow()
     );

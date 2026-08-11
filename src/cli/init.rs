@@ -38,12 +38,12 @@ const FLAGS: super::Flags = &[
 // `check_flags` wants one flat list and a second const would mean teaching it to
 // take several. `splits_flags_between_the_two_help_groups` below is what keeps
 // it honest. Upgrade path: separate consts + a `check_flags` that accepts a
-// slice of lists — worth it the moment a third group appears.
+// slice of lists, worth it the moment a third group appears.
 const AGENT_FLAGS: usize = 15;
 
 fn print_help() {
     println!(
-        "\n{} {} — Setup OMNI for your preferred AI Agent",
+        "\n{} {}: Setup OMNI for your preferred AI Agent",
         "omni".bold().cyan(),
         "init".bold().yellow()
     );
@@ -128,7 +128,7 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
 
     if no_flags {
         println!(
-            "\n{} {} — Setup OMNI for your preferred AI Agent\n",
+            "\n{} {}: Setup OMNI for your preferred AI Agent\n",
             "omni".bold().cyan(),
             "init".bold().yellow()
         );

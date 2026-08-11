@@ -37,7 +37,7 @@ impl Distiller for SystemOpsDistiller {
 }
 
 // ---------------------------------------------------------------------------
-// Sensitive patterns for env redaction (Gate 6 — Security)
+// Sensitive patterns for env redaction (Gate 6: Security)
 // ---------------------------------------------------------------------------
 
 const SENSITIVE_PATTERNS: &[&str] = &[
@@ -171,7 +171,7 @@ fn is_find_output(lines: &[&str]) -> bool {
 
 /// A fingerprint must be a token no sibling format also prints. Box-drawing
 /// connectors fail that test: `tree` prints them, and so does every document
-/// that describes a file layout — 25 markdown files in this repository alone,
+/// that describes a file layout, 25 markdown files in this repository alone,
 /// `CLAUDE.md` among them. Matching on `any` connector meant one such line
 /// classified the whole payload, and `distill_tree_output` replaced a 127-line
 /// prose guide with `tree: 127 entries` (#236). The `directories`/`files` half
@@ -226,7 +226,7 @@ fn is_env_output(lines: &[&str]) -> bool {
 // Grep/Ripgrep distiller
 // ---------------------------------------------------------------------------
 
-/// `path:line:content` (or `path:content`) — split at the first colon, the same
+/// `path:line:content` (or `path:content`), split at the first colon, the same
 /// boundary `is_grep_output` keys off.
 fn split_grep_line(line: &str) -> Option<(&str, &str)> {
     let (path, rest) = line.split_once(':')?;
@@ -234,12 +234,12 @@ fn split_grep_line(line: &str) -> Option<(&str, &str)> {
 }
 
 /// grep repeats the full path on every match line, so a file with 12 matches
-/// pays for its path 12 times — that repetition is the noise, and it lives
+/// pays for its path 12 times, that repetition is the noise, and it lives
 /// between the lines rather than inside them. Hoist each path to a header and
 /// indent its matches under it.
 ///
 /// Every match survives: `header + ':' + indented line` reconstructs the input
-/// exactly. The match text is the whole point of grep — summarising it to
+/// exactly. The match text is the whole point of grep, summarising it to
 /// `foo.rs: 12 matches` (what this used to emit) answers a question nobody
 /// asked and forces the agent to grep again.
 ///
@@ -249,7 +249,7 @@ fn split_grep_line(line: &str) -> Option<(&str, &str)> {
 /// The count used to be global and printed once at position 0, which made it a
 /// claim about output it had never seen. One Bash call holding two greps, the
 /// first matching nothing, was delivered as `grep: 20 matches in 10 files` above
-/// a `---sep---` — so a search that found **nothing** read as one that found
+/// a `---sep---`, so a search that found **nothing** read as one that found
 /// twenty hits in ten files, and the reporter acted on it while asking whether a
 /// Cloudflare API token was on disk (#247). A non-match line is already kept
 /// verbatim, so the boundary was visible in the output and simply not consulted.
@@ -328,7 +328,7 @@ fn distill_grep_output(input: &str) -> String {
         // Nothing in this payload parsed as a match line, so there is no grep
         // result to report. This used to return the string `grep: no matches`,
         // which discarded the body and asserted an outcome for a command whose
-        // output was never recognised — the `require_parsed` prohibition. It is
+        // output was never recognised, the `require_parsed` prohibition. It is
         // near-unreachable, because `is_grep_output` routes here only once three
         // lines already parse, but a latent false claim is not worth keeping for
         // the two lines it saves (#247).
@@ -399,7 +399,7 @@ fn distill_ls_output(input: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Longest directory prefix shared by every path, cut at a `/` so the remainder
-/// stays a valid relative path — a prefix ending mid-filename would not round-trip.
+/// stays a valid relative path, a prefix ending mid-filename would not round-trip.
 /// Empty when the paths share no directory.
 fn common_dir_prefix(paths: &[&str]) -> String {
     let Some(first) = paths.first() else {
@@ -426,14 +426,14 @@ fn common_dir_prefix(paths: &[&str]) -> String {
         .map_or(String::new(), |i| first[..=i].to_string())
 }
 
-/// A find listing IS the answer — the paths are the payload, not noise wrapped
+/// A find listing IS the answer, the paths are the payload, not noise wrapped
 /// around one. What repeats is the directory prefix: on a real tree it is ~73%
 /// of the bytes, one string restated on every line. Hoist it into a header and
 /// emit each path relative to it.
 ///
 /// Lossless: `prefix + line` reconstructs every original path. The previous
 /// version summarised to `find: total=120 files=120` and dropped all 120 paths,
-/// so the agent had to re-run find — paying twice to save once.
+/// so the agent had to re-run find, paying twice to save once.
 fn distill_find_output(input: &str) -> String {
     let paths: Vec<&str> = input
         .lines()
@@ -471,7 +471,7 @@ fn distill_tree_output(input: &str) -> String {
         t.contains("director") && t.contains("file")
     });
 
-    // Collect top-level dirs (depth 1 — lines starting with ├── or └──)
+    // Collect top-level dirs (depth 1, lines starting with ├── or └──)
     let top_dirs: Vec<&str> = input
         .lines()
         .filter(|l| {
@@ -507,7 +507,7 @@ fn distill_tree_output(input: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// env distiller (⚠️ SECURITY CRITICAL — Gate 6)
+// env distiller (⚠️ SECURITY CRITICAL: Gate 6)
 // ---------------------------------------------------------------------------
 
 /// `env` output is an enumeration: every `KEY=VALUE` line is the answer, the same
@@ -823,7 +823,7 @@ mod tests {
     /// #247: the match count was global and printed once at position 0, so it
     /// described output it had never seen. One Bash call holding two greps, the
     /// first matching nothing, came back as `grep: 20 matches in 10 files` above
-    /// the separator — a search that found nothing reading as one that found
+    /// the separator, a search that found nothing reading as one that found
     /// twenty hits in ten files, with no marker to detect it by.
     ///
     /// The assertion is on **what stands above the separator**, not on the total:
@@ -1060,7 +1060,7 @@ mod tests {
     }
 
     /// The old distiller reduced grep to a per-file histogram, dropping every
-    /// matched line — the text that is the entire point of grep. It then had to
+    /// matched line, the text that is the entire point of grep. It then had to
     /// special-case error lines back in, because otherwise they vanished too.
     /// Keeping everything makes that special case unnecessary, and losslessness
     /// is the stronger invariant to pin.
@@ -1085,7 +1085,7 @@ mod tests {
 
     #[test]
     fn hands_back_grep_input_when_hoisting_would_grow_it() {
-        // Arrange: one match per file — every header costs more than it saves
+        // Arrange: one match per file, every header costs more than it saves
         let input = "a.rs:1:x\nb.rs:1:y";
 
         // Act / Assert

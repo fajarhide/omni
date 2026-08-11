@@ -17,7 +17,7 @@ const FLAGS: super::Flags = &[
 
 fn print_help() {
     println!(
-        "\n{} {} — Auto-generate filters from history",
+        "\n{} {}: Auto-generate filters from history",
         "omni".bold().cyan(),
         "learn".bold().yellow()
     );
@@ -189,7 +189,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             .bright_black()
             .bold()
     );
-    println!(" {} — Pattern Discovery", "OMNI".bold().cyan());
+    println!(" {}: Pattern Discovery", "OMNI".bold().cyan());
     println!(
         "{}",
         "─────────────────────────────────────────"
