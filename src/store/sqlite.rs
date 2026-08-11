@@ -1679,6 +1679,19 @@ impl SqliteBackend {
             params![ts_threshold],
         );
 
+        // `loop_memory` declared `ttl_days INTEGER DEFAULT 30` and nothing read
+        // it, so goal memory was a permanent table wearing a 30 day label (#438).
+        // Honoured per row rather than by the caller's window, because the column
+        // is per row: a memory written with a longer ttl asked for one.
+        //
+        // `last_seen` and not `first_seen`, so a fact the loop keeps confirming
+        // keeps its place and only what nobody has reconfirmed expires.
+        let now = chrono::Utc::now().timestamp();
+        let _ = conn.execute(
+            "DELETE FROM loop_memory WHERE last_seen < ?1 - (COALESCE(ttl_days, 30) * 86400)",
+            params![now],
+        );
+
         // `execution_traces` was in no cleanup at all, which is why it alone grew
         // to 160 MB of a 187 MB database while every other table stayed bounded:
         // it stores `raw_input` and `distilled_output` verbatim, so it is two
@@ -2735,6 +2748,43 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #438: the column declared a contract for four releases and nothing read
+    /// it, so the schema said 30 days and the table was permanent.
+    #[test]
+    fn expires_loop_memory_that_nothing_has_reconfirmed() {
+        let (store, _d) = get_temp_store();
+        let conn = store.pool.get().expect("conn");
+        let now = chrono::Utc::now().timestamp();
+        let long_ago = now - 40 * 86400;
+        conn.execute(
+            "INSERT INTO loop_memory (loop_goal_hash, key, value, first_seen, last_seen, ttl_days)
+             VALUES ('g', 'stale', 'v', ?1, ?1, 30),
+                    ('g', 'fresh', 'v', ?1, ?2, 30),
+                    ('g', 'patient', 'v', ?1, ?1, 365)",
+            params![long_ago, now],
+        )
+        .expect("seed");
+        drop(conn);
+
+        store.cleanup_old(90);
+
+        let conn = store.pool.get().expect("conn");
+        let mut stmt = conn
+            .prepare("SELECT key FROM loop_memory ORDER BY key")
+            .expect("prepare");
+        let keys: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .expect("query")
+            .flatten()
+            .collect();
+
+        assert_eq!(
+            keys,
+            vec!["fresh".to_string(), "patient".to_string()],
+            "only the row past its own ttl goes, and a longer ttl is honoured"
+        );
     }
 
     /// The headline `omni stats` leads with, so a wrong median is a wrong
