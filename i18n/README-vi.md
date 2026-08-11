@@ -221,6 +221,12 @@ Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản th
 **Tôi có thể thêm bộ lọc của riêng mình không?**  
 Không, và đó là chủ ý từ 0.7.0. Bộ lọc được biên dịch vào binary, nên tập đang chạy đúng bằng tập mà kiểm thử bao phủ, và không có tệp nào trên đĩa đổi được thứ agent của bạn nhìn thấy. Nếu một công cụ cần signal, hãy mở issue; nó sẽ đi kèm binary cho tất cả mọi người.
 
+**Lấy lại thứ OMNI đã gấp bằng cách nào?**
+`omni retrieve <handle>`, với handle là 16 ký tự bên trong marker. Nó chạy trên mọi host, có hay không có MCP.
+
+**Xem số liệu mà không cần gõ lệnh?**
+`omni dashboard` phục vụ chúng ở `127.0.0.1`, chỉ đọc, từ chính cơ sở dữ liệu mà `omni stats` đọc.
+
 **Làm sao xem mức tiết kiệm của chính tôi?**
 Chạy `omni stats` sau vài ngày. `omni stats --share` in ra cùng những con số đó ở dạng
 tiện sao chép.

@@ -222,6 +222,12 @@ Ya, terukur, dan biayanya tumbuh bersama riwayat Anda. Pipeline distilasinya sen
 **Bisakah saya menambahkan filter sendiri?**  
 Tidak, dan itu disengaja sejak 0.7.0. Filter dikompilasi ke dalam binary, jadi yang berjalan adalah yang diuji, dan tidak ada file di disk yang bisa mengubah apa yang dilihat agent Anda. Kalau sebuah tool butuh signal, buka issue dan filternya ikut terkirim di binary untuk semua orang.
 
+**Bagaimana mengambil kembali sesuatu yang dilipat OMNI?**
+`omni retrieve <handle>`, dengan handle adalah 16 karakter di dalam marker. Ini jalan di semua host, dengan atau tanpa MCP.
+
+**Bisa melihat angkanya tanpa menjalankan perintah?**
+`omni dashboard` menyajikannya di `127.0.0.1`, hanya-baca, dari basis data yang sama dengan `omni stats`.
+
 **Bagaimana saya melihat penghematan saya sendiri?**
 `omni stats` setelah beberapa hari. `omni stats --share` mencetak ringkasan angka yang
 sama, siap disalin.

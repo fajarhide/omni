@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-11
+
+Two installer defects, both found by setting 0.7.0 up on a real machine rather than by a
+gate, and both invisible to `omni doctor` until now.
+
+### Fixed
+- **`omni init` registered OMNI twice when the binary moved (#454)**: `ensure_hook` compared the command it was about to write against the ones already there byte for byte, absolute path included, so reinstalling from a different build matched nothing and appended. A machine set up twice ran **two OMNI processes per hooked call**: the pre-hook rewriting a command the first pass had already rewritten, the post-hook distilling output the first pass had already distilled, and a second row recorded for it. That is #379's double counting arriving through the installer. Identity is now the binary name plus the flag, compared as a whole token because `--pre-hook` ends with `-hook` and a substring test would collapse the two into one. A match rewrites the command to the current path, which also makes an upgrade that moves the binary a no-op rather than a duplication. **Gemini CLI carried its own copy of the same wrong test** and nobody had reported it, so `is_our_hook` now lives in `agents/mod.rs` and both hosts have a test that installs from two paths and asserts one hook per event. Cursor and Codex were already correct: both purge their own entries before writing. Verified end to end as well as in unit tests, two binaries against one temp `HOME`, eight events, one hook each.
+- **`omni doctor` reported `[OK]` for an install that ran OMNI twice (#454)**: it asked whether a hook was present and never how many. It counts now and warns per event, naming how many times that event would run OMNI. The installer no longer creates the state; this is for the machines already in it.
+- **`omni init --all` was documented as Claude-only and configures fourteen hosts (#455)**: the help listed it under `CLAUDE SPECIFIC FLAGS` as "Perform full Claude setup (hooks + MCP)" while `init.rs` hands it the full agent list. One of those writes lands in the working directory, because VS Code's config path is `.vscode/mcp.json` relative to the cwd, so running it inside a repository writes into that repository. The behaviour is kept, since it is what someone typing `--all` wants, and the help now says both things: the group is named for what it holds, and the flag names the file it drops where you are standing.
+
+### Documentation
+- **The recovery path is named as the CLI everywhere**, not as the MCP tool. `README.md`, `docs/ARCHITECTURE.md` and the Hermes integration guide had the agent calling `omni_retrieve`, which is reachable only where MCP is wired; that is what #452 was. All three now name `omni retrieve <handle>` first and the MCP tool as the alternative.
+- **`omni retrieve` and `omni dashboard` are documented** in the README and all six translations, which shipped in 0.7.0 without an entry anywhere a user reads.
+- **`CLAUDE.md` stopped telling contributors to create `~/.omni/signals/my_signal.toml`**, a path 0.7.0 no longer reads, and its Security section stopped describing the trust gate that was deleted with the tier it guarded.
+- The Hermes guide's learn section says what `omni learn` output is for now that there is nowhere on disk to put it: a finding, and an issue.
+
+
 ## [0.7.0] - 2026-08-11
 
 The long-term support release. Three things define it: the ledger stops guessing

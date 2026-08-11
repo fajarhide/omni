@@ -34,7 +34,8 @@ Built in Rust, though the end-to-end cost is not zero.
 ## RewindStore
 
 Everything OMNI cuts is archived locally in SQLite, keyed by SHA-256. The agent
-receives a hash alongside the distilled output and can call `omni_retrieve` to pull
+receives a handle alongside the distilled output and can run `omni retrieve <handle>`,
+or call the `omni_retrieve` MCP tool where MCP is wired, to pull
 the original back byte for byte, mid-conversation, without re-running your command.
 
 Nothing is deleted. The cut is a view, not a destruction.

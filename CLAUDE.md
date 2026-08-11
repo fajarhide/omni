@@ -118,7 +118,12 @@ snapshot_test!(test_my_type_distillation, "my_type_example.txt", ContentType::My
 
 ## How to Add a TOML Filter
 
-Create a file in `~/.omni/signals/my_signal.toml`:
+Add a file under `signals/` in this repository. It is compiled into the binary; there is no
+filter path on disk any more.
+
+```
+signals/tools/my_signal.toml
+```
 ```toml
 schema_version = 1
 
@@ -225,7 +230,7 @@ OMNI uses `anyhow` for top-level application errors and `thiserror` for library-
 
 *   **Sanitize Input**: Treat all tool output as untrusted. Sanitize ANSI codes and control characters before distillation.
 *   **Environment Hygiene**: In `guard/env.rs`, ensure sensitive environment variables (like `LD_PRELOAD`) are sanitized before executing subcommands.
-*   **Config Trust**: Only load `.omni/filters` from the project root if the directory is explicitly "trusted" (see `guard/trust.rs`).
+*   **No config from the tree**: OMNI reads no filter file from disk, neither a project's `.omni/signals/` nor `~/.omni/signals/`. The signals are compiled in. The project tier existed behind a trust gate that hashed one file and admitted another, and it was deleted rather than repaired (#447, #449). Do not reintroduce a tier that lets a checkout decide what an agent is shown.
 
 ---
 
