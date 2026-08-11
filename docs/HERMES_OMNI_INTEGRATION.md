@@ -1,4 +1,4 @@
-# OMNI + Hermes Agent — Integration Best Practices
+# OMNI + Hermes Agent: Integration Best Practices
 
 > Authoritative source for getting maximum value from OMNI while running
 > Hermes Agent.  
@@ -137,7 +137,7 @@ raw npm output.  Confirm with:
 
 | Typical noise | Typical signal | Action |
 |---|---|---|
-| `npm install`, `cargo build`, `docker build` | Dependency warnings, cache hits, progress bars | OMNI shines — expect 70–99 % savings |
+| `npm install`, `cargo build`, `docker build` | Dependency warnings, cache hits, progress bars | OMNI shines, expect 70-99 % savings |
 | `cargo test` / `pytest` passing suite | 1 failing test buried in 10 000 lines | OMNI surfaces failure + stack, drops the rest |
 | `kubectl get pods`, `terraform plan` | Healthy rows vs CrashLoopBackOff | OMNI keeps unhealthy rows, drops healthy |
 | `cat src/` (file dumps) | Imports, API shapes, risk markers | OMNI reshape → outline; do *cat* through agent that calls `read_file` since OMNI only hooks terminal stdout |
@@ -150,10 +150,10 @@ raw npm output.  Confirm with:
 
 After MCP is registered, prompt Hermes to:
 
-- `omni_insight` — recurring errors across the session
-- `omni_history` — what got compressed and why
-- `omni_retrieve <hash>` — pull the raw unfiltered output of a previous tool call
-- `omni_session --status` — hot files, active errors, token pressure
+- `omni_insight`, recurring errors across the session
+- `omni_history`, what got compressed and why
+- `omni_retrieve <hash>`, pull the raw unfiltered output of a previous tool call
+- `omni_session --status`, hot files, active errors, token pressure
 - `omni_stop` analog: set env `OMNI_PASSTHROUGH=1` for one command when you need 100 % raw terminal output
 
 Treat those tools as observability into OMNI itself; they exist so you don't
@@ -253,7 +253,7 @@ With the Hermes integration complete, OMNI MCP tools can be utilized natively by
 | Symptom | Probable cause | Fix |
 |---|---|---|
 | Hermes tools output is *longer* after enabling OMNI | `omni doctor --fix` to trust project `.omni/filters/`; otherwise project-level signals override global | Run `omni doctor --fix`, restart Hermes |
-| `[OMNI: omitted X lines]` shows up but tool result is empty/short | Input was under the 95 % reduction guardrail; OMNI passthrough raw | Expected — harmless; do not double-filter |
+| `[OMNI: omitted X lines]` shows up but tool result is empty/short | Input was under the 95 % reduction guardrail; OMNI passthrough raw | Expected, harmless; do not double-filter |
 | `omni_retrieve` returns empty | Raw output not in RewindStore (streaming distillers skip rewind by default) | Fall back to `omni_history` for the same command |
 | Gateway restart doesn't load plugin | Plugin directory is `~/.hermes/plugins/…` *without* trailing slash; or ~/.hermes ownership mismatch | `hermes plugins enable omni-signal-engine` fixes directory; then `hermes gateway restart` |
 | `hermes mcp add` times out | `connect_timeout` too short; switch to YAML config instead | See §4b |
@@ -270,16 +270,16 @@ Guaranteed by OMNI's Rust release profile on modern Mac/Linux:
 - Fail-open: any hook error is swallowed; raw terminal output passes through
 
 Do not add heavy I/O *inside* Hermes' `post_tool_call` plugin handler
-— `subprocess.run(..., capture_output=True)` is already the cheapest possible
+- `subprocess.run(..., capture_output=True)` is already the cheapest possible
 boundary. Avoid reading files, network calls, or LLM calls in the plugin.
 
 ---
 
 ## 9. Ops checklist after Hermes updates
 
-1. `omni doctor` — confirm hooks still registered
-2. `hermes plugins list` — `omni-signal-engine` still enabled
-3. `omni stats` — savings telemetry is still recording
+1. `omni doctor`, confirm hooks still registered
+2. `hermes plugins list`, `omni-signal-engine` still enabled
+3. `omni stats`, savings telemetry is still recording
 4. If a Hermes release changes hook lifecycles, re-run `omni init --hermes --hook`
    to rewrite the plugin scaffold without touching MCP or config.
 

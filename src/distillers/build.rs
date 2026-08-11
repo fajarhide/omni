@@ -36,7 +36,7 @@ fn is_single_line_diagnostic(content: &str) -> bool {
 /// installed packages), `go env` (297 B of environment), `make help` (420 B of
 /// targets) and `dotnet --list-sdks` all came back as the same nine bytes, each
 /// reported as a ~97% saving. Measured through the release post-hook, not only
-/// in a unit test — the agent really received `Build: ok` for `pip list` (#250).
+/// in a unit test, the agent really received `Build: ok` for `pip list` (#250).
 ///
 /// The list is short on purpose and holds only build *activity*, not success
 /// banners. A tool whose clean run is a single line (`ruff`: `All checks

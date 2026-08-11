@@ -172,8 +172,13 @@ mod eslint {
     /// Drives `load_all_filters` from inside a real project directory, because
     /// that is the only level at which the defect is visible: every unit test on
     /// `is_trusted` passed, since they call it the way it was meant to be called.
+    /// Project-local signals were removed in #447: the trust gate hashed one
+    /// file and admitted a different directory, so a signal dropped into a
+    /// checkout loaded on a trust record that never covered it. The guard is now
+    /// that the tier does not exist, which is only worth asserting because the
+    /// files are still what a repository would ship.
     #[test]
-    fn a_trusted_project_can_add_its_own_signal() {
+    fn a_projects_own_signal_never_loads() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".omni").join("signals")).expect("dirs");
         std::fs::write(
@@ -187,26 +192,15 @@ mod eslint {
         let previous = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(dir.path()).expect("chdir");
 
-        let untrusted = omni::pipeline::toml_filter::load_all_filters();
-        // Trust the path the loader will actually see. On macOS `tempdir()` hands
-        // back `/var/...` while `current_dir()` resolves the symlink to
-        // `/private/var/...`, and the trust registry is keyed on the string, so
-        // trusting the unresolved one registers a project nothing looks up.
-        let here = std::env::current_dir().expect("cwd");
-        omni::guard::trust::trust_project(&here).expect("trust");
-        let trusted = omni::pipeline::toml_filter::load_all_filters();
+        let loaded = omni::pipeline::toml_filter::load_all_filters();
 
         std::env::set_current_dir(previous).expect("restore cwd");
         drop(guard);
 
-        let named = |fs: &[omni::pipeline::toml_filter::TomlFilter]| {
-            fs.iter().any(|f| f.name.contains("project_only_probe"))
-        };
         assert!(
-            !named(&untrusted),
-            "an untrusted project must not be loaded"
+            !loaded.iter().any(|f| f.name.contains("project_only_probe")),
+            "a signal shipped inside a checkout must never load, trusted or not"
         );
-        assert!(named(&trusted), "a trusted project's own signal must load");
     }
 
     /// biome used to be claimed here and saved 0.0% on it: eslint prints a line
@@ -585,7 +579,7 @@ mod ansible {
 // a commit subject from a body line (both are 4-space indented), so on a verbose
 // multi-commit log it kept the bodies, blew past `max_lines = 20`, and dropped the
 // older commits with no marker. Verbose `git log` now falls through to the Rust
-// `distill_log`, which keeps one compact `hash subject` line per commit — every
+// `distill_log`, which keeps one compact `hash subject` line per commit, every
 // commit survives. `--oneline` already relied on the Rust distiller.
 
 mod make {

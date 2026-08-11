@@ -8,7 +8,6 @@ use serde::Deserialize;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
@@ -89,7 +88,7 @@ struct FilterConfig {
     /// to pay attention to its output.
     agent_hint: Option<String>,
 
-    /// Target compression ratio (0.0–1.0). A value of 0.3 means "try to keep
+    /// Target compression ratio (0.0-1.0). A value of 0.3 means "try to keep
     /// only 30% of the original output". Used by adaptive compression.
     compress_ratio_target: Option<f32>,
 
@@ -872,62 +871,31 @@ pub fn load_all_filters() -> Vec<TomlFilter> {
     filters
 }
 
-/// Resolve the effective signal directory for a given base path.
-/// Prefers `<base>/.omni/signals/` (new), falls back to `<base>/.omni/filters/` (legacy).
-fn resolve_signal_dir(base: &Path) -> std::path::PathBuf {
-    crate::paths::project_signal_dir(base)
-}
-
-/// Resolve the effective user-global signal directory.
-///
-/// Through `paths`, not around it. This derived `~/.omni` itself, so it sat
-/// outside `OMNI_HOME` and read the developer's live filters during every
-/// `cargo test` while the same suite's writes were correctly isolated (#315).
-/// It runs on every hooked command, which made it the most expensive place in
-/// the tree to have missed.
-fn resolve_user_signal_dir() -> Option<std::path::PathBuf> {
-    Some(crate::paths::user_signal_dir())
-}
-
 fn load_all_filters_uncached() -> Vec<TomlFilter> {
     let mut all = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    // 1. .omni/signals/*.toml (project-local, if trusted)
-    //    Falls back to .omni/filters/ for backward compatibility.
-    if let Ok(cwd) = std::env::current_dir() {
-        let local_signals_dir = resolve_signal_dir(&cwd);
-        if local_signals_dir.exists() {
-            // The directory, not the file inside it. `is_trusted` appends
-            // `omni_config.json` itself, so passing the file made it look for
-            // `<cwd>/omni_config.json/omni_config.json` and return false at the
-            // existence check every time: project-local signals, documented as the
-            // highest priority tier, had never loaded (#433).
-            if crate::guard::trust::is_trusted(&cwd) {
-                let report = load_from_dir(&local_signals_dir);
-                for f in report.filters {
-                    if !seen.contains(&f.name) {
-                        seen.insert(f.name.clone());
-                        all.push(f);
-                    }
-                }
-            }
-        }
-    }
+    // Project-local signals are gone (#447). The gate that was supposed to make
+    // them safe hashed `omni_config.json` and then decided whether to load
+    // `.omni/signals/`, so a signal added or edited after a project was trusted
+    // loaded with the trust record untouched. A TOML filter carries
+    // `strip_lines_matching`, which is enough to hide a failing test from the
+    // agent, so this was a way to make any repository quietly edit what its
+    // visitors were shown.
+    //
+    // The repair would have been to hash the directory it actually gates. The
+    // deletion is better: the tier was worth nothing measurable, and a filter
+    // that travels with a checkout is a supply chain the tool does not need.
 
-    // 2. ~/.omni/signals/*.toml (user-global)
-    //    Falls back to ~/.omni/filters/ for backward compatibility.
-    if let Some(dir) = resolve_user_signal_dir() {
-        let report = load_from_dir(&dir);
-        for f in report.filters {
-            if !seen.contains(&f.name) {
-                seen.insert(f.name.clone());
-                all.push(f);
-            }
-        }
-    }
+    // User-global signals are gone too (#449). What remains is compiled into the
+    // binary, so OMNI no longer has a filter file anyone edits: no project tier
+    // to be a supply chain, no home tier to drift from what the tests cover, and
+    // one answer to "which filters are running" that does not depend on the
+    // machine. Measured before deleting: disabling every embedded signal moves
+    // the filter column by 804 bytes over 6,656 commands, so the whole layer is
+    // a rounding error and the external tiers were a share of that.
 
-    // 3. Built-in signals (embedded from signals/ directory)
+    // Built-in signals (embedded from signals/ directory)
     let report = load_embedded_filters();
     for f in report.filters {
         if !seen.contains(&f.name) {
@@ -940,91 +908,16 @@ fn load_all_filters_uncached() -> Vec<TomlFilter> {
     all
 }
 
+/// Nothing outside the binary can change the filter set any more, so the cache
+/// has nothing to invalidate against. Kept as a constant rather than deleted
+/// because the cache still exists and a fingerprint of "always the same" is the
+/// honest value for it.
 fn compute_filters_fingerprint() -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-
-    // 1) project-local (include trust decision + config mtime)
-    if let Ok(cwd) = std::env::current_dir() {
-        let config_path = cwd.join("omni_config.json");
-        // Same correction as the loader: the directory, not the file (#433). The
-        // fingerprint has to agree with the loader or a newly trusted project
-        // would keep serving a cached filter set that excluded its own signals.
-        let is_trusted = crate::guard::trust::is_trusted(&cwd);
-        is_trusted.hash(&mut hasher);
-        hash_path_metadata(&config_path, &mut hasher);
-
-        let local_signals_dir = resolve_signal_dir(&cwd);
-        hash_dir_toml_entries(&local_signals_dir, &mut hasher);
-    }
-
-    // 2) user-global
-    if let Some(dir) = resolve_user_signal_dir() {
-        hash_dir_toml_entries(&dir, &mut hasher);
-    }
-
-    hasher.finish()
+    0
 }
 
-fn hash_dir_toml_entries(dir: &Path, hasher: &mut impl Hasher) {
-    if !dir.exists() || !dir.is_dir() {
-        return;
-    }
-
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-
-    let mut paths: Vec<_> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|ext| ext == "toml"))
-        .collect();
-    paths.sort();
-
-    for p in paths {
-        hash_path_metadata(&p, hasher);
-    }
-}
-
-fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
-    path.to_string_lossy().hash(hasher);
-
-    let Ok(meta) = fs::metadata(path) else {
-        0u64.hash(hasher);
-        return;
-    };
-
-    meta.len().hash(hasher);
-    if let Ok(modified) = meta.modified()
-        && let Ok(duration) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH)
-    {
-        duration.as_secs().hash(hasher);
-        duration.subsec_nanos().hash(hasher);
-    } else {
-        0u64.hash(hasher);
-    }
-}
-
-pub fn get_filters_by_source() -> (LoadReport, LoadReport, LoadReport) {
-    let built_in = load_embedded_filters();
-
-    let user_filters = resolve_user_signal_dir()
-        .map(|d| load_from_dir(&d))
-        .unwrap_or_else(|| LoadReport {
-            filters: Vec::new(),
-            warnings: Vec::new(),
-        });
-
-    let mut local_filters = LoadReport {
-        filters: Vec::new(),
-        warnings: Vec::new(),
-    };
-    if let Ok(cwd) = std::env::current_dir() {
-        let local_dir = resolve_signal_dir(&cwd);
-        local_filters = load_from_dir(&local_dir);
-    }
-
-    (built_in, user_filters, local_filters)
+pub fn get_filters_by_source() -> LoadReport {
+    load_embedded_filters()
 }
 
 #[cfg(test)]
@@ -1351,29 +1244,13 @@ mod tests {
         assert_eq!(names, ["high_a", "high_b", "aaa_low"]);
     }
 
-    /// #315: `resolve_user_signal_dir` derived `~/.omni` itself, so `OMNI_HOME`
-    /// did not cover it and the suite read the developer's live filters on every
-    /// hook while its own writes were correctly isolated. That is also the
-    /// remaining half of #304: filters from a developer's home joined the
-    /// `find()` race and decided which signal claimed a command, so the suite's
-    /// result depended on whose machine it ran on.
-    ///
-    /// Asserting the *loaded set* rather than the resolved path, because the
-    /// path was already right once while the loaded set was still wrong.
+    /// #315 asked whether the suite could read a developer's live filters. It
+    /// cannot read anyone's now: the external tiers are gone and the filter set
+    /// is whatever is compiled in (#449). Kept, and rewritten to assert that,
+    /// because the property #315 wanted is stronger when it holds by
+    /// construction than when it holds by path resolution.
     #[test]
-    fn loads_only_shipped_signals_under_a_configured_home() {
-        // `resolve_user_signal_dir`, not `paths::user_signal_dir`. The first
-        // version of this test asserted the accessor and stayed green with the
-        // loader pointed straight back at `~/.omni`, which is the same mistake
-        // #315 was: checking the thing that was already right.
-        let dir = resolve_user_signal_dir().expect("a home resolves");
-        assert!(
-            dir.starts_with(crate::paths::config_home()),
-            "the loader reads {}, outside the configured home {}",
-            dir.display(),
-            crate::paths::config_home().display()
-        );
-
+    fn loads_only_shipped_signals() {
         let filters = load_all_filters();
         let leaked: Vec<&str> = filters
             .iter()

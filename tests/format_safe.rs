@@ -1,4 +1,4 @@
-//! Format-safe gate — structured payloads must leave the hooks byte-for-byte intact.
+//! Format-safe gate, structured payloads must leave the hooks byte-for-byte intact.
 //!
 //! Regression cover for the live repro: `az … -o json` and `git show <dashboard>.json`
 //! had their repeated lines squashed into `[N similar lines collapsed]`, so the payload
@@ -132,7 +132,7 @@ fn yaml_manifest_survives_pipe_byte_for_byte() {
 
 #[test]
 fn post_tool_hook_leaves_structured_output_untouched() {
-    // `None` means "no rewrite" — the host keeps the original bytes at zero marker cost.
+    // `None` means "no rewrite", the host keeps the original bytes at zero marker cost.
     let raw = fixture("az_vm_list.json");
     let payload = bash_payload("az vm list -o json", &raw);
 
@@ -202,7 +202,7 @@ fn space_aligned_table_is_not_mistaken_for_a_delimited_format() {
     );
 }
 
-/// A text build log must not be claimed by the format gate — that gate exists
+/// A text build log must not be claimed by the format gate, that gate exists
 /// for payloads a later step parses, and gating this one would take every build
 /// log off the lossy path.
 ///

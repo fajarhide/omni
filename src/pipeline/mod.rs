@@ -46,13 +46,13 @@ pub const RERUN_WINDOW_SECS: i64 = 300;
 /// confident-but-unsupported number OMNI exists to stop emitting.
 pub const RERUN_MIN_SAMPLES: u64 = 8;
 
-/// Commit timestamp of the #158 fix — `fix(hooks): emit the key Claude Code
+/// Commit timestamp of the #158 fix, `fix(hooks): emit the key Claude Code
 /// actually reads (#162)`, 2026-07-22 21:47:55 +0700.
 ///
 /// Before it, the Claude Code post-hook emitted its output under a key the host
 /// ignores, so `Keep` rows on that path were recorded as distilled while the
 /// agent read the raw bytes. They are controls mislabelled as treatment, and
-/// including them does not merely add noise — on the maintainer's store `grep`
+/// including them does not merely add noise, on the maintainer's store `grep`
 /// reads +9.2pp with them excluded and +0.0pp with them included, so dilution
 /// alone can hide a real finding. Any before/after comparison must drop them.
 pub const POST_HOOK_FIX_TS: i64 = 1_784_731_675;
@@ -62,13 +62,13 @@ pub const POST_HOOK_FIX_TS: i64 = 1_784_731_675;
 ///
 /// Distillation only fires on large output, so "distilled" and "passed through"
 /// are not always the same population. On the maintainer's store `kubectl`
-/// averaged 244,606 B distilled against 115 B raw — a 2,127× skew that made a
+/// averaged 244,606 B distilled against 115 B raw, a 2,127× skew that made a
 /// +48.6pp delta look like evidence when it compared `get -A` dumps against
 /// one-line config reads. `grep` (3,196 B vs 3,240 B) and `npm` (11,419 B vs
 /// 14,065 B) are matched and survive. 3× separates the two cases cleanly.
 pub const RERUN_SIZE_SKEW_LIMIT: f64 = 3.0;
 
-// 1. Segmentation Strategy — how to split tokens
+// 1. Segmentation Strategy, how to split tokens
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SegmentationMode {
     Line,      // Default: line by line
@@ -76,7 +76,7 @@ pub enum SegmentationMode {
     TestGroup, // Test runners: group test cases
 }
 
-// 2. Collapse Strategy — how to group repetitive lines
+// 2. Collapse Strategy, how to group repetitive lines
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CollapseMode {
     Generic,
@@ -86,13 +86,13 @@ pub enum CollapseMode {
     Log,
 }
 
-// 2. Signal tier — how important this segment is
+// 2. Signal tier, how important this segment is
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SignalTier {
-    Noise,     // Progress, compiling boring deps — drop
-    Context,   // Supporting lines — include if space allows
-    Important, // Warning, changed file — biasanya include
-    Critical,  // Error, exception, FAILED — selalu include
+    Noise,     // Progress, compiling boring deps, drop
+    Context,   // Supporting lines, include if space allows
+    Important, // Warning, changed file, biasanya include
+    Critical,  // Error, exception, FAILED, selalu include
 }
 
 // Loop Context Mode
@@ -188,11 +188,11 @@ impl std::fmt::Display for ContextPressure {
     }
 }
 
-// 3. Route — path distilasi
+// 3. Route, path distilasi
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Route {
     Keep,        // score >= 0.7, full distillation
-    Soft,        // 0.3–0.69, labeled distillation
+    Soft,        // 0.3-0.69, labeled distillation
     Passthrough, // < 0.3, raw + learn trigger
     Rewind,      // aggressively compressed, stored in RewindStore
     Error,       // engine error, raw preserved
@@ -285,7 +285,7 @@ pub struct DistillResult {
     /// The two are not the same thing and the difference is what made the
     /// headline untrue: on Claude Code's large-output path the host discarded
     /// OMNI's result and persisted the raw output, while `output_bytes` recorded
-    /// a 93% saving for it (#212). It is 0 where no model reads the path at all —
+    /// a 93% saving for it (#212). It is 0 where no model reads the path at all -
     /// `omni exec` and the shell pipe write to a TTY, and those rows were 73% of
     /// every byte OMNI claimed to have saved, in a unit where "tokens" means
     /// nothing.
@@ -293,7 +293,7 @@ pub struct DistillResult {
     /// **This is derived, not acknowledged.** No host tells a hook whether it
     /// applied the replacement, so this records what OMNI handed over. With the
     /// host-cap path detected above, that is the same value on every route this
-    /// table books — which is the point: the number now comes from what was
+    /// table books, which is the point: the number now comes from what was
     /// delivered rather than from what a distiller intended.
     pub delivered_bytes: usize,
 }
@@ -380,7 +380,7 @@ pub struct SessionState {
     #[serde(default)]
     pub current_turn: crate::analytics::context_composition::ContextTurn,
 
-    // Phase 2: Engram — Automatic Subtask Digest
+    // Phase 2: Engram: Automatic Subtask Digest
     #[serde(default)]
     pub engrams: VecDeque<crate::session::engram::Engram>,
 

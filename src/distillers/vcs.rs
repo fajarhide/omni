@@ -17,12 +17,12 @@ impl Distiller for VcsDistiller {
             return None;
         }
 
-        // PR/Issue list — show first 10, summarize rest
+        // PR/Issue list, show first 10, summarize rest
         let shown: Vec<&str> = lines.iter().take(10).copied().collect();
         let mut out = shown.join("\n");
         if total > 10 {
             out.push_str(&format!(
-                "\n... [{} more items — use --limit to see more]",
+                "\n... [{} more items, use --limit to see more]",
                 total - 10
             ));
         }

@@ -91,6 +91,27 @@ than a sentence asking you to trust it.
 
 ---
 
+## What OMNI remembers, and for how long
+
+Three tiers, already in the schema, never written down until now. The short answer to
+"will OMNI still know my project after a month away" is yes for the conclusions and no for
+the raw bytes.
+
+| Tier | What | Kept |
+|---|---|---|
+| **Permanent** | project knowledge, recurring error patterns, engrams, goal memory | until you delete it, except goal memory, which honours its own `ttl_days` |
+| **Working, 30 days** | sessions, distillation rows, hot files, the RewindStore, the event index, the ledger | rolling window |
+| **Verbatim, 7 days** | `execution_traces` and the session transcript | shorter on purpose: it is two orders of magnitude heavier per row |
+
+The boundary this sets is worth stating plainly, because it is the one thing a handle
+cannot promise: `omni_retrieve` for content archived more than 30 days ago will not
+resolve. Hold the shortest window open while measuring with
+`OMNI_TRACE_RETENTION_DAYS=90`.
+
+`omni reset` wipes all of it, and `omni doctor` shows the live counts.
+
+---
+
 ## What each host lets OMNI do
 
 | Tier | Hosts | What you get |
@@ -167,17 +188,20 @@ Measurably, yes, and the cost grows with your history rather than with the paylo
 205 MB one. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely.
 
 **Can I add my own filters?**
-Yes, in TOML:
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
+No, and that is deliberate as of 0.7.0. The filters are compiled into the binary, so the
+set that runs is the set the tests cover and there is no file on disk that changes what your
+agent is shown. Two tiers were removed to get there: a project's own `.omni/signals/`, which
+made a filter a thing a repository could ship to its visitors, and `~/.omni/signals/`. The
+whole filter layer is worth 804 bytes over 6,656 recorded commands, so what it cost in
+surface it was not paying back. If a tool needs a signal, open an issue and it ships in the
+binary for everyone.
 
 **How do I see my own savings?**
-`omni stats` after a few days. `omni stats --share` prints a copy-pasteable summary,
-and `omni stats --card` writes it as an image.
+`omni stats` after a few days. It leads with session lifetime, how many commands a session
+carries before the host closes it, because that is what the context window costs you. The
+distillation percentage below it is a diagnostic for one host's pipeline, not a product
+claim. `omni stats --share` prints a copy-pasteable summary, and `omni stats --card` writes
+it as an image.
 
 ---
 

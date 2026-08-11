@@ -487,7 +487,7 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         &compact_cmd,
     );
 
-    //  New hooks (async — non-blocking, no output needed)
+    //  New hooks (async, non-blocking, no output needed)
     ensure_async_hook(
         hooks.entry("SessionEnd").or_insert_with(|| json!([])),
         &hook_cmd,

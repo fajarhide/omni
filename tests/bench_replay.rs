@@ -1,4 +1,4 @@
-//! #184 — the reproducible net-savings benchmark.
+//! #184, the reproducible net-savings benchmark.
 //!
 //! Replays every `execution_traces.raw_input` through the CURRENT pipeline and
 //! aggregates raw vs distilled bytes, so the published headline (docs/BENCHMARKS.md,
@@ -12,7 +12,7 @@
 //! divisor. Both are printed for raw input and for post-filter output, because the
 //! whole claim of the ledger is that the two mechanisms are orthogonal.
 //!
-//! Ignored by default — it needs a populated trace DB. Run it explicitly:
+//! Ignored by default, it needs a populated trace DB. Run it explicitly:
 //!
 //!   OMNI_BENCH_DB=~/.omni/omni.db \
 //!     cargo test --release --test bench_replay -- --ignored --nocapture
@@ -40,6 +40,13 @@ use std::io::Cursor;
 /// `docs/specs/2026-08-08-omni-direction.md` section 2.3 used, so the two
 /// numbers are comparable.
 const MIN_REPEAT_LINE: usize = 12;
+
+/// `ledger::Origin::Session`'s marker with a 16 character handle, in bytes.
+///
+/// `Origin` is private, so this is a copy, and a copy that drifts would make the
+/// attribution below quietly wrong. `session_marker_len_matches_the_ledger`
+/// re-derives it from the ledger's own output and fails if the two part ways.
+const SESSION_MARKER_LEN: u64 = 62;
 
 /// A trace, with the two identities repetition is scoped by.
 struct Trace {
@@ -106,6 +113,59 @@ impl Seen {
                 rep.same_project += bytes;
             }
         }
+    }
+}
+
+/// Repetition seen through the ledger's own eyes, so the bytes it declines can
+/// be attributed to the gate that declined them (#450).
+///
+/// `Seen` above answers a different question: it counts lines of at least
+/// `MIN_REPEAT_LINE` characters to describe the corpus. This one keys every line
+/// with `ledger::line_key`, in payload order, so its notion of "already shown"
+/// is byte-identical to the ledger's and the two totals can be subtracted.
+#[derive(Default)]
+struct GapSeen {
+    by_session: HashMap<String, HashSet<String>>,
+    by_project: HashMap<String, HashSet<String>>,
+}
+
+impl GapSeen {
+    /// Per line, whether the ledger would already know it and how long it is,
+    /// then records the payload in both scopes exactly as `project_inner` does.
+    fn account(&mut self, t: &Trace, text: &str) -> Vec<(bool, u64)> {
+        let keys: Vec<(String, u64)> = text
+            .split_inclusive('\n')
+            .map(|l| (omni::ledger::line_key(l), l.len() as u64))
+            .collect();
+
+        // Session first, project only for what the session did not answer,
+        // which is the precedence `origin_of` applies.
+        let mut seen: Vec<bool> = {
+            let session = self.by_session.entry(t.session.clone()).or_default();
+            keys.iter().map(|(k, _)| session.contains(k)).collect()
+        };
+        {
+            let project = self.by_project.entry(t.project.clone()).or_default();
+            for (i, (k, _)) in keys.iter().enumerate() {
+                if !seen[i] && project.contains(k) {
+                    seen[i] = true;
+                }
+            }
+        }
+
+        let session = self.by_session.entry(t.session.clone()).or_default();
+        for (k, _) in &keys {
+            session.insert(k.clone());
+        }
+        let project = self.by_project.entry(t.project.clone()).or_default();
+        for (k, _) in &keys {
+            project.insert(k.clone());
+        }
+
+        keys.iter()
+            .enumerate()
+            .map(|(i, (_, len))| (seen[i], *len))
+            .collect()
     }
 }
 
@@ -232,9 +292,10 @@ fn rtk_filter(cmd: &str) -> Option<&'static str> {
 }
 
 /// Runs one payload through rtk, or hands it back when nothing claims it.
-fn rtk_bytes(rtk: &str, cmd: &str, raw: &str) -> u64 {
+/// What rtk hands back, so the ledger can be measured on top of it.
+fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
     let Some(filter) = rtk_filter(cmd) else {
-        return raw.len() as u64;
+        return raw.to_string();
     };
     use std::io::Write;
     let Ok(mut child) = std::process::Command::new(rtk)
@@ -244,14 +305,14 @@ fn rtk_bytes(rtk: &str, cmd: &str, raw: &str) -> u64 {
         .stderr(std::process::Stdio::null())
         .spawn()
     else {
-        return raw.len() as u64;
+        return raw.to_string();
     };
     if let Some(mut si) = child.stdin.take() {
         let _ = si.write_all(raw.as_bytes());
     }
     match child.wait_with_output() {
-        Ok(o) => o.stdout.len() as u64,
-        Err(_) => raw.len() as u64,
+        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Err(_) => raw.to_string(),
     }
 }
 
@@ -288,7 +349,7 @@ fn since_ts() -> i64 {
 fn replay_execution_traces_net_savings() {
     // Resolve the corpus DB from the REAL home before we repoint HOME below.
     // Build the path with PathBuf, not a hardcoded `/` (CLAUDE.md cross-platform
-    // rule 1) — review of #202.
+    // rule 1), review of #202.
     let db = std::env::var("OMNI_BENCH_DB").unwrap_or_else(|_| {
         std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
             .join(".omni")
@@ -372,7 +433,7 @@ fn replay_execution_traces_net_savings() {
     assert!(!rows.is_empty(), "trace DB has no rows to replay");
     assert!(
         rows.iter().any(|t| !t.raw.is_empty()),
-        "all trace rows have empty raw_input — nothing to measure"
+        "all trace rows have empty raw_input, nothing to measure"
     );
 
     // The ledger's gate (#394) needs the ledger in the loop, and `run_inner`
@@ -384,10 +445,28 @@ fn replay_execution_traces_net_savings() {
     let ledger_store =
         omni::store::sqlite::Store::open_path(&ledger_dir.path().join("ledger.db")).ok();
     let (mut ledger_total, mut ledger_calls) = (0u64, 0u64);
+    // #448. `OMNI_BENCH_PROJECT=off` drops the project scope so the two can be
+    // measured apart; the floor arm is `OMNI_PROJECT_FLOOR_MULT` in the ledger.
+    let project_scope = std::env::var("OMNI_BENCH_PROJECT").ok().as_deref() != Some("off");
+    let (mut mark_session, mut mark_project) = (0u64, 0u64);
+    // #450's three gates, in repeated bytes the ledger never got to claim.
+    let mut gap_seen = GapSeen::default();
+    let (mut gap_structured, mut gap_under_floor, mut gap_processed) = (0u64, 0u64, 0u64);
+    let (mut n_structured, mut n_under_floor) = (0u64, 0u64);
+    // M1 split by the bound that rejected the run.
+    let (mut m1_under_bar, mut m1_eligible) = (0u64, 0u64);
+    let (mut m1_under_bar_runs, mut m1_eligible_runs) = (0u64, 0u64);
+    // Every run of already-seen lines, so the marker's own size can be priced
+    // as the variable it is rather than assumed.
+    let mut run_sizes: Vec<u64> = Vec::new();
     // P4's head-to-head. Off unless `OMNI_BENCH_RTK` names an rtk binary, so CI
     // never needs a competitor installed to run this benchmark.
     let rtk = std::env::var("OMNI_BENCH_RTK").ok();
-    let (mut rtk_total, mut rtk_claimed) = (0u64, 0u64);
+    let (mut rtk_total, mut rtk_claimed, mut rtk_marked) = (0u64, 0u64, 0u64);
+    let rtk_ledger_dir = tempfile::tempdir().expect("rtk ledger home");
+    let rtk_ledger_store =
+        omni::store::sqlite::Store::open_path(&rtk_ledger_dir.path().join("ledger.db")).ok();
+    let mut rtk_ledger_total = 0u64;
 
     let counter = Counter::new();
     let (mut n, mut raw_total, mut out_total) = (0u64, 0u64, 0u64);
@@ -411,7 +490,7 @@ fn replay_execution_traces_net_savings() {
         let mut err = std::io::sink();
         // None store + None session = fresh, deterministic, no persistence. A
         // failed replay would leave `out` empty and be counted as 100% savings,
-        // inflating the honest figure (review of #202) — exclude it entirely and
+        // inflating the honest figure (review of #202), exclude it entirely and
         // report the count instead.
         if omni::hooks::pipe::run_inner(
             Cursor::new(t.raw.as_bytes()),
@@ -460,19 +539,72 @@ fn replay_execution_traces_net_savings() {
         f.1 += r;
         f.2 += o;
 
+        // #450. Attribute the repetition in this payload to the gate that will
+        // decide its fate, before the ledger runs, and in the same order the
+        // ledger will see the payloads.
+        {
+            let lines = gap_seen.account(t, &distilled);
+            let repeated: u64 = lines.iter().filter(|(s, _)| *s).map(|(_, l)| l).sum();
+            if omni::pipeline::format::sniff(&distilled).is_some() {
+                gap_structured += repeated;
+                n_structured += 1;
+            } else if distilled.len() < omni::guard::limits::MIN_LEDGER_INPUT {
+                gap_under_floor += repeated;
+                n_under_floor += 1;
+            } else {
+                gap_processed += repeated;
+                // Why each run of already-seen lines could not fold, using the
+                // same two bounds `substitute` applies. A run that clears both
+                // is one the ledger should have taken, so whatever is left in
+                // that bucket is the gain gate or a failed archive.
+                let mut i = 0;
+                while i < lines.len() {
+                    if !lines[i].0 {
+                        i += 1;
+                        continue;
+                    }
+                    let mut bytes = 0u64;
+                    while i < lines.len() && lines[i].0 {
+                        bytes += lines[i].1;
+                        i += 1;
+                    }
+                    run_sizes.push(bytes);
+                    // The shipped rule, mirrored: a run folds only when it saves
+                    // `MIN_LEDGER_RUN_GAIN` after paying for its marker. The
+                    // marker length is not reachable from a test binary, so the
+                    // session form's 65 bytes is written here and pinned by
+                    // `session_marker_len_matches_the_ledger` below.
+                    let bar = SESSION_MARKER_LEN + omni::guard::limits::MIN_LEDGER_RUN_GAIN as u64;
+                    if bytes < bar {
+                        m1_under_bar += bytes;
+                        m1_under_bar_runs += 1;
+                    } else {
+                        m1_eligible += bytes;
+                        m1_eligible_runs += 1;
+                    }
+                }
+            }
+        }
+
         // Same two gates the hook applies: structured payloads are never
         // projected, and the scope is the session the trace really belongs to.
         let after_ledger = ledger_store
             .as_ref()
             .filter(|_| omni::pipeline::format::sniff(&distilled).is_none())
             .and_then(|s| {
-                omni::ledger::Ledger::new(s, &t.session)
-                    .with_project(&t.project)
-                    .project(&distilled)
+                let ledger = omni::ledger::Ledger::new(s, &t.session);
+                let ledger = if project_scope {
+                    ledger.with_project(&t.project)
+                } else {
+                    ledger
+                };
+                ledger.project(&distilled)
             });
         let l = match after_ledger {
             Some(view) => {
                 ledger_calls += 1;
+                mark_session += view.matches("lines already shown").count() as u64;
+                mark_project += view.matches("from an earlier session").count() as u64;
                 view.len() as u64
             }
             None => o,
@@ -480,10 +612,31 @@ fn replay_execution_traces_net_savings() {
         ledger_total += l;
 
         if let Some(rtk) = &rtk {
-            rtk_total += rtk_bytes(rtk, &t.command, &t.raw);
+            let rtk_text = rtk_out(rtk, &t.command, &t.raw);
+            rtk_total += rtk_text.len() as u64;
             if rtk_filter(&t.command).is_some() {
                 rtk_claimed += 1;
+                // How often the ratio is bought by dropping the tail, in their
+                // own words. Marker strings read from their `core/tee.rs` and
+                // the cap sites in `cmds/`.
+                if rtk_text.contains(" more")
+                    || rtk_text.contains("truncated")
+                    || rtk_text.contains("see remaining")
+                {
+                    rtk_marked += 1;
+                }
             }
+            // Their filters, our ledger, on its own store so the two ledger arms
+            // cannot see each other's history.
+            let after = rtk_ledger_store
+                .as_ref()
+                .filter(|_| omni::pipeline::format::sniff(&rtk_text).is_none())
+                .and_then(|s| {
+                    omni::ledger::Ledger::new(s, &t.session)
+                        .with_project(&t.project)
+                        .project(&rtk_text)
+                });
+            rtk_ledger_total += after.map_or(rtk_text.len() as u64, |v| v.len() as u64);
         }
 
         let c = per_class.entry(trace_class(&t.command)).or_default();
@@ -597,6 +750,71 @@ fn replay_execution_traces_net_savings() {
         saved(raw_total, out_total),
         saved(raw_total, ledger_total)
     );
+    println!(
+        "ledger arm:      project_scope={project_scope} floor_mult={} bytes={ledger_total} markers: {mark_session} session, {mark_project} project",
+        std::env::var("OMNI_PROJECT_FLOOR_MULT").unwrap_or_else(|_| "6".into())
+    );
+
+    // #450. Every repeated byte the ledger was handed, attributed to the gate
+    // that decided it. `claimed` is what the arm above actually removed, so
+    // `M1` is the remainder inside payloads the ledger did process: runs too
+    // short to fold, runs the gain gate rejected, and the markers' own bytes.
+    let claimed = out_total.saturating_sub(ledger_total);
+    let gap_total = gap_structured + gap_under_floor + gap_processed;
+    let m1 = gap_processed.saturating_sub(claimed);
+    let of_raw = |b: u64| 100.0 * b as f64 / raw_total.max(1) as f64;
+    println!("\n--- #450: where the repetition goes (ledger's own line keys) ---");
+    println!(
+        "repeated bytes handed to the ledger: {gap_total} ({:.1}% of raw)",
+        of_raw(gap_total)
+    );
+    println!(
+        "  claimed by the ledger:             {claimed} ({:.1}%)",
+        of_raw(claimed)
+    );
+    println!(
+        "  M1 processed but unclaimed:        {m1} ({:.1}%)",
+        of_raw(m1)
+    );
+    println!(
+        "  M2 payload under MIN_LEDGER_INPUT: {gap_under_floor} ({:.1}%) over {n_under_floor} traces",
+        of_raw(gap_under_floor)
+    );
+    println!(
+        "  M3 structured, gate declined:      {gap_structured} ({:.1}%) over {n_structured} traces",
+        of_raw(gap_structured)
+    );
+    println!("M1 split, against the gain bar the ledger applies:");
+    println!(
+        "  under the bar, cannot pay:         {m1_under_bar} ({:.1}%) over {m1_under_bar_runs} runs",
+        of_raw(m1_under_bar)
+    );
+    println!(
+        "  over the bar, folded or not:       {m1_eligible} ({:.1}%) over {m1_eligible_runs} runs",
+        of_raw(m1_eligible)
+    );
+    println!("run sizes: {} runs, median {} bytes", run_sizes.len(), {
+        let mut v = run_sizes.clone();
+        v.sort_unstable();
+        v.get(v.len() / 2).copied().unwrap_or(0)
+    });
+    if let Ok(path) = std::env::var("OMNI_BENCH_RUNS_OUT") {
+        let dump: String = run_sizes.iter().map(|b| format!("{b}\n")).collect();
+        let _ = std::fs::write(path, dump);
+    }
+    println!("what a smaller marker would be worth, no line or byte floor at all:");
+    for marker in [87u64, 60, 40, 28, 20] {
+        let saved: u64 = run_sizes
+            .iter()
+            .filter(|b| **b > marker)
+            .map(|b| b - marker)
+            .sum();
+        let folds = run_sizes.iter().filter(|b| **b > marker).count();
+        println!(
+            "  marker {marker:>3} bytes: {saved:>8} ({:.1}% of raw) over {folds} folds",
+            of_raw(saved)
+        );
+    }
 
     // P4. One corpus, two tools, one command that reproduces it. rtk is handed
     // the exact filter name for each command, which its own hook has to infer, so
@@ -624,6 +842,14 @@ fn replay_execution_traces_net_savings() {
             rtk_total,
             format!("{:.1}%", saved(raw_total, rtk_total))
         );
+        println!(
+            "{:<22} {:>12} -> {:>12}  {:>7}",
+            "rtk pipe + our ledger",
+            raw_total,
+            rtk_ledger_total,
+            format!("{:.1}%", saved(raw_total, rtk_ledger_total))
+        );
+        println!("rtk marked a cut in {rtk_marked} of the {rtk_claimed} it claimed");
     }
 
     // #395's gate. Printed next to the classes rather than in place of them,
@@ -739,4 +965,25 @@ fn ignores_lines_under_the_floor() {
 
     assert_eq!(rep.accounted, 0);
     assert_eq!(rep.same_session, 0);
+}
+
+/// The ledger's own marker, measured rather than assumed, so
+/// `SESSION_MARKER_LEN` cannot drift away from the string it stands for.
+#[test]
+fn session_marker_len_matches_the_ledger() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = omni::store::sqlite::Store::open_path(&dir.path().join("l.db")).expect("store");
+    let text: String = (0..40)
+        .map(|i| format!("2026-08-11T00:00:00Z  handler finished request {i} in 12ms\n"))
+        .collect();
+    let ledger = omni::ledger::Ledger::new(&store, "s1");
+    ledger.project(&text);
+    let view = ledger.project(&text).expect("a full repeat folds");
+
+    let marker = view
+        .lines()
+        .find(|l| l.starts_with("[OMNI:"))
+        .expect("the fold emits a marker");
+    // 40 lines, so the count is two digits, which is what the constant assumes.
+    assert_eq!(marker.len() as u64, SESSION_MARKER_LEN);
 }

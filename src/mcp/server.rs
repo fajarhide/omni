@@ -3,7 +3,7 @@
 
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
-use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
+use crate::session::learn::detect_patterns;
 use crate::store::sqlite::Store;
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -144,11 +144,6 @@ pub struct OmniRememberParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct OmniTrustParams {
-    pub project_path: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct OmniContextParams {
     pub file_path: String,
 }
@@ -217,7 +212,7 @@ pub struct OmniLoopMemoryParams {
     pub key: Option<String>,
     /// Memory value (required for set)
     pub value: Option<String>,
-    /// Confidence score 0.0–1.0 (default 0.7)
+    /// Confidence score 0.0-1.0 (default 0.7)
     pub confidence: Option<f64>,
 }
 
@@ -363,7 +358,7 @@ impl OmniServer {
 
         if candidates.is_empty() {
             return "No significant noise patterns detected. \
-                    Input has high signal diversity — no filter needed."
+                    Input has high signal diversity, no filter needed."
                 .to_string();
         }
 
@@ -371,7 +366,7 @@ impl OmniServer {
         let mut report = format!("Detected {} noise patterns:\n\n", candidates.len());
         for (i, c) in candidates.iter().enumerate() {
             report.push_str(&format!(
-                "  [{}] \"{}\" — {} occurrences (confidence: {:.0}%)\n      Action: {:?}\n      Sample: {}\n\n",
+                "  [{}] \"{}\", {} occurrences (confidence: {:.0}%)\n      Action: {:?}\n      Sample: {}\n\n",
                 i + 1,
                 c.trigger_prefix,
                 c.count,
@@ -381,29 +376,14 @@ impl OmniServer {
             ));
         }
 
-        // 3. If apply=true: write to ~/.omni/signals/learned.toml
+        // #449 removed every filter tier outside the binary, so `apply` has
+        // nowhere to write. Reporting a successful install to a file nothing
+        // reads is the fabrication class this project files issues about, so it
+        // says what is true instead.
         if apply {
-            let filter_name = format!("learned_{}", chrono::Utc::now().timestamp_micros());
-            let _toml_content = generate_toml(&candidates, &filter_name, None);
-
-            let config_path = crate::paths::learned_filters_path();
-            let _ = crate::paths::ensure_omni_home();
-
-            match apply_to_config(&candidates, &filter_name, &config_path, None) {
-                Ok(added) => {
-                    report.push_str(&format!(
-                        "\n✓ Applied {} filters to {}\n  Run: omni doctor to verify",
-                        added,
-                        config_path.display()
-                    ));
-                }
-                Err(e) => {
-                    report.push_str(&format!(
-                        "\n✗ Failed to write filters: {}\n  Try manually: omni learn --apply",
-                        e
-                    ));
-                }
-            }
+            report.push_str(
+                "\n! Not applied: OMNI's filters are compiled into the binary, so there is no file to write.\n  The patterns above are the finding; open an issue if a tool needs its own signal.",
+            );
         } else {
             report.push_str(&format!(
                 "Run omni_learn with apply=true to save {} filters automatically.",
@@ -658,25 +638,6 @@ impl OmniServer {
             "No recurring issues detected yet.".to_string()
         } else {
             report
-        }
-    }
-
-    #[tool(
-        name = "omni_trust",
-        description = "Trust project's local configurations explicitly"
-    )]
-    pub async fn omni_trust(&self, params: Parameters<OmniTrustParams>) -> String {
-        let project_path = params.0.project_path;
-        let default_path = if project_path.is_empty() {
-            ".".to_string()
-        } else {
-            project_path
-        };
-
-        let path = std::path::Path::new(&default_path);
-        match crate::guard::trust::trust_project(path) {
-            Ok(hash) => format!("Trusted: {}\nSHA-256: {}", path.display(), hash),
-            Err(e) => format!("Failed to trust local hashes ensuring sandbox loops: {}", e),
         }
     }
 
@@ -1523,10 +1484,7 @@ impl OmniServer {
 }
 
 fn compute_project_hash_str(project_path: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(project_path.as_bytes());
-    hex::encode(&hasher.finalize()[..8])
+    crate::agents::multiagent::project_hash(project_path)
 }
 pub async fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Result<()> {
     let server = OmniServer { store, session };
@@ -1687,36 +1645,6 @@ mod tests {
         );
     }
 
-    /// The write itself is tested against a path this test owns, because
-    /// `apply_to_config` already takes one. Driving it through the MCP tool
-    /// instead wrote a learned filter into the shared home on every run, and
-    /// those filters then joined the `find()` race that decides which signal
-    /// claims a command, which is the mechanism behind #304. The MCP layer's own
-    /// job is the response, and that is what the test below it checks.
-    #[test]
-    fn learned_filters_are_written_to_the_path_they_are_given() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("learned.toml");
-        let repetitive = "Downloading dep v1.0\n".repeat(6);
-        let candidates = crate::session::learn::detect_patterns(&repetitive);
-        assert!(!candidates.is_empty(), "fixture must produce a candidate");
-
-        let added = crate::session::learn::apply_to_config(
-            &candidates,
-            "learned_test",
-            &path,
-            Some("npm install"),
-        )
-        .expect("apply");
-
-        assert!(added > 0, "nothing was written");
-        let written = std::fs::read_to_string(&path).expect("file exists");
-        assert!(
-            written.contains("[filters.learned_test]"),
-            "the filter block is missing: {written}"
-        );
-    }
-
     #[tokio::test]
     async fn test_omni_learn_reports_what_it_would_apply() {
         let dir = tempdir().unwrap();
@@ -1735,21 +1663,6 @@ mod tests {
             out.contains("filters"),
             "expected a report of the detected patterns, got: {out}"
         );
-    }
-
-    #[tokio::test]
-    async fn test_omni_trust_saves_hash() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let session = Arc::new(Mutex::new(SessionState::new()));
-
-        let server = OmniServer { store, session };
-        let out = server
-            .omni_trust(Parameters(OmniTrustParams {
-                project_path: "/invalid".to_string(),
-            }))
-            .await;
-        assert!(out.contains("Failed") || out.contains("Trusted"));
     }
 
     // ── Phase 2 MCP Tests ──

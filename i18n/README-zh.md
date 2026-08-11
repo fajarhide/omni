@@ -177,6 +177,24 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
+## OMNI 记住什么，以及记多久
+
+三个层级，schema 里早就有，这是第一次写下来。“离开一个月后 OMNI 还认识我的项目吗”的简短
+答案是：结论记得，原始字节不记得。
+
+| 层级 | 内容 | 保留 |
+|---|---|---|
+| **永久** | 项目知识、反复出现的错误模式、engram、目标记忆 | 直到你删除；只有目标记忆遵循自己的 `ttl_days` |
+| **工作，30 天** | 会话、蒸馏行、热点文件、RewindStore、事件索引、账本 | 滚动窗口 |
+| **逐字，7 天** | `execution_traces` 与会话记录 | 刻意更短：每行重量高出两个数量级 |
+
+它划下的边界值得直说，因为这是句柄唯一无法承诺的事：对 30 天前归档内容的 `omni_retrieve`
+不会解析成功。测量期间可以用 `OMNI_TRACE_RETENTION_DAYS=90` 把最短的窗口撑开。
+
+`omni reset` 会清空全部，`omni doctor` 显示真实数量。
+
+---
+
 ## 常见问题
 
 **OMNI 会永久删除我的日志吗？**  
@@ -186,16 +204,11 @@ irm omni.weekndlabs.com/install.ps1 | iex
 会，而且是可测量的，代价还随历史增长。蒸馏流水线本身是个位数毫秒，但每条被挂钩的命令还要写一次本地 RewindStore：496 字节的 `git status` 对着全新数据库约 21 ms，对着 205 MB 的数据库约 61 ms，16.5 KB 的 `cargo test` 约 25 ms。请算进预算。需要拿回原始输出时，`OMNI_PASSTHROUGH=1` 会完全跳过流水线。
 
 **我能加自己的过滤器吗？**  
-能。你可以用 TOML 教 OMNI 剥掉你们内部工具特有的噪音：
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
+不能，这是 0.7.0 起的有意决定。过滤器被编译进二进制文件，所以运行的集合就是测试覆盖的集合，磁盘上的任何文件都无法改变你的 agent 看到的内容。如果某个工具需要 signal，请提 issue，它会随二进制发给所有人。
 
 **怎么看我自己的节省？**
 用几天之后跑 `omni stats`。`omni stats --share` 会把同一批数字打印成方便复制的形式。
+`omni stats` 首先展示会话寿命，也就是一个会话在被 host 关闭之前承载了多少条命令，因为上下文窗口真正消耗的是它。下面的蒸馏百分比是对单个 host 流水线的诊断，而不是产品层面的主张。
 
 ---
 

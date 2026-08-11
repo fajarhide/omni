@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn pi_settings_snapshot_handles_missing_file() {
-        // Use a temp dir with no settings — should not panic.
+        // Use a temp dir with no settings, should not panic.
         let snapshot = PiSettingsSnapshot {
             _path: PathBuf::from("/tmp/omni-test-nonexistent/settings.json"),
             json: None,

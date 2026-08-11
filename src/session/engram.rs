@@ -1,7 +1,7 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
 #![allow(clippy::string_slice)]
 
-/// Engram — Automatic Subtask Digest
+/// Engram: Automatic Subtask Digest
 ///
 /// Rule-based state snapshots capturing subtask progress without LLM calls.
 /// Triggered by signal events: error resolution, commits, test pass-after-failure.
@@ -156,7 +156,7 @@ pub fn format_tool_summary(log: &VecDeque<ToolCallEntry>) -> String {
             format!(" → {}", s.last_files.join(", "))
         };
         out.push_str(&format!(
-            "  {} — {}x ({}ok/{}err) last:{}{}\n",
+            "  {}, {}x ({}ok/{}err) last:{}{}\n",
             s.family, s.total_calls, s.success_count, s.error_count, s.last_status, files_hint
         ));
     }

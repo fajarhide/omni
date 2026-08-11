@@ -1,4 +1,4 @@
-/// Savings threshold assertions — each distiller must achieve minimum token reduction.
+/// Savings threshold assertions, each distiller must achieve minimum token reduction.
 ///
 /// This integration test runs the full pipeline (classify → score → compose) on real
 /// fixture files and asserts each achieves a minimum savings percentage.
@@ -141,7 +141,7 @@ fn test_empty_input_no_crash() {
 fn test_pipeline_latency_under_50ms_debug() {
     let input = include_str!("../tests/fixtures/git_diff_multi_file.txt").repeat(3);
 
-    // Warmup pass — ensures any lazy initialization (regex, scorer caches) is done
+    // Warmup pass, ensures any lazy initialization (regex, scorer caches) is done
     let _ = scorer::score_with_command(&input, "git diff", None);
 
     let start = Instant::now();

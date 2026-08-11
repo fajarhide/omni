@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn accepts_claude_code_cwd_alias() {
-        // Claude Code sends "cwd" not "workingDirectory" — this must not produce a parse error
+        // Claude Code sends "cwd" not "workingDirectory", this must not produce a parse error
         let (store, _dir) = get_store();
         // Claude Code sends "cwd" and snake_case field names (from actual hook transcripts)
         let input = json!({
@@ -757,7 +757,7 @@ mod tests {
     #[test]
     fn session_start_accepts_missing_working_directory() {
         let (store, _dir) = get_store();
-        // No workingDirectory / cwd field at all — must not produce a parse error.
+        // No workingDirectory / cwd field at all, must not produce a parse error.
         // The handler falls back to current_dir() and may emit watch paths if the
         // cwd looks like a project, but the critical guarantee is: no parse error
         // and the session is persisted.

@@ -16,7 +16,7 @@ pub const MAX_OUTPUT_BYTES: usize = 50_000;
 /// against it is measured against a number the host already chose, not against
 /// what the command produced. Above roughly the same threshold the host also
 /// writes the **raw** output to a file, previews the **raw** first 2 KB, and
-/// discards whatever the hook returns — so on that path OMNI's work is thrown
+/// discards whatever the hook returns, so on that path OMNI's work is thrown
 /// away and the saving it booked never happened. 43 rows in the maintainer's DB
 /// sit at exactly this size, from 2026-07-08 onward, one of them booked as
 /// 93% compression and 6,194 tokens for a distillation the model never saw
@@ -43,12 +43,16 @@ pub const HOST_OUTPUT_CAP: usize = 30_000;
 /// the agent instead of being implied.
 pub const MAX_REWIND_BYTES: usize = 64 * 1024;
 
-/// Below this an output is not worth taking to the ledger.
+/// Below this an output cannot contain a fold, so the ledger does not read it.
 ///
-/// The ledger's cost is a membership query and a batched insert per call, and
-/// its gain is bounded by what a handle can replace. The marker is about 88
-/// bytes, so on a small reply it is a measurable share of the payload.
-pub const MIN_LEDGER_INPUT: usize = 400;
+/// Derived rather than chosen: the smallest run that can pay for itself is a one
+/// line marker (64 bytes) plus `MIN_LEDGER_RUN_GAIN`, and a payload smaller than
+/// that cannot hold one. The old 400 was a guess in the same direction and cost
+/// 0.1 points of aggregate by excluding payloads that could still fold.
+///
+/// It also still buys what it always bought: below it, the ledger skips a
+/// membership query and a batched insert per call.
+pub const MIN_LEDGER_INPUT: usize = 264;
 
 /// A run of already-shown lines shorter than this stays verbatim.
 ///
@@ -66,16 +70,38 @@ pub const MIN_LEDGER_INPUT: usize = 400;
 /// | **400 / 4 / 200** | **15.7%** | **24.8%** | **512** |
 /// | 200 / 2 / 150 | 16.6% | 25.2% | 840 |
 ///
-/// The middle row is the knee. The first loosening bought 3.3 points for 353
-/// more markers; the second bought 0.9 for 328 more, and those markers are two
-/// line substitutions that make the output choppier and invite an expansion
-/// request for barely more than the marker costs. The fidelity alarm exists, but
-/// spending it on 0.9 points is the wrong trade.
-pub const MIN_LEDGER_RUN_LINES: usize = 4;
-pub const MIN_LEDGER_RUN_BYTES: usize = 200;
+/// The middle row was the knee for those two bounds, and both bounds are now
+/// gone, because the sweep above varied the wrong variable. A line count and a
+/// byte count are proxies for the only question that decides the trade: does
+/// this run save more than the marker replacing it costs. Nothing compared the
+/// two, so a 3-line 150 byte run was rejected as too small while the 4-line
+/// bound was quietly protecting the output from 11,406 runs averaging 23 bytes
+/// (#450).
+///
+/// What replaces them is that comparison, stated directly.
+///
+/// The bytes a fold has to **save**, after the marker that replaces the run is
+/// paid for. Measured over 6,656 claude_code traces, ledger contribution against
+/// raw, with the marker trimmed to 65 bytes in the same change:
+///
+/// | minimum net gain | aggregate | markers |
+/// |---|---|---|
+/// | the old two bounds | 13.9% | 678 |
+/// | 200 | 14.7% | 680 |
+/// | **150** | **15.4%** | **849** |
+/// | 100 | 16.0% | 1,089 |
+///
+/// Judged the way the sweep above judged its own rows, in points per extra
+/// marker, because a marker is an interruption in the output and the second
+/// number is the one that costs fidelity. Dropping 200 to 150 buys 0.7 points
+/// for 169 markers, which is a better trade than the 0.9 for 328 that sweep
+/// accepted. Dropping 150 to 100 buys 0.6 for 240, which is the trade it
+/// declined. So 150, and the 100 row is left on the table deliberately rather
+/// than missed.
+pub const MIN_LEDGER_RUN_GAIN: usize = 150;
 
 /// Output must be under this percentage of the input to count as a real
-/// reduction. Anything above it is not compression worth taking — e.g. a TOML
+/// reduction. Anything above it is not compression worth taking, e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that
 /// would summarise the same input.
 pub const MIN_REDUCTION_PCT: usize = 95;

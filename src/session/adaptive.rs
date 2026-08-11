@@ -1,7 +1,7 @@
 /// [INT-01] Adaptive Scoring Feedback Loop
 ///
 /// Analyzes the `retrieval_feedback` table to surface actionable insights
-/// about OMNI's distillation effectiveness — without any LLM calls.
+/// about OMNI's distillation effectiveness, without any LLM calls.
 /// All analysis is rule-based and runs on-demand (not in background).
 use crate::store::sqlite::Store;
 
@@ -40,7 +40,7 @@ pub fn analyze(store: &Store, project_hash: &str) -> Vec<AdaptiveInsight> {
         insights.push(AdaptiveInsight {
             insight_type: InsightType::OverFiltered,
             description: format!(
-                "`{}` was recalled {} time(s) in the last 7 days — distillation may be too aggressive.",
+                "`{}` was recalled {} time(s) in the last 7 days, distillation may be too aggressive.",
                 cmd, count
             ),
             affected_item: Some(cmd.clone()),
@@ -57,7 +57,7 @@ pub fn analyze(store: &Store, project_hash: &str) -> Vec<AdaptiveInsight> {
         insights.push(AdaptiveInsight {
             insight_type: InsightType::Underused,
             description: format!(
-                "Knowledge entry `{}` has never been recalled — it may be outdated or irrelevant.",
+                "Knowledge entry `{}` has never been recalled, it may be outdated or irrelevant.",
                 key
             ),
             affected_item: Some(key),

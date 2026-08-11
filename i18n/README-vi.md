@@ -190,6 +190,26 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
+## OMNI nhớ những gì, và trong bao lâu
+
+Ba tầng, vốn đã nằm trong schema và tới giờ mới được viết ra. Câu trả lời ngắn cho "sau một
+tháng vắng mặt, OMNI còn biết dự án của tôi không" là có với các kết luận, và không với
+những byte thô.
+
+| Tầng | Cái gì | Giữ |
+|---|---|---|
+| **Vĩnh viễn** | tri thức dự án, các mẫu lỗi lặp lại, engram, bộ nhớ mục tiêu | cho tới khi bạn xoá, trừ bộ nhớ mục tiêu vốn tôn trọng `ttl_days` của chính nó |
+| **Làm việc, 30 ngày** | phiên, các dòng chưng cất, tệp nóng, RewindStore, chỉ mục sự kiện, sổ cái | cửa sổ trượt |
+| **Nguyên văn, 7 ngày** | `execution_traces` và bản ghi phiên | ngắn hơn có chủ đích: nặng hơn hai bậc trên mỗi dòng |
+
+Ranh giới nó đặt ra đáng được nói thẳng, vì đó là điều duy nhất một handle không thể hứa:
+`omni_retrieve` cho nội dung lưu trữ quá 30 ngày sẽ không tìm thấy gì. Hãy giữ cửa sổ ngắn
+nhất mở khi đang đo bằng `OMNI_TRACE_RETENTION_DAYS=90`.
+
+`omni reset` xoá tất cả, và `omni doctor` hiển thị số liệu thực.
+
+---
+
 ## Câu hỏi thường gặp
 
 **OMNI có xóa vĩnh viễn log của tôi không?**  
@@ -199,17 +219,12 @@ Không. Log thô được nén và lưu cục bộ trong RewindStore SQLite. AI 
 Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản thân pipeline chưng cất chạy trong vài mili giây một chữ số, nhưng mọi lệnh được hook cũng ghi vào RewindStore cục bộ: `git status` 496 byte mất khoảng 21 ms với cơ sở dữ liệu mới và khoảng 61 ms với cơ sở dữ liệu 205 MB, còn `cargo test` 16,5 KB mất khoảng 25 ms. Hãy tính vào ngân sách. `OMNI_PASSTHROUGH=1` bỏ qua toàn bộ pipeline khi bạn cần lại đầu ra thô.
 
 **Tôi có thể thêm bộ lọc của riêng mình không?**  
-Có. Bạn có thể dạy OMNI bóc phần nhiễu riêng của công cụ nội bộ bằng TOML:
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
+Không, và đó là chủ ý từ 0.7.0. Bộ lọc được biên dịch vào binary, nên tập đang chạy đúng bằng tập mà kiểm thử bao phủ, và không có tệp nào trên đĩa đổi được thứ agent của bạn nhìn thấy. Nếu một công cụ cần signal, hãy mở issue; nó sẽ đi kèm binary cho tất cả mọi người.
 
 **Làm sao xem mức tiết kiệm của chính tôi?**
 Chạy `omni stats` sau vài ngày. `omni stats --share` in ra cùng những con số đó ở dạng
 tiện sao chép.
+`omni stats` mở đầu bằng tuổi thọ phiên, tức số lệnh một phiên đi được trước khi host đóng nó, vì đó mới là thứ cửa sổ ngữ cảnh thực sự tiêu tốn. Tỷ lệ chưng cất bên dưới là số liệu chẩn đoán cho pipeline của một host, không phải một tuyên bố về sản phẩm.
 
 ---
 

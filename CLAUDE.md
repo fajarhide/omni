@@ -1,4 +1,4 @@
-# CLAUDE.md — OMNI Developer Guide
+# CLAUDE.md: OMNI Developer Guide
 
 This file is for AI assistants (Claude, Codex, etc.) and human contributors working on OMNI.
 
@@ -162,14 +162,14 @@ OMNI must compile and pass tests gracefully across Linux, macOS, and Windows. Al
 
 ## Key Design Decisions
 
-- **Panic safety**: All hooks use `catch_unwind` — OMNI never crashes the host agent
+- **Panic safety**: All hooks use `catch_unwind`: OMNI never crashes the host agent
 - **Graceful degradation**: If DB fails, hooks still work (just without session context)
 - **Deterministic**: Same input always produces same output (no randomness)
 - **Sub-millisecond**: Pipeline targets <2ms for typical inputs
 - **Never drop**: RewindStore ensures no information is permanently lost
 
 ### Essential Reading
-- [tests/README.md#critical-guardrails](tests/README.md#critical-guardrails) — **Mandatory: Prevent deadlocks & test hangs**
+- [tests/README.md#critical-guardrails](tests/README.md#critical-guardrails), **Mandatory: Prevent deadlocks & test hangs**
 
 ## Rust 2024 Idiomatic Standards
 

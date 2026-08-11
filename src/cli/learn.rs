@@ -1,5 +1,5 @@
 use crate::session::correction::{self, CommandExecution};
-use crate::session::learn::{apply_to_config, detect_patterns};
+use crate::session::learn::detect_patterns;
 use anyhow::Result;
 use chrono::Utc;
 use colored::*;
@@ -9,7 +9,10 @@ use std::io::{self, IsTerminal, Read};
 /// Read by both `print_help` and `super::check_flags` (#151).
 const FLAGS: super::Flags = &[
     ("--discover", "Discover and view candidate patterns"),
-    ("--apply", "Automatically append new filters to config"),
+    (
+        "--apply",
+        "Kept so the flag is not silently ignored; filters are compiled in now",
+    ),
     ("--dry-run", "Preview the generated TOML without writing"),
     ("--from-queue", "Use background learning queue as source"),
     ("--verify", "Run inline tests for all existing filters"),
@@ -17,7 +20,7 @@ const FLAGS: super::Flags = &[
 
 fn print_help() {
     println!(
-        "\n{} {} — Auto-generate filters from history",
+        "\n{} {}: Auto-generate filters from history",
         "omni".bold().cyan(),
         "learn".bold().yellow()
     );
@@ -189,7 +192,7 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             .bright_black()
             .bold()
     );
-    println!(" {} — Pattern Discovery", "OMNI".bold().cyan());
+    println!(" {}: Pattern Discovery", "OMNI".bold().cyan());
     println!(
         "{}",
         "─────────────────────────────────────────"
@@ -300,65 +303,29 @@ pub fn run_learn(args: &[String]) -> Result<()> {
                 .bold()
         );
     } else if apply {
-        let path = if std::path::Path::new(".omni").exists() {
-            std::path::PathBuf::from(".omni/filters.toml")
-        } else if std::path::Path::new(".omni.toml").exists() {
-            std::path::PathBuf::from(".omni.toml")
-        } else {
-            let _ = crate::paths::ensure_omni_home();
-            crate::paths::learned_filters_path()
-        };
-        let added = apply_to_config(&candidates, &filter_name, &path, command_hint)?;
-        if added > 0 {
-            println!(
-                "\n{}",
-                "─────────────────────────────────────────"
-                    .bright_black()
-                    .bold()
-            );
-            println!(
-                "  {} Successfully added {} triggers to {:?}",
-                "✓".green(),
-                added,
-                path
-            );
-
-            // AUTO-CLEAR QUEUE after successful apply
-            if use_queue {
-                let queue_path = crate::paths::learn_queue_path();
-                if queue_path.exists() {
-                    let _ = fs::write(&queue_path, ""); // Truncate the file
-                    println!(
-                        "  {} Learning queue cleared. {} pending samples processed.",
-                        "✨".bright_white(),
-                        executions.len().to_string().yellow()
-                    );
-                }
-            }
-
-            println!(
-                "{}",
-                "─────────────────────────────────────────"
-                    .bright_black()
-                    .bold()
-            );
-        } else {
-            println!(
-                "  {} No new patterns to apply (all already exist).",
-                "ℹ".blue()
-            );
-        }
+        // #449 removed every filter tier outside the binary, so there is nowhere
+        // left to write one. Writing the file anyway and reporting success would
+        // be the exact defect this project files issues about: a confident
+        // message about work that changes nothing.
+        println!(
+            "\n  {} There is nowhere to apply a filter to any more.",
+            "!".yellow()
+        );
+        println!(
+            "  {} OMNI's filters are compiled into the binary, so a TOML file on disk is not read.",
+            "-".bright_black()
+        );
+        println!(
+            "  {} Run {} to see the patterns, and open an issue if a tool needs its own signal.",
+            "-".bright_black(),
+            "omni learn --dry-run".cyan().bold()
+        );
     } else {
         println!(
             "\n{}",
             "─────────────────────────────────────────"
                 .bright_black()
                 .bold()
-        );
-        println!(
-            "  {} Run {} to commit these filters.",
-            "→".yellow(),
-            "omni learn --apply".cyan().bold()
         );
         println!(
             "  {} Run {} to preview TOML configuration.",

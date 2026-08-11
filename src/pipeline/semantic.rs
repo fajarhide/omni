@@ -22,12 +22,12 @@ static PATH_WITH_LINE: LazyLock<Regex> = LazyLock::new(|| {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SemanticClass {
-    Critical,   // errors, panics, fatal — ALWAYS shown
-    Diagnostic, // warnings, deprecations — shown with count
-    Context,    // stack traces, file locations — shown if Critical present
-    Progress,   // loading bars, "Compiling X" — always stripped
-    Noise,      // blank lines, decorators — always stripped
-    Data,       // actual output data (JSON, tables) — shown as-is
+    Critical,   // errors, panics, fatal: ALWAYS shown
+    Diagnostic, // warnings, deprecations, shown with count
+    Context,    // stack traces, file locations, shown if Critical present
+    Progress,   // loading bars, "Compiling X", always stripped
+    Noise,      // blank lines, decorators, always stripped
+    Data,       // actual output data (JSON, tables), shown as-is
 }
 
 #[derive(Debug, Clone)]

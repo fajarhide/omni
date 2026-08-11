@@ -1,3 +1,4 @@
+pub mod dashboard;
 pub mod diff;
 pub mod doctor;
 pub mod engram;
@@ -10,6 +11,7 @@ pub mod patterns;
 pub mod query;
 pub mod remember;
 pub mod reset;
+pub mod retrieve;
 pub mod rewrite;
 pub mod session;
 pub mod stats;
@@ -25,7 +27,7 @@ use colored::*;
 ///
 /// Both the help printer and the argument check read this one list, so a flag
 /// cannot be accepted without being documented or documented without being
-/// accepted — the drift that made `omni stats`'s own footer advertise a
+/// accepted, the drift that made `omni stats`'s own footer advertise a
 /// `--detail` its `--help` never mentioned (#151).
 pub type Flags = &'static [(&'static str, &'static str)];
 
@@ -65,7 +67,7 @@ pub fn print_flag_group(title: &str, flags: &[&(&str, &str)]) {
 /// with a `Vec<String>` catch-all and each module then re-parses raw argv by
 /// hand, so clap is never told the valid set and nothing can detect a value
 /// outside it. Untouched, `omni stats --detial` silently ran the default
-/// overview and exited 0 — the user asked for one mode, got another, and the
+/// overview and exited 0, the user asked for one mode, got another, and the
 /// output said nothing about the flag being ignored (#151).
 ///
 /// Long `--flags` are always checked. A single-letter `-x` is checked only when
@@ -96,7 +98,7 @@ pub fn check_flags(command: &str, args: &[String], flags: Flags) -> Result<()> {
             Some(candidate) => format!("did you mean `{candidate}`?"),
             None => format!("run `omni {command} --help` for the accepted flags"),
         };
-        bail!("unknown flag `{name}` for `omni {command}` — {hint}");
+        bail!("unknown flag `{name}` for `omni {command}`, {hint}");
     }
     Ok(())
 }
@@ -111,7 +113,7 @@ fn is_short_flag(arg: &str) -> bool {
 fn nearest(name: &str, flags: Flags) -> Option<&'static str> {
     /// Beyond two edits the "suggestion" is noise: `--week` and `--month` are
     /// three apart and are not each other's typo. Short flags are one character,
-    /// so any two of them are within this distance — they never suggest.
+    /// so any two of them are within this distance, they never suggest.
     const MAX_DISTANCE: usize = 2;
 
     flags

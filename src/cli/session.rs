@@ -23,7 +23,7 @@ const FLAGS: super::Flags = &[
 
 fn print_help() {
     println!(
-        "\n{} {} — Session state management",
+        "\n{} {}: Session state management",
         "omni".bold().cyan(),
         "session".bold().yellow()
     );
@@ -202,7 +202,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
                 .bright_black()
                 .bold()
         );
-        println!(" {} — Current Session", "OMNI".bold().cyan());
+        println!(" {}: Current Session", "OMNI".bold().cyan());
         println!(
             "{}",
             "─────────────────────────────────────────"
@@ -296,7 +296,7 @@ fn run_resume() -> anyhow::Result<()> {
                     .bright_black()
                     .bold()
             );
-            println!(" {} — Interrupted Session Detected", "OMNI".bold().cyan());
+            println!(" {}: Interrupted Session Detected", "OMNI".bold().cyan());
             println!(
                 "{}",
                 "─────────────────────────────────────────"
@@ -406,7 +406,7 @@ fn run_transcript() -> anyhow::Result<()> {
             .bold()
     );
     println!(
-        " {} — Session Transcript ({})",
+        " {}: Session Transcript ({})",
         "OMNI".bold().cyan(),
         sid.cyan()
     );
@@ -495,7 +495,7 @@ fn run_health(store: &Store) -> anyhow::Result<()> {
             .bright_black()
             .bold()
     );
-    println!(" {} — Session Health Dashboard", "OMNI".bold().cyan());
+    println!(" {}: Session Health Dashboard", "OMNI".bold().cyan());
     println!(
         "{}",
         "═══════════════════════════════════════════"

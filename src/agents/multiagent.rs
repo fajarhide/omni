@@ -14,7 +14,17 @@ use crate::store::sqlite::Store;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
-/// Compute a stable 16-char hash for a project path
+/// The 16 character address of a project, and the only implementation of it.
+///
+/// There were four (#437). Three hashed the path as given and this one trimmed
+/// the trailing slash first, so a project reached as `/foo/bar/` on one path and
+/// `/foo/bar` on another split its knowledge, engrams and patterns across two
+/// addresses and `omni_recall` found half of them. The trimming version is the
+/// survivor because a trailing slash names the same directory and a key that
+/// disagrees with that is wrong, not merely different.
+///
+/// CLAUDE.md calls this a single source of truth; every other caller delegates
+/// here rather than re-deriving four bytes of hex.
 pub fn project_hash(path: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(path.trim_end_matches('/').as_bytes());
@@ -26,7 +36,7 @@ pub fn project_hash(path: &str) -> String {
 /// This runs on the `omni exec` and pipe paths, where there is no JSON payload
 /// to inspect. The ids it returns **must match**
 /// `hooks::normalize::detect_agent_id`, which names the same agents from the
-/// payload shape on the hook path — otherwise one agent's work splits across two
+/// payload shape on the hook path, otherwise one agent's work splits across two
 /// rows in `omni stats` and neither row is the true total (#160).
 pub fn detect_agent_id() -> String {
     // Explicit override (set by agent-specific wrapper scripts)
@@ -35,7 +45,7 @@ pub fn detect_agent_id() -> String {
     }
     // Claude Code first: it sets `TERM_PROGRAM`/`VSCODE_PID` too when run from
     // VS Code's integrated terminal, so checking it after the VSCode branch
-    // below would label it `vscode` — trading a vague answer for a confidently
+    // below would label it `vscode`, trading a vague answer for a confidently
     // wrong one. Same reasoning as the Antigravity-before-VSCode ordering.
     if std::env::var("CLAUDECODE").is_ok() || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok() {
         return "claude_code".to_string();
@@ -59,7 +69,7 @@ pub fn detect_agent_id() -> String {
     if std::env::var("AIDER_SESSION").is_ok() {
         return "aider".to_string();
     }
-    // Antigravity IDE detection (must be before VSCODE_PID — Antigravity is a VSCode fork)
+    // Antigravity IDE detection (must be before VSCODE_PID: Antigravity is a VSCode fork)
     if std::env::var("ANTIGRAVITY_EDITOR_APP_ROOT").is_ok()
         || std::env::var("ANTIGRAVITY_SESSION").is_ok()
         || std::env::var("__CFBundleIdentifier")
@@ -219,6 +229,24 @@ pub fn auto_learn_project_patterns(
 
 #[cfg(test)]
 mod tests {
+    /// #437: four implementations, and the three that did not trim split a
+    /// project's memory in two the moment a path arrived with a trailing slash.
+    #[test]
+    fn addresses_a_path_the_same_with_or_without_a_trailing_slash() {
+        assert_eq!(project_hash("/foo/bar"), project_hash("/foo/bar/"));
+        assert_eq!(project_hash("/foo/bar"), project_hash("/foo/bar///"));
+        assert_ne!(project_hash("/foo/bar"), project_hash("/foo/baz"));
+    }
+
+    /// Every other site delegates, so this is the check that they still do.
+    #[test]
+    fn every_caller_agrees_on_one_address() {
+        assert_eq!(
+            project_hash("/repo/"),
+            crate::hooks::session_end::compute_project_hash_for_test("/repo/")
+        );
+    }
+
     use super::*;
     use tempfile::tempdir;
 
@@ -262,7 +290,7 @@ mod tests {
             std::env::remove_var("CONTINUE_SESSION_ID");
             std::env::remove_var("AIDER_SESSION");
             // #160: without these the "default is terminal" assertion fails on
-            // any machine where OMNI's own tests run under Claude Code — which
+            // any machine where OMNI's own tests run under Claude Code, which
             // is most of them.
             std::env::remove_var("CLAUDECODE");
             std::env::remove_var("CLAUDE_CODE_ENTRYPOINT");
@@ -283,7 +311,7 @@ mod tests {
         // #160: Claude Code had no branch at all and fell through to
         // `terminal`, splitting one agent's work across two rows in
         // `omni stats`. It must also win over the VSCode branch, because
-        // Claude Code in VS Code's integrated terminal sets `VSCODE_PID` too —
+        // Claude Code in VS Code's integrated terminal sets `VSCODE_PID` too -
         // ordering it after would turn a vague answer into a wrong one.
         unsafe {
             std::env::set_var("CLAUDECODE", "1");
@@ -308,7 +336,7 @@ mod tests {
         // Folded into this test rather than given its own, for the reason at the
         // top: env vars are process-global, so a second test mutating them races
         // this one. As a separate `#[test]` it passed alone and failed in the
-        // full suite — and under Claude Code the ambient `CLAUDECODE` made
+        // full suite, and under Claude Code the ambient `CLAUDECODE` made
         // `CURSOR_TRACE_ID` resolve to `claude_code`, since that branch is
         // checked first by design.
         use crate::hooks::normalize::{AgentFormat, detect_agent_id as from_payload};
@@ -333,7 +361,7 @@ mod tests {
                 from_env,
                 from_payload(&format),
                 "`{env_var}` yields `{from_env}` from the environment but \
-                 `{}` from the payload — same agent, two rows",
+                 `{}` from the payload, same agent, two rows",
                 from_payload(&format)
             );
         }

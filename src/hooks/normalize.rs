@@ -27,13 +27,13 @@ pub struct NormalizedInput {
     pub failed: bool,      // command exited non-zero / agent signalled an error (#120)
     /// The host's original `tool_response` object, kept verbatim.
     ///
-    /// `content` above is a flattened, lossy view of it — stdout and stderr are
+    /// `content` above is a flattened, lossy view of it, stdout and stderr are
     /// concatenated, and every other key is dropped. That was fine while the
     /// replacement was emitted in OMNI's own `{status, result}` shape, and became
     /// the bug in #187: Claude Code validates `updatedToolOutput` against the
     /// *host tool's* output schema, so the reply has to be the same object shape
     /// that arrived, with only the output text swapped. Reconstructing it from
-    /// `content` is not possible — `interrupted`, `isImage`, `backgroundTaskId`
+    /// `content` is not possible, `interrupted`, `isImage`, `backgroundTaskId`
     /// and friends live only here.
     ///
     /// `None` for agents whose payload has no `tool_response` object; those keep
@@ -49,7 +49,7 @@ pub struct NormalizedInput {
     /// grouping: the PostToolUse banner, the `omni stats` slices, and the
     /// turns-since-insertion a cumulative saving would multiply by (#173).
     ///
-    /// The host has always sent this — `hooks::session_start` parses the same
+    /// The host has always sent this, `hooks::session_start` parses the same
     /// key and uses it for one log line before discarding it. `None` when the
     /// payload carries no such key (pipe mode, Aider, older hosts), and the
     /// caller falls back to the local id rather than losing the row.
@@ -60,7 +60,7 @@ pub struct NormalizedInput {
 pub fn detect_agent(input: &str) -> AgentFormat {
     // Coba parse sebagai JSON
     let Ok(val) = serde_json::from_str::<Value>(input) else {
-        // Bukan JSON — mungkin piped stdin (Aider)
+        // Bukan JSON, mungkin piped stdin (Aider)
         return AgentFormat::Aider;
     };
 
@@ -124,7 +124,7 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
     let mut normalized = match agent {
         AgentFormat::ClaudeCode | AgentFormat::Unknown => normalize_claude_code(input, agent_id),
         AgentFormat::CursorWindsurf => {
-            // Cursor punya content array — tangani itu dulu, lalu delegate ke Claude Code parser
+            // Cursor punya content array, tangani itu dulu, lalu delegate ke Claude Code parser
             normalize_cursor(input, agent_id)
         }
         AgentFormat::OpenCode => normalize_opencode(input, agent_id),
@@ -268,7 +268,7 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         // matches that shape, so a `Read` payload normalised to `None` and the
         // hook emitted nothing. That is the *second* reason the `Read` distiller
         // has never run: #172 found the matcher naming only `Bash`, and widening
-        // it alone would have produced silence rather than distillation — no
+        // it alone would have produced silence rather than distillation, no
         // output, no error, and a feature that looks shipped.
         if file_content.is_empty() {
             return None;
@@ -313,9 +313,9 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         // before reaching here. Reaching this point means the tool_response was
         // an object carrying output, i.e. the command succeeded.
         //
-        // #187 moved where that bail happens — it used to be serde rejecting a
+        // #187 moved where that bail happens, it used to be serde rejecting a
         // string for a typed `ClaudeToolResponse`, and is now `Value::get`
-        // returning None — but not whether it happens. `passes_through_failed_
+        // returning None, but not whether it happens. `passes_through_failed_
         // command_payload` locks the behaviour, not the mechanism.
         failed: false,
         raw_response: parsed.tool_response,
@@ -416,7 +416,7 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
         content,
         agent_id,
         failed: response.is_error,
-        // Host contract not investigated (#187) — keeps the MCP shape.
+        // Host contract not investigated (#187), keeps the MCP shape.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -478,7 +478,7 @@ fn normalize_opencode(input: &str, agent_id: String) -> Option<NormalizedInput> 
         content,
         agent_id,
         failed: false, // OpenCode payload carries no exit/error signal
-        // Host contract not investigated (#187) — keeps the MCP shape.
+        // Host contract not investigated (#187), keeps the MCP shape.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -552,7 +552,7 @@ fn normalize_vscode_continue(input: &str, agent_id: String) -> Option<Normalized
         content,
         agent_id,
         failed: false, // Continue.dev payload carries no exit/error signal
-        // Host contract not investigated (#187) — keeps the MCP shape.
+        // Host contract not investigated (#187), keeps the MCP shape.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -596,7 +596,7 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         content,
         agent_id,
         failed: parsed.exit_code.is_some_and(|c| c != 0),
-        // Host contract not investigated (#187) — keeps the MCP shape.
+        // Host contract not investigated (#187), keeps the MCP shape.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -605,7 +605,7 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
 
 // ── AIDER ─────────────────────────────────────────────────────────────
 fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
-    // Aider pakai piped stdin — content adalah raw string, command dari OMNI_CMD
+    // Aider pakai piped stdin, content adalah raw string, command dari OMNI_CMD
     let command = std::env::var("OMNI_CMD").unwrap_or_default();
     if input.trim().is_empty() {
         return None;
@@ -618,7 +618,7 @@ fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
         content: input.to_string(),
         agent_id,
         failed: false, // Aider pipes raw stdout only; no exit signal available
-        // Host contract not investigated (#187) — keeps the MCP shape.
+        // Host contract not investigated (#187), keeps the MCP shape.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -650,7 +650,7 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         return None;
     }
 
-    // Command tidak bisa di-detect dari JSON-RPC result — gunakan OMNI_CMD env
+    // Command tidak bisa di-detect dari JSON-RPC result, gunakan OMNI_CMD env
     let command = std::env::var("OMNI_CMD").unwrap_or_default();
 
     Some(NormalizedInput {
@@ -660,7 +660,7 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         content,
         agent_id,
         failed,
-        // Host contract not investigated (#187) — keeps the MCP shape.
+        // Host contract not investigated (#187), keeps the MCP shape.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,

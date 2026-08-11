@@ -16,7 +16,7 @@ pub fn run_version(args: &[String]) {
         .iter()
         .any(|a| a == "--help" || a == "-h" || a == "help")
     {
-        println!("\nomni version — Build and feature information\n");
+        println!("\nomni version: Build and feature information\n");
         println!("USAGE:\n  omni version [FLAGS]\n");
         crate::cli::print_flags(FLAGS);
         return;

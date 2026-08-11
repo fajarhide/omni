@@ -59,8 +59,7 @@ fn resolve_root(split_var: &str, xdg_var: &str) -> PathBuf {
     legacy
 }
 
-/// Where configuration lives: `config.toml`, `filters/`, `signals/`,
-/// `trusted.json`.
+/// Where configuration lives: `config.toml`, `filters/`, `signals/`.
 #[inline]
 pub fn config_home() -> PathBuf {
     static ROOT: std::sync::LazyLock<PathBuf> =
@@ -109,47 +108,6 @@ pub fn filters_directory() -> PathBuf {
     config_home().join("filters")
 }
 
-/// Get path to the user's signal directory, the newer name for the same thing.
-#[inline]
-pub fn signals_directory() -> PathBuf {
-    config_home().join("signals")
-}
-
-/// The effective user-global signal directory: `signals/` when it exists, the
-/// legacy `filters/` otherwise.
-///
-/// This lives here rather than in `pipeline::toml_filter` because that copy
-/// derived `~/.omni` itself and so was outside `OMNI_HOME` entirely. It runs on
-/// every hooked command, which made it the most expensive place in the tree to
-/// have missed (#315).
-#[inline]
-pub fn user_signal_dir() -> PathBuf {
-    let signals = signals_directory();
-    if signals.exists() {
-        signals
-    } else {
-        filters_directory()
-    }
-}
-
-/// The same signals-then-filters choice for a project-local `.omni` directory.
-#[inline]
-pub fn project_signal_dir(base: &std::path::Path) -> PathBuf {
-    let signals = base.join(".omni").join("signals");
-    if signals.exists() {
-        signals
-    } else {
-        base.join(".omni").join("filters")
-    }
-}
-
-/// Get path to trusted projects signature file
-#[inline]
-#[cfg_attr(test, allow(dead_code))]
-pub fn trusted_projects_path() -> PathBuf {
-    config_home().join("trusted.json")
-}
-
 /// Get path to the user configuration file.
 #[inline]
 pub fn config_file() -> PathBuf {
@@ -183,15 +141,6 @@ pub fn cache_directory() -> PathBuf {
 #[inline]
 pub fn exports_directory() -> PathBuf {
     data_home().join("exports")
-}
-
-/// Ensure OMNI home directory exists
-/// Creates parent directories if they don't exist
-pub fn ensure_omni_home() -> std::io::Result<()> {
-    std::fs::create_dir_all(config_home())?;
-    std::fs::create_dir_all(data_home())?;
-    std::fs::create_dir_all(filters_directory())?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -231,9 +180,6 @@ mod tests {
 
         for (name, path) in [
             ("filters_directory", filters_directory()),
-            ("signals_directory", signals_directory()),
-            ("user_signal_dir", user_signal_dir()),
-            ("trusted_projects_path", trusted_projects_path()),
             ("config_file", config_file()),
             ("learned_filters_path", learned_filters_path()),
         ] {

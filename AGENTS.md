@@ -1,4 +1,4 @@
-# AGENTS.md — Omni Multi-Agent Coordination Rules
+# AGENTS.md: Omni Multi-Agent Coordination Rules
 
 Welcome to the OMNI project! If you are an AI Agent (Claude, Cursor, Copilot, or any other LLM), you MUST read and follow this document. This file acts as the primary synchronization point for multi-agent workflows and ensures that all AI systems adhere to the same development standards.
 

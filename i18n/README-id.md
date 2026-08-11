@@ -190,6 +190,27 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
+## Apa yang OMNI ingat, dan berapa lama
+
+Tiga tingkat, sudah ada di skema, dan baru sekarang ditulis. Jawaban singkat untuk
+"apakah OMNI masih mengenal proyek saya setelah sebulan ditinggal" adalah ya untuk
+kesimpulannya, tidak untuk byte mentahnya.
+
+| Tingkat | Apa | Disimpan |
+|---|---|---|
+| **Permanen** | pengetahuan proyek, pola error berulang, engram, memori goal | sampai Anda hapus, kecuali memori goal yang menghormati `ttl_days` miliknya |
+| **Kerja, 30 hari** | sesi, baris distilasi, file panas, RewindStore, indeks event, ledger | jendela bergulir |
+| **Verbatim, 7 hari** | `execution_traces` dan transkrip sesi | sengaja lebih pendek: dua orde lebih berat per baris |
+
+Batas yang ditetapkannya perlu dikatakan terang-terangan, karena inilah satu hal yang tidak
+bisa dijanjikan sebuah handle: `omni_retrieve` untuk konten yang diarsipkan lebih dari 30
+hari lalu tidak akan menemukan apa pun. Tahan jendela terpendek saat mengukur dengan
+`OMNI_TRACE_RETENTION_DAYS=90`.
+
+`omni reset` menghapus semuanya, dan `omni doctor` menunjukkan jumlah aktualnya.
+
+---
+
 ## FAQ
 
 **Apakah OMNI menghapus log saya secara permanen?**  
@@ -199,17 +220,12 @@ Tidak. Log mentahnya dipampatkan dan disimpan lokal di RewindStore SQLite. AI me
 Ya, terukur, dan biayanya tumbuh bersama riwayat Anda. Pipeline distilasinya sendiri berjalan dalam milidetik satu digit, tapi setiap perintah yang dikaitkan juga menulis ke RewindStore lokal: `git status` 496 byte butuh ~21 ms pada database baru dan ~61 ms pada database 205 MB, dan `cargo test` 16,5 KB butuh ~25 ms. Perhitungkan itu. `OMNI_PASSTHROUGH=1` melewati pipeline sepenuhnya kalau Anda butuh output mentahnya kembali.
 
 **Bisakah saya menambahkan filter sendiri?**  
-Bisa. Anda bisa mengajari OMNI membuang noise khas tools internal Anda memakai TOML:
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
+Tidak, dan itu disengaja sejak 0.7.0. Filter dikompilasi ke dalam binary, jadi yang berjalan adalah yang diuji, dan tidak ada file di disk yang bisa mengubah apa yang dilihat agent Anda. Kalau sebuah tool butuh signal, buka issue dan filternya ikut terkirim di binary untuk semua orang.
 
 **Bagaimana saya melihat penghematan saya sendiri?**
 `omni stats` setelah beberapa hari. `omni stats --share` mencetak ringkasan angka yang
 sama, siap disalin.
+`omni stats` membuka laporannya dengan umur sesi, yaitu berapa banyak perintah yang dibawa sebuah sesi sebelum host menutupnya, karena itulah yang benar-benar dibayar oleh jendela konteks. Persentase distilasi di bawahnya adalah diagnostik untuk pipeline satu host, bukan klaim produk.
 
 ---
 

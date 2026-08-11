@@ -26,11 +26,15 @@ const FLAGS: super::Flags = &[
         "Validate a TOML filter file (syntax and tests)",
     ),
     ("--json", "Machine-readable JSON output"),
+    (
+        "--detail",
+        "Print every integration row, not just the ones needing attention",
+    ),
 ];
 
 fn print_help() {
     println!(
-        "\n{} {} — Installation diagnostics",
+        "\n{} {}: Installation diagnostics",
         "omni".bold().cyan(),
         "doctor".bold().yellow()
     );
@@ -237,6 +241,58 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One host's report, trimmed to what a diagnostic is read for.
+///
+/// #426: doctor answered one question in a hundred lines, 34 of which said
+/// `[OK]`. A row confirming that something is fine is not what a diagnostic is
+/// read for. A host with nothing wrong collapses to a single line naming its
+/// distill tier and how many checks passed; a host with anything to say keeps
+/// its heading, every row that is not `[OK]`, and the same count. `--detail`
+/// returns the whole report, and a row that is not `[OK]` is never hidden in
+/// either mode.
+fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
+    let heading = report
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .to_string();
+    let tier_row = format!("   {:<15} {}\n", "Distill tier:", tier);
+    if detail {
+        return format!("{report}{tier_row}");
+    }
+
+    let body: Vec<&str> = report
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .skip(1)
+        .collect();
+    let hidden = body.iter().filter(|l| l.contains("[OK]")).count();
+    let kept: Vec<&&str> = body
+        .iter()
+        .filter(|l| !l.contains("[OK]") && !l.trim().is_empty())
+        .collect();
+
+    if kept.is_empty() {
+        let checks = if hidden == 1 { "check" } else { "checks" };
+        return format!("{heading} {tier}, {hidden} {checks} [OK]\n");
+    }
+
+    let mut out = format!("{heading}\n");
+    for line in kept {
+        out.push_str(line);
+        out.push('\n');
+    }
+    if hidden > 0 {
+        let checks = if hidden == 1 { "check" } else { "checks" };
+        out.push_str(&format!(
+            "   {:<15} {hidden} more {checks} [OK], omni doctor --detail to see them\n",
+            ""
+        ));
+    }
+    out.push_str(&tier_row);
+    out
+}
+
 pub fn run(args: &[String]) -> anyhow::Result<()> {
     if args
         .iter()
@@ -274,6 +330,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     }
 
     let fix_mode = args.iter().any(|a| a == "--fix");
+    let detail = args.iter().any(|a| a == "--detail");
 
     let mut all_ok = true;
     let mut warnings: Vec<String> = Vec::new();
@@ -283,10 +340,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             .bright_black()
             .bold()
     );
-    println!(
-        " {} — Installation Diagnostics",
-        "OMNI Doctor".bold().cyan()
-    );
+    println!(" {}: Installation Diagnostics", "OMNI Doctor".bold().cyan());
     println!(
         "{}",
         "─────────────────────────────────────────"
@@ -317,7 +371,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     // #137: `[LATEST]` above answers "is there a newer release than mine". It
     // cannot see fixes that were never released, because then the newest
-    // release *is* the running version — exactly the state #127 filed, where
+    // release *is* the running version, exactly the state #127 filed, where
     // six correctness fixes sat merged and unshipped while doctor said
     // `[LATEST]`. This is the other question, answered from the tree the binary
     // was built from.
@@ -328,7 +382,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             format!("[{} UNRELEASED]", unreleased_entries())
                 .yellow()
                 .bold(),
-            "changes built into this binary are in no release — cut a tag".bright_black()
+            "changes built into this binary are in no release, cut a tag".bright_black()
         );
     }
 
@@ -535,20 +589,37 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     let integrations = crate::agents::all_integrations();
     let mut any_agent_ok = false;
     for agent in integrations {
-        if agent.doctor_check(fix_mode, &mut warnings) {
+        // #426. doctor answered one question in a hundred lines, 34 of which
+        // said [OK]. A row that says a thing is fine is not what a diagnostic is
+        // read for, so by default each host keeps only the rows that need
+        // attention plus a count of the rest. `--detail` prints all of them, and
+        // anything that is not [OK] always prints, in either mode.
+        let (ok, report) =
+            crate::agents::output::capture(|| agent.doctor_check(fix_mode, &mut warnings));
+        if ok {
             any_agent_ok = true;
         }
-        // Printed for every host, configured or not. "Hooks installed" and "the
-        // model reads less" are different claims, and three integrations shipped
-        // the first while delivering none of the second (#351). This line is the
-        // one a user can act on.
-        println!(
-            "   {:<15} {}",
-            "Distill tier:".bright_black(),
-            agent.tier().label().bright_black()
+        // The tier is printed for every host, configured or not. "Hooks
+        // installed" and "the model reads less" are different claims, and three
+        // integrations shipped the first while delivering none of the second
+        // (#351). It survives the condensing for that reason.
+        print!(
+            "{}",
+            condense_agent_report(&report, agent.tier().name(), detail)
         );
         // Note: integrations are optional; "not configured" should not fail doctor
     }
+    // The three tier sentences, once. They used to arrive in full on every host
+    // line, which on this machine meant the MCP-only explanation ten times in a
+    // block of a hundred lines (#426). The per-host line above still names the
+    // tier, so nothing #351 asked for is lost.
+    println!(
+        "   {:<15} {}",
+        "".bright_black(),
+        "Full = model-facing distill active · Handoff-first = built-in tool output not rewritten, omni_run distils what you route through it · MCP-only = memory and session state, no shell distill"
+            .bright_black()
+    );
+
     if !any_agent_ok {
         warnings.push(
             "No agent integrations are configured. Run `omni init` to set up hooks + MCP for your agent."
@@ -568,8 +639,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let (built_in, user_report, local_report) =
-        crate::pipeline::toml_filter::get_filters_by_source();
+    let built_in = crate::pipeline::toml_filter::get_filters_by_source();
 
     println!(
         "   {:<15} {} loaded (embedded)",
@@ -603,134 +673,18 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         all_ok = false;
     }
 
-    let user_dir = {
-        let signals_path = conf_dir.join("signals");
-        if signals_path.exists() {
-            signals_path
-        } else {
-            conf_dir.join("filters") // backward compat
-        }
-    };
-    if user_dir.exists() {
-        let dir_name = if user_dir.ends_with("signals") {
-            "signals"
-        } else {
-            "filters"
-        };
-        println!(
-            "   {:<15} ~/.omni/{dir_name}/ ({} signals)",
-            "User:".bright_black(),
-            user_report.filters.len().to_string().yellow()
-        );
-
-        if fix_mode && let Ok(entries) = std::fs::read_dir(&user_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "toml")
-                    && crate::pipeline::toml_filter::load_from_file(&path).is_err()
-                {
-                    // Try to repair before renaming to .bak
-                    match crate::pipeline::toml_filter::try_repair_file(&path) {
-                        Ok(true) => {
-                            println!(
-                                "   {:<15} {} {}",
-                                "Cleaned:".bright_black(),
-                                path.file_name()
-                                    .unwrap_or_default()
-                                    .to_string_lossy()
-                                    .bright_black(),
-                                "[REPAIRED]".green().bold()
-                            );
-                        }
-                        _ => {
-                            let bak_path = path.with_extension("toml.bak");
-                            if std::fs::rename(&path, &bak_path).is_ok() {
-                                println!(
-                                    "   {:<15} {} {}",
-                                    "Cleaned:".bright_black(),
-                                    path.file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .bright_black(),
-                                    "[RENAMED TO .bak]".yellow().bold()
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        println!("   {:<15} none", "User:".bright_black());
-    }
-
-    if let Ok(cwd) = std::env::current_dir() {
-        let local_signals_dir = {
-            let s = cwd.join(".omni").join("signals");
-            if s.exists() {
-                s
-            } else {
-                cwd.join(".omni").join("filters")
-            }
-        };
-        if local_signals_dir.exists() {
-            let dir_label = if local_signals_dir.ends_with("signals") {
-                "signals"
-            } else {
-                "filters"
-            };
-            // The directory, not the file inside it (#433). Doctor agreed with the
-            // defect rather than exposing it, reporting the project untrusted for
-            // the same reason the loader skipped it.
-            if crate::guard::trust::is_trusted(&cwd) {
-                println!(
-                    "   {:<15} .omni/{dir_label}/ ({} signals, TRUSTED) {}",
-                    "Project:".bright_black(),
-                    local_report.filters.len().to_string().yellow(),
-                    "[OK]".green().bold()
-                );
-            } else if fix_mode {
-                let _ = crate::guard::trust::trust_project(&cwd);
-                println!(
-                    "   {:<15} .omni/{dir_label}/ (TRUSTED) {}",
-                    "Project:".bright_black(),
-                    "[FIXED]".green().bold()
-                );
-            } else {
-                println!(
-                    "   {:<15} .omni/{dir_label}/ ({} signals, NOT TRUSTED) {}",
-                    "Project:".bright_black(),
-                    local_report.filters.len().to_string().yellow(),
-                    "[WARNING]".yellow().bold()
-                );
-                warnings.push(
-                    "Project signals found but not trusted. Run: `omni doctor --fix`.".to_string(),
-                );
-                all_ok = false;
-            }
-        } else {
-            println!(
-                "   {:<15} {}",
-                "Project:".bright_black(),
-                "none".bright_black()
-            );
-        }
-    }
-
     // --- Elegant Warning Display ---
     let mut all_filter_warnings = Vec::new();
     // Line patterns compile on first use now, so loading no longer reports a
     // malformed one (#283). `doctor` is where that check moved: it is run by a
     // human asking whether the config is sound, not on the hook's path, so it
     // can afford to compile every pattern.
-    for report in [&built_in, &user_report, &local_report] {
+    for report in [&built_in] {
         for filter in &report.filters {
             all_filter_warnings.extend(filter.validate_line_patterns());
         }
     }
     all_filter_warnings.extend(built_in.warnings);
-    all_filter_warnings.extend(user_report.warnings);
-    all_filter_warnings.extend(local_report.warnings);
 
     if !all_filter_warnings.is_empty() {
         for warning in all_filter_warnings.iter().take(5) {
@@ -974,4 +928,41 @@ fn run_validate(path_str: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::condense_agent_report;
+
+    const REPORT: &str = "  Claude Code:\n   PreToolUse      [OK] installed\n   MCP Server:     ~/.claude.json [OK]\n";
+
+    /// #426: 34 of doctor's hundred lines said [OK]. A host with nothing to
+    /// report is one line now, and the tier #351 asked for is still on it.
+    #[test]
+    fn collapses_a_healthy_host_to_one_line() {
+        let out = condense_agent_report(REPORT, "Full", false);
+
+        assert_eq!(out, "  Claude Code: Full, 2 checks [OK]\n");
+    }
+
+    /// The rows that matter are never the ones hidden.
+    #[test]
+    fn keeps_every_row_that_is_not_ok() {
+        let report = format!("{REPORT}   Plugin:         not installed\n");
+
+        let out = condense_agent_report(&report, "MCP-only", false);
+
+        assert!(out.contains("Plugin:         not installed"), "{out}");
+        assert!(out.contains("2 more checks [OK]"), "{out}");
+        assert!(out.contains("Distill tier:"), "{out}");
+    }
+
+    #[test]
+    fn detail_returns_the_whole_report() {
+        let out = condense_agent_report(REPORT, "Full", true);
+
+        assert!(out.contains("PreToolUse"), "{out}");
+        assert!(out.contains("MCP Server:"), "{out}");
+        assert!(out.contains("Distill tier:"), "{out}");
+    }
 }

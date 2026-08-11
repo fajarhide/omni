@@ -76,45 +76,54 @@ Recorded with dates, because the useful part of a rejected option is the reason.
 Everything that counts as progress moves one of these. A change that moves none of
 them can still be worth making, but it is maintenance, not direction.
 
-### 1. Correctness — nothing is asserted that was not parsed
+### 1. Correctness, nothing is asserted that was not parsed
 
 **Done when** a distiller cannot ship a confident summary of input it failed to
 read, because the dispatch boundary enforces it instead of each author
 remembering to.
 
-**Where it stands.** `require_parsed` exists and is voluntary. On `main` at the
-time of writing, 3 of 12 distiller files call it: `cloud.rs` at four sites,
-`jsts.rs` at four, `security.rs` at one. Every fabrication issue in the CHANGELOG
-landed in one of the other nine. Tracked as #250.
+**Where it stands. Closed.** The invariant moved off the authors and into the
+trait: `Distiller::distill` returns `Option<String>` (`src/distillers/mod.rs`),
+so a distiller that parsed nothing returns `None` and the caller hands back the
+raw bytes. It holds for all 12 by construction rather than by remembering to call
+`require_parsed`. Landed in #250.
+
+What is not closed is the class this axis exists for. Returning `None` proves a
+distiller knew it had failed; it proves nothing about a distiller that parsed
+something and summarised it wrongly. The check below is still the measurement.
 
 **How to check:** no open bug describes OMNI asserting a result it did not parse,
 and that stays true across a full release cycle. The tracker is the measurement;
 this class of issue has been filed against nine separate releases, so a quiet
 month is not evidence.
 
-### 2. Coverage — the hook reaches the tools agents actually use
+### 2. Coverage, the hook reaches the tools agents actually use
 
 **Done when** OMNI distills the tool calls that dominate a real session rather
 than `Bash` alone.
 
-**Where it stands.** The `PostToolUse` matcher is registered for `Bash` only, so
-the Read, Grep and WebFetch distillers are written, tested, and have never run in
-a live Claude Code session. Tracked as #172, gated on #246.
+**Where it stands. Closed for Claude Code.** `POST_TOOL_MATCHER` is
+`"Bash|Read|Grep|WebFetch"` (`src/agents/claude.rs`), so the three distillers that
+had never run now do. #172 is still open on the half this does not reach: hosts
+whose matcher vocabulary is narrower, where the same distillers remain
+unreachable however well tested they are.
 
 **How to check:** the installed hook configuration names more than one matcher,
 and `~/.omni/omni.db` holds distillation rows for a tool other than `Bash`.
 
-### 3. Proof — every published number can be reproduced
+### 3. Proof, every published number can be reproduced
 
 **Done when** a stranger with the repo can re-derive any figure the README
 claims, and no headline blends measurements from environments that behave
 differently.
 
-**Where it stands.** The headline is one blended number. Terminal runs
-(`omni exec`, pipe mode) and hook runs (`claude_code`) compress very differently
-and are counted together; a saving is booked when OMNI produces it, whether or not
-the host applied it; duplicate rows inflate the top entries. Tracked as #212,
-#173 and #118.
+**Where it stands. The open one.** The blending is fixed: terminal runs are
+excluded from the model-facing figure (#212) and duplicate rows are gone (#118).
+What remains is that the numbers cannot outlive their corpus. `execution_traces`
+prunes at `TRACE_RETENTION_DAYS`, so any published figure stops being
+re-derivable a week after it is measured, which is the opposite of what this axis
+asks for (#440). Every figure in `docs/BENCHMARKS.md` therefore names its window
+and its corpus, and none of them is quoted without one.
 
 **How to check:** every published figure states the `agent_id` it was measured
 on, the corpus it was measured over, and the command that reproduces it.

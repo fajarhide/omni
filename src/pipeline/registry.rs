@@ -42,7 +42,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     };
     let cmd_lower = cmd.to_lowercase();
 
-    // 1. Git — Hunk based
+    // 1. Git: Hunk based
     if base == "git" {
         let parts: Vec<&str> = cmd_lower.split_whitespace().collect();
         let sub = parts.get(1).copied().unwrap_or("");
@@ -57,7 +57,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         }
     }
 
-    // 2. Test Runners — Outcome based
+    // 2. Test Runners: Outcome based
     if matches!(
         base,
         "pytest" | "rspec" | "phpunit" | "jest" | "vitest" | "playwright"
@@ -99,7 +99,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         };
     }
 
-    // 3. Build Tools — Build collapse
+    // 3. Build Tools: Build collapse
     if matches!(
         base,
         "rustc"
@@ -121,7 +121,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         };
     }
 
-    // 4. Cloud & Infra — Infra collapse
+    // 4. Cloud & Infra: Infra collapse
     if matches!(
         base,
         "docker" | "podman" | "kubectl" | "helm" | "terraform" | "tofu" | "aws" | "gcloud" | "az"
@@ -132,7 +132,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         };
     }
 
-    // 5. System Ops & Logs — Log collapse
+    // 5. System Ops & Logs: Log collapse
     if matches!(base, "grep" | "rg" | "cat" | "tail" | "head" | "curl")
         || cmd_lower.contains(".log")
     {
@@ -142,7 +142,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         };
     }
 
-    // 6. Database Tools — Log/tabular collapse
+    // 6. Database Tools: Log/tabular collapse
     if matches!(
         base,
         "psql"
@@ -160,7 +160,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         };
     }
 
-    // 7. Java/JVM Ecosystem — Build collapse
+    // 7. Java/JVM Ecosystem: Build collapse
     if matches!(
         base,
         "java" | "javac" | "mvn" | "gradle" | "gradlew" | "mvnw" | "kotlin" | "kotlinc"
@@ -247,7 +247,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
         };
     }
 
-    // 13. Deno & Bun — Runtime tests
+    // 13. Deno & Bun: Runtime tests
     if base == "deno" {
         if cmd_lower.contains("test") || cmd_lower.contains("check") {
             return ToolProfile {
@@ -314,7 +314,7 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
         return ToolProfile::default();
     }
 
-    // Score tiap segment — pilih yang paling spesifik
+    // Score tiap segment, pilih yang paling spesifik
     let scored: Vec<(usize, &str, u8)> = segments
         .iter()
         .enumerate()
@@ -341,10 +341,10 @@ pub fn resolve_profile_for_chain(command: &str) -> ToolProfile {
     }
 }
 
-/// Specificity score — test runner lebih spesifik dari generic shell command
+/// Specificity score, test runner lebih spesifik dari generic shell command
 fn command_specificity(base: &str, full_cmd: &str) -> u8 {
     let cmd_lower = full_cmd.to_lowercase();
-    // Test runners — paling spesifik
+    // Test runners, paling spesifik
     if matches!(
         base,
         "pytest" | "jest" | "vitest" | "rspec" | "phpunit" | "playwright"
@@ -362,7 +362,7 @@ fn command_specificity(base: &str, full_cmd: &str) -> u8 {
     if matches!(base, "docker" | "kubectl" | "terraform" | "helm") {
         return 75;
     }
-    // Grep/find (filter commands — biasanya pipe akhir)
+    // Grep/find (filter commands, biasanya pipe akhir)
     if matches!(base, "grep" | "rg" | "awk" | "sed") {
         return 60;
     }

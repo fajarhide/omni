@@ -5,7 +5,7 @@ use std::process::Command;
 
 pub fn print_help() {
     println!(
-        "\n{} {} — Upgrade OMNI to latest version",
+        "\n{} {}: Upgrade OMNI to latest version",
         "omni".bold().cyan(),
         "update".bold().yellow()
     );

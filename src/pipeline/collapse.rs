@@ -72,7 +72,7 @@ fn strip_ansi(line: &str) -> Cow<'_, str> {
 /// Skeleton grouping is only safe where something already established that the
 /// varying token is noise: a crate version in `Compiling serde v1.0.217`, a test
 /// name in `test foo::bar ... ok`, a layer hash after `--->`. `Generic` is the
-/// fallback for commands no distiller claimed, so nothing established anything —
+/// fallback for commands no distiller claimed, so nothing established anything -
 /// and `normalize_structural` rewrites every digit run to `#`, which made
 /// fourteen distinct issue numbers one pattern and deleted all fourteen behind
 /// `[14 similar lines collapsed] (pattern: "now\t##")` (#232). A count that
@@ -337,7 +337,7 @@ fn collapse_inner(input: &str, mode: &CollapseMode) -> CollapseResult {
     // sits in the first section, and the later sections come back empty (#220).
     //
     // A line survives when its pattern occurs fewer than MIN_GROUP_SIZE times
-    // inside its own segment, and a surviving line is itself a boundary — so
+    // inside its own segment, and a surviving line is itself a boundary, so
     // the split runs to a fixpoint. What holds at the end: no surviving line
     // lies between the first and last row of any group, which makes every count
     // equal to the rows standing under its marker. Rows collapsed into *another*
@@ -665,7 +665,7 @@ mod tests {
     /// The rows carried distinct timestamps when this was written, which only
     /// grouped because `Generic` normalised digits away. #232 stopped that, and
     /// leaving the old data here would have left the test passing over an empty
-    /// `groups` — green, and asserting nothing. The rows are now literally
+    /// `groups`, green, and asserting nothing. The rows are now literally
     /// repeated, which is what `Generic` still collapses, so the same invariant
     /// is exercised rather than quietly retired.
     #[test]
@@ -709,7 +709,7 @@ mod tests {
     /// distinct issue numbers became one pattern and all fourteen were deleted
     /// behind a marker that identifies none of them. The count survives and the
     /// data does not, which leaves re-running with distillation bypassed as the
-    /// only recovery — the token-negative outcome collapse exists to avoid.
+    /// only recovery, the token-negative outcome collapse exists to avoid.
     #[test]
     fn keeps_rows_that_share_a_shape_but_not_a_value() {
         let mut input = String::from("Lane\tIssue\n");
@@ -733,7 +733,7 @@ mod tests {
     }
 
     /// The counter-case. Literally repeated lines are repetition under any
-    /// reading, so `Generic` must still collapse them — otherwise #232's fix is
+    /// reading, so `Generic` must still collapse them, otherwise #232's fix is
     /// just "stop collapsing", which is not a fix.
     #[test]
     fn still_collapses_literally_repeated_lines() {
@@ -758,7 +758,7 @@ mod tests {
     /// dropped in the wrong position, so `on_intel`, `postflight` and the outer
     /// `cask` block all lost their terminator and what reached the agent was
     /// invalid Ruby that reads as a complete file. #227's per-section grouping
-    /// is what fixed it — the blank line between blocks is a boundary — and this
+    /// is what fixed it, the blank line between blocks is a boundary, and this
     /// locks that in, since the reporter saw it on a released 0.6.7 that did not
     /// yet carry #227.
     #[test]

@@ -1,4 +1,4 @@
-/// [BIZ-03] omni goal — North Star Context Pinning
+/// [BIZ-03] omni goal: North Star Context Pinning
 ///
 /// Stores the project goal as a special reserved key `__omni_goal__`
 /// in `project_knowledge`. The goal is injected into every SessionStart
@@ -10,14 +10,10 @@ use colored::*;
 const GOAL_KEY: &str = "__omni_goal__";
 
 fn project_hash() -> String {
-    use sha2::{Digest, Sha256};
     let path = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "global".to_string());
-    let mut h = Sha256::new();
-    h.update(path.as_bytes());
-    let enc = hex::encode(h.finalize());
-    crate::util::text::safe_slice(&enc, 16).to_string()
+    crate::agents::multiagent::project_hash(&path)
 }
 
 /// Set the project goal (overwrites previous).
@@ -44,7 +40,7 @@ pub fn cmd_show(store: &Store) -> Result<()> {
     match store.get_knowledge(&ph, GOAL_KEY) {
         Some(goal) => {
             println!(
-                "\n{} {} — Current goal\n",
+                "\n{} {}: Current goal\n",
                 "omni".bold().cyan(),
                 "goal".bold().yellow()
             );
@@ -117,7 +113,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
 fn print_help() {
     println!(
-        "\n{} {} — North Star context pinning",
+        "\n{} {}: North Star context pinning",
         "omni".bold().cyan(),
         "goal".bold().yellow()
     );

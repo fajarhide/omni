@@ -1,27 +1,23 @@
-# Writing TOML filters
+# The signal files
 
-OMNI ships a distiller for the commands it knows. A TOML filter covers the ones
-it does not: an internal deploy script, a company CI wrapper, any tool whose
-output is noise around a verdict. Filters are data, so they need no rebuild, and
-they carry their own tests.
+**As of 0.7.0 these are not a user extension point.** Every signal is compiled into
+the binary, and OMNI reads no filter file from disk: not `~/.omni/signals/`, not a
+project's `.omni/signals/`. Both tiers were removed in #447 and #449.
+
+Two reasons, one measured and one structural. Measured: disabling every embedded
+signal moves the filter column by **804 bytes over 6,656 recorded commands**, so
+the layer is a rounding error and the external tiers were a share of that.
+Structural: a filter carries `strip_lines_matching`, so a file that travels with a
+checkout could quietly decide what a visitor's agent was shown, and the trust gate
+that was supposed to stop it hashed a different file from the one it guarded.
+
+This document is therefore for **contributors** adding a signal to the repository.
+A signal that lands here ships in the binary for everyone and is covered by the
+inline tests `omni doctor` runs. If a tool of yours needs one, open an issue.
 
 A filter that matches a command **short-circuits the Rust distiller entirely**.
 That is the point when you want it and a trap when you do not: check `signals/`
 before concluding a distiller misbehaved.
-
-| Directory | Priority | Description |
-|---|---|---|
-| **Built-in (embedded)** | Lowest | Compiled into the OMNI binary |
-| **User** (`~/.omni/signals/`) | Medium | Personal/User-global signals |
-| **Project** (`.omni/signals/`) | Highest | Project-specific (requires `omni trust`) |
-
-## Hierarchy Logic
-1. **Project-local filters** override User filters.
-2. **User filters** override Built-in filters.
-3. **Built-in filters** are the fallback for standard commands.
-
-> [!NOTE]
-> **Built-in** signals are not visible in the filesystem because they are compiled into the binary (`embedded`). If you want to modify them, create a file with the same name in `~/.omni/signals/` to override their behavior.
 
 ## Basic Structure
 
@@ -272,57 +268,20 @@ expected = "2024-01-15 10:30:03 ERROR Connection timeout to redis-primary"
 | `message` | String | Replacement message (supports `$1`, `$2` capture groups) |
 | `unless` | Regex | Skip this match if unless-pattern also matches |
 
-## Testing Your Filters
+## Testing a signal
 
 ```bash
-# Verify all loaded filters pass inline tests
+# Every embedded filter's inline tests, which is also what `omni doctor` runs
 omni learn --verify
 
-# Discovery: search for patterns in a log file
+# Find repeated noise in a real log
 omni learn --discover < output.log
 
-# Preview: show generated TOML
+# Draft a filter from what it found, to paste into signals/
 omni learn --dry-run < output.log
-
-# Action: apply patterns to learned.toml
-omni learn --apply < output.log
 ```
 
-## Project-local Signals (.omni/signals/)
-
-This signal level is extremely useful for teams or repositories that have specific internal tooling. By placing signals inside the project folder, you ensure that the entire team (and their AI agents) gets consistent signal distillation.
-
-### Usage Guide (Step-by-Step)
-
-1. **Create Directory**: In your project root, create the `.omni/signals/` directory.
-   ```bash
-   mkdir -p .omni/signals
-   ```
-
-2. **Add Signal**: Create a TOML file, for example `.omni/signals/setup-backend.toml`.
-   ```toml
-   schema_version = 1
-   [filters.setup-backend]
-   match_command = "^./scripts/setup-db"
-   strip_lines_matching = ["^Connecting", "^Checking versions"]
-   on_empty = "db: setup complete"
-   ```
-
-3. **Verify & Trust**: Run `omni doctor`. You will see the status **[WARNING] NOT TRUSTED**. Run the following command to enable it:
-   ```bash
-   omni trust
-   ```
-
-### Benefits of Project Signals
-- **Checked into Git**: These signals can be added to the repository (`git add .omni/signals`), ensuring anyone who clones the repo immediately gets the same token savings.
-- **Custom Signalling**: Perfect for internal scripts that produce noisy output but only contain small bits of information relevant to the AI.
-
-### Trust for Project Signals
-
-Project-local signals (`.omni/signals/`) will not be loaded until you explicitly "trust" the project. This is a security feature to prevent malicious signals from untrusted repositories.
-
-```bash
-omni trust    # Review and approve filters in the current project
-omni doctor   # Check trust status and number of loaded filters
-```
+`omni learn --apply` no longer writes anything: there is no file for it to write
+to. It says so rather than reporting a successful install to a path nothing
+reads.
 

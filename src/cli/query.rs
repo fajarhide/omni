@@ -41,7 +41,7 @@ pub fn run_query(args: &[String], store: &Store) -> Result<()> {
 
 fn print_help() {
     println!(
-        "\n{} {} — Natural-language query engine for distillation history",
+        "\n{} {}: Natural-language query engine for distillation history",
         "omni".bold().cyan(),
         "query".bold().yellow()
     );

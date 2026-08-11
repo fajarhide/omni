@@ -1,10 +1,10 @@
-//! Format sniffer — detects structured, machine-read payloads.
+//! Format sniffer, detects structured, machine-read payloads.
 //!
 //! Collapse and the distillers are lossy: they are safe on human-facing free text
 //! but they corrupt anything a later step parses (`jq`, `json.load`, `kubectl apply`).
 //! The sniffer is the gate that keeps those payloads out of the lossy path.
 //!
-//! Design principle: when a payload is *plausibly* structured, say so — a missed
+//! Design principle: when a payload is *plausibly* structured, say so, a missed
 //! compression is cheap, a corrupted payload is not. Detection is still positive
 //! (a signal must be present), because treating unknown text as structured would
 //! disable compression everywhere.
@@ -57,7 +57,7 @@ pub fn passthrough_reason(kind: Structured) -> String {
     format!("structured:{}", kind)
 }
 
-/// Classify `input`. `None` means plain text — safe to compress.
+/// Classify `input`. `None` means plain text, safe to compress.
 pub fn sniff(input: &str) -> Option<Structured> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -95,7 +95,7 @@ fn sniff_json(trimmed: &str) -> Option<Structured> {
         .map(|_| Structured::Json)
 }
 
-/// Bracketed but unparseable — truncated or comment-bearing JSON. Unsure →
+/// Bracketed but unparseable, truncated or comment-bearing JSON. Unsure →
 /// structured: compression cannot repair it, but it can make it worse.
 fn sniff_json_shaped(trimmed: &str) -> Option<Structured> {
     if is_bracketed(trimmed) && has_json_field_syntax(trimmed) {
@@ -114,7 +114,7 @@ fn is_bracketed(trimmed: &str) -> bool {
     (first == b'{' && last == b'}') || (first == b'[' && last == b']')
 }
 
-/// Looks for `"key":` — the one bit of syntax free text almost never carries.
+/// Looks for `"key":`, the one bit of syntax free text almost never carries.
 fn has_json_field_syntax(text: &str) -> bool {
     static JSON_FIELD: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#""[^"]*"\s*:"#).expect("valid json field regex"));
@@ -177,7 +177,7 @@ fn sniff_yaml(trimmed: &str) -> Option<Structured> {
 }
 
 /// A block scalar (`config.hcl: |`) hands the rest of the block to whatever the
-/// value happens to be — Vault HCL, a shell script, a PEM certificate. Those
+/// value happens to be: Vault HCL, a shell script, a PEM certificate. Those
 /// lines carry no `key:` and are not YAML-shaped, but the `|` that introduced
 /// them is YAML's own signal that they are a value, so they are skipped rather
 /// than judged. Without this, one embedded ConfigMap sank a whole 608-line
@@ -203,7 +203,7 @@ fn all_lines_yaml_shaped(lines: &[&str]) -> bool {
     true
 }
 
-/// `key: |`, `key: >-`, `key: |2+` — an indicator and nothing else after it.
+/// `key: |`, `key: >-`, `key: |2+`, an indicator and nothing else after it.
 /// A `|` inside a plain value (`cmd: sh -c "a | b"`) has trailing text, so it
 /// does not match.
 fn opens_block_scalar(line: &str) -> bool {
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn treats_log_lines_with_colons_as_plain_text() {
-        // `level: message` looks superficially like YAML — it must not gate.
+        // `level: message` looks superficially like YAML, it must not gate.
         let payload = "INFO: starting server\nWARN: cache miss\nERROR: connection refused\n";
         assert_eq!(sniff(payload), None);
     }
@@ -370,7 +370,7 @@ mod tests {
     }
 
     /// `kubectl kustomize` output has no leading `---` on its first document, so
-    /// it is judged line by line — and a ConfigMap carrying Vault HCL made it
+    /// it is judged line by line, and a ConfigMap carrying Vault HCL made it
     /// look like free text.
     #[test]
     fn detects_yaml_holding_a_block_scalar_of_foreign_config() {

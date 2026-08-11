@@ -3,6 +3,27 @@ use colored::*;
 use std::env;
 use std::io::Write;
 
+/// Read by both `print_help` and `super::check_flags`, so this list is what
+/// `omni reset` documents *and* what it accepts (#151, #444).
+const FLAGS: super::Flags = &[
+    (
+        "--all",
+        "Uninstall every integration and offer to wipe omni.db",
+    ),
+    ("--claude", "Uninstall Claude Code (Anthropic)"),
+    ("--cursor", "Uninstall Cursor AI"),
+    ("--zed", "Uninstall Zed Editor"),
+    ("--cline", "Uninstall Cline"),
+    ("--roo, --roo-code", "Uninstall Roo Code"),
+    ("--copilot", "Uninstall GitHub Copilot CLI"),
+    ("--gemini", "Uninstall Gemini CLI"),
+    ("--opencode", "Uninstall OpenCode"),
+    ("--codex", "Uninstall Codex CLI"),
+    ("--antigravity", "Uninstall Antigravity IDE"),
+    ("--hermes", "Uninstall Hermes Agent"),
+    ("--pi", "Uninstall Pi Agent"),
+];
+
 fn print_help() {
     println!(
         "\n{} {}",
@@ -13,33 +34,8 @@ fn print_help() {
     println!();
     println!("Usage: omni reset [OPTIONS]");
     println!();
-    println!("Options:");
-    println!(
-        "  {: <14} Uninstall all integrations and wipe the omni.db",
-        "--all".red()
-    );
-    println!(
-        "  {: <14} Uninstall Claude Code (Anthropic)",
-        "--claude".cyan()
-    );
-    println!("  {: <14} Uninstall Cursor AI", "--cursor".cyan());
-    println!("  {: <14} Uninstall Zed Editor", "--zed".cyan());
-    println!("  {: <14} Uninstall Cline", "--cline".cyan());
-    println!("  {: <14} Uninstall Roo Code", "--roo".cyan());
-    println!("  {: <14} Uninstall GitHub Copilot CLI", "--copilot".cyan());
-    println!("  {: <14} Uninstall Gemini CLI", "--gemini".cyan());
-    println!("  {: <14} Uninstall OpenCode", "--opencode".cyan());
-    println!("  {: <14} Uninstall Codex CLI", "--codex".cyan());
-    println!(
-        "  {: <14} Uninstall Antigravity IDE",
-        "--antigravity".cyan()
-    );
-    println!("  {: <14} Uninstall Hermes Agent", "--hermes".cyan());
-    println!("  {: <14} Uninstall Pi Agent", "--pi".cyan());
-    println!(
-        "  {: <14} Display this help message",
-        "--help, -h".bright_black()
-    );
+    super::print_flags(FLAGS);
+    println!("Run with no flags for an interactive menu.");
     println!();
 }
 
@@ -50,6 +46,11 @@ pub fn handle_reset() -> anyhow::Result<()> {
         print_help();
         return Ok(());
     }
+
+    // Without this an unknown flag falls through to the interactive menu, which
+    // is the #151 defect: a command that was asked for something it did not
+    // understand, doing something else, and exiting 0.
+    super::check_flags("reset", &args, FLAGS)?;
 
     let is_all = args.iter().any(|a| a == "--all");
 
@@ -195,6 +196,16 @@ fn perform_reset(is_all: bool, target_ids: Vec<&str>) -> anyhow::Result<()> {
             let db_path = crate::paths::database_path();
             if db_path.exists() {
                 std::fs::remove_file(&db_path).ok();
+                // SQLite runs in WAL mode, so the database is three files and
+                // removing one of them leaves the other two holding its
+                // content: 4.2 MB of -wal survived a wipe that reported success
+                // (#446). A stale -wal beside a fresh database is also the one
+                // way this can corrupt rather than merely mislead.
+                for sidecar in ["-wal", "-shm"] {
+                    let mut path = db_path.clone().into_os_string();
+                    path.push(sidecar);
+                    std::fs::remove_file(std::path::PathBuf::from(path)).ok();
+                }
                 println!("  {} Omni database wiped.", "✓".green());
             }
         }

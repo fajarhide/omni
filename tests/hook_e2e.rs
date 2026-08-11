@@ -1,5 +1,5 @@
 use std::io::Write;
-/// Hook E2E tests — spawn the omni binary as a child process.
+/// Hook E2E tests, spawn the omni binary as a child process.
 use std::process::{Command, Stdio};
 
 fn omni_binary() -> String {
@@ -272,7 +272,7 @@ fn before_agent_start_returns_valid_hook_json() {
     );
 
     let parsed: serde_json::Value = serde_json::from_str(trimmed)
-        .unwrap_or_else(|e| panic!("Output is not valid JSON: {} — output: {}", e, stdout));
+        .unwrap_or_else(|e| panic!("Output is not valid JSON: {}, output: {}", e, stdout));
 
     let hook_specific = parsed
         .get("hookSpecificOutput")

@@ -1,14 +1,14 @@
 // `rewrite_logic` has no CLI entry point: the `omni rewrite` subcommand was
 // deleted in #164 (zero invocations on record). The module stays because
-// `hooks::pre_tool` calls it on every command — see #157.
+// `hooks::pre_tool` calls it on every command, see #157.
 
-/// True when the command carries its own downstream stages — a pipe, a
+/// True when the command carries its own downstream stages, a pipe, a
 /// redirect, or a chain operator standing outside quotes.
 ///
 /// The rewrite wraps the **whole** command string, so `bash tidy.sh 2>&1 | tail -3`
 /// ran as `omni exec bash tidy.sh 2>&1 | tail -3`: distillation landed upstream
 /// of a pipeline the caller wrote deliberately, and `tail` returned OMNI's
-/// markers instead of the script's last three lines — the summary line the pipe
+/// markers instead of the script's last three lines, the summary line the pipe
 /// existed to read (#157). A redirect is the same defect with a file on the end:
 /// `npm run build > build.log 2>&1` wrote a truncated log **plus OMNI's banner**
 /// into the file on disk, so the documented escape hatch from distillation
@@ -318,7 +318,7 @@ mod tests {
         assert_eq!(rewrite_logic("git fetch; git status", None, None), None);
     }
 
-    /// An operator inside quotes is data, not a stage — blocking on it would
+    /// An operator inside quotes is data, not a stage, blocking on it would
     /// give up coverage for nothing.
     #[test]
     fn still_rewrites_when_the_operator_is_quoted() {

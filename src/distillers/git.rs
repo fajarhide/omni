@@ -163,7 +163,7 @@ fn distill_log(segments: &[OutputSegment], input: &str) -> String {
     // Keeping every commit's full body reduced little on a verbose multi-commit
     // log, missed the size guardrail, and the pipe's collapse fallback then
     // dropped whole commits (#199): `git log -12` came back with 2 of 12. Keep
-    // one compact line per commit — hash + subject, the `--oneline` view — so
+    // one compact line per commit, hash + subject, the `--oneline` view, so
     // every commit and its subject survive while the body and the
     // Author/Date/Merge metadata go.
     let mut awaiting_subject = false;
@@ -186,8 +186,8 @@ fn distill_log(segments: &[OutputSegment], input: &str) -> String {
                 awaiting_subject = true;
             } else if crate::distillers::git::RE_GIT_LOG_HASH.is_match(line) {
                 // `--oneline`: the hash and the subject share one line. Taking
-                // `chars().take(7)` kept the hash and threw the subject away —
-                // the only part a reader wanted — and `push(' ')` then joined
+                // `chars().take(7)` kept the hash and threw the subject away -
+                // the only part a reader wanted, and `push(' ')` then joined
                 // every commit into a wall of hashes reported as an ~89% saving
                 // (#107). The hash is the cheap part; the subject is the signal.
                 // Keep the line whole.
@@ -201,7 +201,7 @@ fn distill_log(segments: &[OutputSegment], input: &str) -> String {
                 || line.starts_with("Date:")
                 || line.starts_with("Merge:")
             {
-                // Metadata — drop.
+                // Metadata, drop.
             } else if awaiting_subject {
                 // First content line after `commit <sha>` is the subject.
                 out.push_str(line);
@@ -214,7 +214,7 @@ fn distill_log(segments: &[OutputSegment], input: &str) -> String {
 
     let result = out.trim().to_string();
     if result.is_empty() {
-        // Nothing matched a commit or a `--oneline` entry — this input is not a
+        // Nothing matched a commit or a `--oneline` entry, this input is not a
         // git log we can parse (the fixture harness even feeds non-log text here).
         // Fail open: return it verbatim rather than a lossy guess or empty output
         // (#143). Real logs always produce a compact result above.
@@ -244,7 +244,7 @@ mod tests {
     /// #107. Each `--oneline` entry carries its subject on the same line as the
     /// hash; the distiller kept 7 chars and dropped the rest, joining every
     /// commit into a wall of hashes reported as an ~89% saving. Assert the
-    /// subjects survive — the hash alone is close to worthless to a reader.
+    /// subjects survive, the hash alone is close to worthless to a reader.
     #[test]
     fn oneline_keeps_every_commit_subject() {
         let input = "\

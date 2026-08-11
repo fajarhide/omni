@@ -31,10 +31,10 @@ pub fn run(args: &[String], store: Arc<Store>) -> Result<()> {
     let parsed = RememberArgs::parse_from(clap_args);
 
     if parsed.content.trim().len() < 10 {
-        anyhow::bail!("Memory entry more short (min 10 character) — write more specific");
+        anyhow::bail!("Memory entry more short (min 10 character), write more specific");
     }
     if parsed.content.len() > 2000 {
-        anyhow::bail!("Memory entry more long (max 2000 character) — write more specific");
+        anyhow::bail!("Memory entry more long (max 2000 character), write more specific");
     }
     let valid_categories = ["decision", "pattern", "gotcha", "fact"];
     if !valid_categories.contains(&parsed.category.as_str()) {
@@ -77,7 +77,7 @@ pub fn run(args: &[String], store: Arc<Store>) -> Result<()> {
         &project_hash,
         &key,
         &parsed.content,
-        0.9, // high confidence — user explicitly set this
+        0.9, // high confidence, user explicitly set this
     );
 
     let display_len = 60.min(parsed.content.len());
