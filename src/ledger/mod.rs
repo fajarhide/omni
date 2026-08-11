@@ -181,7 +181,30 @@ impl<'a> Ledger<'a> {
             Some(p) => self.store.ledger_seen(p, &hashes),
             None => HashSet::new(),
         };
+        // A line that states a failure is never folded, however often it has been
+        // shown (#458). The heuristic "you have seen this already" is sound for
+        // informational lines and wrong for the error channel, where the
+        // repetition *is* the signal: the same TypeError appearing on a re-run
+        // means the bug is still there, and that is the one line worth the
+        // tokens. Eliding it delivers source context and no statement of what
+        // went wrong, which an agent reasonably reads as the failure being gone.
+        //
+        // Marking the line unseen rather than filtering it afterwards also
+        // splits the run around it, so the frames either side still fold.
+        // Identical hash means identical trimmed text, so the verdict is a
+        // property of the hash and this set answers in O(1) rather than the
+        // closure searching the payload per line. The hook has a 10 ms budget.
+        let never_fold: HashSet<&String> = hashes
+            .iter()
+            .zip(lines.iter())
+            .filter(|(_, line)| crate::pipeline::semantic::carries_failure(line))
+            .map(|(hash, _)| hash)
+            .collect();
+
         let origin_of = |h: &String| {
+            if never_fold.contains(h) {
+                return None;
+            }
             if in_session.contains(h) {
                 Some(Origin::Session)
             } else if in_project.contains(h) {
@@ -516,6 +539,31 @@ mod tests {
         );
 
         assert_eq!(ledger.project(&second), None);
+    }
+
+    /// #458, from a real session. A failing `bun` script re-run in the same
+    /// session came back with source context and no `TypeError`, because the
+    /// error lines had been shown earlier and the fold treated them like any
+    /// other repetition. An agent reads that as the failure being gone.
+    #[test]
+    fn never_folds_a_line_that_states_a_failure() {
+        let (store, _d) = temp_store();
+        let payload = "19 |   \"x-csrf-token\": csrf,\n                       20 |   Cookie: cookies,\n                       21 | };\n                       22 | \n                       23 | const profiles = await (await fetch(BASE)).json();\n                       24 | const profileId = profiles.profiles[0].id;\n                       TypeError: undefined is not an object (evaluating 'profiles.profiles[0]')\n                             at /tmp/repro237.ts:24:28\n                       Bun v1.3.14 (macOS arm64)\n";
+
+        let ledger = Ledger::new(&store, "s1");
+        ledger.project(payload);
+        let second = ledger
+            .project(payload)
+            .expect("a full repeat still folds something");
+
+        assert!(
+            second.contains("TypeError: undefined is not an object"),
+            "the error was elided on the re-run: {second}"
+        );
+        assert!(
+            second.contains("[OMNI:"),
+            "the repeated context should still fold, or this proves nothing: {second}"
+        );
     }
 
     /// The new rule, and the one the old bounds got wrong. Three lines is under

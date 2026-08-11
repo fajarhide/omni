@@ -144,6 +144,16 @@ fn is_blank_or_decorative(lines: &[&str]) -> bool {
 }
 
 #[allow(clippy::collapsible_match)]
+/// Whether one line states a failure, tool-agnostically.
+///
+/// The same predicate the scorer tiers by, exposed because the ledger needs it
+/// and a second copy would drift from this one. It is what stops a fold from
+/// eliding an error: the scorer decides what to keep in a single payload, and
+/// this decides what may never be replaced by a handle across payloads (#458).
+pub fn carries_failure(line: &str) -> bool {
+    is_critical(&line.to_lowercase(), None)
+}
+
 fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
     // Tool-specific critical markers
     if let Some(tool) = tool_family {
