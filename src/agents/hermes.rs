@@ -170,6 +170,107 @@ fn configured_compression(config: &str) -> bool {
     has_compression && has_enabled
 }
 
+/// Drops one `[section]` and its keys from a TOML document.
+///
+/// Line based on purpose: `omni_config.toml` is hand-edited and round-tripping
+/// it through a parser would reformat everything a user wrote around our
+/// section. The block ends at the next `[` in column zero.
+fn strip_toml_section(config: &str, header: &str) -> String {
+    let lines: Vec<&str> = config.lines().collect();
+    let Some(start) = lines.iter().position(|l| l.trim_end() == header) else {
+        return config.to_string();
+    };
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, l)| l.starts_with('['))
+        .map(|(i, _)| i)
+        .unwrap_or(lines.len());
+
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    kept.extend_from_slice(&lines[..start]);
+    kept.extend_from_slice(&lines[end..]);
+    let mut out = kept.join("\n");
+    if config.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+/// Removes only OMNI's own entry under `mcp_servers:`, and the key itself when
+/// nothing else is left under it.
+///
+/// Deliberately not a block delete. `mcp_servers:` is a mapping the user shares
+/// with every other server they have registered, so dropping the whole key to
+/// uninstall one entry would take their servers with it. That is the same class
+/// of defect as #377, where an installer that spliced a block in the wrong place
+/// silently disabled every plugin the user had.
+///
+/// Returns `None` when there was nothing of ours to remove, so the caller can
+/// tell "cleaned" from "was never there" and report the truth either way.
+fn remove_omni_mcp_server(config: &str) -> Option<String> {
+    let lines: Vec<&str> = config.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim_end() == "mcp_servers:" || l.trim_end() == "mcp:")?;
+
+    // The block runs to the next top-level key. Blank lines belong to it, so a
+    // trailing blank does not end it early.
+    let mut end = lines.len();
+    for (i, line) in lines.iter().enumerate().skip(start + 1) {
+        if !line.trim().is_empty() && !line.starts_with([' ', '\t']) {
+            end = i;
+            break;
+        }
+    }
+
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let child_indent = lines[start + 1..end]
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| indent(l))?;
+
+    let omni_at = lines[start + 1..end]
+        .iter()
+        .position(|l| indent(l) == child_indent && l.trim() == "omni:")
+        .map(|i| start + 1 + i)?;
+
+    let mut omni_end = end;
+    for (i, line) in lines
+        .iter()
+        .enumerate()
+        .skip(omni_at + 1)
+        .take(end - omni_at - 1)
+    {
+        if !line.trim().is_empty() && indent(line) <= child_indent {
+            omni_end = i;
+            break;
+        }
+    }
+
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    kept.extend_from_slice(&lines[..start + 1]);
+    kept.extend_from_slice(&lines[start + 1..omni_at]);
+    kept.extend_from_slice(&lines[omni_end..]);
+
+    // If the mapping is now empty, the key is noise, so it goes too.
+    let still_has_children = kept
+        .iter()
+        .skip(start + 1)
+        .take_while(|l| l.trim().is_empty() || l.starts_with([' ', '\t']))
+        .any(|l| !l.trim().is_empty());
+    if !still_has_children {
+        kept.remove(start);
+    }
+
+    let mut out = kept.join("\n");
+    if config.ends_with('\n') {
+        out.push('\n');
+    }
+    Some(out)
+}
+
 fn configured_compression_in_config(config_path: &Path) -> bool {
     fs::read_to_string(config_path)
         .map(|config| configured_compression(&config))
@@ -431,13 +532,61 @@ def register(ctx):
     }
 
     fn uninstall(&self) -> anyhow::Result<()> {
+        // Hermes has two installation forms and `doctor_check` twenty lines
+        // below has always known it: a plugin directory, and an entry in
+        // ~/.hermes/config.yaml. This removed the first only, so uninstalling a
+        // config-form install changed nothing, printed nothing, and let
+        // perform_reset report "All resets completed" (#445).
+        let mut did_something = false;
+
         let dest = plugin_dir();
         if dest.exists() {
             fs::remove_dir_all(&dest)?;
+            did_something = true;
             crate::agent_report!(
                 "  {} Removed Hermes plugin from ~/.hermes/plugins/",
                 "✓".yellow()
             );
+        }
+
+        let config_path = hermes_config_path();
+        if let Ok(config) = fs::read_to_string(&config_path)
+            && let Some(updated) = remove_omni_mcp_server(&config)
+        {
+            fs::write(&config_path, updated)?;
+            did_something = true;
+            crate::agent_report!(
+                "  {} Removed the OMNI MCP server from ~/.hermes/config.yaml",
+                "✓".yellow()
+            );
+        }
+
+        let omni_cfg = omni_config_path();
+        if let Ok(cfg) = fs::read_to_string(&omni_cfg)
+            && cfg.contains("[agents.hermes]")
+        {
+            let stripped = strip_toml_section(&cfg, "[agents.hermes]");
+            fs::write(&omni_cfg, stripped)?;
+            did_something = true;
+            crate::agent_report!(
+                "  {} Removed [agents.hermes] from omni's config",
+                "✓".yellow()
+            );
+        }
+
+        // Compression is a Hermes setting, not ours. The installer only turns it
+        // on when it was off, and after the fact there is no way to tell an
+        // installation that enabled it from a user who always had it. Saying so
+        // beats guessing and beats silence.
+        if configured_compression_in_config(&config_path) {
+            crate::agent_report!(
+                "  {} Left compression: enabled in ~/.hermes/config.yaml, it is a Hermes setting",
+                "-".bright_black()
+            );
+        }
+
+        if !did_something {
+            crate::agent_report!("  {} Hermes was not installed", "-".bright_black());
         }
         Ok(())
     }
@@ -605,6 +754,59 @@ pub fn is_hermes_agent(agent_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// The defect #445 filed: an install that lives only in config.yaml was
+    /// reported as uninstalled while staying fully configured.
+    #[test]
+    fn removes_the_omni_server_and_leaves_the_users_own() {
+        let config = "plugins:\n  - name: my-linter\n\nmcp_servers:\n  omni:\n    command: \"/usr/local/bin/omni\"\n    args: [\"--mcp\"]\n    env:\n      OMNI_AGENT_ID: \"hermes\"\n  their-server:\n    command: \"/usr/bin/other\"\n";
+
+        let out = super::remove_omni_mcp_server(config).expect("ours was there");
+
+        assert!(!out.contains("omni:"), "our entry must go: {out}");
+        assert!(!out.contains("OMNI_AGENT_ID"), "and its children: {out}");
+        assert!(out.contains("their-server:"), "theirs must stay: {out}");
+        assert!(
+            out.contains("mcp_servers:"),
+            "the key still has an entry: {out}"
+        );
+        assert!(
+            out.contains("my-linter"),
+            "unrelated blocks are untouched: {out}"
+        );
+    }
+
+    #[test]
+    fn drops_the_key_when_omni_was_its_only_entry() {
+        let config = "plugins:\n  - name: my-linter\n\nmcp_servers:\n  omni:\n    command: \"/usr/local/bin/omni\"\n    args: [\"--mcp\"]\n";
+
+        let out = super::remove_omni_mcp_server(config).expect("ours was there");
+
+        assert!(
+            !out.contains("mcp_servers:"),
+            "an empty mapping is noise: {out}"
+        );
+        assert!(out.contains("my-linter"), "{out}");
+    }
+
+    #[test]
+    fn reports_nothing_to_remove_rather_than_rewriting_the_file() {
+        let config = "plugins:\n  - name: my-linter\n";
+
+        assert!(super::remove_omni_mcp_server(config).is_none());
+    }
+
+    #[test]
+    fn strips_our_toml_section_and_stops_at_the_next_one() {
+        let config = "[core]\nmode = \"balanced\"\n\n[agents.hermes]\nmode = \"aggressive\"\nenable_grep_distillation = true\n\n[agents.pi]\nmode = \"balanced\"\n";
+
+        let out = super::strip_toml_section(config, "[agents.hermes]");
+
+        assert!(!out.contains("[agents.hermes]"), "{out}");
+        assert!(!out.contains("aggressive"), "its keys go with it: {out}");
+        assert!(out.contains("[agents.pi]"), "the next section stays: {out}");
+        assert!(out.contains("[core]"), "{out}");
+    }
+
     use super::append_top_level_block;
 
     /// #377: the block was spliced in directly after the `plugins:` line, which
