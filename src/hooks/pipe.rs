@@ -644,6 +644,17 @@ fn distill(
         }
     }
 
+    // The post-condition (#458), same rule the hook path applies and the same
+    // function, because two copies of one predicate drift and only one of them
+    // gets reported. If the command stated a failure and this reply no longer
+    // does, hand the bytes back: a reply an agent reads as success is worse than
+    // a long one.
+    if !crate::pipeline::fidelity::preserves_failures(&input_text, &output) {
+        output = input_text.clone();
+        route = Route::Passthrough;
+        r_hash = None;
+    }
+
     // Safety truncation. The marker carries the line count: `ps aux` lost 416 of
     // 556 rows here behind a bare `[OMNI: output truncated]` while the footer
     // reported it as a 62.2% saving (#219).

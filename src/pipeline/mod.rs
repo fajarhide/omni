@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod collapse;
+pub mod fidelity;
 pub mod format;
 pub mod gate;
 pub mod producer;

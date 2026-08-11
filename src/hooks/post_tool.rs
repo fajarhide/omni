@@ -679,6 +679,22 @@ pub fn process_payload(
         final_out = view;
     }
 
+    // The post-condition (#458). Every invariant above constrains what a stage
+    // is given; this is the only one that asks what came out. If the command
+    // stated a failure and the reply no longer does, the reply is worse than
+    // useless: an agent reads it as the failure being gone. Hand back the bytes
+    // rather than a confident silence.
+    if !crate::pipeline::fidelity::preserves_failures(&content, &final_out) {
+        if let Some(ref s) = store {
+            s.record_passthrough(
+                clean_command,
+                content.len(),
+                "would have dropped the failure",
+            );
+        }
+        final_out = content.to_string();
+    }
+
     // Re-check segments from content for metadata/learning. Same resolver the
     // distillation above used: the direct one disagrees on a chain, so on
     // `cd /tmp/x && kubectl get pods` this read `Generic` where the scoring read
