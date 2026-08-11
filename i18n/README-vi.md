@@ -219,14 +219,7 @@ Không. Log thô được nén và lưu cục bộ trong RewindStore SQLite. AI 
 Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản thân pipeline chưng cất chạy trong vài mili giây một chữ số, nhưng mọi lệnh được hook cũng ghi vào RewindStore cục bộ: `git status` 496 byte mất khoảng 21 ms với cơ sở dữ liệu mới và khoảng 61 ms với cơ sở dữ liệu 205 MB, còn `cargo test` 16,5 KB mất khoảng 25 ms. Hãy tính vào ngân sách. `OMNI_PASSTHROUGH=1` bỏ qua toàn bộ pipeline khi bạn cần lại đầu ra thô.
 
 **Tôi có thể thêm bộ lọc của riêng mình không?**  
-Có. Bạn có thể dạy OMNI bóc phần nhiễu riêng của công cụ nội bộ bằng TOML:
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
-Bộ lọc chỉ được đọc từ thư mục home của bạn. Thư mục `.omni/signals/` bên trong một kho mã bị bỏ qua có chủ đích: một bộ lọc có thể giấu dòng, nên bộ lọc đi kèm bản checkout có thể lặng lẽ sửa những gì agent của người khác nhìn thấy.
+Không, và đó là chủ ý từ 0.7.0. Bộ lọc được biên dịch vào binary, nên tập đang chạy đúng bằng tập mà kiểm thử bao phủ, và không có tệp nào trên đĩa đổi được thứ agent của bạn nhìn thấy. Nếu một công cụ cần signal, hãy mở issue; nó sẽ đi kèm binary cho tất cả mọi người.
 
 **Làm sao xem mức tiết kiệm của chính tôi?**
 Chạy `omni stats` sau vài ngày. `omni stats --share` in ra cùng những con số đó ở dạng

@@ -220,14 +220,7 @@ Tidak. Log mentahnya dipampatkan dan disimpan lokal di RewindStore SQLite. AI me
 Ya, terukur, dan biayanya tumbuh bersama riwayat Anda. Pipeline distilasinya sendiri berjalan dalam milidetik satu digit, tapi setiap perintah yang dikaitkan juga menulis ke RewindStore lokal: `git status` 496 byte butuh ~21 ms pada database baru dan ~61 ms pada database 205 MB, dan `cargo test` 16,5 KB butuh ~25 ms. Perhitungkan itu. `OMNI_PASSTHROUGH=1` melewati pipeline sepenuhnya kalau Anda butuh output mentahnya kembali.
 
 **Bisakah saya menambahkan filter sendiri?**  
-Bisa. Anda bisa mengajari OMNI membuang noise khas tools internal Anda memakai TOML:
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
-Filter hanya dibaca dari direktori home Anda. Direktori `.omni/signals/` di dalam sebuah repositori sengaja diabaikan: sebuah filter bisa menyembunyikan baris, jadi filter yang ikut sebuah checkout dapat diam-diam mengubah apa yang dilihat agent seorang pengunjung.
+Tidak, dan itu disengaja sejak 0.7.0. Filter dikompilasi ke dalam binary, jadi yang berjalan adalah yang diuji, dan tidak ada file di disk yang bisa mengubah apa yang dilihat agent Anda. Kalau sebuah tool butuh signal, buka issue dan filternya ikut terkirim di binary untuk semua orang.
 
 **Bagaimana saya melihat penghematan saya sendiri?**
 `omni stats` setelah beberapa hari. `omni stats --share` mencetak ringkasan angka yang

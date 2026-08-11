@@ -108,29 +108,6 @@ pub fn filters_directory() -> PathBuf {
     config_home().join("filters")
 }
 
-/// Get path to the user's signal directory, the newer name for the same thing.
-#[inline]
-pub fn signals_directory() -> PathBuf {
-    config_home().join("signals")
-}
-
-/// The effective user-global signal directory: `signals/` when it exists, the
-/// legacy `filters/` otherwise.
-///
-/// This lives here rather than in `pipeline::toml_filter` because that copy
-/// derived `~/.omni` itself and so was outside `OMNI_HOME` entirely. It runs on
-/// every hooked command, which made it the most expensive place in the tree to
-/// have missed (#315).
-#[inline]
-pub fn user_signal_dir() -> PathBuf {
-    let signals = signals_directory();
-    if signals.exists() {
-        signals
-    } else {
-        filters_directory()
-    }
-}
-
 /// Get path to the user configuration file.
 #[inline]
 pub fn config_file() -> PathBuf {
@@ -212,8 +189,6 @@ mod tests {
 
         for (name, path) in [
             ("filters_directory", filters_directory()),
-            ("signals_directory", signals_directory()),
-            ("user_signal_dir", user_signal_dir()),
             ("config_file", config_file()),
             ("learned_filters_path", learned_filters_path()),
         ] {

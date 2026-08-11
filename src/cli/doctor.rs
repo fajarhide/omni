@@ -639,7 +639,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let (built_in, user_report) = crate::pipeline::toml_filter::get_filters_by_source();
+    let built_in = crate::pipeline::toml_filter::get_filters_by_source();
 
     println!(
         "   {:<15} {} loaded (embedded)",
@@ -673,80 +673,18 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         all_ok = false;
     }
 
-    let user_dir = {
-        let signals_path = conf_dir.join("signals");
-        if signals_path.exists() {
-            signals_path
-        } else {
-            conf_dir.join("filters") // backward compat
-        }
-    };
-    if user_dir.exists() {
-        let dir_name = if user_dir.ends_with("signals") {
-            "signals"
-        } else {
-            "filters"
-        };
-        println!(
-            "   {:<15} ~/.omni/{dir_name}/ ({} signals)",
-            "User:".bright_black(),
-            user_report.filters.len().to_string().yellow()
-        );
-
-        if fix_mode && let Ok(entries) = std::fs::read_dir(&user_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "toml")
-                    && crate::pipeline::toml_filter::load_from_file(&path).is_err()
-                {
-                    // Try to repair before renaming to .bak
-                    match crate::pipeline::toml_filter::try_repair_file(&path) {
-                        Ok(true) => {
-                            println!(
-                                "   {:<15} {} {}",
-                                "Cleaned:".bright_black(),
-                                path.file_name()
-                                    .unwrap_or_default()
-                                    .to_string_lossy()
-                                    .bright_black(),
-                                "[REPAIRED]".green().bold()
-                            );
-                        }
-                        _ => {
-                            let bak_path = path.with_extension("toml.bak");
-                            if std::fs::rename(&path, &bak_path).is_ok() {
-                                println!(
-                                    "   {:<15} {} {}",
-                                    "Cleaned:".bright_black(),
-                                    path.file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .bright_black(),
-                                    "[RENAMED TO .bak]".yellow().bold()
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        println!("   {:<15} none", "User:".bright_black());
-    }
-
     // --- Elegant Warning Display ---
     let mut all_filter_warnings = Vec::new();
     // Line patterns compile on first use now, so loading no longer reports a
     // malformed one (#283). `doctor` is where that check moved: it is run by a
     // human asking whether the config is sound, not on the hook's path, so it
     // can afford to compile every pattern.
-    for report in [&built_in, &user_report] {
+    for report in [&built_in] {
         for filter in &report.filters {
             all_filter_warnings.extend(filter.validate_line_patterns());
         }
     }
     all_filter_warnings.extend(built_in.warnings);
-    all_filter_warnings.extend(user_report.warnings);
 
     if !all_filter_warnings.is_empty() {
         for warning in all_filter_warnings.iter().take(5) {

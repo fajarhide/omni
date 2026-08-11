@@ -204,14 +204,7 @@ irm omni.weekndlabs.com/install.ps1 | iex
 会，而且是可测量的，代价还随历史增长。蒸馏流水线本身是个位数毫秒，但每条被挂钩的命令还要写一次本地 RewindStore：496 字节的 `git status` 对着全新数据库约 21 ms，对着 205 MB 的数据库约 61 ms，16.5 KB 的 `cargo test` 约 25 ms。请算进预算。需要拿回原始输出时，`OMNI_PASSTHROUGH=1` 会完全跳过流水线。
 
 **我能加自己的过滤器吗？**  
-能。你可以用 TOML 教 OMNI 剥掉你们内部工具特有的噪音：
-```toml
-# ~/.omni/signals/custom.toml
-[filters.my_tool]
-match_command = "^internal-tool\\b"
-strip_lines_matching = ["^DEBUG", "syncing..."]
-```
-过滤器只从你的主目录读取。仓库内的 `.omni/signals/` 会被有意忽略：过滤器可以隐藏行，因此随检出一起分发的过滤器可能悄悄改变访客的 agent 所看到的内容。
+不能，这是 0.7.0 起的有意决定。过滤器被编译进二进制文件，所以运行的集合就是测试覆盖的集合，磁盘上的任何文件都无法改变你的 agent 看到的内容。如果某个工具需要 signal，请提 issue，它会随二进制发给所有人。
 
 **怎么看我自己的节省？**
 用几天之后跑 `omni stats`。`omni stats --share` 会把同一批数字打印成方便复制的形式。

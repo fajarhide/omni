@@ -3,7 +3,7 @@
 
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
-use crate::session::learn::{apply_to_config, detect_patterns, generate_toml};
+use crate::session::learn::detect_patterns;
 use crate::store::sqlite::Store;
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -376,29 +376,14 @@ impl OmniServer {
             ));
         }
 
-        // 3. If apply=true: write to ~/.omni/signals/learned.toml
+        // #449 removed every filter tier outside the binary, so `apply` has
+        // nowhere to write. Reporting a successful install to a file nothing
+        // reads is the fabrication class this project files issues about, so it
+        // says what is true instead.
         if apply {
-            let filter_name = format!("learned_{}", chrono::Utc::now().timestamp_micros());
-            let _toml_content = generate_toml(&candidates, &filter_name, None);
-
-            let config_path = crate::paths::learned_filters_path();
-            let _ = crate::paths::ensure_omni_home();
-
-            match apply_to_config(&candidates, &filter_name, &config_path, None) {
-                Ok(added) => {
-                    report.push_str(&format!(
-                        "\n✓ Applied {} filters to {}\n  Run: omni doctor to verify",
-                        added,
-                        config_path.display()
-                    ));
-                }
-                Err(e) => {
-                    report.push_str(&format!(
-                        "\n✗ Failed to write filters: {}\n  Try manually: omni learn --apply",
-                        e
-                    ));
-                }
-            }
+            report.push_str(
+                "\n! Not applied: OMNI's filters are compiled into the binary, so there is no file to write.\n  The patterns above are the finding; open an issue if a tool needs its own signal.",
+            );
         } else {
             report.push_str(&format!(
                 "Run omni_learn with apply=true to save {} filters automatically.",
