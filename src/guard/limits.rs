@@ -43,12 +43,16 @@ pub const HOST_OUTPUT_CAP: usize = 30_000;
 /// the agent instead of being implied.
 pub const MAX_REWIND_BYTES: usize = 64 * 1024;
 
-/// Below this an output is not worth taking to the ledger.
+/// Below this an output cannot contain a fold, so the ledger does not read it.
 ///
-/// The ledger's cost is a membership query and a batched insert per call, and
-/// its gain is bounded by what a handle can replace. The marker is about 88
-/// bytes, so on a small reply it is a measurable share of the payload.
-pub const MIN_LEDGER_INPUT: usize = 400;
+/// Derived rather than chosen: the smallest run that can pay for itself is a one
+/// line marker (64 bytes) plus `MIN_LEDGER_RUN_GAIN`, and a payload smaller than
+/// that cannot hold one. The old 400 was a guess in the same direction and cost
+/// 0.1 points of aggregate by excluding payloads that could still fold.
+///
+/// It also still buys what it always bought: below it, the ledger skips a
+/// membership query and a batched insert per call.
+pub const MIN_LEDGER_INPUT: usize = 264;
 
 /// A run of already-shown lines shorter than this stays verbatim.
 ///
@@ -80,18 +84,21 @@ pub const MIN_LEDGER_INPUT: usize = 400;
 /// paid for. Measured over 6,656 claude_code traces, ledger contribution against
 /// raw, with the marker trimmed to 65 bytes in the same change:
 ///
-/// | minimum net gain | claimed | of raw | folds |
-/// |---|---|---|---|
-/// | the old two bounds | 720,518 | 11.1% | 678 |
-/// | 200 | 881,829 | **13.6%** | 772 |
-/// | 100 | 930,599 | 14.4% | 1,113 |
-/// | 0 | 994,849 | 15.4% | 2,856 |
+/// | minimum net gain | aggregate | markers |
+/// |---|---|---|
+/// | the old two bounds | 13.9% | 678 |
+/// | 200 | 14.7% | 680 |
+/// | **150** | **15.4%** | **849** |
+/// | 100 | 16.0% | 1,089 |
 ///
-/// 200 is the row that buys 2.5 points for 94 extra markers. The 100 row is
-/// worth another 0.8 and costs 341 more substitutions, which is the same
-/// choppiness trade the sweep above declined, so it is left on the table
-/// deliberately rather than missed.
-pub const MIN_LEDGER_RUN_GAIN: usize = 200;
+/// Judged the way the sweep above judged its own rows, in points per extra
+/// marker, because a marker is an interruption in the output and the second
+/// number is the one that costs fidelity. Dropping 200 to 150 buys 0.7 points
+/// for 169 markers, which is a better trade than the 0.9 for 328 that sweep
+/// accepted. Dropping 150 to 100 buys 0.6 for 240, which is the trade it
+/// declined. So 150, and the 100 row is left on the table deliberately rather
+/// than missed.
+pub const MIN_LEDGER_RUN_GAIN: usize = 150;
 
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking — e.g. a TOML
