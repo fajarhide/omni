@@ -40,7 +40,7 @@
 
 use std::collections::HashSet;
 
-use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_BYTES, MIN_LEDGER_RUN_LINES};
+use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN};
 use crate::store::sqlite::Store;
 
 /// Which history a run was found in, because the two cannot make the same claim.
@@ -65,31 +65,46 @@ enum Origin {
 
 impl Origin {
     /// What a replaced run is worth saying about itself.
+    ///
+    /// Every word here is paid for on every fold, so the wording is as short as
+    /// it can be while still saying which history the lines came from and how to
+    /// get them back. The session form was 87 bytes and is 65; trimming it moved
+    /// the aggregate by 0.3 points on its own, because a shorter marker makes
+    /// smaller runs worth folding (#450).
     fn marker(self, lines: usize, handle: &str) -> String {
         match self {
-            Self::Session => format!(
-                "[OMNI: {lines} lines already shown this session, omni_retrieve(\"{handle}\") for them]"
-            ),
-            Self::Project => format!(
-                "[OMNI: {lines} lines shown in an earlier session of this project, not in this one, omni_retrieve(\"{handle}\") for them]"
-            ),
+            Self::Session => {
+                format!("[OMNI: {lines} lines already shown, omni_retrieve(\"{handle}\")]")
+            }
+            Self::Project => {
+                format!("[OMNI: {lines} lines from an earlier session, omni_retrieve(\"{handle}\")]")
+            }
         }
     }
 
-    /// The bytes a run has to carry before replacing it is worth the trade.
+    /// The bytes a fold has to save, after paying for its own marker.
     ///
     /// Session scope pays a marker. Project scope pays a marker **and** the
     /// expected cost of a retrieval the agent has no choice about if it needs
-    /// the content, so the block has to be large enough that the bytes saved
-    /// cover it. Six times the session floor is a starting point, and the replay
-    /// is what decides whether it stays.
-    fn min_run_bytes(self) -> usize {
+    /// the content, because it has never seen those lines. Three times the
+    /// session gain is where the replay put the knee: at that bar the project
+    /// scope keeps the runs worth several hundred bytes each and drops the tail
+    /// that was earning 179 bytes per interruption (#448).
+    fn min_gain(self) -> usize {
         match self {
-            Self::Session => MIN_LEDGER_RUN_BYTES,
-            Self::Project => MIN_LEDGER_RUN_BYTES * 6,
+            Self::Session => MIN_LEDGER_RUN_GAIN,
+            Self::Project => MIN_LEDGER_RUN_GAIN * 3,
         }
     }
 }
+
+/// A handle is always this long, so a marker's length is known before the run is
+/// archived and the profitability test can weigh the real thing.
+///
+/// `store_rewind` slices the hex digest to 16 characters. If that ever changes,
+/// `renders_a_marker_the_gain_test_can_predict` fails rather than the ledger
+/// silently folding runs that do not pay.
+const HANDLE_LEN: usize = 16;
 
 /// Addresses the ledger for one session, and optionally for its project.
 ///
@@ -208,8 +223,13 @@ impl<'a> Ledger<'a> {
         let mut replaced_any = false;
         for run in runs {
             let body = lines[run.start..run.end].concat();
+            // The only question that decides a fold: does this run save more
+            // than the marker replacing it costs. The marker is rendered rather
+            // than estimated, so the test cannot drift from the string it is
+            // weighing, and the handle's length is fixed (#450).
             let long_enough = run.seen.is_some_and(|o| {
-                run.end - run.start >= MIN_LEDGER_RUN_LINES && body.len() >= o.min_run_bytes()
+                let marker = o.marker(run.end - run.start, &"0".repeat(HANDLE_LEN)).len();
+                body.len() >= marker + o.min_gain()
             });
 
             // A handle is only offered for content that is provably retrievable.
@@ -309,7 +329,7 @@ mod tests {
         let second = ledger.project(&text).expect("a repeat is projectable");
 
         assert!(second.len() < text.len());
-        assert!(second.contains("already shown this session"));
+        assert!(second.contains("lines already shown"));
     }
 
     /// The promise the marker makes. A handle that does not resolve to the exact
@@ -380,11 +400,11 @@ mod tests {
             .expect("a project repeat above the floor is projectable");
 
         assert!(
-            view.contains("shown in an earlier session of this project, not in this one"),
+            view.contains("from an earlier session"),
             "the marker claimed a sighting this session never had: {view}"
         );
         assert!(
-            !view.contains("already shown this session"),
+            !view.contains("already shown"),
             "a project repeat was reported as a session repeat: {view}"
         );
     }
@@ -395,20 +415,24 @@ mod tests {
     #[test]
     fn holds_a_project_repeat_to_its_own_higher_floor() {
         let (store, _d) = temp_store();
-        // Sized to land between the two floors on purpose: over the input floor
-        // and the session run floor, under the project one. `payload()` is over
-        // all three, which is what the guard below caught when this test first
+        // Sized to land between the two bars on purpose: it saves more than a
+        // session marker plus its gain, and less than a project one. `payload()`
+        // clears both, which is what the guard below caught when this test first
         // reached for it.
         let text: String = (0..9)
             .map(|i| format!("2026-08-10T00:00:0{i}Z  handler finished request {i}\n"))
             .collect();
+        let session_bar =
+            Origin::Session.marker(9, &"0".repeat(HANDLE_LEN)).len() + Origin::Session.min_gain();
+        let project_bar =
+            Origin::Project.marker(9, &"0".repeat(HANDLE_LEN)).len() + Origin::Project.min_gain();
         assert!(
-            text.len() > MIN_LEDGER_INPUT && text.len() > MIN_LEDGER_RUN_BYTES,
-            "fixture must clear the session floors, or it tests the early return"
+            text.len() > MIN_LEDGER_INPUT && text.len() >= session_bar,
+            "fixture must clear the session bar, or it tests the early return"
         );
         assert!(
-            text.len() < Origin::Project.min_run_bytes(),
-            "fixture must sit between the two floors, or it tests neither"
+            text.len() < project_bar,
+            "fixture must sit between the two bars, or it tests neither"
         );
         Ledger::new(&store, "s1")
             .with_project("/repo")
@@ -439,8 +463,8 @@ mod tests {
 
         let view = ledger.project(&text).expect("projectable");
 
-        assert!(view.contains("already shown this session"), "{view}");
-        assert!(!view.contains("earlier session of this project"), "{view}");
+        assert!(view.contains("already shown"), "{view}");
+        assert!(!view.contains("from an earlier session"), "{view}");
     }
 
     /// Everything the ledger does not replace comes back byte for byte, line
@@ -492,5 +516,54 @@ mod tests {
         );
 
         assert_eq!(ledger.project(&second), None);
+    }
+
+    /// The new rule, and the one the old bounds got wrong. Three lines is under
+    /// `MIN_LEDGER_RUN_LINES` as it was, but three long lines pay for their
+    /// marker several times over, so refusing them was refusing free bytes.
+    #[test]
+    fn folds_a_short_run_of_long_lines_because_it_pays_for_its_marker() {
+        let (store, _d) = temp_store();
+        let run: String = (0..3)
+            .map(|i| format!("2026-08-11T00:00:0{i}Z  a long structured log line that carries a request id, a latency and a route\n"))
+            .collect();
+        let ledger = Ledger::new(&store, "s1");
+        ledger.project(&format!("{run}{}", payload()));
+
+        let bar = Origin::Session.marker(3, &"0".repeat(HANDLE_LEN)).len()
+            + Origin::Session.min_gain();
+        assert!(
+            run.len() >= bar,
+            "fixture must clear the gain bar ({} vs {bar}), or it tests the old bound",
+            run.len()
+        );
+
+        let second = format!(
+            "{run}{}",
+            (0..40)
+                .map(|i| format!("a completely different line number {i} of this second payload\n"))
+                .collect::<String>()
+        );
+        let view = ledger.project(&second).expect("a run that pays should fold");
+
+        assert!(view.contains("3 lines already shown"), "{view}");
+    }
+
+    /// The gain test weighs a marker rendered with a placeholder handle, so it
+    /// is only honest while the real handle is the same length. If
+    /// `store_rewind` ever widens its slice, the ledger would start folding runs
+    /// that do not pay, silently.
+    #[test]
+    fn renders_a_marker_the_gain_test_can_predict() {
+        let (store, _d) = temp_store();
+        let handle = store
+            .store_rewind("some content worth archiving\n")
+            .expect("a healthy store archives");
+
+        assert_eq!(handle.len(), HANDLE_LEN);
+        assert_eq!(
+            Origin::Session.marker(9, &handle).len(),
+            Origin::Session.marker(9, &"0".repeat(HANDLE_LEN)).len()
+        );
     }
 }

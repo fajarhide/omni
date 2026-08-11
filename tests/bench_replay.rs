@@ -41,6 +41,13 @@ use std::io::Cursor;
 /// numbers are comparable.
 const MIN_REPEAT_LINE: usize = 12;
 
+/// `ledger::Origin::Session`'s marker with a 16 character handle, in bytes.
+///
+/// `Origin` is private, so this is a copy, and a copy that drifts would make the
+/// attribution below quietly wrong. `session_marker_len_matches_the_ledger`
+/// re-derives it from the ledger's own output and fails if the two part ways.
+const SESSION_MARKER_LEN: u64 = 65;
+
 /// A trace, with the two identities repetition is scoped by.
 struct Trace {
     command: String,
@@ -451,8 +458,8 @@ fn replay_execution_traces_net_savings() {
     let (mut gap_structured, mut gap_under_floor, mut gap_processed) = (0u64, 0u64, 0u64);
     let (mut n_structured, mut n_under_floor) = (0u64, 0u64);
     // M1 split by the bound that rejected the run.
-    let (mut m1_short_lines, mut m1_short_bytes, mut m1_eligible) = (0u64, 0u64, 0u64);
-    let (mut m1_short_lines_runs, mut m1_short_bytes_runs, mut m1_eligible_runs) = (0u64, 0u64, 0u64);
+    let (mut m1_under_bar, mut m1_eligible) = (0u64, 0u64);
+    let (mut m1_under_bar_runs, mut m1_eligible_runs) = (0u64, 0u64);
     // Every run of already-seen lines, so the marker's own size can be priced
     // as the variable it is rather than assumed.
     let mut run_sizes: Vec<u64> = Vec::new();
@@ -566,14 +573,16 @@ fn replay_execution_traces_net_savings() {
                         bytes += lines[i].1;
                         i += 1;
                     }
-                    let run_lines = i - start;
                     run_sizes.push(bytes);
-                    if run_lines < omni::guard::limits::MIN_LEDGER_RUN_LINES {
-                        m1_short_lines += bytes;
-                        m1_short_lines_runs += 1;
-                    } else if bytes < omni::guard::limits::MIN_LEDGER_RUN_BYTES as u64 {
-                        m1_short_bytes += bytes;
-                        m1_short_bytes_runs += 1;
+                    // The shipped rule, mirrored: a run folds only when it saves
+                    // `MIN_LEDGER_RUN_GAIN` after paying for its marker. The
+                    // marker length is not reachable from a test binary, so the
+                    // session form's 65 bytes is written here and pinned by
+                    // `session_marker_len_matches_the_ledger` below.
+                    let bar = SESSION_MARKER_LEN + omni::guard::limits::MIN_LEDGER_RUN_GAIN as u64;
+                    if bytes < bar {
+                        m1_under_bar += bytes;
+                        m1_under_bar_runs += 1;
                     } else {
                         m1_eligible += bytes;
                         m1_eligible_runs += 1;
@@ -599,8 +608,8 @@ fn replay_execution_traces_net_savings() {
         let l = match after_ledger {
             Some(view) => {
                 ledger_calls += 1;
-                mark_session += view.matches("already shown this session").count() as u64;
-                mark_project += view.matches("earlier session of this project").count() as u64;
+                mark_session += view.matches("lines already shown").count() as u64;
+                mark_project += view.matches("from an earlier session").count() as u64;
                 view.len() as u64
             }
             None => o,
@@ -780,19 +789,13 @@ fn replay_execution_traces_net_savings() {
         "  M3 structured, gate declined:      {gap_structured} ({:.1}%) over {n_structured} traces",
         of_raw(gap_structured)
     );
-    println!("M1 split, by the bound that rejected the run:");
+    println!("M1 split, against the gain bar the ledger applies:");
     println!(
-        "  under {} lines:                     {m1_short_lines} ({:.1}%) over {m1_short_lines_runs} runs",
-        omni::guard::limits::MIN_LEDGER_RUN_LINES,
-        of_raw(m1_short_lines)
+        "  under the bar, cannot pay:         {m1_under_bar} ({:.1}%) over {m1_under_bar_runs} runs",
+        of_raw(m1_under_bar)
     );
     println!(
-        "  under {} bytes:                    {m1_short_bytes} ({:.1}%) over {m1_short_bytes_runs} runs",
-        omni::guard::limits::MIN_LEDGER_RUN_BYTES,
-        of_raw(m1_short_bytes)
-    );
-    println!(
-        "  cleared both, folded or not:       {m1_eligible} ({:.1}%) over {m1_eligible_runs} runs",
+        "  over the bar, folded or not:       {m1_eligible} ({:.1}%) over {m1_eligible_runs} runs",
         of_raw(m1_eligible)
     );
     println!(
@@ -971,4 +974,25 @@ fn ignores_lines_under_the_floor() {
 
     assert_eq!(rep.accounted, 0);
     assert_eq!(rep.same_session, 0);
+}
+
+/// The ledger's own marker, measured rather than assumed, so
+/// `SESSION_MARKER_LEN` cannot drift away from the string it stands for.
+#[test]
+fn session_marker_len_matches_the_ledger() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = omni::store::sqlite::Store::open_path(&dir.path().join("l.db")).expect("store");
+    let text: String = (0..40)
+        .map(|i| format!("2026-08-11T00:00:00Z  handler finished request {i} in 12ms\n"))
+        .collect();
+    let ledger = omni::ledger::Ledger::new(&store, "s1");
+    ledger.project(&text);
+    let view = ledger.project(&text).expect("a full repeat folds");
+
+    let marker = view
+        .lines()
+        .find(|l| l.starts_with("[OMNI:"))
+        .expect("the fold emits a marker");
+    // 40 lines, so the count is two digits, which is what the constant assumes.
+    assert_eq!(marker.len() as u64, SESSION_MARKER_LEN);
 }
