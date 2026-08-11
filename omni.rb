@@ -1,5 +1,5 @@
 class Omni < Formula
-  desc "Semantic Signal Engine — Less noise. More signal. Right signal."
+  desc "Semantic Signal Engine: less noise, more signal, the right signal"
   homepage "https://github.com/fajarhide/omni"
   version "0.7.0"
   license "MIT"
