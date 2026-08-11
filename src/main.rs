@@ -226,6 +226,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ),
     (
         "SEE WHAT IT SAVED",
+        "dashboard",
+        "The same numbers in a browser, on 127.0.0.1",
+    ),
+    (
+        "SEE WHAT IT SAVED",
         "diff",
         "The last command's output, before vs after",
     ),
