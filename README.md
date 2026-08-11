@@ -84,7 +84,7 @@ than a sentence asking you to trust it.
 
 | Guarantee | How | Proof |
 |---|---|---|
-| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite RewindStore; the agent gets a hash and calls `omni_retrieve` | [Architecture](docs/ARCHITECTURE.md) |
+| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite RewindStore; the marker carries a handle, and `omni retrieve <handle>` prints it on any host, with the `omni_retrieve` MCP tool where MCP is wired | [Architecture](docs/ARCHITECTURE.md) |
 | **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
@@ -104,7 +104,7 @@ the raw bytes.
 | **Verbatim, 7 days** | `execution_traces` and the session transcript | shorter on purpose: it is two orders of magnitude heavier per row |
 
 The boundary this sets is worth stating plainly, because it is the one thing a handle
-cannot promise: `omni_retrieve` for content archived more than 30 days ago will not
+cannot promise: `omni retrieve` for content archived more than 30 days ago will not
 resolve. Hold the shortest window open while measuring with
 `OMNI_TRACE_RETENTION_DAYS=90`.
 
@@ -195,6 +195,15 @@ made a filter a thing a repository could ship to its visitors, and `~/.omni/sign
 whole filter layer is worth 804 bytes over 6,656 recorded commands, so what it cost in
 surface it was not paying back. If a tool needs a signal, open an issue and it ships in the
 binary for everyone.
+
+**How do I get back something OMNI folded?**
+`omni retrieve <handle>`, where the handle is the 16 characters inside the marker. It works
+on every host, with or without MCP. Agents that have the MCP server wired can call
+`omni_retrieve` instead.
+
+**Can I watch the numbers instead of running a command?**
+`omni dashboard` serves them on `127.0.0.1`, read-only, from the same database `omni stats`
+reads. It binds loopback and nothing else.
 
 **How do I see my own savings?**
 `omni stats` after a few days. It leads with session lifetime, how many commands a session

@@ -118,6 +118,27 @@ impl AgentIntegration for ClaudeIntegration {
         crate::agent_report!("  {}", "Claude Code:".cyan());
         let path = get_settings_path();
         if path.exists() {
+            // An install that registered OMNI twice ran the pipeline twice per
+            // call and reported [OK] throughout, because this check asked
+            // whether a hook was present and never how many (#454). The
+            // installer no longer creates that state; this is what tells the
+            // machines already in it.
+            if let Ok(content) = fs::read_to_string(&path)
+                && let Ok(val) = serde_json::from_str::<Value>(&content)
+            {
+                for (event, count) in crate::agents::duplicate_omni_hooks(&val) {
+                    all_ok = false;
+                    crate::agent_report!(
+                        "   {:<15} {} {}",
+                        "Duplicate:".bright_black(),
+                        format!("{event} runs OMNI {count} times per call"),
+                        "[WARNING]".yellow().bold()
+                    );
+                    warnings.push(format!(
+                        "{event} has {count} OMNI hooks. Re-run `omni init --claude` to collapse them."
+                    ));
+                }
+            }
             if let Ok(content) = fs::read_to_string(&path) {
                 if content.contains("--hook")
                     || content.contains("--post-hook")
@@ -386,11 +407,33 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
                 .get("hooks")
                 .and_then(|h| h.as_array())
                 .is_some_and(|inner| {
-                    inner
-                        .iter()
-                        .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd))
+                    inner.iter().any(|h| {
+                        crate::agents::is_our_hook(
+                            h.get("command").and_then(|c| c.as_str()),
+                            hook_cmd,
+                        )
+                    })
                 });
             if installed {
+                // Bring the path up to date as well as the matcher. Matching on
+                // the exact string meant a reinstall from a different binary
+                // matched nothing and pushed a second entry, so OMNI ran twice
+                // per call (#454).
+                if let Some(inner) = v
+                    .get_mut("hooks")
+                    .and_then(|h| h.as_array_mut())
+                    .and_then(|inner| {
+                        inner.iter_mut().find(|h| {
+                            crate::agents::is_our_hook(
+                                h.get("command").and_then(|c| c.as_str()),
+                                hook_cmd,
+                            )
+                        })
+                    })
+                    .and_then(|h| h.as_object_mut())
+                {
+                    inner.insert("command".to_string(), json!(hook_cmd));
+                }
                 // Already installed, but the matcher still has to be brought up to
                 // date. Returning here unconditionally is why widening it in #172
                 // would have reached new installs only: every existing settings
@@ -415,10 +458,16 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
 
     let ensure_async_hook = |arr_val: &mut serde_json::Value, hook_cmd: &str| {
         let arr = arr_val.as_array_mut().unwrap();
-        for v in arr.iter() {
-            if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
-                for h in inner {
-                    if h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd) {
+        for v in arr.iter_mut() {
+            if let Some(inner) = v.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                for h in inner.iter_mut() {
+                    if crate::agents::is_our_hook(
+                        h.get("command").and_then(|c| c.as_str()),
+                        hook_cmd,
+                    ) {
+                        if let Some(obj) = h.as_object_mut() {
+                            obj.insert("command".to_string(), json!(hook_cmd));
+                        }
                         return;
                     }
                 }
@@ -590,6 +639,67 @@ pub fn install_mcp_server(exe_path: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// #454, found on a real machine: a working install was repointed from a
+    /// development build to the released one, and every OMNI hook ended up
+    /// registered twice, once per path. Two OMNI processes per hooked call, and
+    /// `omni doctor` reported `[OK]` throughout because it asks whether a hook is
+    /// present, never how many.
+    #[test]
+    fn reinstalling_from_another_path_moves_the_hook_rather_than_adding_one() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/repo/target/debug/omni");
+        install_omni_hooks(&mut val, "/opt/homebrew/bin/omni");
+
+        let hooks = val["hooks"].as_object().expect("hooks written");
+        assert!(!hooks.is_empty(), "no hooks were written at all");
+        for (event, arr) in hooks {
+            let ours: Vec<&str> = arr
+                .as_array()
+                .expect("event is an array")
+                .iter()
+                .flat_map(|m| m["hooks"].as_array().cloned().unwrap_or_default())
+                .filter_map(|h| h["command"].as_str().map(str::to_string))
+                .filter(|c| c.contains("omni"))
+                .map(|c| Box::leak(c.into_boxed_str()) as &str)
+                .collect();
+            assert_eq!(
+                ours.len(),
+                1,
+                "{event} carries {} OMNI hooks, so OMNI would run {} times: {ours:?}",
+                ours.len(),
+                ours.len()
+            );
+            assert!(
+                ours[0].starts_with("/opt/homebrew/bin/omni"),
+                "{event} still points at the old path: {ours:?}"
+            );
+        }
+    }
+
+    /// The identity test is the binary plus the flag, and the flag is compared as
+    /// a whole token. `--pre-hook` ends with `-hook`, so a `contains` would make
+    /// the two the same hook and one would overwrite the other.
+    #[test]
+    fn tells_the_hook_flags_apart_even_when_one_ends_with_another() {
+        assert!(crate::agents::is_our_hook(
+            Some("/a/omni --pre-hook"),
+            "/b/omni --pre-hook"
+        ));
+        assert!(!crate::agents::is_our_hook(
+            Some("/a/omni --pre-hook"),
+            "/b/omni --hook"
+        ));
+        assert!(!crate::agents::is_our_hook(
+            Some("/a/omni --post-hook"),
+            "/b/omni --hook"
+        ));
+        assert!(!crate::agents::is_our_hook(
+            Some("/usr/bin/other --pre-hook"),
+            "/b/omni --pre-hook"
+        ));
+        assert!(!crate::agents::is_our_hook(None, "/b/omni --pre-hook"));
+    }
+
     use super::*;
 
     #[test]

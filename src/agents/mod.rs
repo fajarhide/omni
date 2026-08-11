@@ -135,6 +135,57 @@ impl Tier {
     }
 }
 
+/// Whether `command` is OMNI's own hook for the same entry point as `ours`.
+///
+/// Shared, because Claude Code and Gemini CLI both had their own copy of the
+/// wrong test and only one of them was reported (#454).
+///
+/// Identity is the binary name plus the flag, never the whole string. Comparing
+/// the whole string meant that reinstalling from a different path matched
+/// nothing and appended, so a machine that had been set up twice ran OMNI twice
+/// per tool call and `omni doctor` reported `[OK]` throughout (#454).
+pub(crate) fn is_our_hook(command: Option<&str>, ours: &str) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    let flag = match ours.rsplit_once(' ') {
+        Some((_, flag)) if flag.starts_with("--") => flag,
+        _ => return false,
+    };
+    // `--hook` is a prefix of nothing else here, but `--pre-hook` ends with
+    // `-hook`, so the flag is compared as the last token rather than by
+    // `contains`.
+    command.contains("omni") && command.rsplit(' ').next() == Some(flag)
+}
+
+/// Events that carry more than one OMNI hook, with the count.
+///
+/// `doctor` asked whether a hook was present and never how many, so an install
+/// that registered OMNI twice reported `[OK]` while running the pipeline twice
+/// per call (#454). The installer no longer creates that state; this is what
+/// notices the machines that are already in it.
+pub(crate) fn duplicate_omni_hooks(val: &serde_json::Value) -> Vec<(String, usize)> {
+    let Some(hooks) = val.get("hooks").and_then(|h| h.as_object()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (event, arr) in hooks {
+        let Some(arr) = arr.as_array() else { continue };
+        let count = arr
+            .iter()
+            .filter_map(|m| m.get("hooks").and_then(|h| h.as_array()))
+            .flatten()
+            .filter_map(|h| h.get("command").and_then(|c| c.as_str()))
+            .filter(|c| c.contains("omni") && c.contains("-hook") || c.contains("--session-start"))
+            .count();
+        if count > 1 {
+            out.push((event.clone(), count));
+        }
+    }
+    out.sort();
+    out
+}
+
 pub fn all_integrations() -> Vec<Box<dyn AgentIntegration>> {
     // The hosts that do more than write one JSON entry, then the six that do
     // exactly that, from `mcp_host::HOSTS` (#443). Order is what `omni doctor`
@@ -160,6 +211,25 @@ pub fn all_integrations() -> Vec<Box<dyn AgentIntegration>> {
 
 #[cfg(test)]
 mod fix_reporting_tests {
+    /// #454's silent half: the state existed and every surface said [OK].
+    #[test]
+    fn counts_the_hooks_an_event_would_run() {
+        let val = serde_json::json!({"hooks": {
+            "PreToolUse": [
+                {"hooks": [{"command": "/a/omni --pre-hook"}]},
+                {"hooks": [{"command": "/b/omni --pre-hook"}]}
+            ],
+            "SessionStart": [{"hooks": [{"command": "/b/omni --session-start"}]}],
+            "OtherTool": [{"hooks": [{"command": "/usr/bin/prettier --write"}]}]
+        }});
+
+        assert_eq!(
+            super::duplicate_omni_hooks(&val),
+            vec![("PreToolUse".to_string(), 2)],
+            "only the doubled event is reported, and someone else's hook is not ours"
+        );
+    }
+
     use super::report_fix;
 
     /// #386: every site did `let _ = self.install(...)` and printed `[FIXED]`

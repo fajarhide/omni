@@ -152,7 +152,7 @@ After MCP is registered, prompt Hermes to:
 
 - `omni_insight`, recurring errors across the session
 - `omni_history`, what got compressed and why
-- `omni_retrieve <hash>`, pull the raw unfiltered output of a previous tool call
+- `omni_retrieve <handle>`, pull the raw unfiltered output of a previous tool call. `omni retrieve <handle>` does the same from a shell, on hosts with no MCP
 - `omni_session --status`, hot files, active errors, token pressure
 - `omni_stop` analog: set env `OMNI_PASSTHROUGH=1` for one command when you need 100 % raw terminal output
 
@@ -222,8 +222,9 @@ workspace.
 omni learn
 ```
 
-Output is TOML filter proposals for `~/.omni/signals/`. Review and copy into
-`~/.omni/signals/` rather than editing built-in signals. This is where
+Output is a TOML filter proposal, and as of 0.7.0 there is nowhere on disk to put it:
+OMNI reads no filter file, the signals are compiled into the binary. Treat the output as a
+finding and open an issue so the filter ships for everyone. This is where
 project-specific commands (internal CLIs, bespoke deploy scripts) get tuned.
 
 ### 6h. Advanced Tools Usage (Level 4 Autonomous Loops)

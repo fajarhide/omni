@@ -84,6 +84,29 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         .or(detected_cmd.as_deref())
         .map(crate::cli::rewrite::strip_exec_wrapper);
 
+    // Phase 0.4: the escape hatch is never distilled, on this path either.
+    //
+    // `post_tool` declines a recovery command and this did not, so
+    // `omni exec omni retrieve <handle>` re-entered the pipeline and handed back
+    // another marker: the same loop #456 reported, reached through a different
+    // door. Found by probing the sibling path after fixing the reported one.
+    if command_to_use.is_some_and(crate::hooks::post_tool::returns_archived_bytes) {
+        let mut passthrough = String::new();
+        let mut reader = std::io::BufReader::new(input);
+        use std::io::Read;
+        let _ = reader.read_to_string(&mut passthrough);
+        output.write_all(passthrough.as_bytes())?;
+        output.flush()?;
+        if let Some(s) = &store {
+            s.record_passthrough(
+                command_to_use.unwrap_or(""),
+                passthrough.len(),
+                "own recovery command",
+            );
+        }
+        return Ok(());
+    }
+
     // Phase 0.5: Streaming Distillation Check
     if let Some(filter) = command_to_use.and_then(stream_filter_for) {
         return stream_distill(input, output, error, filter, store, session, command_to_use);
@@ -595,7 +618,7 @@ fn distill(
                     hash.cyan().bold()
                 )
             } else {
-                format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n")
+                format!("\n[OMNI: {lost} omitted, omni retrieve {hash} for full output]\n")
             };
             r_hash = Some(hash);
             marker
@@ -1097,7 +1120,7 @@ mod tests {
             "a lossy reply must be smaller than the bytes it replaces"
         );
         assert!(
-            delivered.contains("omni_retrieve("),
+            delivered.contains("omni retrieve "),
             "the caller cannot call what it was not told: {delivered}"
         );
     }
@@ -1267,6 +1290,36 @@ mod tests {
         assert_eq!(
             filter.apply("Copying blob sha256:aaa111\nCopying config sha256:ccc333"),
             "docker: image operation completed successfully"
+        );
+    }
+
+    /// #456 reached through the sibling door. `post_tool` declined a recovery
+    /// command and this path did not, so `omni exec omni retrieve <handle>` came
+    /// back as another marker with another handle. Found by probing this path
+    /// after fixing the one that was reported, which is the only reason it is not
+    /// a second issue.
+    #[test]
+    fn hands_a_retrieval_back_untouched() {
+        let input: String = (0..200)
+            .map(|i| format!("2026-08-11T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        run_inner(
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+            None,
+            None,
+            Some("omni retrieve eb888d2874dfc9ab"),
+        )
+        .expect("must succeed");
+
+        assert_eq!(
+            String::from_utf8(out).expect("valid UTF-8"),
+            input,
+            "a retrieval must reach the caller byte for byte"
         );
     }
 

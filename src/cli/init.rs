@@ -25,7 +25,10 @@ const FLAGS: super::Flags = &[
     ("--hermes", "Configure Hermes Agent"),
     ("--vscode", "Configure VS Code (MCP)"),
     ("--pi", "Configure Pi Agent"),
-    ("--all", "Perform full Claude setup (hooks + MCP)"),
+    (
+        "--all",
+        "Every host above, not just Claude. Writes .vscode/mcp.json in the current directory",
+    ),
     ("--hook", "Only install hooks"),
     ("--mcp", "Only register MCP server"),
     ("--status", "Check current installation status"),
@@ -55,7 +58,15 @@ fn print_help() {
         .chain(std::iter::once(&super::HELP_FLAG))
         .collect();
     super::print_flag_group("SUPPORTED AGENTS:", &entries[..AGENT_FLAGS]);
-    super::print_flag_group("CLAUDE SPECIFIC FLAGS:", &entries[AGENT_FLAGS..]);
+    // `--all` sits at the head of this group and is the one flag in it that is
+    // not Claude-specific: it configures every host above. It was documented as
+    // "full Claude setup" while doing exactly that, which is the class of defect
+    // this project files issues about, so the group is named for what it holds
+    // rather than for what most of it does (#455).
+    super::print_flag_group(
+        "EVERY HOST, AND CLAUDE SPECIFIC FLAGS:",
+        &entries[AGENT_FLAGS..],
+    );
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -65,6 +76,10 @@ fn print_help() {
     println!(
         "  omni init --claude    {}",
         "# Setup for Claude Code".bright_black()
+    );
+    println!(
+        "  omni init --all       {}",
+        "# Every host, including a .vscode/mcp.json here".bright_black()
     );
     println!();
 }
@@ -395,7 +410,7 @@ mod tests {
         );
         assert_eq!(
             FLAGS[AGENT_FLAGS].0, "--all",
-            "first Claude-specific flag moved; AGENT_FLAGS is stale"
+            "first non-agent flag moved; AGENT_FLAGS is stale"
         );
     }
 }
