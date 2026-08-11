@@ -206,10 +206,12 @@ Bisa. Anda bisa mengajari OMNI membuang noise khas tools internal Anda memakai T
 match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
+Filter hanya dibaca dari direktori home Anda. Direktori `.omni/signals/` di dalam sebuah repositori sengaja diabaikan: sebuah filter bisa menyembunyikan baris, jadi filter yang ikut sebuah checkout dapat diam-diam mengubah apa yang dilihat agent seorang pengunjung.
 
 **Bagaimana saya melihat penghematan saya sendiri?**
 `omni stats` setelah beberapa hari. `omni stats --share` mencetak ringkasan angka yang
 sama, siap disalin.
+`omni stats` membuka laporannya dengan umur sesi, yaitu berapa banyak perintah yang dibawa sebuah sesi sebelum host menutupnya, karena itulah yang benar-benar dibayar oleh jendela konteks. Persentase distilasi di bawahnya adalah diagnostik untuk pipeline satu host, bukan klaim produk.
 
 ---
 

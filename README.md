@@ -167,17 +167,23 @@ Measurably, yes, and the cost grows with your history rather than with the paylo
 205 MB one. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely.
 
 **Can I add my own filters?**
-Yes, in TOML:
+Yes, in TOML, for your own account:
 ```toml
 # ~/.omni/signals/custom.toml
 [filters.my_tool]
 match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
+Filters live under your home directory only. A `.omni/signals/` directory inside a
+repository is ignored, deliberately: a filter can hide lines, so one that travels with a
+checkout could quietly edit what a visitor's agent is shown.
 
 **How do I see my own savings?**
-`omni stats` after a few days. `omni stats --share` prints a copy-pasteable summary,
-and `omni stats --card` writes it as an image.
+`omni stats` after a few days. It leads with session lifetime, how many commands a session
+carries before the host closes it, because that is what the context window costs you. The
+distillation percentage below it is a diagnostic for one host's pipeline, not a product
+claim. `omni stats --share` prints a copy-pasteable summary, and `omni stats --card` writes
+it as an image.
 
 ---
 

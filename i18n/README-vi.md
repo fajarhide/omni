@@ -206,10 +206,12 @@ Có. Bạn có thể dạy OMNI bóc phần nhiễu riêng của công cụ nộ
 match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
+Bộ lọc chỉ được đọc từ thư mục home của bạn. Thư mục `.omni/signals/` bên trong một kho mã bị bỏ qua có chủ đích: một bộ lọc có thể giấu dòng, nên bộ lọc đi kèm bản checkout có thể lặng lẽ sửa những gì agent của người khác nhìn thấy.
 
 **Làm sao xem mức tiết kiệm của chính tôi?**
 Chạy `omni stats` sau vài ngày. `omni stats --share` in ra cùng những con số đó ở dạng
 tiện sao chép.
+`omni stats` mở đầu bằng tuổi thọ phiên, tức số lệnh một phiên đi được trước khi host đóng nó, vì đó mới là thứ cửa sổ ngữ cảnh thực sự tiêu tốn. Tỷ lệ chưng cất bên dưới là số liệu chẩn đoán cho pipeline của một host, không phải một tuyên bố về sản phẩm.
 
 ---
 

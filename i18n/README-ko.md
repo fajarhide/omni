@@ -203,10 +203,12 @@ irm omni.weekndlabs.com/install.ps1 | iex
 match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
+필터는 홈 디렉터리에서만 읽습니다. 저장소 안의 `.omni/signals/` 는 의도적으로 무시합니다. 필터는 줄을 숨길 수 있으므로, 체크아웃과 함께 배포되는 필터는 방문자의 에이전트가 보는 내용을 조용히 바꿀 수 있습니다.
 
 **내 절감량은 어떻게 보나요?**
 며칠 쓴 뒤 `omni stats`. `omni stats --share`는 같은 수치를 복사하기 좋은 형태로
 출력합니다.
+`omni stats` 는 세션 수명부터 보여줍니다. 호스트가 세션을 닫기까지 처리한 명령 수이며, 컨텍스트 윈도가 실제로 소모하는 것이 그것이기 때문입니다. 그 아래의 증류 비율은 한 호스트 파이프라인에 대한 진단값이지 제품의 주장이 아닙니다.
 
 ---
 

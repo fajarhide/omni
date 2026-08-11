@@ -193,9 +193,11 @@ irm omni.weekndlabs.com/install.ps1 | iex
 match_command = "^internal-tool\\b"
 strip_lines_matching = ["^DEBUG", "syncing..."]
 ```
+过滤器只从你的主目录读取。仓库内的 `.omni/signals/` 会被有意忽略：过滤器可以隐藏行，因此随检出一起分发的过滤器可能悄悄改变访客的 agent 所看到的内容。
 
 **怎么看我自己的节省？**
 用几天之后跑 `omni stats`。`omni stats --share` 会把同一批数字打印成方便复制的形式。
+`omni stats` 首先展示会话寿命，也就是一个会话在被 host 关闭之前承载了多少条命令，因为上下文窗口真正消耗的是它。下面的蒸馏百分比是对单个 host 流水线的诊断，而不是产品层面的主张。
 
 ---
 
