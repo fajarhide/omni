@@ -230,7 +230,7 @@ fn archive_tool_reply(
 ///
 /// Matched on the token after the program rather than by substring, so a `grep
 /// retrieve` or a file called `retrieve` is not mistaken for ours.
-fn returns_archived_bytes(command: &str) -> bool {
+pub(crate) fn returns_archived_bytes(command: &str) -> bool {
     let mut tokens = command.split_whitespace().peekable();
     while let Some(token) = tokens.next() {
         let program = token.rsplit(['/', '\\']).next().unwrap_or(token);
