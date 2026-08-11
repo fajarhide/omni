@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-11
+
+One bug, reported against 0.7.1 hours after it shipped, and the class of bug it belongs to.
+
+### Fixed
+- **A re-run of a failing script came back with no error in it (#458)**: the ledger folded a `TypeError` and its stack frame because both lines had been shown earlier in the session, so the second run of a still-broken `bun` script reached the model as source context and nothing else. An agent re-running a command to check a fix reads that as the failure being gone. It is the fabricated-success mode, reached through cross-command dedup rather than through a distiller mislabelling its own surface, which is why it can hit **any** command whose error text recurs. The reporter could not reproduce it synthetically and said so rather than guessing; the real payload was still in `execution_traces` and reproduced it exactly.
+
+  **The heuristic is sound for informational lines and wrong for the error channel.** Repetition is the signal there: the same `TypeError` appearing again means the bug is still there, and that is the line worth spending tokens on. The ledger now marks any line `semantic::carries_failure` recognises as unfoldable, so it survives verbatim and the run splits around it, leaving the repeated frames either side still foldable. That predicate is the scorer's own, exposed rather than copied, because two copies of one rule drift and only one of them gets reported (0.7.1 shipped three fixes of exactly that shape).
+
+  **The second layer is what makes this the last time.** `pipeline::fidelity::preserves_failures` is a post-condition: every invariant in this pipeline constrains what a stage is *given*, and none asked what came *out*. If the input stated a failure and the reply no longer does, both entry points hand the bytes back. It catches stages that do not exist yet, and the distiller class #333 and #354 were filed under.
+
+  Measured on the reporter's exact payload: on 0.7.1 the second run contains no `TypeError`; with the fix it keeps the error, the frame and the version line, and folds only the repeated source context. **The cost is 0.5 points of aggregate, 15.4% to 14.9%**, and markers rise from 772 to 817 because runs now split around error lines. That is the trade, stated rather than buried: half a point to never elide the answer.
+
+
 ## [0.7.1] - 2026-08-11
 
 Two installer defects, both found by setting 0.7.0 up on a real machine rather than by a
