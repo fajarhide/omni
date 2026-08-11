@@ -1768,6 +1768,49 @@ impl SqliteBackend {
         );
     }
 
+    /// How long a session lasts before the host ends it, in commands.
+    ///
+    /// This is the meter #357 promoted and #435 found missing from every
+    /// surface: a distillation percentage says how well one payload compressed,
+    /// while the thing a user feels is how many turns they get before the
+    /// context window forces a compaction. Only sessions the host actually
+    /// closed are counted, because an open session's command count is a
+    /// half-measured number that would drag the median down every time.
+    ///
+    /// Returns `(sessions, median_commands, longest, ended_by_compaction)`.
+    /// `ended_by_compaction` is the count whose `exit_reason` names compaction,
+    /// which is what makes the median mean "before the window ran out" rather
+    /// than "before the user went to lunch".
+    pub fn session_lifetime(&self, since: i64) -> (u64, u32, u32, u64) {
+        let Ok(conn) = self.pool.get() else {
+            return (0, 0, 0, 0);
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT total_commands, exit_reason FROM session_summaries
+             WHERE ended_at >= ?1 AND total_commands > 0
+             ORDER BY total_commands",
+        ) {
+            Ok(s) => s,
+            Err(_) => return (0, 0, 0, 0),
+        };
+        let rows: Vec<(u32, String)> = match stmt.query_map(params![since], |r| {
+            Ok((r.get::<_, i64>(0)? as u32, r.get::<_, String>(1)?))
+        }) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => return (0, 0, 0, 0),
+        };
+        if rows.is_empty() {
+            return (0, 0, 0, 0);
+        }
+        let compacted = rows
+            .iter()
+            .filter(|(_, reason)| reason.to_ascii_lowercase().contains("compact"))
+            .count() as u64;
+        let median = rows[rows.len() / 2].0;
+        let longest = rows.last().map(|(c, _)| *c).unwrap_or(0);
+        (rows.len() as u64, median, longest, compacted)
+    }
+
     pub fn get_recent_session_summaries(&self, limit: usize) -> Vec<SessionSummaryRow> {
         let conn = match self.pool.get() {
             Ok(c) => c,
@@ -2692,6 +2735,33 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// The headline `omni stats` leads with, so a wrong median is a wrong
+    /// product claim rather than a wrong debug line.
+    #[test]
+    fn reports_the_median_session_and_how_many_hit_a_compaction() {
+        let (store, _d) = get_temp_store();
+        for (id, commands, reason) in [
+            ("s1", 10u32, "clear"),
+            ("s2", 50, "auto_compact"),
+            ("s3", 200, "logout"),
+            // Never closed, so it has nothing to say about how long a session
+            // lasts, and counting it would drag every median down.
+            ("s4", 0, "clear"),
+        ] {
+            store.save_session_summary(id, 0, "claude_code", commands, 0, "", reason, "/p");
+        }
+
+        let (sessions, median, longest, compacted) = store.session_lifetime(0);
+
+        assert_eq!(
+            sessions, 3,
+            "a session with no commands is not a data point"
+        );
+        assert_eq!(median, 50);
+        assert_eq!(longest, 200);
+        assert_eq!(compacted, 1);
     }
 
     #[test]

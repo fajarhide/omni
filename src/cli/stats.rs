@@ -831,6 +831,45 @@ fn run_default(store: &Store) -> Result<()> {
         return Ok(());
     }
 
+    // #435. The headline is session lifetime, because that is the meter #357
+    // promoted and ROADMAP.md calls the number that decides progress. The
+    // distillation percentage below it is a diagnostic for one host's pipeline
+    // and says so, which is the whole of the correction: it was never wrong, it
+    // was presented as the product number after the project stopped treating it
+    // as one.
+    let (sessions, median_cmds, longest, compacted) = store.session_lifetime(0);
+    println!("  {}", "Session lifetime:".bold().bright_white());
+    if sessions == 0 {
+        println!(
+            "  {}",
+            "  not measurable yet: no session has been closed by a host that reports one"
+                .bright_black()
+                .italic()
+        );
+    } else {
+        println!(
+            "  {} commands median, {} longest, across {} closed sessions",
+            median_cmds.to_string().bright_green().bold(),
+            longest.to_string().cyan(),
+            format_number(sessions).cyan()
+        );
+        let compaction_line = if compacted == 0 {
+            "  none of them ended at a compaction, so this measures sessions, not the window"
+                .to_string()
+        } else {
+            format!("  {compacted} of them ended at a compaction, which is what the window costs")
+        };
+        println!("  {}", compaction_line.bright_black().italic());
+    }
+    println!();
+    println!(
+        "  {} {}",
+        "Pipeline diagnostic:".bold().bright_white(),
+        "how much one host's tool output shrank, not a product claim"
+            .bright_black()
+            .italic()
+    );
+
     // Multi-period rows
     let period_rows: Vec<PeriodRow<'_>> = periods
         .iter()
@@ -864,7 +903,7 @@ fn run_default(store: &Store) -> Result<()> {
     // when the model-facing figure was 29.3%.
     println!(
         "  {}",
-        "Counts calls whose result reached a model. Terminal output is excluded — no context holds it."
+        "Counts calls whose result reached a model. Terminal output is excluded, no context holds it."
             .bright_black()
             .italic()
     );
