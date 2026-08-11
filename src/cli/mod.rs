@@ -1,3 +1,4 @@
+pub mod dashboard;
 pub mod diff;
 pub mod doctor;
 pub mod engram;

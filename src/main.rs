@@ -101,6 +101,12 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
+    /// A local dashboard over the numbers omni stats prints
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
+    Dashboard {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// View recurring error patterns
     #[command(trailing_var_arg = true, disable_help_flag = true)]
     Patterns {
@@ -584,6 +590,18 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
+                Some(OmniCommand::Dashboard { .. }) => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::dashboard::run(&args, &store) {
+                            eprintln!("[omni] Dashboard error: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] DB error: {}", e);
+                        std::process::exit(1);
+                    }
+                },
                 Some(OmniCommand::Patterns { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::patterns::run_patterns(&args, &store) {
@@ -692,6 +710,18 @@ fn main() {
                             }
                             Err(e) => {
                                 eprintln!("[omni] Cannot open database for query: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "dashboard" => match Store::open() {
+                            Ok(store) => {
+                                if let Err(e) = cli::dashboard::run(&args, &store) {
+                                    eprintln!("[omni] Dashboard error: {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] DB error: {}", e);
                                 std::process::exit(1);
                             }
                         },
