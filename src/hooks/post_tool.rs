@@ -219,6 +219,33 @@ fn archive_tool_reply(
     (distilled.len() + marker.len() < content.len()).then(|| distilled + &marker)
 }
 
+/// Whether this command exists to hand archived bytes back verbatim.
+///
+/// `omni retrieve` is the escape hatch every marker names, and its output was
+/// being distilled like any other Bash stdout: the recovered content came back
+/// as a fresh marker with a fresh handle, so following the instruction produced
+/// another instruction and the original was unreachable past the first hop
+/// (#456). `omni diff` shows an original beside its distilled form, which is the
+/// same promise.
+///
+/// Matched on the token after the program rather than by substring, so a `grep
+/// retrieve` or a file called `retrieve` is not mistaken for ours.
+fn returns_archived_bytes(command: &str) -> bool {
+    let mut tokens = command.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
+        let program = token.rsplit(['/', '\\']).next().unwrap_or(token);
+        if program != "omni" && program != "omni.exe" {
+            continue;
+        }
+        // Skip the global flags `omni` accepts before a subcommand.
+        let sub = tokens.clone().find(|t| !t.starts_with('-'));
+        if matches!(sub, Some("retrieve") | Some("diff")) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Whether this payload is one OMNI must not touch, and the recording of why.
 ///
 /// Six gates, each of which used to sit inline at the top of `process_payload`.
@@ -233,6 +260,18 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
     // (a fabricated success terminates investigation; a fabricated error only costs a
     // retry). Emit nothing: the host keeps the original bytes at zero marker cost.
     if normalized.failed {
+        return true;
+    }
+
+    // The escape hatch cannot be subject to the thing it escapes (#456).
+    if returns_archived_bytes(&normalized.command) {
+        if let Some(s) = store {
+            s.record_passthrough(
+                &normalized.command,
+                normalized.content.len(),
+                "own recovery command",
+            );
+        }
         return true;
     }
 
@@ -1171,6 +1210,73 @@ fn strip_html_simple(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #456. The marker tells the agent to run `omni retrieve <handle>`, and that
+    /// command's own stdout was going back through this pipeline: the recovered
+    /// content came back as a fresh marker with a fresh handle, so following the
+    /// instruction produced another instruction and the original was unreachable
+    /// past the first hop. Filed the day after #452 made the command exist.
+    #[test]
+    fn never_distils_the_command_that_undoes_distillation() {
+        for cmd in [
+            "omni retrieve eb888d2874dfc9ab",
+            "/opt/homebrew/bin/omni retrieve eb888d2874dfc9ab",
+            "cd /tmp && omni retrieve eb888d2874dfc9ab",
+            "omni diff",
+        ] {
+            assert!(returns_archived_bytes(cmd), "{cmd} must pass through");
+        }
+    }
+
+    /// The guard is the program plus its subcommand, never a substring, so
+    /// someone else's `retrieve` keeps being distilled.
+    #[test]
+    fn does_not_mistake_someone_elses_retrieve_for_ours() {
+        for cmd in [
+            "grep retrieve src/",
+            "cat retrieve.md",
+            "./scripts/retrieve --all",
+            "omni stats",
+            "omnictl retrieve thing",
+        ] {
+            assert!(!returns_archived_bytes(cmd), "{cmd} is not ours");
+        }
+    }
+
+    /// The property at the level that was broken: the hook returns nothing for a
+    /// retrieval, so the host keeps the archived bytes it just printed.
+    #[test]
+    fn hands_a_retrieval_back_untouched() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let repetitive = (0..200)
+            .map(|i| format!("2026-08-11T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect::<String>();
+        let payload = |cmd: &str| {
+            serde_json::json!({
+                "session_id": "s1",
+                "tool_name": "Bash",
+                "tool_input": {"command": cmd},
+                "tool_response": {"stdout": repetitive, "stderr": ""}
+            })
+            .to_string()
+        };
+
+        // Prime the ledger so an ordinary command would certainly be folded.
+        let _ = process_payload(&payload("cat log.txt"), Some(store.clone()), None);
+        let control = process_payload(&payload("cat log.txt"), Some(store.clone()), None);
+        assert!(
+            control.is_some(),
+            "the fixture must be foldable, or this test proves nothing"
+        );
+
+        let retrieval = process_payload(
+            &payload("omni retrieve eb888d2874dfc9ab"),
+            Some(store.clone()),
+            None,
+        );
+
+        assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
+    }
 
     /// #379: a rewritten command was recorded twice. `omni exec` distills the
     /// output, then the host's PostToolUse fires with that summary and the
