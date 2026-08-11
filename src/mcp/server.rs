@@ -144,11 +144,6 @@ pub struct OmniRememberParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct OmniTrustParams {
-    pub project_path: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct OmniContextParams {
     pub file_path: String,
 }
@@ -658,25 +653,6 @@ impl OmniServer {
             "No recurring issues detected yet.".to_string()
         } else {
             report
-        }
-    }
-
-    #[tool(
-        name = "omni_trust",
-        description = "Trust project's local configurations explicitly"
-    )]
-    pub async fn omni_trust(&self, params: Parameters<OmniTrustParams>) -> String {
-        let project_path = params.0.project_path;
-        let default_path = if project_path.is_empty() {
-            ".".to_string()
-        } else {
-            project_path
-        };
-
-        let path = std::path::Path::new(&default_path);
-        match crate::guard::trust::trust_project(path) {
-            Ok(hash) => format!("Trusted: {}\nSHA-256: {}", path.display(), hash),
-            Err(e) => format!("Failed to trust local hashes ensuring sandbox loops: {}", e),
         }
     }
 
@@ -1735,21 +1711,6 @@ mod tests {
             out.contains("filters"),
             "expected a report of the detected patterns, got: {out}"
         );
-    }
-
-    #[tokio::test]
-    async fn test_omni_trust_saves_hash() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let session = Arc::new(Mutex::new(SessionState::new()));
-
-        let server = OmniServer { store, session };
-        let out = server
-            .omni_trust(Parameters(OmniTrustParams {
-                project_path: "/invalid".to_string(),
-            }))
-            .await;
-        assert!(out.contains("Failed") || out.contains("Trusted"));
     }
 
     // ── Phase 2 MCP Tests ──

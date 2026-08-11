@@ -59,8 +59,7 @@ fn resolve_root(split_var: &str, xdg_var: &str) -> PathBuf {
     legacy
 }
 
-/// Where configuration lives: `config.toml`, `filters/`, `signals/`,
-/// `trusted.json`.
+/// Where configuration lives: `config.toml`, `filters/`, `signals/`.
 #[inline]
 pub fn config_home() -> PathBuf {
     static ROOT: std::sync::LazyLock<PathBuf> =
@@ -130,24 +129,6 @@ pub fn user_signal_dir() -> PathBuf {
     } else {
         filters_directory()
     }
-}
-
-/// The same signals-then-filters choice for a project-local `.omni` directory.
-#[inline]
-pub fn project_signal_dir(base: &std::path::Path) -> PathBuf {
-    let signals = base.join(".omni").join("signals");
-    if signals.exists() {
-        signals
-    } else {
-        base.join(".omni").join("filters")
-    }
-}
-
-/// Get path to trusted projects signature file
-#[inline]
-#[cfg_attr(test, allow(dead_code))]
-pub fn trusted_projects_path() -> PathBuf {
-    config_home().join("trusted.json")
 }
 
 /// Get path to the user configuration file.
@@ -233,7 +214,6 @@ mod tests {
             ("filters_directory", filters_directory()),
             ("signals_directory", signals_directory()),
             ("user_signal_dir", user_signal_dir()),
-            ("trusted_projects_path", trusted_projects_path()),
             ("config_file", config_file()),
             ("learned_filters_path", learned_filters_path()),
         ] {

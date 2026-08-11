@@ -292,10 +292,6 @@ fn rtk_filter(cmd: &str) -> Option<&'static str> {
 }
 
 /// Runs one payload through rtk, or hands it back when nothing claims it.
-fn rtk_bytes(rtk: &str, cmd: &str, raw: &str) -> u64 {
-    rtk_out(rtk, cmd, raw).len() as u64
-}
-
 /// What rtk hands back, so the ledger can be measured on top of it.
 fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
     let Some(filter) = rtk_filter(cmd) else {
@@ -567,7 +563,6 @@ fn replay_execution_traces_net_savings() {
                         i += 1;
                         continue;
                     }
-                    let start = i;
                     let mut bytes = 0u64;
                     while i < lines.len() && lines[i].0 {
                         bytes += lines[i].1;
@@ -798,15 +793,11 @@ fn replay_execution_traces_net_savings() {
         "  over the bar, folded or not:       {m1_eligible} ({:.1}%) over {m1_eligible_runs} runs",
         of_raw(m1_eligible)
     );
-    println!(
-        "run sizes: {} runs, median {} bytes",
-        run_sizes.len(),
-        {
-            let mut v = run_sizes.clone();
-            v.sort_unstable();
-            v.get(v.len() / 2).copied().unwrap_or(0)
-        }
-    );
+    println!("run sizes: {} runs, median {} bytes", run_sizes.len(), {
+        let mut v = run_sizes.clone();
+        v.sort_unstable();
+        v.get(v.len() / 2).copied().unwrap_or(0)
+    });
     if let Ok(path) = std::env::var("OMNI_BENCH_RUNS_OUT") {
         let dump: String = run_sizes.iter().map(|b| format!("{b}\n")).collect();
         let _ = std::fs::write(path, dump);

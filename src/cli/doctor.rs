@@ -568,8 +568,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let (built_in, user_report, local_report) =
-        crate::pipeline::toml_filter::get_filters_by_source();
+    let (built_in, user_report) = crate::pipeline::toml_filter::get_filters_by_source();
 
     println!(
         "   {:<15} {} loaded (embedded)",
@@ -664,73 +663,19 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!("   {:<15} none", "User:".bright_black());
     }
 
-    if let Ok(cwd) = std::env::current_dir() {
-        let local_signals_dir = {
-            let s = cwd.join(".omni").join("signals");
-            if s.exists() {
-                s
-            } else {
-                cwd.join(".omni").join("filters")
-            }
-        };
-        if local_signals_dir.exists() {
-            let dir_label = if local_signals_dir.ends_with("signals") {
-                "signals"
-            } else {
-                "filters"
-            };
-            // The directory, not the file inside it (#433). Doctor agreed with the
-            // defect rather than exposing it, reporting the project untrusted for
-            // the same reason the loader skipped it.
-            if crate::guard::trust::is_trusted(&cwd) {
-                println!(
-                    "   {:<15} .omni/{dir_label}/ ({} signals, TRUSTED) {}",
-                    "Project:".bright_black(),
-                    local_report.filters.len().to_string().yellow(),
-                    "[OK]".green().bold()
-                );
-            } else if fix_mode {
-                let _ = crate::guard::trust::trust_project(&cwd);
-                println!(
-                    "   {:<15} .omni/{dir_label}/ (TRUSTED) {}",
-                    "Project:".bright_black(),
-                    "[FIXED]".green().bold()
-                );
-            } else {
-                println!(
-                    "   {:<15} .omni/{dir_label}/ ({} signals, NOT TRUSTED) {}",
-                    "Project:".bright_black(),
-                    local_report.filters.len().to_string().yellow(),
-                    "[WARNING]".yellow().bold()
-                );
-                warnings.push(
-                    "Project signals found but not trusted. Run: `omni doctor --fix`.".to_string(),
-                );
-                all_ok = false;
-            }
-        } else {
-            println!(
-                "   {:<15} {}",
-                "Project:".bright_black(),
-                "none".bright_black()
-            );
-        }
-    }
-
     // --- Elegant Warning Display ---
     let mut all_filter_warnings = Vec::new();
     // Line patterns compile on first use now, so loading no longer reports a
     // malformed one (#283). `doctor` is where that check moved: it is run by a
     // human asking whether the config is sound, not on the hook's path, so it
     // can afford to compile every pattern.
-    for report in [&built_in, &user_report, &local_report] {
+    for report in [&built_in, &user_report] {
         for filter in &report.filters {
             all_filter_warnings.extend(filter.validate_line_patterns());
         }
     }
     all_filter_warnings.extend(built_in.warnings);
     all_filter_warnings.extend(user_report.warnings);
-    all_filter_warnings.extend(local_report.warnings);
 
     if !all_filter_warnings.is_empty() {
         for warning in all_filter_warnings.iter().take(5) {

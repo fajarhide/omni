@@ -77,7 +77,9 @@ impl Origin {
                 format!("[OMNI: {lines} lines already shown, omni_retrieve(\"{handle}\")]")
             }
             Self::Project => {
-                format!("[OMNI: {lines} lines from an earlier session, omni_retrieve(\"{handle}\")]")
+                format!(
+                    "[OMNI: {lines} lines from an earlier session, omni_retrieve(\"{handle}\")]"
+                )
             }
         }
     }
@@ -530,8 +532,8 @@ mod tests {
         let ledger = Ledger::new(&store, "s1");
         ledger.project(&format!("{run}{}", payload()));
 
-        let bar = Origin::Session.marker(3, &"0".repeat(HANDLE_LEN)).len()
-            + Origin::Session.min_gain();
+        let bar =
+            Origin::Session.marker(3, &"0".repeat(HANDLE_LEN)).len() + Origin::Session.min_gain();
         assert!(
             run.len() >= bar,
             "fixture must clear the gain bar ({} vs {bar}), or it tests the old bound",
@@ -544,7 +546,9 @@ mod tests {
                 .map(|i| format!("a completely different line number {i} of this second payload\n"))
                 .collect::<String>()
         );
-        let view = ledger.project(&second).expect("a run that pays should fold");
+        let view = ledger
+            .project(&second)
+            .expect("a run that pays should fold");
 
         assert!(view.contains("3 lines already shown"), "{view}");
     }
