@@ -1285,10 +1285,18 @@ mod tests {
     /// percentage down.
     #[test]
     fn recognises_a_summary_omni_wrote() {
-        // Exactly the shape `omni exec` emits: the marker on its own line.
-        let ours = "test result: ok. 600 passed; 0 failed;\n[OMNI: 600 lines omitted, omni_retrieve(\"abc123\") for full output]";
+        // Both shapes, because a warm session can hold markers written before
+        // 0.7.1 changed the wording and after. The comment here used to claim the
+        // first was "exactly the shape omni exec emits", which stopped being true
+        // the moment the marker named the CLI instead of the MCP tool.
+        let legacy = "test result: ok. 600 passed; 0 failed;\n[OMNI: 600 lines omitted, omni_retrieve(\"abc123\") for full output]";
+        let current = "test result: ok. 600 passed; 0 failed;\n[OMNI: 600 lines omitted, omni retrieve abc123 for full output]";
 
-        assert!(carries_our_marker(ours), "own summary not recognised");
+        assert!(
+            carries_our_marker(legacy),
+            "a pre-0.7.1 summary not recognised"
+        );
+        assert!(carries_our_marker(current), "own summary not recognised");
     }
 
     /// The guard must not swallow a tool's own output, or the post-hook path
