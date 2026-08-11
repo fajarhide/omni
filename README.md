@@ -91,6 +91,27 @@ than a sentence asking you to trust it.
 
 ---
 
+## What OMNI remembers, and for how long
+
+Three tiers, already in the schema, never written down until now. The short answer to
+"will OMNI still know my project after a month away" is yes for the conclusions and no for
+the raw bytes.
+
+| Tier | What | Kept |
+|---|---|---|
+| **Permanent** | project knowledge, recurring error patterns, engrams, goal memory | until you delete it, except goal memory, which honours its own `ttl_days` |
+| **Working, 30 days** | sessions, distillation rows, hot files, the RewindStore, the event index, the ledger | rolling window |
+| **Verbatim, 7 days** | `execution_traces` and the session transcript | shorter on purpose: it is two orders of magnitude heavier per row |
+
+The boundary this sets is worth stating plainly, because it is the one thing a handle
+cannot promise: `omni_retrieve` for content archived more than 30 days ago will not
+resolve. Hold the shortest window open while measuring with
+`OMNI_TRACE_RETENTION_DAYS=90`.
+
+`omni reset` wipes all of it, and `omni doctor` shows the live counts.
+
+---
+
 ## What each host lets OMNI do
 
 | Tier | Hosts | What you get |

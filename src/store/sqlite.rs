@@ -1730,8 +1730,20 @@ impl SqliteBackend {
         // which asks for the newest N, so a trace older than a week answers no
         // question anyone is posing. Measured on the maintainer's database: 160.1
         // MB in total, 6.0 MB within seven days.
-        let traces_threshold =
-            chrono::Utc::now().timestamp() - (TRACE_RETENTION_DAYS as i64 * 86400);
+        // Held open by `OMNI_TRACE_RETENTION_DAYS` while a measurement is in
+        // flight (#440). Roadmap axis 3 asks that a published figure be
+        // reproducible by a stranger with the repo, and it cannot be if the
+        // corpus behind it is deleted seven days later. Seven days stays the
+        // default: #165 recorded this table at 160 MB of a 187 MB database
+        // before the window existed, so the default is load bearing and only the
+        // override is new. A value that does not parse is ignored rather than
+        // failing the cleanup, because a typo in an env var must not stop the
+        // database from being maintained.
+        let retention_days = std::env::var("OMNI_TRACE_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(TRACE_RETENTION_DAYS);
+        let traces_threshold = chrono::Utc::now().timestamp() - (retention_days as i64 * 86400);
         let _ = conn.execute(
             "DELETE FROM execution_traces WHERE ts < ?1",
             params![traces_threshold],
@@ -2784,6 +2796,24 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #440. The knob exists so a corpus can outlive the window while a figure
+    /// is being measured; the default has to stay where #165 put it.
+    #[test]
+    fn holds_traces_open_when_the_override_asks_and_ignores_a_bad_one() {
+        let read = |raw: Option<&str>| -> u32 {
+            raw.and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(TRACE_RETENTION_DAYS)
+        };
+
+        assert_eq!(read(None), 7, "the default is load bearing");
+        assert_eq!(read(Some("90")), 90);
+        assert_eq!(
+            read(Some("not-a-number")),
+            7,
+            "a typo must not stop cleanup"
+        );
     }
 
     /// #427: every one of 20 entries read RESOLVED, including patterns that had

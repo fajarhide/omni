@@ -190,6 +190,26 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
+## OMNI nhớ những gì, và trong bao lâu
+
+Ba tầng, vốn đã nằm trong schema và tới giờ mới được viết ra. Câu trả lời ngắn cho "sau một
+tháng vắng mặt, OMNI còn biết dự án của tôi không" là có với các kết luận, và không với
+những byte thô.
+
+| Tầng | Cái gì | Giữ |
+|---|---|---|
+| **Vĩnh viễn** | tri thức dự án, các mẫu lỗi lặp lại, engram, bộ nhớ mục tiêu | cho tới khi bạn xoá, trừ bộ nhớ mục tiêu vốn tôn trọng `ttl_days` của chính nó |
+| **Làm việc, 30 ngày** | phiên, các dòng chưng cất, tệp nóng, RewindStore, chỉ mục sự kiện, sổ cái | cửa sổ trượt |
+| **Nguyên văn, 7 ngày** | `execution_traces` và bản ghi phiên | ngắn hơn có chủ đích: nặng hơn hai bậc trên mỗi dòng |
+
+Ranh giới nó đặt ra đáng được nói thẳng, vì đó là điều duy nhất một handle không thể hứa:
+`omni_retrieve` cho nội dung lưu trữ quá 30 ngày sẽ không tìm thấy gì. Hãy giữ cửa sổ ngắn
+nhất mở khi đang đo bằng `OMNI_TRACE_RETENTION_DAYS=90`.
+
+`omni reset` xoá tất cả, và `omni doctor` hiển thị số liệu thực.
+
+---
+
 ## Câu hỏi thường gặp
 
 **OMNI có xóa vĩnh viễn log của tôi không?**  

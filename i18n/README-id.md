@@ -190,6 +190,27 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ---
 
+## Apa yang OMNI ingat, dan berapa lama
+
+Tiga tingkat, sudah ada di skema, dan baru sekarang ditulis. Jawaban singkat untuk
+"apakah OMNI masih mengenal proyek saya setelah sebulan ditinggal" adalah ya untuk
+kesimpulannya, tidak untuk byte mentahnya.
+
+| Tingkat | Apa | Disimpan |
+|---|---|---|
+| **Permanen** | pengetahuan proyek, pola error berulang, engram, memori goal | sampai Anda hapus, kecuali memori goal yang menghormati `ttl_days` miliknya |
+| **Kerja, 30 hari** | sesi, baris distilasi, file panas, RewindStore, indeks event, ledger | jendela bergulir |
+| **Verbatim, 7 hari** | `execution_traces` dan transkrip sesi | sengaja lebih pendek: dua orde lebih berat per baris |
+
+Batas yang ditetapkannya perlu dikatakan terang-terangan, karena inilah satu hal yang tidak
+bisa dijanjikan sebuah handle: `omni_retrieve` untuk konten yang diarsipkan lebih dari 30
+hari lalu tidak akan menemukan apa pun. Tahan jendela terpendek saat mengukur dengan
+`OMNI_TRACE_RETENTION_DAYS=90`.
+
+`omni reset` menghapus semuanya, dan `omni doctor` menunjukkan jumlah aktualnya.
+
+---
+
 ## FAQ
 
 **Apakah OMNI menghapus log saya secara permanen?**  

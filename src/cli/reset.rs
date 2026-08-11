@@ -196,6 +196,16 @@ fn perform_reset(is_all: bool, target_ids: Vec<&str>) -> anyhow::Result<()> {
             let db_path = crate::paths::database_path();
             if db_path.exists() {
                 std::fs::remove_file(&db_path).ok();
+                // SQLite runs in WAL mode, so the database is three files and
+                // removing one of them leaves the other two holding its
+                // content: 4.2 MB of -wal survived a wipe that reported success
+                // (#446). A stale -wal beside a fresh database is also the one
+                // way this can corrupt rather than merely mislead.
+                for sidecar in ["-wal", "-shm"] {
+                    let mut path = db_path.clone().into_os_string();
+                    path.push(sidecar);
+                    std::fs::remove_file(std::path::PathBuf::from(path)).ok();
+                }
                 println!("  {} Omni database wiped.", "✓".green());
             }
         }
