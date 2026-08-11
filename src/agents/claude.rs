@@ -118,6 +118,27 @@ impl AgentIntegration for ClaudeIntegration {
         crate::agent_report!("  {}", "Claude Code:".cyan());
         let path = get_settings_path();
         if path.exists() {
+            // An install that registered OMNI twice ran the pipeline twice per
+            // call and reported [OK] throughout, because this check asked
+            // whether a hook was present and never how many (#454). The
+            // installer no longer creates that state; this is what tells the
+            // machines already in it.
+            if let Ok(content) = fs::read_to_string(&path)
+                && let Ok(val) = serde_json::from_str::<Value>(&content)
+            {
+                for (event, count) in crate::agents::duplicate_omni_hooks(&val) {
+                    all_ok = false;
+                    crate::agent_report!(
+                        "   {:<15} {} {}",
+                        "Duplicate:".bright_black(),
+                        format!("{event} runs OMNI {count} times per call"),
+                        "[WARNING]".yellow().bold()
+                    );
+                    warnings.push(format!(
+                        "{event} has {count} OMNI hooks. Re-run `omni init --claude` to collapse them."
+                    ));
+                }
+            }
             if let Ok(content) = fs::read_to_string(&path) {
                 if content.contains("--hook")
                     || content.contains("--post-hook")
@@ -360,26 +381,6 @@ pub fn remove_omni_hooks(val: &mut Value) {
     }
 }
 
-/// Whether `command` is OMNI's own hook for the same entry point as `ours`.
-///
-/// Identity is the binary name plus the flag, never the whole string. Comparing
-/// the whole string meant that reinstalling from a different path matched
-/// nothing and appended, so a machine that had been set up twice ran OMNI twice
-/// per tool call and `omni doctor` reported `[OK]` throughout (#454).
-fn is_our_hook(command: Option<&str>, ours: &str) -> bool {
-    let Some(command) = command else {
-        return false;
-    };
-    let flag = match ours.rsplit_once(' ') {
-        Some((_, flag)) if flag.starts_with("--") => flag,
-        _ => return false,
-    };
-    // `--hook` is a prefix of nothing else here, but `--pre-hook` ends with
-    // `-hook`, so the flag is compared as the last token rather than by
-    // `contains`.
-    command.contains("omni") && command.rsplit(' ').next() == Some(flag)
-}
-
 pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
     let obj = match val.as_object_mut() {
         Some(o) => o,
@@ -406,9 +407,12 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
                 .get("hooks")
                 .and_then(|h| h.as_array())
                 .is_some_and(|inner| {
-                    inner
-                        .iter()
-                        .any(|h| is_our_hook(h.get("command").and_then(|c| c.as_str()), hook_cmd))
+                    inner.iter().any(|h| {
+                        crate::agents::is_our_hook(
+                            h.get("command").and_then(|c| c.as_str()),
+                            hook_cmd,
+                        )
+                    })
                 });
             if installed {
                 // Bring the path up to date as well as the matcher. Matching on
@@ -420,7 +424,10 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
                     .and_then(|h| h.as_array_mut())
                     .and_then(|inner| {
                         inner.iter_mut().find(|h| {
-                            is_our_hook(h.get("command").and_then(|c| c.as_str()), hook_cmd)
+                            crate::agents::is_our_hook(
+                                h.get("command").and_then(|c| c.as_str()),
+                                hook_cmd,
+                            )
                         })
                     })
                     .and_then(|h| h.as_object_mut())
@@ -454,7 +461,10 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         for v in arr.iter_mut() {
             if let Some(inner) = v.get_mut("hooks").and_then(|h| h.as_array_mut()) {
                 for h in inner.iter_mut() {
-                    if is_our_hook(h.get("command").and_then(|c| c.as_str()), hook_cmd) {
+                    if crate::agents::is_our_hook(
+                        h.get("command").and_then(|c| c.as_str()),
+                        hook_cmd,
+                    ) {
                         if let Some(obj) = h.as_object_mut() {
                             obj.insert("command".to_string(), json!(hook_cmd));
                         }
@@ -671,17 +681,23 @@ mod tests {
     /// the two the same hook and one would overwrite the other.
     #[test]
     fn tells_the_hook_flags_apart_even_when_one_ends_with_another() {
-        assert!(is_our_hook(
+        assert!(crate::agents::is_our_hook(
             Some("/a/omni --pre-hook"),
             "/b/omni --pre-hook"
         ));
-        assert!(!is_our_hook(Some("/a/omni --pre-hook"), "/b/omni --hook"));
-        assert!(!is_our_hook(Some("/a/omni --post-hook"), "/b/omni --hook"));
-        assert!(!is_our_hook(
+        assert!(!crate::agents::is_our_hook(
+            Some("/a/omni --pre-hook"),
+            "/b/omni --hook"
+        ));
+        assert!(!crate::agents::is_our_hook(
+            Some("/a/omni --post-hook"),
+            "/b/omni --hook"
+        ));
+        assert!(!crate::agents::is_our_hook(
             Some("/usr/bin/other --pre-hook"),
             "/b/omni --pre-hook"
         ));
-        assert!(!is_our_hook(None, "/b/omni --pre-hook"));
+        assert!(!crate::agents::is_our_hook(None, "/b/omni --pre-hook"));
     }
 
     use super::*;

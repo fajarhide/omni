@@ -236,10 +236,19 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
 
     let ensure_hook = |arr_val: &mut serde_json::Value, matcher: &str, hook_cmd: &str| {
         let arr = arr_val.as_array_mut().unwrap();
-        for v in arr.iter() {
-            if let Some(inner) = v.get("hooks").and_then(|h| h.as_array()) {
-                for h in inner {
-                    if h.get("command").and_then(|c| c.as_str()) == Some(hook_cmd) {
+        // Ours is identified by binary and flag, never by the whole command, so
+        // reinstalling from a different path moves the entry instead of adding a
+        // second one that runs OMNI twice per call (#454).
+        for v in arr.iter_mut() {
+            if let Some(inner) = v.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+                for h in inner.iter_mut() {
+                    if crate::agents::is_our_hook(
+                        h.get("command").and_then(|c| c.as_str()),
+                        hook_cmd,
+                    ) {
+                        if let Some(obj) = h.as_object_mut() {
+                            obj.insert("command".to_string(), json!(hook_cmd));
+                        }
                         return;
                     }
                 }
@@ -304,6 +313,39 @@ pub fn remove_omni_hooks(val: &mut Value) {
 
 #[cfg(test)]
 mod tests {
+    /// Gemini carried its own copy of the exact-string test that #454 was filed
+    /// against for Claude Code. Only one of the two was reported, so this is the
+    /// half that was found by looking rather than by being told.
+    #[test]
+    fn reinstalling_from_another_path_moves_the_hook_rather_than_adding_one() {
+        let mut val = json!({});
+        install_omni_hooks(&mut val, "/repo/target/debug/omni");
+        install_omni_hooks(&mut val, "/opt/homebrew/bin/omni");
+
+        let hooks = val["hooks"].as_object().expect("hooks written");
+        assert!(!hooks.is_empty());
+        for (event, arr) in hooks {
+            let ours: Vec<String> = arr
+                .as_array()
+                .expect("array")
+                .iter()
+                .flat_map(|m| m["hooks"].as_array().cloned().unwrap_or_default())
+                .filter_map(|h| h["command"].as_str().map(str::to_string))
+                .filter(|c| c.contains("omni"))
+                .collect();
+            assert_eq!(
+                ours.len(),
+                1,
+                "{event} would run OMNI {} times: {ours:?}",
+                ours.len()
+            );
+            assert!(
+                ours[0].starts_with("/opt/homebrew/bin/omni"),
+                "{event}: {ours:?}"
+            );
+        }
+    }
+
     use super::*;
 
     /// #351: the matcher was `"Bash"`, which is Claude Code's tool name. Gemini
