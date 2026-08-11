@@ -1645,36 +1645,6 @@ mod tests {
         );
     }
 
-    /// The write itself is tested against a path this test owns, because
-    /// `apply_to_config` already takes one. Driving it through the MCP tool
-    /// instead wrote a learned filter into the shared home on every run, and
-    /// those filters then joined the `find()` race that decides which signal
-    /// claims a command, which is the mechanism behind #304. The MCP layer's own
-    /// job is the response, and that is what the test below it checks.
-    #[test]
-    fn learned_filters_are_written_to_the_path_they_are_given() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("learned.toml");
-        let repetitive = "Downloading dep v1.0\n".repeat(6);
-        let candidates = crate::session::learn::detect_patterns(&repetitive);
-        assert!(!candidates.is_empty(), "fixture must produce a candidate");
-
-        let added = crate::session::learn::apply_to_config(
-            &candidates,
-            "learned_test",
-            &path,
-            Some("npm install"),
-        )
-        .expect("apply");
-
-        assert!(added > 0, "nothing was written");
-        let written = std::fs::read_to_string(&path).expect("file exists");
-        assert!(
-            written.contains("[filters.learned_test]"),
-            "the filter block is missing: {written}"
-        );
-    }
-
     #[tokio::test]
     async fn test_omni_learn_reports_what_it_would_apply() {
         let dir = tempdir().unwrap();

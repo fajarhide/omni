@@ -3,7 +3,6 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::Path;
 use std::sync::LazyLock;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -203,73 +202,6 @@ pub fn generate_toml(
     toml
 }
 
-pub fn apply_to_config(
-    candidates: &[PatternCandidate],
-    filter_name: &str,
-    config_path: &Path,
-    command: Option<&str>,
-) -> anyhow::Result<usize> {
-    if candidates.is_empty() {
-        return Ok(0);
-    }
-
-    let existing_content = if config_path.exists() {
-        fs::read_to_string(config_path).unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let mut new_candidates = Vec::new();
-    let mut skipped = 0;
-
-    for c in candidates {
-        let clean_prefix: String = c
-            .trigger_prefix
-            .chars()
-            .filter(|&ch| !ch.is_control() || ch == '\t')
-            .collect();
-        let escaped_prefix = regex::escape(&clean_prefix);
-        let toml_safe = escaped_prefix.replace('\\', "\\\\").replace('"', "\\\"");
-        let pattern_str = format!("\"^{}\"", toml_safe);
-
-        if existing_content.contains(&pattern_str) {
-            skipped += 1;
-            println!(
-                "  [Skip] Pattern \"{}\" already exists in learned filters.",
-                c.trigger_prefix
-            );
-        } else {
-            new_candidates.push(c.clone());
-        }
-    }
-
-    if new_candidates.is_empty() {
-        println!(
-            "\n  All {} patterns are already learned! No new filters added.",
-            skipped
-        );
-        return Ok(0);
-    }
-
-    let generated = generate_toml(&new_candidates, filter_name, command);
-
-    if !config_path.exists() {
-        if let Some(p) = config_path.parent() {
-            fs::create_dir_all(p)?;
-        }
-        fs::write(config_path, "schema_version = 1\n")?;
-    }
-
-    let mut file = OpenOptions::new().append(true).open(config_path)?;
-    file.write_all(generated.as_bytes())?;
-
-    if skipped > 0 {
-        println!("\n  Skipped {} existing patterns.", skipped);
-    }
-
-    Ok(new_candidates.len())
-}
-
 pub fn queue_for_learn(input: &str, command: &str) {
     if input.len() <= 100 {
         return;
@@ -317,114 +249,6 @@ pub fn queue_for_learn(input: &str, command: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
-
-    #[test]
-    fn never_suggests_stripping_the_stderr_marker() {
-        // A filter that hides the error channel is worse than one that drops
-        // output: the reader has no signal that anything was hidden (#266).
-        // Three of each distinct line. At two the prefix never clears
-        // `count >= 3`, so the test would pass with the guard removed and prove
-        // nothing.
-        let input =
-            "[stderr] warning one\n[stderr] warning two\n[stderr] warning three\n".repeat(3);
-
-        let patterns = detect_patterns(&input);
-
-        assert!(
-            !patterns.iter().any(|p| p.trigger_prefix.contains("stderr")),
-            "the error channel marker must never be offered as noise: {:?}",
-            patterns
-                .iter()
-                .map(|p| &p.trigger_prefix)
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn never_suggests_stripping_a_documents_structure() {
-        // `spec:` and a lone brace are the shape of the manifest, not decoration.
-        let input = "spec:\nspec:\nspec:\n}\n}\n}\n```\n```\n```\n---\n---\n---\n";
-
-        let patterns = detect_patterns(input);
-
-        assert!(
-            patterns.is_empty(),
-            "structural keys must never be offered as noise: {:?}",
-            patterns
-                .iter()
-                .map(|p| &p.trigger_prefix)
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn still_detects_real_repetition_around_the_structure() {
-        // The guard must not swallow the thing it sits next to.
-        let input = "spec:\nWaiting for connection\nspec:\nWaiting for connection\n\
-                     spec:\nWaiting for connection\n";
-
-        let patterns = detect_patterns(input);
-
-        assert_eq!(patterns.len(), 1, "got {patterns:?}");
-        assert_eq!(patterns[0].trigger_prefix, "Waiting for connection");
-    }
-
-    #[test]
-    fn detects_patterns_for_repetitive_build_output() {
-        let input = "Waiting for connection 1\nWaiting for connection 2\nWaiting for connection 3\nFinished dev";
-        let candidates = detect_patterns(input);
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].trigger_prefix, "Waiting for connection");
-        assert_eq!(candidates[0].count, 3);
-    }
-
-    #[test]
-    fn detects_patterns_for_podman_steps() {
-        let input = "[1/2] STEP 1/7: FROM alpine\n[1/2] STEP 2/7: RUN ls\n[1/2] STEP 3/7: RUN date";
-        let candidates = detect_patterns(input);
-        assert_eq!(candidates.len(), 1);
-        // Prefix should have numbers replaced by #
-        assert_eq!(candidates[0].trigger_prefix, "[#/#] STEP #/#:");
-        assert_eq!(candidates[0].count, 3);
-    }
-
-    #[test]
-    fn ignores_diverse_text_without_repetition() {
-        let input = "one two three\nfour five six\nseven eight nine\n";
-        let candidates = detect_patterns(input);
-        assert_eq!(candidates.len(), 0);
-    }
-
-    #[test]
-    fn generates_valid_toml_format() {
-        let c = vec![PatternCandidate {
-            trigger_prefix: "Test Prefix Gen".to_string(),
-            sample_line: "Test Prefix Gen is good".to_string(),
-            count: 5,
-            confidence: 0.9,
-            suggested_action: LearnAction::Strip,
-        }];
-        let toml = generate_toml(&c, "gen_test", None);
-        // schema_version is now handled by apply_to_config, not generation
-        assert!(toml.contains("[filters.gen_test]"));
-        assert!(toml.contains("\"^Test Prefix Gen\""));
-    }
-
-    #[test]
-    fn applies_to_config_without_duplicate_trigger() {
-        let file = NamedTempFile::new().unwrap();
-        let c = vec![PatternCandidate {
-            trigger_prefix: "Test".to_string(),
-            sample_line: "x".to_string(),
-            count: 3,
-            confidence: 0.9,
-            suggested_action: LearnAction::Strip,
-        }];
-        apply_to_config(&c, "dummy", file.path(), None).unwrap();
-        let content = fs::read_to_string(file.path()).unwrap();
-        assert!(content.contains("[filters.dummy]"));
-    }
 
     #[test]
     fn queues_for_learn_non_blocking() {

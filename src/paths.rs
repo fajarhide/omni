@@ -143,15 +143,6 @@ pub fn exports_directory() -> PathBuf {
     data_home().join("exports")
 }
 
-/// Ensure OMNI home directory exists
-/// Creates parent directories if they don't exist
-pub fn ensure_omni_home() -> std::io::Result<()> {
-    std::fs::create_dir_all(config_home())?;
-    std::fs::create_dir_all(data_home())?;
-    std::fs::create_dir_all(filters_directory())?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
