@@ -788,6 +788,35 @@ impl SqliteBackend {
             tx.commit()?;
         }
 
+        // Every pattern in an existing database carries a `was_resolved` that was
+        // set by any success in its tool family and never taken back, so
+        // `omni patterns` reported 20 of 20 RESOLVED while five of them were
+        // still firing (#427). The flag now clears on recurrence, but history
+        // cannot be re-derived: nothing recorded when a resolution happened. So
+        // the label is cleared once and re-earned by the new rule, which is the
+        // only reading of these rows that is not a guess.
+        let migration_clear_resolved = "2026_08_clear_unearned_pattern_resolutions";
+        let resolved_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1",
+                params![migration_clear_resolved],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap_or(None);
+        if resolved_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "UPDATE pattern_memory SET was_resolved = 0, resolution_hint = ''",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_clear_resolved, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         // `context_turns` was written on every hooked command, carried an index,
         // and had no `SELECT` anywhere in the tree: 5,532 rows paying write
         // latency and disk for a reader that never existed (#270). The in-memory
@@ -2106,6 +2135,13 @@ impl SqliteBackend {
              ON CONFLICT(pattern_hash) DO UPDATE SET
                last_seen = ?4,
                occurrence_count = occurrence_count + 1,
+               -- A pattern that just happened again is not resolved, whatever a
+               -- later success said about its tool family (#427). resolve_pattern
+               -- marks every unresolved pattern of a family at once, so without
+               -- this one green `cargo test` declares five distinct failures
+               -- fixed and they stay declared while they keep firing.
+               was_resolved = 0,
+               resolution_hint = '',
                tool_family = CASE WHEN tool_family = '' THEN ?3 ELSE tool_family END",
             params![hash, &pattern_text[..pattern_text.len().min(500)], tool_family, now],
         );
@@ -2748,6 +2784,36 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #427: every one of 20 entries read RESOLVED, including patterns that had
+    /// fired 27 times, because a success resolves a whole tool family and
+    /// nothing ever took the flag back.
+    #[test]
+    fn a_pattern_that_recurs_stops_being_resolved() {
+        let (store, _d) = get_temp_store();
+        store.upsert_pattern("test module::perf::latency ... FAILED", "cargo test");
+        store.resolve_pattern("cargo test", "cargo test");
+
+        let resolved_now = store
+            .get_patterns(None, 10)
+            .into_iter()
+            .find(|p| p.pattern_text.contains("latency"))
+            .expect("recorded");
+        assert!(resolved_now.was_resolved, "a success does resolve it");
+
+        store.upsert_pattern("test module::perf::latency ... FAILED", "cargo test");
+
+        let after_recurrence = store
+            .get_patterns(None, 10)
+            .into_iter()
+            .find(|p| p.pattern_text.contains("latency"))
+            .expect("recorded");
+        assert!(
+            !after_recurrence.was_resolved,
+            "it fired again, so calling it resolved is a false claim"
+        );
+        assert_eq!(after_recurrence.occurrence_count, 2);
     }
 
     /// #438: the column declared a contract for four releases and nothing read
