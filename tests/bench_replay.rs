@@ -46,7 +46,7 @@ const MIN_REPEAT_LINE: usize = 12;
 /// `Origin` is private, so this is a copy, and a copy that drifts would make the
 /// attribution below quietly wrong. `session_marker_len_matches_the_ledger`
 /// re-derives it from the ledger's own output and fails if the two part ways.
-const SESSION_MARKER_LEN: u64 = 65;
+const SESSION_MARKER_LEN: u64 = 62;
 
 /// A trace, with the two identities repetition is scoped by.
 struct Trace {

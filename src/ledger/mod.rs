@@ -74,12 +74,10 @@ impl Origin {
     fn marker(self, lines: usize, handle: &str) -> String {
         match self {
             Self::Session => {
-                format!("[OMNI: {lines} lines already shown, omni_retrieve(\"{handle}\")]")
+                format!("[OMNI: {lines} lines already shown, omni retrieve {handle}]")
             }
             Self::Project => {
-                format!(
-                    "[OMNI: {lines} lines from an earlier session, omni_retrieve(\"{handle}\")]"
-                )
+                format!("[OMNI: {lines} lines from an earlier session, omni retrieve {handle}]")
             }
         }
     }
@@ -346,8 +344,8 @@ mod tests {
         let second = ledger.project(&text).expect("projectable");
 
         let handle = second
-            .split_once("omni_retrieve(\"")
-            .and_then(|(_, rest)| rest.split_once('"'))
+            .split_once("omni retrieve ")
+            .and_then(|(_, rest)| rest.split_once(']'))
             .map(|(h, _)| h.to_string())
             .expect("a handle was offered");
         assert_eq!(store.retrieve_rewind(&handle), Some(text.clone()));

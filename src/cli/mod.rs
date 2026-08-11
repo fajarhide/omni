@@ -11,6 +11,7 @@ pub mod patterns;
 pub mod query;
 pub mod remember;
 pub mod reset;
+pub mod retrieve;
 pub mod rewrite;
 pub mod session;
 pub mod stats;

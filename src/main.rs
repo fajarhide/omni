@@ -101,6 +101,12 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
+    /// Print the content a marker archived
+    #[command(trailing_var_arg = true, disable_help_flag = true)]
+    Retrieve {
+        #[arg(allow_hyphen_values = true, num_args = 0..)]
+        extra: Vec<String>,
+    },
     /// A local dashboard over the numbers omni stats prints
     #[command(trailing_var_arg = true, disable_help_flag = true)]
     Dashboard {
@@ -223,6 +229,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
         "SEE WHAT IT SAVED",
         "stats",
         "How many tokens OMNI cut, and from which commands",
+    ),
+    (
+        "SEE WHAT IT SAVED",
+        "retrieve",
+        "Print the content a marker archived, by its handle",
     ),
     (
         "SEE WHAT IT SAVED",
@@ -595,6 +606,18 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
+                Some(OmniCommand::Retrieve { .. }) => match Store::open() {
+                    Ok(store) => {
+                        if let Err(e) = cli::retrieve::run(&args, &store) {
+                            eprintln!("[omni] {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[omni] DB error: {}", e);
+                        std::process::exit(1);
+                    }
+                },
                 Some(OmniCommand::Dashboard { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::dashboard::run(&args, &store) {
@@ -715,6 +738,18 @@ fn main() {
                             }
                             Err(e) => {
                                 eprintln!("[omni] Cannot open database for query: {}", e);
+                                std::process::exit(1);
+                            }
+                        },
+                        "retrieve" => match Store::open() {
+                            Ok(store) => {
+                                if let Err(e) = cli::retrieve::run(&args, &store) {
+                                    eprintln!("[omni] {}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[omni] DB error: {}", e);
                                 std::process::exit(1);
                             }
                         },

@@ -187,7 +187,7 @@ fn rewind_marker(
     // never written (#388).
     match store.and_then(|s| s.store_rewind(content)) {
         Some(hash) => (
-            format!("\n[OMNI: {lost} omitted, omni_retrieve(\"{hash}\") for full output]\n"),
+            format!("\n[OMNI: {lost} omitted, omni retrieve {hash} for full output]\n"),
             hash,
         ),
         None => (
@@ -2081,14 +2081,14 @@ INFO:jean.server:startup complete in 4.2s
             "the recorded row must name the archive it belongs to"
         );
         assert!(
-            out.contains("omni_retrieve("),
+            out.contains("omni retrieve "),
             "the agent cannot call what it was not told: {out}"
         );
     }
 
     /// The bound is stated, not implied. Above the cap the content is not
     /// archived, and the reply has to say so rather than leaving the agent to
-    /// infer that `omni_retrieve` exists for it.
+    /// infer that a handle exists for it.
     ///
     /// The payload carries its text at `tool_response.content` on purpose. The
     /// host-cap gate reads `tool_response.stdout`, so a Bash-shaped response
