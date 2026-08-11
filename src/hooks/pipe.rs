@@ -127,12 +127,9 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
         output.flush()?;
         if let Some(s) = &store {
             s.record_passthrough(
-                &format!(
-                    "{} [{}]",
-                    command_to_use.unwrap_or(""),
-                    crate::pipeline::format::passthrough_reason(kind)
-                ),
+                command_to_use.unwrap_or(""),
                 input_text.len(),
+                &crate::pipeline::format::passthrough_reason(kind),
             );
         }
         return Ok(());

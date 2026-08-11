@@ -407,7 +407,8 @@ impl SqliteBackend {
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 command      TEXT NOT NULL,
                 bytes        INTEGER NOT NULL,
-                ts           INTEGER NOT NULL
+                ts           INTEGER NOT NULL,
+                reason       TEXT NOT NULL DEFAULT 'unrecorded'
             );
             CREATE INDEX IF NOT EXISTS idx_pt_ts ON passthrough_events(ts);
 
@@ -721,6 +722,13 @@ impl SqliteBackend {
             )?;
         }
 
+        // #441. Rows written before this column carry their reason concatenated
+        // onto `command`, so the default says exactly that rather than naming a
+        // reason nobody recorded.
+        let _ = conn.execute(
+            "ALTER TABLE passthrough_events ADD COLUMN reason TEXT NOT NULL DEFAULT 'unrecorded'",
+            [],
+        );
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN collapse_original INTEGER DEFAULT 0",
             [],
@@ -1055,21 +1063,47 @@ impl SqliteBackend {
         );
     }
 
-    /// Every passthrough gate tags its reason onto the end of `command`, because
-    /// `passthrough_events` has no reason column and this table is read by hand
-    /// to decide what to build next. An untagged row is ambiguous between a
-    /// signal file that stripped its whole input and a distiller too weak to
-    /// keep, and those two call for opposite work (#254).
-    pub fn record_passthrough(&self, command: &str, bytes: usize) {
+    /// Records that a payload was handed back untouched, and why.
+    ///
+    /// The reason used to be tagged onto the end of `command` because there was
+    /// no column for it (#254), which made the largest population in the corpus
+    /// readable only by string matching on the thing it was concatenated to.
+    /// `reason` is its own column now, so `GROUP BY reason` answers the question
+    /// the tagging was invented for (#441): "declined because the payload was
+    /// JSON" and "declined because no distiller could parse it" call for
+    /// opposite work, and the second is the only direct evidence that the
+    /// never-fabricate invariant is doing any.
+    pub fn record_passthrough(&self, command: &str, bytes: usize, reason: &str) {
         let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
         let now = chrono::Utc::now().timestamp();
         let _ = conn.execute(
-            "INSERT INTO passthrough_events (command, bytes, ts) VALUES (?1, ?2, ?3)",
-            params![command, bytes as i64, now],
+            "INSERT INTO passthrough_events (command, bytes, ts, reason) VALUES (?1, ?2, ?3, ?4)",
+            params![command, bytes as i64, now, reason],
         );
+    }
+
+    /// How many payloads each gate declined, newest window first.
+    ///
+    /// The point of the column: most calls are passthrough and correctly do
+    /// nothing, and until this existed that population was one bucket.
+    pub fn passthrough_reasons(&self, since: i64) -> Vec<(String, u64)> {
+        let Ok(conn) = self.pool.get() else {
+            return Vec::new();
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT reason, COUNT(*) FROM passthrough_events
+             WHERE ts >= ?1 GROUP BY reason ORDER BY 2 DESC",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![since], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
     }
 
     /// Newest first. Exists so the tag above can be asserted; nothing in the
@@ -2796,6 +2830,27 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #441. The largest population in the corpus was one undifferentiated
+    /// bucket, readable only by string matching on the command it had been
+    /// concatenated to.
+    #[test]
+    fn counts_passthroughs_by_the_gate_that_declined_them() {
+        let (store, _d) = get_temp_store();
+        store.record_passthrough("kubectl get pods -o json", 900, "structured json");
+        store.record_passthrough("gh api repos", 700, "structured json");
+        store.record_passthrough("cargo build", 500, "below guardrail");
+
+        let by_reason = store.passthrough_reasons(0);
+
+        assert_eq!(
+            by_reason,
+            vec![
+                ("structured json".to_string(), 2),
+                ("below guardrail".to_string(), 1)
+            ]
+        );
     }
 
     /// #440. The knob exists so a corpus can outlive the window while a figure

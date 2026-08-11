@@ -244,12 +244,9 @@ pub fn process_payload(
     if let Some(kind) = format::sniff(&normalized.content) {
         if let Some(ref s) = store {
             s.record_passthrough(
-                &format!(
-                    "{} [{}]",
-                    normalized.command,
-                    format::passthrough_reason(kind)
-                ),
+                &normalized.command,
                 normalized.content.len(),
+                &format::passthrough_reason(kind),
             );
         }
         return None;
@@ -280,8 +277,9 @@ pub fn process_payload(
     if normalized.agent_id == "claude_code" && host_capped_stdout {
         if let Some(ref s) = store {
             s.record_passthrough(
-                &format!("{} [host output cap]", normalized.command),
+                &normalized.command,
                 normalized.content.len(),
+                "host output cap",
             );
         }
         return None;
@@ -476,10 +474,7 @@ pub fn process_payload(
                 // hand the same payload to another distiller, `black` turned
                 // 200 all-stripped rows into the fabricated `Build: ok` (#224).
                 if let Some(ref s) = store {
-                    s.record_passthrough(
-                        &format!("{clean_command} [toml zero-state]"),
-                        content.len(),
-                    );
+                    s.record_passthrough(clean_command, content.len(), "toml zero-state");
                 }
                 return None;
             }
@@ -695,7 +690,7 @@ pub fn process_payload(
     if !redacted_here && final_out.len() >= content.len() * 9 / 10 {
         // Record passthrough metric regardless of size
         if let Some(ref s) = store {
-            s.record_passthrough(&format!("{clean_command} [below guardrail]"), content.len());
+            s.record_passthrough(clean_command, content.len(), "below guardrail");
         }
 
         // Take the route the banner names. Prefixing `Passthrough` onto
