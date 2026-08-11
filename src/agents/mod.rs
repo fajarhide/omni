@@ -1,37 +1,26 @@
 use colored::Colorize;
 
-pub mod antigravity;
 pub mod checker;
 pub mod claude;
 pub mod cline;
 pub mod codex;
-pub mod copilot;
 pub mod cursor;
 pub mod gemini;
 pub mod hermes;
+pub mod mcp_host;
 pub mod multiagent;
 pub mod openclaw;
-pub mod opencode;
 pub mod output;
 pub mod pi;
-pub mod roo_code;
-pub mod vscode;
-pub mod zed;
 
-pub use antigravity::AntigravityIntegration;
 pub use claude::ClaudeIntegration;
 pub use cline::ClineIntegration;
 pub use codex::CodexIntegration;
-pub use copilot::CopilotIntegration;
 pub use cursor::CursorIntegration;
 pub use gemini::GeminiIntegration;
 pub use hermes::HermesIntegration;
 pub use openclaw::OpenClawIntegration;
-pub use opencode::OpenCodeIntegration;
 pub use pi::PiIntegration;
-pub use roo_code::RooCodeIntegration;
-pub use vscode::VscodeIntegration;
-pub use zed::ZedIntegration;
 
 /// Reports the outcome of a `doctor --fix` repair attempt, honestly.
 ///
@@ -147,22 +136,26 @@ impl Tier {
 }
 
 pub fn all_integrations() -> Vec<Box<dyn AgentIntegration>> {
-    vec![
+    // The hosts that do more than write one JSON entry, then the six that do
+    // exactly that, from `mcp_host::HOSTS` (#443). Order is what `omni doctor`
+    // prints, so the ones with hooks come first.
+    let mut all: Vec<Box<dyn AgentIntegration>> = vec![
         Box::new(claude::ClaudeIntegration),
         Box::new(cursor::CursorIntegration),
-        Box::new(zed::ZedIntegration),
         Box::new(cline::ClineIntegration),
-        Box::new(roo_code::RooCodeIntegration),
-        Box::new(copilot::CopilotIntegration),
         Box::new(gemini::GeminiIntegration),
-        Box::new(opencode::OpenCodeIntegration),
         Box::new(codex::CodexIntegration),
         Box::new(openclaw::OpenClawIntegration),
-        Box::new(antigravity::AntigravityIntegration),
         Box::new(hermes::HermesIntegration),
         Box::new(pi::PiIntegration),
-        Box::new(vscode::VscodeIntegration),
-    ]
+    ];
+    all.extend(
+        mcp_host::HOSTS
+            .iter()
+            .map(|h| Box::new(h) as Box<dyn AgentIntegration>)
+            .collect::<Vec<_>>(),
+    );
+    all
 }
 
 #[cfg(test)]

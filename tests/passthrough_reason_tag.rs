@@ -1,8 +1,11 @@
-//! `passthrough_events` has no reason column, so every gate encodes its reason
-//! as a `[tag]` suffix on the command. Two of the four gates used to write the
-//! bare command, which made a signal file that stripped its whole input and a
-//! distiller too weak to keep indistinguishable in the table this project
-//! queries to decide what to build (#254).
+//! Every gate names itself in `passthrough_events.reason`.
+//!
+//! The reason used to be a `[tag]` suffix on the command because there was no
+//! column for it (#254), and two of the four gates wrote the bare command, which
+//! made a signal file that stripped its whole input and a distiller too weak to
+//! keep indistinguishable in the table this project queries to decide what to
+//! build. #441 gave it a column; these tests moved with it and assert the same
+//! property, that no recorded passthrough is ambiguous between the seven gates.
 
 use omni::hooks::post_tool::process_payload;
 use omni::store::sqlite::Store;
@@ -49,9 +52,9 @@ fn tags_the_gate_when_a_distiller_misses_the_guardrail() {
     let _ = process_payload(&payload, Some(store.clone()), None);
 
     // Assert
-    let rows = store.recent_passthroughs(8);
+    let rows = store.passthrough_reasons(0);
     assert!(
-        rows.iter().any(|r| r.contains("[below guardrail]")),
+        rows.iter().any(|(reason, _)| reason == "below guardrail"),
         "a weak distiller must name its gate, got: {rows:?}"
     );
 }
@@ -66,9 +69,9 @@ fn tags_the_gate_when_the_payload_is_structured() {
 
     let _ = process_payload(&payload, Some(store.clone()), None);
 
-    let rows = store.recent_passthroughs(8);
+    let rows = store.passthrough_reasons(0);
     assert!(
-        rows.iter().any(|r| r.contains("[structured:json]")),
+        rows.iter().any(|(reason, _)| reason == "structured:json"),
         "the format gate must name the format, got: {rows:?}"
     );
 }
@@ -89,12 +92,12 @@ fn every_recorded_passthrough_names_a_gate() {
         let _ = process_payload(&payload, Some(store.clone()), None);
     }
 
-    let rows = store.recent_passthroughs(16);
+    let rows = store.passthrough_reasons(0);
     assert!(!rows.is_empty(), "no passthrough was recorded at all");
-    for row in &rows {
+    for (reason, count) in &rows {
         assert!(
-            row.contains('[') && row.ends_with(']'),
-            "untagged passthrough row is ambiguous between gates: {row:?}"
+            !reason.is_empty() && reason != "unrecorded",
+            "a row with no gate named is ambiguous between all seven: {reason:?} x{count}"
         );
     }
 }
