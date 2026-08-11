@@ -124,7 +124,7 @@ bukan kalimat yang meminta Anda percaya.
 | **Tidak pernah mengarang hasil** | distiller yang tidak berhasil mem-parse sinyal apa pun mengembalikan output mentah, bukan string hijau `no errors` atau `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Kegagalan tidak pernah ditutupi** | perintah yang keluar dengan status bukan nol diteruskan apa adanya | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Data terstruktur tidak pernah disentuh** | JSON / YAML / NDJSON / CSV lewat byte demi byte | `pipeline::format` |
-| **Angkanya diukur, bukan diharapkan** | 7.095 trace nyata diputar ulang di biner rilis, dan 97,1% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
+| **Angkanya diukur, bukan diharapkan** | 6.656 trace nyata diputar ulang di biner rilis, dan 97,3% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
 
 Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **aslinya selalu bisa Anda pulihkan, dan ia tidak akan pernah membohongi agen Anda.**
 
@@ -132,14 +132,14 @@ Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **asliny
 
 ## Tolok Ukur
 
-Diukur pada biner rilis dengan memutar ulang **7.095 eksekusi perintah nyata**
+Diukur pada biner rilis dengan memutar ulang **6.656 eksekusi perintah nyata**
 sepanjang **3 sampai 10 Agustus 2026 UTC**, semuanya output yang sampai ke model.
 Jendela waktunya bagian dari angkanya: `execution_traces` dipangkas setelah tujuh
 hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 
-* Output build dan test: **87,8%**. Baca ulang berkas, kelas terbesar: **0,0%** dari
-  filter dan **24,7%** dari ledger, dan celah itulah alasan ledger ada.
-* **97,1% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
+* Output build dan test: **76,9%**. Baca ulang berkas, kelas terbesar: **0,0%** dari
+  filter dan **26,3%** dari ledger, dan celah itulah alasan ledger ada.
+* **97,3% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
   itulah yang memberi tahu Anda seberapa berarti sisanya. **Tidak ada panggilan yang
   justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
   menerbitkannya selama keduanya masih ada.

@@ -125,7 +125,7 @@ một câu xin bạn tin.
 | **Không bao giờ bịa kết quả** | bộ chưng cất không phân tích được tín hiệu nào sẽ trả về đầu ra thô, chứ không phải một dòng xanh `no errors` hay `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Thất bại không bao giờ bị che** | lệnh thoát với mã khác 0 được cho qua nguyên vẹn | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Dữ liệu có cấu trúc không bị chạm** | JSON / YAML / NDJSON / CSV đi qua từng byte một | `pipeline::format` |
-| **Số liệu là đo được, không phải kỳ vọng** | 7.095 trace thật phát lại trên bản binary phát hành, và 97,1% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
+| **Số liệu là đo được, không phải kỳ vọng** | 6.656 trace thật phát lại trên bản binary phát hành, và 97,3% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
 
 Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
 
@@ -133,14 +133,14 @@ một câu xin bạn tin.
 
 ## Đo đạc
 
-Đo trên bản binary phát hành bằng cách phát lại **7.095 lần thực thi lệnh thật**
+Đo trên bản binary phát hành bằng cách phát lại **6.656 lần thực thi lệnh thật**
 trong khoảng **3 đến 10 tháng 8 năm 2026 UTC**, tất cả đều là đầu ra tới được mô hình.
 Khoảng thời gian là một phần của con số: `execution_traces` bị cắt sau bảy ngày, nên
 một tập dữ liệu biến mất một tuần sau khi được đo.
 
-* Đầu ra build và test **87,8%**. Lớp lớn nhất là đọc lại tệp: bộ lọc lấy **0,0%**, ledger
-  lấy **24,7%**, và chính khoảng cách đó là lý do ledger tồn tại.
-* **97,1% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
+* Đầu ra build và test **76,9%**. Lớp lớn nhất là đọc lại tệp: bộ lọc lấy **0,0%**, ledger
+  lấy **26,3%**, và chính khoảng cách đó là lý do ledger tồn tại.
+* **97,3% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
   phần còn lại đáng giá bao nhiêu. **Không lệnh gọi nào làm đầu ra lớn hơn**
   trong lần đo này. Từng có 2 cho tới ([#398](https://github.com/fajarhide/omni/issues/398)), và chúng tôi đã công bố chúng suốt
   thời gian đó.

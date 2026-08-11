@@ -11,7 +11,7 @@ OMNI_BENCH_DB=~/.omni/omni.db \
   cargo test --release --test bench_replay -- --ignored --nocapture
 ```
 
-**Every figure in this file comes from one run**, the 7,221 trace replay dated below.
+**Every figure in this file comes from one run**, the 6,656 trace replay dated below.
 That is stricter than it sounds and it was not true before: the head-to-head and the
 headline once came from two replays a day apart, so the file published 15.7% and 16.1%
 without saying they were different measurements (#420). One run, or each figure names
@@ -21,7 +21,14 @@ its own.
 `execution_traces` is pruned to `TRACE_RETENTION_DAYS`, seven days, so a corpus is
 gone a week after it is measured. The 9,965-trace run that earlier releases quoted
 cannot be re-derived by anyone, including us. Numbers that outlive their corpus are
-the thing this document exists to stop.
+the thing this document exists to stop. `OMNI_TRACE_RETENTION_DAYS` holds the window
+open while a measurement is in flight (#440).
+
+**These figures were re-derived on 0.7.0 and the previous ones are gone rather than
+kept for comparison.** 0.7.0 changed the rule that decides whether the ledger folds a
+run (#450), so every number measured before it describes a pipeline that no longer
+exists. Quoting both would invite a reader to treat the difference as a trend when it
+is two different programs.
 
 ## Method
 
@@ -39,26 +46,32 @@ the thing this document exists to stop.
 
 ## The headline
 
-Replayed 2026-08-10 over **7,221 traces covering 2026-08-03 08:45 to 08-10 12:51 UTC**, every one
-of them `agent_id='claude_code'`.
+Replayed 2026-08-11 on 0.7.0 over **6,656 traces covering 2026-08-04 02:56 to 08-11 03:34 UTC**,
+every one of them `agent_id='claude_code'`.
 
-* **16.1% fewer bytes** across the whole mix (7.15 MB → 6.00 MB), of which the
-  filters are 5.2% and the session ledger is the rest.
-* **5.0% fewer tokens** from the filters alone (2,006,138 → 1,906,541 by
-  `cl100k_base`). Terminal output measures **3.562 bytes per token** here, which is
-  what `util::token_estimate`'s shipped 3.6 was calibrated against.
-* **97.1% of calls saved nothing at all** and handed the output straight back. Every
-  byte of the saving comes from the other 2.9%.
-* **Not one call of 7,221 came back larger.** Two did until #398, which was a line
+* **15.4% fewer bytes** across the whole mix (6.47 MB to 5.47 MB), of which the
+  filters are 2.7% and the ledger is the rest.
+* **2.8% fewer tokens** from the filters alone (1,800,715 to 1,750,287 by
+  `cl100k_base`). This corpus measures **3.592 bytes per token**, which is what
+  `util::token_estimate`'s shipped 3.6 was calibrated against.
+* **97.3% of calls saved nothing at all** and handed the output straight back. Every
+  byte of the saving comes from the other 2.7%, which is 183 calls.
+* **Not one call of 6,656 came back larger.** Two did until #398, which was a line
   ending the stream writer invented; the count was published while it stood rather
   than rounded away.
 
+The filter column is lower than earlier releases published and that is not a
+regression: 0.7.0 deleted the user and project filter tiers (#449), so the set that
+runs here is the embedded set alone, which is also the set every installation now
+gets. The old figure included whatever filters the measuring machine happened to
+carry.
+
 Two numbers a byte figure cannot express, both new in #392:
 
-* **25.0% of raw bytes are lines the agent had already been shown**, and **22.6%
+* **22.9% of raw bytes are lines the agent had already been shown**, and **22.4%
   still are after every distiller has run.** Filtering and repetition are orthogonal,
   which is the entire argument for the ledger.
-* Of that repetition, 18.7% is within one session and 3.9% is from an earlier
+* Of that repetition, 19.0% is within one session and 3.9% is from an earlier
   session of the same project, which is the share the project scope reaches.
 
 The byte-sink ranking and the token-sink ranking **disagree**: `grep` and `ls` move
@@ -74,17 +87,25 @@ CI never needs a competitor installed.
 
 | | bytes | saved |
 |---|---|---|
-| omni, filters only | 7,146,553 to 6,778,460 | **5.2%** |
-| rtk `pipe` | 7,146,553 to 6,564,350 | **8.1%** |
-| omni, with the ledger | 7,146,553 to 5,995,835 | **16.1%** |
+| omni, filters only | 6,469,047 to 6,291,784 | **2.7%** |
+| rtk `pipe` | 6,469,047 to 6,067,012 | **6.2%** |
+| omni, with the ledger | 6,469,047 to 5,470,574 | **15.4%** |
+| rtk `pipe` + omni's ledger | 6,469,047 to 5,298,714 | **18.1%** |
 
-**rtk's filters are better than ours**, by 3 points on the same bytes, and it reached
-that on 932 of 7,221 traces. That is not a rounding difference and it is not going to
-be argued away here: on the commands both tools claim, theirs cut more.
+**rtk's filters are better than ours**, by 3.5 points on the same bytes, reached on
+872 of 6,656 traces. That is not a rounding difference and it is not going to be
+argued away here: on the commands both tools claim, theirs cut more. It is also not
+bought by truncation, which was the first explanation tried and dropped: rtk marked a
+cut in only 33 of the 872 outputs it claimed, so its patterns are simply better.
 
-**The ledger is the difference**, roughly double rtk's figure, and it is the thing
-neither tool's filters can do: it removes bytes because the agent has already been
-shown them, not because a pattern says they are noise.
+**The ledger is the difference**, and the last row is the honest way to say why. Our
+ledger adds 12.7 points on top of our filters and 11.9 on top of theirs, so it is
+orthogonal to whose patterns run: it removes bytes because the agent has already been
+shown them, not because a pattern says they are noise. That row also says plainly
+that a reader who wants the largest number would run their filters with our ledger.
+
+What neither column measures is whether the removed lines were signal. Byte counts
+cannot answer that, and no arrangement of them will.
 
 Two things that make this comparison tilt **towards rtk**, stated because a benchmark
 that only lists its own handicaps is an advertisement. rtk is handed the exact filter
@@ -111,13 +132,13 @@ top of them:
 
 | Class | Calls | Input | Filters | + ledger |
 |---|---|---|---|---|
-| other | 4,608 | 3.28 MB | 0.7% | **5.7%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 723 | 1.63 MB | 0.0% | **24.7%** |
-| search (`grep`, `rg`, `find`) | 863 | 1.07 MB | 4.6% | **12.0%** |
-| `git`, `gh` | 690 | 679 KB | 4.6% | **22.2%** |
-| build and test | 81 | 292 KB | 87.8% | **92.3%** |
-| infra (`kubectl`, `az`, `docker`) | 256 | 193 KB | 4.3% | **5.9%** |
-| **aggregate** | **7,221** | **7.15 MB** | **5.2%** | **16.1%** |
+| other | 4,145 | 2.95 MB | 0.7% | **7.1%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **26.3%** |
+| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.5%** |
+| `git`, `gh` | 661 | 609 KB | 4.4% | **22.9%** |
+| build and test | 69 | 94 KB | 76.9% | **78.3%** |
+| infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
+| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **15.4%** |
 
 Two things this table says that the old one could not.
 
