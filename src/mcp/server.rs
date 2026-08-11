@@ -1499,10 +1499,7 @@ impl OmniServer {
 }
 
 fn compute_project_hash_str(project_path: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(project_path.as_bytes());
-    hex::encode(&hasher.finalize()[..8])
+    crate::agents::multiagent::project_hash(project_path)
 }
 pub async fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Result<()> {
     let server = OmniServer { store, session };

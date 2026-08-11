@@ -1,7 +1,6 @@
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
 /// Claude Code sends snake_case and names the field `reason`.
@@ -134,10 +133,14 @@ fn export_session_csv(state: &SessionState, project_path: &str) {
 }
 
 fn compute_project_hash(project_path: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(project_path.as_bytes());
-    let result = hasher.finalize();
-    hex::encode(&result[..8])
+    crate::agents::multiagent::project_hash(project_path)
+}
+
+/// Lets the SSOT test in `agents::multiagent` assert that this site really does
+/// delegate, rather than the assertion being a copy of the same call.
+#[cfg(test)]
+pub fn compute_project_hash_for_test(project_path: &str) -> String {
+    compute_project_hash(project_path)
 }
 
 #[cfg(test)]

@@ -14,7 +14,17 @@ use crate::store::sqlite::Store;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
-/// Compute a stable 16-char hash for a project path
+/// The 16 character address of a project, and the only implementation of it.
+///
+/// There were four (#437). Three hashed the path as given and this one trimmed
+/// the trailing slash first, so a project reached as `/foo/bar/` on one path and
+/// `/foo/bar` on another split its knowledge, engrams and patterns across two
+/// addresses and `omni_recall` found half of them. The trimming version is the
+/// survivor because a trailing slash names the same directory and a key that
+/// disagrees with that is wrong, not merely different.
+///
+/// CLAUDE.md calls this a single source of truth; every other caller delegates
+/// here rather than re-deriving four bytes of hex.
 pub fn project_hash(path: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(path.trim_end_matches('/').as_bytes());
@@ -219,6 +229,24 @@ pub fn auto_learn_project_patterns(
 
 #[cfg(test)]
 mod tests {
+    /// #437: four implementations, and the three that did not trim split a
+    /// project's memory in two the moment a path arrived with a trailing slash.
+    #[test]
+    fn addresses_a_path_the_same_with_or_without_a_trailing_slash() {
+        assert_eq!(project_hash("/foo/bar"), project_hash("/foo/bar/"));
+        assert_eq!(project_hash("/foo/bar"), project_hash("/foo/bar///"));
+        assert_ne!(project_hash("/foo/bar"), project_hash("/foo/baz"));
+    }
+
+    /// Every other site delegates, so this is the check that they still do.
+    #[test]
+    fn every_caller_agrees_on_one_address() {
+        assert_eq!(
+            project_hash("/repo/"),
+            crate::hooks::session_end::compute_project_hash_for_test("/repo/")
+        );
+    }
+
     use super::*;
     use tempfile::tempdir;
 
