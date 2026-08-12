@@ -365,6 +365,38 @@ fn trim_enormous(content: &str) -> std::borrow::Cow<'_, str> {
 /// because returning before the Bash rewind block means each one owes the same
 /// guarantee itself: no bytes dropped without a marker and a recoverable copy
 /// (#271 closed that for Bash, #273 found it still open here).
+/// The ledger, for the arms that return before the Bash pipeline reaches it.
+///
+/// `Read`, `Grep` and `WebFetch` each `return` from `distil_tool_reply`, so the
+/// cross-turn fold at the end of the Bash path never ran for them and a workload
+/// that is not shell-heavy got no cross-turn folding at all (#483). File reads are
+/// the largest class in the corpus and the one the ledger is worth most on, which
+/// is the awkward part: the mechanism was reaching everything except its best
+/// case.
+///
+/// Same two gates and the same order as the Bash path: structured payloads are
+/// never projected, no host session id means no ledger, and it runs **after**
+/// archiving so a folded run is already recoverable when its marker is written.
+fn fold_cross_turn(
+    store: Option<&Arc<Store>>,
+    normalized: &crate::hooks::normalize::NormalizedInput,
+    text: String,
+) -> String {
+    let (Some(s), Some(scope)) = (store, normalized.host_session_id.as_deref()) else {
+        return text;
+    };
+    if crate::pipeline::format::sniff(&text).is_some() {
+        return text;
+    }
+    let project = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    crate::ledger::Ledger::new(s, scope)
+        .with_project(&project)
+        .project(&text)
+        .unwrap_or(text)
+}
+
 fn distil_tool_reply(
     normalized: &crate::hooks::normalize::NormalizedInput,
     content: &str,
@@ -409,6 +441,7 @@ fn distil_tool_reply(
                     count_dependents,
                 )
                 .and_then(|d| archive_tool_reply(store, content, d))
+                .map(|d| fold_cross_turn(store, normalized, d))
                 .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
             );
         }
@@ -419,6 +452,7 @@ fn distil_tool_reply(
             return Some(
                 distill_grep(content)
                     .and_then(|d| archive_tool_reply(store, content, d))
+                    .map(|d| fold_cross_turn(store, normalized, d))
                     .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
             );
         }
@@ -429,6 +463,7 @@ fn distil_tool_reply(
             return Some(
                 process_web_content(content)
                     .and_then(|d| archive_tool_reply(store, content, d))
+                    .map(|d| fold_cross_turn(store, normalized, d))
                     .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
             );
         }
@@ -2663,6 +2698,44 @@ INFO:jean.server:startup complete in 4.2s
         assert!(
             res.contains("pub fn function_0"),
             "Must contain pub fn signatures"
+        );
+    }
+
+    /// The ledger has to reach every tool, not only `Bash` (#483).
+    ///
+    /// `Read`, `Grep` and `WebFetch` each return from `distil_tool_reply` before
+    /// the Bash pipeline's fold, so a workload that is not shell-heavy got no
+    /// cross-turn folding at all. File reads are the largest class in the corpus
+    /// and the one the ledger is worth most on, so the mechanism was reaching
+    /// everything except its best case.
+    #[test]
+    fn folds_a_repeated_read_across_turns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // Distinct lines, long enough to clear the ledger's own floors, and a
+        // payload big enough to reach the readfile distiller at all.
+        let body: String = (0..200)
+            .map(|i| format!("2026-08-12T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+
+        let payload = |n: &str| {
+            json!({
+                "session_id": "host-483",
+                "tool_name": n,
+                "tool_input": {"path": "notes.txt"},
+                "tool_response": {"content": body},
+            })
+            .to_string()
+        };
+
+        // First sighting is delivered; the second is the one that may fold.
+        let _ = process_payload(&payload("Read"), Some(store.clone()), None);
+        let second = process_payload(&payload("Read"), Some(store.clone()), None);
+
+        let out = second.unwrap_or_default();
+        assert!(
+            out.contains("lines already shown") || out.contains("from an earlier session"),
+            "a repeated Read never reached the ledger: {out}"
         );
     }
 
