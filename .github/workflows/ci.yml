@@ -66,3 +66,29 @@ jobs:
 
       - name: Run tests
         run: cargo test --all
+
+  plugin-pi:
+    name: typecheck (plugins/pi)
+    # Not `needs: ci`, for the same reason the matrix is not: it shares nothing
+    # with the Rust jobs and serialising it would only add its wall clock to
+    # theirs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/pi/package-lock.json
+
+      # `npm ci` rather than `npm install`, so a dependency bump is typechecked
+      # against the lockfile the PR proposes rather than against whatever
+      # resolves today.
+      - name: Install
+        working-directory: plugins/pi
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: plugins/pi
+        run: npm run typecheck

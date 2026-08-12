@@ -10,6 +10,9 @@
     "index.ts",
     "README.md"
   ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
