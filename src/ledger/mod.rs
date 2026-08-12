@@ -220,29 +220,60 @@ impl<'a> Ledger<'a> {
         // in front of the agent already. Recording after keeps the projection a
         // function of what *earlier commands* showed, which is what makes it
         // deterministic for a caller replaying the same session.
-        let projected = self.substitute(&lines, &hashes, &origin_of);
-        self.store.ledger_record(&self.scope, &hashes);
+        let projected = self
+            .substitute(&lines, &hashes, &origin_of)
+            .filter(|(view, _)| view.len() < text.len());
+
+        // Record what the agent was handed, which is not always what it was
+        // given (#465). A run replaced by a marker never reached the context, so
+        // recording it here would let the *next* occurrence in this session read
+        // as `Origin::Session` and say "already shown" about bytes that were
+        // never shown. It also halves the bar: session origin charges
+        // `MIN_LEDGER_RUN_GAIN` where project origin charges three times that,
+        // so the false claim makes the ledger more willing to fold, not less.
+        //
+        // When the projection is discarded, by `substitute` finding nothing or by
+        // the gain filter above, the caller emits `text` verbatim and every line
+        // was delivered. That is the empty-set case and needs no special arm.
+        let delivered: Vec<String> = match &projected {
+            Some((_, folded)) => hashes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !folded.contains(i))
+                .map(|(_, h)| h.clone())
+                .collect(),
+            None => hashes.clone(),
+        };
+        self.store.ledger_record(&self.scope, &delivered);
         // The project history is written too, so a later session can draw on this
-        // one. Same rows, a second scope key.
+        // one. Same rows, a second scope key. A folded line is already in both
+        // scopes, since that is what made it foldable, so filtering it out of
+        // this write changes nothing and keeps the two calls saying one thing.
         if let Some(p) = &self.project {
-            self.store.ledger_record(p, &hashes);
+            self.store.ledger_record(p, &delivered);
         }
 
-        projected.filter(|p| p.len() < text.len())
+        projected.map(|(view, _)| view)
     }
 
+    /// The view, and the indices of the lines it replaced with a marker.
+    ///
+    /// The caller needs the second half to record only what it delivered (#465);
+    /// returning it beats recomputing which runs folded, which would mean
+    /// re-deciding profitability and could disagree with what was emitted.
     fn substitute(
         &self,
         lines: &[&str],
         hashes: &[String],
         origin_of: &dyn Fn(&String) -> Option<Origin>,
-    ) -> Option<String> {
+    ) -> Option<(String, HashSet<usize>)> {
         let runs = group_runs(hashes, origin_of);
         if !runs.iter().any(|r| r.seen.is_some()) {
             return None;
         }
 
         let mut out = String::with_capacity(lines.iter().map(|l| l.len()).sum());
+        let mut folded: HashSet<usize> = HashSet::new();
         let mut replaced_any = false;
         for run in runs {
             let body = lines[run.start..run.end].concat();
@@ -272,12 +303,13 @@ impl<'a> Ledger<'a> {
                     if body.ends_with('\n') {
                         out.push('\n');
                     }
+                    folded.extend(run.start..run.end);
                     replaced_any = true;
                 }
                 None => out.push_str(&body),
             }
         }
-        replaced_any.then_some(out)
+        replaced_any.then_some((out, folded))
     }
 }
 
@@ -429,6 +461,47 @@ mod tests {
         assert!(
             !view.contains("already shown"),
             "a project repeat was reported as a session repeat: {view}"
+        );
+    }
+
+    /// A marker is not a sighting (#465).
+    ///
+    /// The session above was handed a pointer, never the bytes behind it, so the
+    /// next occurrence in that same session is still a project repeat. Recording
+    /// the folded run as shown turned the second marker into `already shown`,
+    /// which is false, and dropped the bar from `MIN_LEDGER_RUN_GAIN * 3` to
+    /// `MIN_LEDGER_RUN_GAIN`, so the false claim also made the ledger three times
+    /// more willing to fold.
+    #[test]
+    fn a_folded_run_is_not_recorded_as_shown() {
+        let (store, _d) = temp_store();
+        let text: String = (0..200)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .project(&text);
+
+        // s2 sees it for the first time and is handed a marker, not the bytes.
+        let first = Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .project(&text)
+            .expect("a project repeat above the floor is projectable");
+        assert!(first.contains("from an earlier session"), "{first}");
+
+        // Same session, same payload. It has still never received those lines.
+        let second = Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .project(&text)
+            .expect("still projectable");
+
+        assert!(
+            second.contains("from an earlier session"),
+            "a run this session only ever saw as a marker was reported as shown: {second}"
+        );
+        assert!(
+            !second.contains("already shown"),
+            "the ledger claimed a sighting that was a marker: {second}"
         );
     }
 
