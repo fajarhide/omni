@@ -168,7 +168,7 @@ impl<'a> Ledger<'a> {
         // rebuilding with `\n` would rewrite every CRLF payload on Windows into
         // LF, silently, on content the ledger did not replace. Keeping the
         // terminator on the slice makes the untouched runs byte-exact by
-        // construction rather than by promise (CLAUDE.md cross-platform rule 2).
+        // construction rather than by promise (`CONTRIBUTING.md` cross-platform rule 2).
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
         let hashes: Vec<String> = lines.iter().map(|l| line_key(l)).collect();
 

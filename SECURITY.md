@@ -118,7 +118,7 @@ All commands that are wrapped by OMNI (e.g., `omni exec <cmd>`) receive a **sani
 - **Git injection**: `GIT_ASKPASS`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`
 
 > [!NOTE]
-> This is transparent — you don't need to configure anything. OMNI automatically sanitizes the environment to protect command executions.
+> This is transparent. You don't need to configure anything: OMNI sanitizes the environment automatically to protect command executions.
 
 ---
 

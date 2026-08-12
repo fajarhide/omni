@@ -21,7 +21,7 @@ pub enum ContentHint {
 /// And it dominated the hook. Measured by removal on the release binary, same
 /// payload, 10 runs each: the post-hook's median wall clock went from **53.8 ms
 /// to 19.5 ms**. Loading that vocabulary was **34.3 ms, 64% of every hooked
-/// command**, spent on a reporting column. `AGENTS.md` budgets the whole hook
+/// command**, spent on a reporting column. `CONTRIBUTING.md` budgets the whole hook
 /// at 10 ms.
 ///
 /// What it bought was 4.9%. Calibrated against `cl100k_base` over 4,000 real

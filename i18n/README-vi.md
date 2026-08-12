@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 
@@ -150,10 +150,12 @@ một tập dữ liệu biến mất một tuần sau khi được đo.
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Toàn bộ tập dữ liệu, phân tích theo lớp lệnh, fixture và bảng độ trễ:
-**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**. Tái lập bằng
-`cargo test --release --test bench_replay -- --ignored`.
+Bạn có thể tự tái lập những con số này trên máy mình:
 
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
 ## Bắt đầu nhanh & Cài đặt
 
 OMNI cực kỳ dễ thiết lập và tích hợp nguyên bản vào terminal của bạn.
@@ -236,9 +238,9 @@ tiện sao chép.
 
 ## Tìm hiểu thêm
 
-* [Cách hoạt động và cái giá của nó](../docs/ARCHITECTURE.md): pipeline, RewindStore, Memory OS
-* [Đo đạc đầy đủ](../docs/BENCHMARKS.md): tập dữ liệu, theo lớp lệnh, fixture, độ trễ
-* [Đóng góp](../CONTRIBUTING.md): chạy được `make ci` là xong
+* [Đóng góp](../CONTRIBUTING.md): pipeline, chuẩn code, các cổng CI, và cách thêm một distiller. Một tài liệu, không phải bốn
+* [CHANGELOG.md](../CHANGELOG.md): những gì đã phát hành, kèm bằng chứng cho từng mục
+* [SECURITY.md](../SECURITY.md): cách báo cáo lỗ hổng
 
 ---
 
@@ -251,7 +253,7 @@ brew install fajarhide/tap/omni && omni init
 Đây là một dự án làm vì đam mê, xây cho kỷ nguyên AI dạng agent. Dù bạn đến để tiết kiệm tiền token, thử các mô hình miễn phí, hay góp sức dựng nên bộ đồ nghề agent tối thượng, đóng góp luôn được chào đón!
 
 - **Phát triển**: muốn build từ mã nguồn? Chạy `make ci` và `cargo build`. Đọc [CONTRIBUTING.md](../CONTRIBUTING.md) để biết chi tiết.
-- **Giấy phép**: [MIT License](../LICENSE)
+- **Giấy phép**: [Apache License 2.0](../LICENSE)
 
 <!-- Star History -->
 <p align="center">

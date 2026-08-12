@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Guardrail: only emit distilled output if it's at least this much smaller than
-/// input. Shared with `hooks::post_tool` via `guard::limits` (CLAUDE.md SSOT).
+/// input. Shared with `hooks::post_tool` via `guard::limits` (`CONTRIBUTING.md` SSOT).
 use crate::guard::limits::{MAX_OUTPUT_BYTES, MIN_REDUCTION_PCT};
 
 use crate::pipeline::{Route, SessionState, collapse, scorer, toml_filter};

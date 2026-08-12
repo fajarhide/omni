@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Relicensed from MIT to Apache 2.0 (#467)**: `LICENSE` is now the verbatim Apache License 2.0, with a `NOTICE` file carrying the copyright, since section 4(d) only has effect when one exists. `Cargo.toml`, the README badge and licence line, and all six translations move together, because a repository stating two licences at once is worse than either. Apache 2.0 adds an explicit patent grant from contributors and requires a redistributor to state what they changed. It does **not** restrict copying: it is permissive in the same way MIT is, and a fork may still close its source. That is recorded here so nobody later relies on a protection it does not provide. Releases up to and including 0.7.2 were published under MIT and that grant is irrevocable for the versions it covered.
+
+- **Contributor documentation is one file instead of three (#466)**: `CLAUDE.md` (387 lines) and `AGENTS.md` (45) were addressed to AI assistants while `CONTRIBUTING.md` was 51 lines of pointers, so a human contributor read the thin one and never reached the standards CI enforces. All three are now `CONTRIBUTING.md`, and the repository ships `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md` and `SECURITY.md`.
+
+  Four claims were wrong and are gone with the files that carried them: `docs/HERMES_OMNI_INTEGRATION.md` told readers to run `omni doctor --fix` to trust a project `.omni/filters/` tier that #447 and #449 deleted, `docs/ROADMAP.md` offered "a TOML filter for an internal tool" as a contribution path that no longer exists on disk, and both it and `docs/ARCHITECTURE.md` linked to a `DEVELOPMENT.md` that never existed. The "27 OMNI tools" figure in the Hermes guide was wrong too, by one: that count came from grepping `"omni_[a-z_]+"` in `src/mcp/server.rs`, and `omni_auto_noise` at line 1036 is a filter name passed to `generate_toml`, not a tool. The server's own `tools/list` answers **26**, and `tools/call` on the extra name returns `-32602 tool not found`.
+
+  `README.md` and the six translations linked to `docs/ARCHITECTURE.md` and `docs/BENCHMARKS.md` in 21 places, and those links were what backed the published savings figures. The per-class table, the rtk head to head including the row we lose, and the reproduce command now live in `README.md` itself, so no public claim is left without a way to check it. Seventeen code comments citing `CLAUDE.md`, `AGENTS.md` or `ROADMAP.md` as the authority for a rule were repointed. The `AGENTS.md` and `CLAUDE.md` entries in `guard::config::pinned_files` and `hermes_default_config` are untouched: they name files in a *user's* project, not this one.
+
 ## [0.7.2] - 2026-08-11
 
 One bug, reported against 0.7.1 hours after it shipped, and the class of bug it belongs to.

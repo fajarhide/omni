@@ -27,7 +27,7 @@ pub fn distill_grep(content: &str) -> Option<String> {
     // Count descending, then path, so equal counts do not fall back to `HashMap`
     // iteration order. Now that the tail is listed too, an unstable order changed
     // both the listing and which files were quoted, for identical input: it
-    // breaks the determinism CLAUDE.md requires and defeats prompt-cache reuse.
+    // breaks the determinism `CONTRIBUTING.md` requires and defeats prompt-cache reuse.
     files.sort_by(|a, b| {
         file_counts
             .get(b)

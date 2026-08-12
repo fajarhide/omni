@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 </br></br>
@@ -170,10 +170,12 @@ brew install fajarhide/tap/omni && omni init
 
 <div dir="rtl">
 
-المجموعة كاملة، والتفصيل حسب الفئة، والعيّنات وجداول زمن الاستجابة في
-**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**. وأعد إنتاجها بـ
-`cargo test --release --test bench_replay -- --ignored`.
+يمكنك إعادة إنتاج هذه الأرقام على جهازك:
 
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
 ## البدء السريع والتثبيت
 
 <div dir="rtl">
@@ -277,9 +279,9 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 <div dir="rtl">
 
-* [كيف يعمل، وكم يكلّف](../docs/ARCHITECTURE.md): خط المعالجة، وRewindStore، وMemory OS
-* [القياسات كاملة](../docs/BENCHMARKS.md): المجموعة، والتفصيل حسب الفئة، والعيّنات، وزمن الاستجابة
-* [المساهمة](../CONTRIBUTING.md): اجعل `make ci` يمرّ وأنت معنا
+* [المساهمة](../CONTRIBUTING.md): خط المعالجة، ومعايير الكود، وبوابات CI، وكيفية إضافة مُقطِّر. وثيقة واحدة بدل أربع
+* [CHANGELOG.md](../CHANGELOG.md): ما الذي صدر، مع الدليل خلف كل بند
+* [SECURITY.md](../SECURITY.md): كيفية الإبلاغ عن ثغرة
 
 </div>
 
@@ -296,7 +298,7 @@ brew install fajarhide/tap/omni && omni init
 هذا مشروع شغف بُني لعصر الذكاء الاصطناعي الوكيل. سواء جئت لتوفير تكاليف التوكنز، أو لتجريب النماذج المجانية، أو للمساعدة في بناء حزمة أدوات الوكلاء المثلى، فالمساهمات مرحّب بها دائمًا!
 
 - **التطوير**: تريد البناء من المصدر؟ شغّل `make ci` و`cargo build`. اقرأ [CONTRIBUTING.md](../CONTRIBUTING.md) للتفاصيل.
-- **الترخيص**: [MIT License](../LICENSE)
+- **الترخيص**: [Apache License 2.0](../LICENSE)
 
 </div>
 

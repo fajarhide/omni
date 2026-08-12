@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 /// survivor because a trailing slash names the same directory and a key that
 /// disagrees with that is wrong, not merely different.
 ///
-/// CLAUDE.md calls this a single source of truth; every other caller delegates
+/// `CONTRIBUTING.md` calls this a single source of truth; every other caller delegates
 /// here rather than re-deriving four bytes of hex.
 pub fn project_hash(path: &str) -> String {
     let mut hasher = Sha256::new();

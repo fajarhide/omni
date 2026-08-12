@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 /// Compiled once. It used to be built inside `is_context`, which `classify_block`
 /// calls for every line, so a single 64-character line cost 660 µs and an 80-line
 /// payload spent 52 ms deciding what it was. That is five times the whole hook
-/// budget in `AGENTS.md`, spent compiling the same pattern eighty times (#283).
+/// budget in `CONTRIBUTING.md`, spent compiling the same pattern eighty times (#283).
 /// A test tally in the shape reporters print outside the cargo world:
 /// ` 7 pass`, `1 fail`, `12 skipped`. Anchored to a count so an ordinary sentence
 /// containing the word cannot match.
@@ -510,7 +510,7 @@ mod tests {
     /// #283. `is_context` built its path regex with `Regex::new` on every call,
     /// and `classify_block` calls it once per line, so a single 64-character
     /// line cost 660 microseconds and an 80-line payload spent 52 ms being
-    /// classified. `AGENTS.md` budgets the whole hook at 10 ms.
+    /// classified. `CONTRIBUTING.md` budgets the whole hook at 10 ms.
     ///
     /// The bound is deliberately loose. Fixed, a thousand calls take under a
     /// millisecond in release and a few milliseconds in a debug test build; the

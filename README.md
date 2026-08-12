@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 
@@ -84,7 +84,7 @@ than a sentence asking you to trust it.
 
 | Guarantee | How | Proof |
 |---|---|---|
-| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite RewindStore; the marker carries a handle, and `omni retrieve <handle>` prints it on any host, with the `omni_retrieve` MCP tool where MCP is wired | [Architecture](docs/ARCHITECTURE.md) |
+| **Get the original back, byte-for-byte** | everything cut is archived in a local SQLite RewindStore; the marker carries a handle, and `omni retrieve <handle>` prints it on any host, with the `omni_retrieve` MCP tool where MCP is wired | [#388](https://github.com/fajarhide/omni/issues/388) |
 | **Never fabricates a result** | a distiller that parsed no signal returns the raw output, never a green `no errors` / `passed` string | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Failures are never masked** | a command that exits non-zero passes through verbatim | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Structured data is never touched** | JSON / YAML / NDJSON / CSV pass through byte-for-byte | `pipeline::format` |
@@ -170,9 +170,33 @@ command executions that reached a model:
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
 
-Full corpus, per-class breakdown, fixtures and latency tables:
-**[docs/BENCHMARKS.md](docs/BENCHMARKS.md)**. Reproduce them with
-`cargo test --release --test bench_replay -- --ignored`.
+Per class, over the same 6,656 traces, with what the filters take and what the ledger
+adds on top:
+
+| Class | Calls | Input | Filters | + ledger |
+|---|---|---|---|---|
+| other | 4,145 | 2.95 MB | 0.7% | **7.1%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **26.3%** |
+| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.5%** |
+| `git`, `gh` | 661 | 609 KB | 4.4% | **22.9%** |
+| build and test | 69 | 94 KB | 76.9% | **78.3%** |
+| infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
+| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **15.4%** |
+
+Head to head against rtk on that corpus, including the half we lose: rtk's filters
+take 6.2% where ours take 2.7%, and our ledger takes 15.4% against their 6.2%. Run
+their filters with our ledger and you get 18.1%, which is the largest number on the
+page and not ours.
+
+Reproduce all of it:
+
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
+
+`OMNI_BENCH_RTK=/path/to/rtk` adds the competitor arm. `OMNI_BENCH_ALL=1` replays the
+wider population including terminal output, and the harness prints which one it used.
 
 ---
 
@@ -216,9 +240,10 @@ it as an image.
 
 ## Learn more
 
-* [How it works, and what it costs](docs/ARCHITECTURE.md): pipeline, RewindStore, the Memory OS
-* [Benchmarks in full](docs/BENCHMARKS.md): corpus, per-class, fixtures, latency
-* [Contributing](CONTRIBUTING.md): `make ci` and you're in
+* [Contributing](CONTRIBUTING.md): the pipeline, the standards, the gates, and how to
+  add a distiller. One document, not four.
+* [CHANGELOG.md](CHANGELOG.md): what shipped, with the evidence behind each entry
+* [SECURITY.md](SECURITY.md): reporting a vulnerability
 
 ---
 
@@ -227,7 +252,7 @@ brew install fajarhide/tap/omni && omni init
 ```
 
 A passion project for the era of agentic AI. Contributions welcome.
-[MIT License](LICENSE).
+[Apache License 2.0](LICENSE).
 
 <p align="center">
   <a href="https://star-history.com/#fajarhide/omni&Date">

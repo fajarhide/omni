@@ -167,7 +167,7 @@ pub fn detect_agent_id(agent: &AgentFormat) -> String {
     // host-cap branch off this value, so it describes the *payload contract*.
     // Reading the environment here made a behaviour decision depend on ambient
     // state and let a concurrently running test relabel it, which is the
-    // cross-test hazard `AGENTS.md` names. The stats label is a different
+    // cross-test hazard `CONTRIBUTING.md` names. The stats label is a different
     // question and is answered at the point of recording (see `stats_agent_id`).
     resolve_agent_id(agent, "")
 }
@@ -190,7 +190,7 @@ pub fn stats_agent_id(agent: &AgentFormat) -> String {
 /// The decision, split from the environment lookup so it can be tested without
 /// `set_var`. `cargo` runs tests in parallel and a test that mutates the
 /// environment decides what a concurrently running one sees, which is the
-/// failure `AGENTS.md` calls out.
+/// failure `CONTRIBUTING.md` calls out.
 ///
 /// It also stops the probe lying to you: run the naive check under Claude Code
 /// and `CLAUDECODE` is already set in the ambient environment, so a Codex

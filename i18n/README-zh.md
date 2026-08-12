@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 
@@ -137,10 +137,12 @@ UTC**，每一次都是抵达模型的输出。时间窗口是这个数字的一
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-完整语料、按类别拆分、fixture 和延迟表在
-**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**。复现命令：
-`cargo test --release --test bench_replay -- --ignored`。
+这些数字可以在你自己的机器上复现：
 
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
 ## 快速上手与安装
 
 OMNI 极易配置，原生集成进你的终端。
@@ -220,9 +222,9 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ## 了解更多
 
-* [工作原理与代价](../docs/ARCHITECTURE.md)：流水线、RewindStore、Memory OS
-* [完整基准测试](../docs/BENCHMARKS.md)：语料、按类别、fixture、延迟
-* [参与贡献](../CONTRIBUTING.md)：跑通 `make ci` 就可以了
+* [贡献指南](../CONTRIBUTING.md)：流水线、代码规范、CI 关卡，以及如何新增 distiller。一份文档，而不是四份
+* [CHANGELOG.md](../CHANGELOG.md)：发布了什么，每条都附带证据
+* [SECURITY.md](../SECURITY.md)：如何报告安全问题
 
 ---
 
@@ -235,7 +237,7 @@ brew install fajarhide/tap/omni && omni init
 这是一个为智能体 AI 时代而生的兴趣项目。无论你是来省 Token 费用、试用免费模型，还是来一起打造终极的智能体工具带，我们都欢迎贡献！
 
 - **开发**：想从源码构建？运行 `make ci` 和 `cargo build`。细节见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
-- **许可**：[MIT License](../LICENSE)
+- **许可**：[Apache License 2.0](../LICENSE)
 
 <!-- Star History -->
 <p align="center">

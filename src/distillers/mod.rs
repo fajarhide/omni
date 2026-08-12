@@ -109,7 +109,7 @@ fn is_json_line(line: &str) -> bool {
 }
 
 /// One `match` over the registry's decision. Every arm of what used to be here
-/// is now a variant of `registry::Distillation`, which is where `CLAUDE.md` says
+/// is now a variant of `registry::Distillation`, which is where `CONTRIBUTING.md` says
 /// the command-to-behaviour mapping belongs (#194).
 fn route(
     segments: &[crate::pipeline::OutputSegment],

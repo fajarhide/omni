@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 
@@ -147,10 +147,12 @@ OMNI は両方を直し、それ以外では退きます。
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-コーパス全体、クラス別の内訳、フィクスチャ、レイテンシ表は
-**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)** にあります。再現は
-`cargo test --release --test bench_replay -- --ignored` で。
+これらの数値は自分の環境で再現できます:
 
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
 ## クイックスタートとインストール
 
 OMNI の準備は驚くほど簡単で、ターミナルにネイティブに統合されます。
@@ -233,9 +235,9 @@ OMNI はこのプロジェクトを覚えているか」への短い答えは、
 
 ## もっと知る
 
-* [仕組みと、そのコスト](../docs/ARCHITECTURE.md): パイプライン、RewindStore、Memory OS
-* [ベンチマーク全文](../docs/BENCHMARKS.md): コーパス、クラス別、フィクスチャ、レイテンシ
-* [コントリビュート](../CONTRIBUTING.md): `make ci` が通れば準備完了
+* [コントリビュート](../CONTRIBUTING.md): パイプライン、コーディング規約、CI ゲート、ディストーラーの追加方法。4 つではなく 1 つの文書に
+* [CHANGELOG.md](../CHANGELOG.md): 何がリリースされたか、各項目の根拠つきで
+* [SECURITY.md](../SECURITY.md): 脆弱性の報告方法
 
 ---
 
@@ -248,7 +250,7 @@ brew install fajarhide/tap/omni && omni init
 これはエージェント型 AI の時代のために作られた、情熱から生まれたプロジェクトです。トークン代を節約しに来た方も、無料モデルを試しに来た方も、究極のエージェント用ツールベルトを一緒に作りに来た方も、貢献はいつでも歓迎します。
 
 - **開発**: ソースからビルドしたいですか? `make ci` と `cargo build` を実行してください。詳細は [CONTRIBUTING.md](../CONTRIBUTING.md) を参照。
-- **ライセンス**: [MIT License](../LICENSE)
+- **ライセンス**: [Apache License 2.0](../LICENSE)
 
 <!-- Star History -->
 <p align="center">
