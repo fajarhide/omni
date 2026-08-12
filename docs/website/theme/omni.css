@@ -33,12 +33,12 @@
    -------------------------------------------------------------------------- */
 
 @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/ibm-plex-sans-400.woff2') format('woff2'); }
-@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: var(--wl-weight-medium); font-display: swap; src: url('../fonts/ibm-plex-sans-500.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/ibm-plex-sans-500.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/ibm-plex-sans-600.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Sans Condensed'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/ibm-plex-sans-condensed-600.woff2') format('woff2'); }
-@font-face { font-family: 'IBM Plex Sans Condensed'; font-style: normal; font-weight: var(--wl-weight-display); font-display: swap; src: url('../fonts/ibm-plex-sans-condensed-700.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans Condensed'; font-style: normal; font-weight: 700; font-display: swap; src: url('../fonts/ibm-plex-sans-condensed-700.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/ibm-plex-mono-400.woff2') format('woff2'); }
-@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: var(--wl-weight-medium); font-display: swap; src: url('../fonts/ibm-plex-mono-500.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/ibm-plex-mono-500.woff2') format('woff2'); }
 
 /* --------------------------------------------------------------------------
    Every value in this file that decides how the book looks is a --wl-* token
@@ -69,10 +69,28 @@
      is on the design system's mono. */
   --mono-font: var(--font-mono);
 
-  /* 68 characters at this size. Long enough for a wide reference table to
-     breathe, short enough that prose is read rather than skimmed. */
-  --doc-measure: 46rem;
-  --toc-width: 15rem;
+  /* mdBook's general.css opens with `:root { font-size: 62.5% }`, so 1rem is
+     10px in this book and not 16px. Every --wl-text-* token is authored in rem
+     against a 16px root, so used raw each one renders at 62.5% of its size:
+     body text came out at 9.375px. Restated through the factor once, here, so
+     no rule below has to remember it. Anything measured in px, and mdBook's own
+     rem values, are already correct and are left alone. */
+  --root-ratio: 1.6;
+  --text-label:    calc(var(--wl-text-label,    0.6875rem) * var(--root-ratio));
+  --text-meta:     calc(var(--wl-text-meta,     0.8125rem) * var(--root-ratio));
+  --text-body:     calc(var(--wl-text-body,     0.9375rem) * var(--root-ratio));
+  --text-lede:     calc(var(--wl-text-lede,     1.125rem)  * var(--root-ratio));
+  --text-subtitle: calc(var(--wl-text-subtitle, 1.25rem)   * var(--root-ratio));
+  --text-title:    calc(var(--wl-text-title,    1.5rem)    * var(--root-ratio));
+  --text-display:  calc(var(--wl-text-display,  2rem)      * var(--root-ratio));
+
+  /* Around 95 characters. Written in px because rem here means two different
+     things depending on which stylesheet you are reading, and a measure is
+     exactly the value nobody should have to convert in their head. The old 46rem
+     was 460px, a column narrow enough that a reference table scrolled and the
+     page read as a strip floating in the middle of the window. */
+  --doc-measure: 820px;
+  --toc-width: 220px;
 }
 
 /* --------------------------------------------------------------------------
@@ -188,9 +206,26 @@
 
 html { font-family: var(--font-body); -webkit-text-size-adjust: 100%; }
 
-body { font-size: var(--wl-text-body); line-height: var(--wl-leading-body); -webkit-font-smoothing: antialiased; }
+body { font-size: var(--text-body); line-height: var(--wl-leading-body); -webkit-font-smoothing: antialiased; }
 
-.content main { max-width: var(--doc-measure); }
+/* mdBook centres `main` inside whatever the sidebar leaves, with
+   `margin-inline: auto`. At a 460px measure that put the text in the middle of
+   a 1100px band with 340px of nothing either side, so the page read as a strip
+   floating in the window rather than as a document beside its contents. It is
+   anchored to the sidebar now, and the space that frees on the right is where
+   the page outline lives. */
+.content main {
+  max-width: var(--doc-measure);
+  margin-inline-start: 0;
+  margin-inline-end: auto;
+  padding-inline-start: 1.5rem;
+}
+
+/* Below the point where the outline plus the measure fit beside the sidebar,
+   there is nothing to anchor to, so centring is the better answer again. */
+@media (max-width: 1100px) {
+  .content main { margin-inline: auto; padding-inline-start: 0; }
+}
 
 .content p, .content li { line-height: var(--wl-leading-body); }
 .content p { margin: 0 0 1.15em; }
@@ -214,7 +249,7 @@ body { font-size: var(--wl-text-body); line-height: var(--wl-leading-body); -web
 }
 
 .content h1 {
-  font-size: var(--wl-text-display);
+  font-size: var(--text-display);
   font-weight: var(--wl-weight-display);
   letter-spacing: var(--wl-tracking-hero);
   line-height: var(--wl-leading-hero);
@@ -224,21 +259,21 @@ body { font-size: var(--wl-text-body); line-height: var(--wl-leading-body); -web
 /* Whitespace separates sections, not a border. The one exception is h2, which
    marks the joints a reader scans for. */
 .content h2 {
-  font-size: var(--wl-text-title);
+  font-size: var(--text-title);
   margin: 2.9em 0 0.75em;
   padding-bottom: 0.3em;
   border-bottom: 1px solid var(--rule);
 }
 
-.content h3 { font-size: var(--wl-text-lede); margin: 2.2em 0 0.6em; }
-.content h4 { font-size: var(--wl-text-body); margin: 1.8em 0 0.5em; color: var(--ink-soft); }
+.content h3 { font-size: var(--text-lede); margin: 2.2em 0 0.6em; }
+.content h4 { font-size: var(--text-body); margin: 1.8em 0 0.5em; color: var(--ink-soft); }
 
 .content h1 a.header, .content h2 a.header,
 .content h3 a.header, .content h4 a.header { color: inherit; }
 
 /* The paragraph directly under an h1 is the page's lede. */
 .content h1 + p {
-  font-size: var(--wl-text-lede);
+  font-size: var(--text-lede);
   line-height: var(--wl-leading-body);
   color: var(--ink-soft);
 }
@@ -291,13 +326,13 @@ code { font-family: var(--font-mono); font-size: 0.875em; }
   width: 100%;
   border-collapse: collapse;
   margin: 1.6em 0;
-  font-size: var(--wl-text-body);
+  font-size: var(--text-body);
 }
 
 .content table thead th {
   font-family: var(--font-mono);
   font-weight: var(--wl-weight-body);
-  font-size: var(--wl-text-label);
+  font-size: var(--text-label);
   letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
   color: var(--ink-soft);
@@ -341,7 +376,7 @@ blockquote p:last-child { margin-bottom: 0; }
    eyebrow the site uses for the same job.
    -------------------------------------------------------------------------- */
 
-#mdbook-sidebar { font-size: var(--wl-text-body); }
+#mdbook-sidebar { font-size: var(--text-body); }
 #mdbook-sidebar .sidebar-scrollbox { padding: 1.5rem 1.5rem 4rem; }
 
 .chapter li.chapter-item { line-height: 1.5; margin: 0.34em 0; }
@@ -355,7 +390,7 @@ blockquote p:last-child { margin-bottom: 0; }
 
 .chapter li.part-title {
   font-family: var(--font-mono);
-  font-size: var(--wl-text-label);
+  font-size: var(--text-label);
   font-weight: var(--wl-weight-body);
   letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
@@ -373,7 +408,7 @@ blockquote p:last-child { margin-bottom: 0; }
 #mdbook-menu-bar h1.menu-title {
   font-family: var(--font-display);
   font-weight: var(--wl-weight-display);
-  font-size: var(--wl-text-lede);
+  font-size: var(--text-lede);
   letter-spacing: 0.01em;
 }
 
@@ -406,7 +441,7 @@ blockquote p:last-child { margin-bottom: 0; }
 
 .site-links a {
   font-family: var(--font-body);
-  font-size: var(--wl-text-meta);
+  font-size: var(--text-meta);
   color: var(--ink-soft);
   text-decoration: none;
   border-bottom: 1px solid transparent;
@@ -430,11 +465,14 @@ blockquote p:last-child { margin-bottom: 0; }
 .pagetoc {
   position: fixed;
   top: 5rem;
-  right: max(1.5rem, calc((100vw - var(--content-max-width, 46rem)) / 2 - var(--toc-width) - 3rem));
+  /* The measure is anchored to the sidebar, so the outline sits in what is left
+     to the right of it rather than in a gap either side of a centred column.
+     Clamped so it never leaves the window on a narrow desktop. */
+  right: max(1.5rem, calc(100vw - var(--sidebar-width, 300px) - var(--doc-measure) - var(--toc-width) - 6rem));
   width: var(--toc-width);
   max-height: calc(100vh - 8rem);
   overflow-y: auto;
-  font-size: var(--wl-text-meta);
+  font-size: var(--text-meta);
   line-height: 1.5;
   border-left: 1px solid var(--rule);
   padding-left: 0.9rem;
@@ -442,26 +480,36 @@ blockquote p:last-child { margin-bottom: 0; }
 
 .pagetoc-label {
   font-family: var(--font-mono);
-  font-size: var(--wl-text-label);
+  font-size: var(--text-label);
   letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
-  color: var(--sidebar-non-existant);
+  /* --sidebar-non-existant is the greyed-out-chapter colour and is far too
+     faint to label a rail with. */
+  color: var(--ink-soft);
   margin-bottom: 0.7em;
 }
 
-.pagetoc a {
+/* `.content a:link` in chrome.css is 0,2,1 and this outline lives inside
+   .content, so a bare `.pagetoc a` lost and every entry rendered in the accent
+   as though all five were current. Matching :link here is what levels it. */
+.pagetoc a:link,
+.pagetoc a:visited {
   display: block;
   color: var(--ink-soft);
   padding: 0.24em 0;
   text-decoration: none;
   border: 0;
 }
-.pagetoc a:hover { color: var(--fg); }
-.pagetoc a.active { color: var(--links); }
+.pagetoc a:link:hover, .pagetoc a:visited:hover { color: var(--fg); }
+.pagetoc a.active:link, .pagetoc a.active:visited { color: var(--links); }
 .pagetoc a.h3 { padding-left: 0.8rem; font-size: 0.95em; }
 
-/* Below this the outline has nowhere to live without stealing from the text. */
-@media (max-width: 1500px) { .pagetoc { display: none; } }
+/* Below this the outline has nowhere to live without stealing from the text.
+   1500 was set against a centred 460px column and never fired on a 1440 laptop,
+   so the outline this theme is designed around was invisible on the most common
+   screen there is. Sidebar 300 plus measure 820 plus outline 220 plus gutters
+   fits inside 1440 with room to spare. */
+@media (max-width: 1400px) { .pagetoc { display: none; } }
 
 /* --------------------------------------------------------------------------
    Search
@@ -482,11 +530,24 @@ mark { border-radius: var(--wl-radius-control); padding: 0 0.15em; }
 .nav-chapters { font-family: var(--font-body); }
 .nav-wrapper { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
 
+/* mdBook's wide-screen chapter arrows are full-height columns pinned to the
+   edges of `.page`. That worked while the text was centred with 340px of empty
+   space either side. Anchored to the sidebar, the left one sits on top of the
+   first words of every paragraph. The pair at the foot of the article says the
+   same thing with the chapter's name attached, so the arrows go and that pair
+   stops being mobile-only. */
+.nav-wide-wrapper { display: none; }
+/* chrome.css sets `.nav-wrapper { display: none }` and only turns it back on
+   under 1080px, because above that the arrows were doing the job. With them
+   gone it has to be on at every width, or a desktop reader has no way to the
+   next chapter at all. */
+.content .nav-wrapper { display: block; }
+
 /* --------------------------------------------------------------------------
    Small screens
    -------------------------------------------------------------------------- */
 
 @media (max-width: 700px) {
-  .content h2 { font-size: var(--wl-text-subtitle); }
-  .content table { font-size: var(--wl-text-meta); }
+  .content h2 { font-size: var(--text-subtitle); }
+  .content table { font-size: var(--text-meta); }
 }

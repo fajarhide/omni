@@ -34,13 +34,13 @@
       var a = document.createElement('a');
       a.href = '#' + h.id;
       a.className = h.tagName.toLowerCase();
-      // The heading's own anchor link is appended by mdBook; textContent picks
-      // it up as a stray character, so read the text nodes instead.
-      a.textContent = Array.prototype.filter
-        .call(h.childNodes, function (n) { return n.nodeType === 3 || !n.classList || !n.classList.contains('header'); })
-        .map(function (n) { return n.textContent; })
-        .join('')
-        .trim();
+      // mdBook 0.4 appended its anchor as a sibling of the heading text, so this
+      // filtered the anchor out and kept the text nodes. 0.5 wraps the text in
+      // that anchor instead, `<h2><a class="header">Title</a></h2>`, so the
+      // filter dropped the heading's only child and every outline entry
+      // rendered empty. The anchor carries no extra characters now, so the
+      // heading's own text is the answer. Same 0.4-to-0.5 markup move as #477.
+      a.textContent = h.textContent.trim();
       toc.appendChild(a);
       links.push({ el: a, target: h });
     });
