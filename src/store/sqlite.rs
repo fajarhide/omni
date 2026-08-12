@@ -1415,10 +1415,21 @@ impl SqliteBackend {
 
     /// Per-command stats with agent_id: (command, agent_id, count, input_bytes, output_bytes)
     #[allow(clippy::type_complexity)]
+    /// Every `(command, agent)` pair in the window, unaggregated.
+    ///
+    /// There is no row limit, and removing the `LIMIT 200` this carried is the
+    /// point. The single caller folds these into shortened command keys before
+    /// displaying them, so a cap applied to *raw* commands cut the rows that the
+    /// fold would have summed: 1,064 pairs over 1,099 distillations, of which
+    /// the cap kept 200. `node -e` is 21 separate one-call rows that add up to a
+    /// displayed `21x`, and every one of them sat below the cut, so the row was
+    /// shown with no agent at all (#471).
+    ///
+    /// The bound is the retention window rather than a row count, which is the
+    /// honest one here: this is a report command, not a hook.
     pub fn get_per_command_with_agent(
         &self,
         since: i64,
-        limit: usize,
     ) -> Result<Vec<(String, String, u64, u64, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(&format!(
@@ -1431,13 +1442,12 @@ impl SqliteBackend {
             FROM distillations
             WHERE ts >= ?1 AND command != '[pipe]' AND {}
             GROUP BY command_name, agent
-            ORDER BY calls DESC
-            LIMIT ?2",
+            ORDER BY calls DESC",
             applied_only()
         ))?;
 
         let rows = stmt
-            .query_map(params![since, limit as i64], |row| {
+            .query_map(params![since], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -3227,6 +3237,53 @@ mod tests {
         };
         // Should not panic
         store.record_distillation("sess_123", &res, "npm start", "", "claude_code");
+    }
+
+    /// The `LIMIT 200` this carried was applied to raw commands, but the caller
+    /// folds them into shortened keys afterwards, so the cap silently cut rows
+    /// the fold would have summed. `node -e` was 21 one-call rows adding up to a
+    /// displayed `21x`, all of them below the cut, and the command was rendered
+    /// with an agent nobody had resolved (#471).
+    #[test]
+    fn returns_every_command_not_the_first_two_hundred() {
+        let (store, _dir) = get_temp_store();
+        let res = DistillResult {
+            output: "x".to_string(),
+            route: crate::pipeline::Route::Keep,
+            filter_name: "f".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: 100,
+            output_bytes: 10,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 1,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 20,
+            filtered_tokens: 5,
+            delivered_bytes: 10,
+        };
+        // 250 distinct one-call commands, which is the shape that defeats a cap
+        // ordered by call count: every row ties at 1.
+        for i in 0..250 {
+            store.record_distillation(
+                "s",
+                &res,
+                &format!("node -e script{i}.js"),
+                "",
+                "claude_code",
+            );
+        }
+
+        let rows = store.get_per_command_with_agent(0).expect("query");
+
+        assert_eq!(
+            rows.len(),
+            250,
+            "every (command, agent) pair has to survive; a row limit here drops \
+             the ones the caller was about to sum"
+        );
     }
 
     fn saving(raw: usize, filtered: usize) -> DistillResult {

@@ -196,19 +196,10 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             &state.session_id
         };
 
-        println!(
-            "\n{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        println!();
+        super::print_rule();
         println!(" {}: Current Session", "OMNI".bold().cyan());
-        println!(
-            "{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
 
         println!(
             "  {:<15} {}",
@@ -273,12 +264,8 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
                 println!("  {} {}", "•".red(), clean.red());
             }
         }
-        println!(
-            "\n{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        println!();
+        super::print_rule();
         Ok(())
     } else {
         Ok(())
@@ -290,19 +277,10 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
 fn run_resume() -> anyhow::Result<()> {
     match transcript::find_pending() {
         Some(t) => {
-            println!(
-                "\n{}",
-                "─────────────────────────────────────────"
-                    .bright_black()
-                    .bold()
-            );
+            println!();
+            super::print_rule();
             println!(" {}: Interrupted Session Detected", "OMNI".bold().cyan());
-            println!(
-                "{}",
-                "─────────────────────────────────────────"
-                    .bright_black()
-                    .bold()
-            );
+            super::print_rule();
 
             let sid = if t.session_id.len() > 8 {
                 &t.session_id[..8]
@@ -366,12 +344,7 @@ fn run_resume() -> anyhow::Result<()> {
                 "Tip:".bold().green(),
                 "omni session --continue".cyan()
             );
-            println!(
-                "{}",
-                "─────────────────────────────────────────"
-                    .bright_black()
-                    .bold()
-            );
+            super::print_rule();
         }
         None => {
             println!(
@@ -399,23 +372,14 @@ fn run_transcript() -> anyhow::Result<()> {
         &t.session_id
     };
 
-    println!(
-        "\n{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    println!();
+    super::print_rule();
     println!(
         " {}: Session Transcript ({})",
         "OMNI".bold().cyan(),
         sid.cyan()
     );
-    println!(
-        "{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    super::print_rule();
 
     println!(
         "  {:<15} {}",
@@ -469,12 +433,8 @@ fn run_transcript() -> anyhow::Result<()> {
         }
     }
 
-    println!(
-        "\n{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    println!();
+    super::print_rule();
     Ok(())
 }
 

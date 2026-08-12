@@ -186,19 +186,10 @@ pub fn run_learn(args: &[String]) -> Result<()> {
 
     let candidates = detect_patterns(&input);
 
-    println!(
-        "\n{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    println!();
+    super::print_rule();
     println!(" {}: Pattern Discovery", "OMNI".bold().cyan());
-    println!(
-        "{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    super::print_rule();
 
     if candidates.is_empty() {
         println!("  {} No repetitive noise patterns discovered.", "ℹ".blue());
@@ -206,12 +197,8 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             "  {} Requirement: minimum 3 occurrences.",
             "•".bright_black()
         );
-        println!(
-            "{}\n",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
+        println!();
         return Ok(());
     }
 
@@ -279,29 +266,15 @@ pub fn run_learn(args: &[String]) -> Result<()> {
     if dry_run {
         let generated =
             crate::session::learn::generate_toml(&candidates, &filter_name, command_hint);
-        println!(
-            "\n{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        println!();
+        super::print_rule();
         println!(
             " {} Suggested TOML Configuration:",
             "Preview".bold().bright_white()
         );
-        println!(
-            "{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
         println!("{}", generated.cyan());
-        println!(
-            "{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
     } else if apply {
         // #449 removed every filter tier outside the binary, so there is nowhere
         // left to write one. Writing the file anyway and reporting success would
@@ -321,23 +294,14 @@ pub fn run_learn(args: &[String]) -> Result<()> {
             "omni learn --dry-run".cyan().bold()
         );
     } else {
-        println!(
-            "\n{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        println!();
+        super::print_rule();
         println!(
             "  {} Run {} to preview TOML configuration.",
             "→".yellow(),
             "omni learn --dry-run".cyan().bold()
         );
-        println!(
-            "{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
     }
 
     Ok(())

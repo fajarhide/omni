@@ -194,31 +194,18 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
             _ => return Ok(()),
         }
 
-        println!(
-            "\n{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        println!();
+        super::print_rule();
         println!(" {} OMNI Before & After Preview", "⚡".yellow());
-        println!(
-            "{}",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
         println!("{}", "Without OMNI:".red());
         println!("  npm WARN deprecated ... (300 lines of warnings)");
         println!("  git log (2000 lines of history)");
         println!("{}", "\nWith OMNI:".green());
         println!("  npm WARN deprecated ... [OMNI: ⚠️ 300 repetitive lines dropped]");
         println!("  git log [OMNI: ⚠️ truncated to latest 50 lines]");
-        println!(
-            "{}\n",
-            "─────────────────────────────────────────"
-                .bright_black()
-                .bold()
-        );
+        super::print_rule();
+        println!();
 
         let proceed = dialoguer::Confirm::new()
             .with_prompt("Proceed with installation?")

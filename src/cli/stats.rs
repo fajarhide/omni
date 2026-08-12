@@ -30,8 +30,10 @@ pub fn format_exact_tokens(tokens: u64) -> String {
     }
 }
 
-pub fn format_bar(pct: f64) -> String {
-    let width = 20;
+/// `width` is the column the bar has to live in, not a fixed 20. The detail
+/// table gives it 12 so the whole row fits `cli::WIDTH`; the wider single-column
+/// listings still pass 20.
+pub fn format_bar(pct: f64, width: usize) -> String {
     let filled = ((pct / 100.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     "█".repeat(filled)
@@ -122,7 +124,17 @@ fn max_width<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> usize {
         .unwrap_or(0)
 }
 
-fn group_and_calculate_stats(
+/// The bar column inside the two framed tables. Narrower than the 20 the
+/// single-column listings use, so a full row lands inside `cli::WIDTH`.
+const DETAIL_BAR: usize = 12;
+
+/// The one width every command name is shortened to.
+///
+/// It is a constant because two call sites disagreeing by a single column is
+/// what made the `Agent` column report commands it had never resolved (#471).
+const CMD_KEY_WIDTH: usize = 18;
+
+pub(crate) fn group_and_calculate_stats(
     items: Vec<(String, u64, u64, u64, u64, u64)>,
     limit: usize,
 ) -> Vec<(String, u64, f64, u64)> {
@@ -130,7 +142,7 @@ fn group_and_calculate_stats(
 
     for (cmd, calls, input, output, raw_tok, filt_tok) in items {
         // Group by the shortened version so things like "npm install x" and "npm install y" combine
-        let key = shorten_command(&cmd, 18);
+        let key = shorten_command(&cmd, CMD_KEY_WIDTH);
         let entry = grouped.entry(key).or_insert((0, 0, 0, 0, 0));
         entry.0 += calls;
         entry.1 += input;
@@ -205,7 +217,7 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
 /// branch in `agents::multiagent::detect_agent_id` for the life of the feature.
 /// A detection gap now shows up in the table as `Unknown` instead of looking
 /// like ordinary shell usage.
-fn agent_display_name(agent_id: &str) -> &str {
+pub(crate) fn agent_display_name(agent_id: &str) -> &str {
     match agent_id {
         "claude_code" | "claude" => "Claude Code",
         "cursor" => "Cursor AI",
@@ -231,12 +243,7 @@ fn agent_display_name(agent_id: &str) -> &str {
 }
 
 fn print_separator() {
-    println!(
-        "{}",
-        "─────────────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    super::print_rule();
 }
 
 /// Read by both `print_help` and `super::check_flags`, so this list is what
@@ -1168,12 +1175,15 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     };
 
     // Per-command with agent info
-    let cmd_agent_data = store
-        .get_per_command_with_agent(since, 200)
-        .unwrap_or_default();
+    let cmd_agent_data = store.get_per_command_with_agent(since).unwrap_or_default();
     let mut cmd_agent_counts: HashMap<String, HashMap<String, u64>> = HashMap::new();
     for (cmd, agent_id, calls, _, _) in &cmd_agent_data {
-        let key = shorten_command(cmd, 19);
+        // `group_and_calculate_stats` keys the rows this table displays with
+        // `shorten_command(cmd, 18)`. Keying the agent map at 19 built a second
+        // namespace: every command whose two-token prefix ran past 18 cut at a
+        // different place on each side, the lookup below missed, and the miss
+        // was reported as a fact (#471).
+        let key = shorten_command(cmd, CMD_KEY_WIDTH);
         let entry = cmd_agent_counts.entry(key).or_default();
         *entry.entry(agent_id.clone()).or_insert(0) += *calls;
     }
@@ -1181,24 +1191,23 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     if !display_filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
         println!(
-            "   {}  {:<20} {:<12} {:>4} {:>7}  {:>10}  {}",
+            "  {:>3} {:<w_cmd$} {:<11} {:>5} {:>6} {:>6} {}",
             "#".bright_black(),
             "CLI".bright_black(),
             "Agent".bright_black(),
             "Count".bright_black(),
-            "Savings".bright_black(),
-            "Tokens Reduced".bright_black(),
-            "Signal Strength".bright_black()
+            "Saved".bright_black(),
+            "Tokens".bright_black(),
+            "Signal".bright_black(),
+            w_cmd = CMD_KEY_WIDTH
         );
         println!(
-            "   {} {}",
-            "──".bright_black(),
-            "──────────────────── ──────────── ───── ──────── ────────────── ────────────────────"
-                .bright_black()
+            "  {}",
+            super::column_rule(&[3, CMD_KEY_WIDTH, 11, 5, 6, 6, DETAIL_BAR]).bright_black()
         );
 
         for (i, (name, cnt, pct, tokens_saved)) in display_filters.iter().enumerate() {
-            let bar = format_bar(*pct);
+            let bar = format_bar(*pct, DETAIL_BAR);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
             } else {
@@ -1210,20 +1219,21 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 "".clear()
             };
 
-            let display_name = if name.chars().count() > 19 {
-                let mut s: String = name.chars().take(16).collect();
-                s.push_str("...");
-                s
-            } else {
-                (*name).clone()
-            };
+            // `group_and_calculate_stats` already shortened these to
+            // `CMD_KEY_WIDTH`, so re-cutting here at a third width only broke
+            // the lookup below. Kept as a guard for names that arrive longer.
+            let display_name =
+                crate::util::text::display_truncate_with_ellipsis(name, CMD_KEY_WIDTH - 3);
 
             // Pick the dominant agent for this command key by highest call count.
             let agent_label = cmd_agent_counts
                 .get(&display_name)
                 .and_then(|agents| agents.iter().max_by_key(|(_, calls)| *calls))
                 .map(|(agent_id, _)| agent_display_name(agent_id))
-                .unwrap_or("Terminal");
+                // `Unknown`, never `Terminal`: a lookup that missed has not
+                // established that a human ran this in a shell, and `:202`
+                // already says why those two facts must not be folded (#471).
+                .unwrap_or("Unknown");
 
             let tokens_str = if *tokens_saved > 0 {
                 format!("-{}", format_exact_tokens(*tokens_saved))
@@ -1232,7 +1242,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             };
 
             println!(
-                "  {:>2}. {:<20} {:<12} {:>4}x  {:>5.1}%  {:>14}  {}{}",
+                "  {:>2}. {:<w_cmd$} {:<11} {:>4}x {:>5.1}% {:>6} {:<w_bar$}{}",
                 i + 1,
                 display_name.bright_cyan(),
                 agent_label.bright_blue(),
@@ -1240,7 +1250,9 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 pct,
                 tokens_str.bright_magenta(),
                 bar_colored,
-                suffix
+                suffix,
+                w_cmd = CMD_KEY_WIDTH,
+                w_bar = DETAIL_BAR
             );
         }
 
@@ -1329,16 +1341,18 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n {}", "Agent Distribution:".bold().bright_white());
         println!(
-            "   {:<16} {:>6} {:>7}  {}",
+            "  {:<16} {:>6} {:>7} {}",
             "Agent".bright_black(),
             "Count".bright_black(),
             "Share".bright_black(),
             "Savings".bright_black()
         );
+        // Four groups under a four-column header. It carried five, because the
+        // leading `──` was copied from the By Command table's `#` column, which
+        // is what made a 56-column rule sit under a 43-column header (#463).
         println!(
-            "   {} {}",
-            "──".bright_black(),
-            "────────────── ────── ─────── ────────────────────".bright_black()
+            "  {}",
+            super::column_rule(&[16, 6, 7, DETAIL_BAR + 7]).bright_black()
         );
 
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
@@ -1355,7 +1369,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             } else {
                 0.0
             };
-            let bar = format_bar(savings);
+            let bar = format_bar(savings, DETAIL_BAR);
             let bar_colored = if savings > 80.0 {
                 bar.bright_green()
             } else if savings > 40.0 {
@@ -1364,12 +1378,13 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 bar.bright_red()
             };
             println!(
-                "   {:<16} {:>5}x  {:>5.1}%  {} {:.1}%",
+                "  {:<16} {:>5}x {:>6.1}% {:<w_bar$} {:>5.1}%",
                 name.bright_cyan(),
                 count,
                 pct,
                 bar_colored,
                 savings,
+                w_bar = DETAIL_BAR
             );
             // #163: the excluded rows are named, not silently missing. A count
             // that shrinks without explanation reads as OMNI having stopped
@@ -1378,7 +1393,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 && u > 0
             {
                 println!(
-                    "   {:<16} {:>5}x  {}",
+                    "  {:<16} {:>5}x {}",
                     "".bright_black(),
                     u,
                     "not counted, never applied (#158), or read at a terminal (#212)"
@@ -1671,7 +1686,7 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
             path
         };
 
-        let bar = format_bar(savings);
+        let bar = format_bar(savings, 20);
         let bar_colored = if savings > 80.0 {
             bar.bright_green()
         } else if savings > 40.0 {
@@ -1856,9 +1871,9 @@ mod tests {
 
     #[test]
     fn test_format_bar() {
-        assert_eq!(format_bar(100.0), "████████████████████");
-        assert_eq!(format_bar(50.0), "██████████");
-        assert_eq!(format_bar(0.0), "");
+        assert_eq!(format_bar(100.0, 20), "████████████████████");
+        assert_eq!(format_bar(50.0, 20), "██████████");
+        assert_eq!(format_bar(0.0, 20), "");
     }
 
     #[test]

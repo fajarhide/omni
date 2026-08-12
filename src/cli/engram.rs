@@ -100,7 +100,16 @@ pub fn run_engram(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
         println!("  none yet");
     } else {
         for engram in &state.engrams {
-            println!("  {}", engram.compact());
+            // Bounded to the shared width. One of these reached 160 columns and
+            // wrapped into an unreadable block (#463); the marker says it was cut
+            // rather than dropping the tail silently.
+            println!(
+                "  {}",
+                crate::util::text::display_truncate_with_ellipsis(
+                    &engram.compact(),
+                    super::WIDTH - 5
+                )
+            );
         }
     }
     Ok(())
