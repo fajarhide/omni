@@ -20,8 +20,9 @@
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
-   Fonts. Vendored into src/fonts/ so the book is self-contained and renders
-   identically under `mdbook serve` and under /docs on the live origin.
+   Fonts, vendored into src/fonts/ so a checkout of this repository renders
+   without a package manager. Published pages load the design system's families
+   over the top of these and never reach them; see the note below the block.
 
    The `../` is load-bearing. mdBook copies this file to `book/theme/` and
    fingerprints its name, while `src/fonts/` lands at `book/fonts/`, so a URL
@@ -38,10 +39,26 @@
 @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/ibm-plex-mono-400.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/ibm-plex-mono-500.woff2') format('woff2'); }
 
+/* --------------------------------------------------------------------------
+   Every value in this file that decides how the book looks is a --wl-* token
+   from @weekndlabs/design, and every one of them carries the pre-system value
+   as its fallback.
+
+   The tokens are not vendored here. omni-pages depends on that package for its
+   own pages and, at publish time, drops the same copy into this book and links
+   it from theme/head.hbs (see scripts/build-docs.sh over there). That is what
+   keeps /docs and the rest of omni.weekndlabs.com on one palette through a
+   style change: one version bump, in one repository.
+
+   The consequence to know about: `mdbook serve` here renders the fallbacks, so
+   a local preview is the pre-system look and correct only in layout. Judge
+   colour and type on the published site, not on localhost:3000.
+   -------------------------------------------------------------------------- */
+
 :root {
-  --font-display: 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif;
-  --font-body:    'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono:    'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: var(--wl-font-sans, 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif);
+  --font-body:    var(--wl-font-sans, 'IBM Plex Sans', system-ui, sans-serif);
+  --font-mono:    var(--wl-font-mono, 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace);
 
   /* 68 characters at this size. Long enough for a wide reference table to
      breathe, short enough that prose is read rather than skimmed. */
@@ -54,14 +71,14 @@
    -------------------------------------------------------------------------- */
 
 .light {
-  --paper:       #E3E4E0;
-  --paper-panel: #DBDCD6;
-  --paper-sunk:  #D3D5CD;
-  --ink:         #16161A;
-  --ink-soft:    #56585A;
-  --rule:        #C6C8C1;
-  --rule-strong: #A9ABA3;
-  --accent:      #7A4E00;   /* the only amber allowed on paper, 5.6:1 */
+  --paper:       var(--wl-background, #E3E4E0);
+  --paper-panel: var(--wl-card, #DBDCD6);
+  --paper-sunk:  var(--wl-muted, #D3D5CD);
+  --ink:         var(--wl-foreground, #16161A);
+  --ink-soft:    var(--wl-muted-foreground, #56585A);
+  --rule:        var(--wl-border, #C6C8C1);
+  --rule-strong: var(--wl-input, #A9ABA3);
+  --accent:      var(--wl-warning, #7A4E00);   /* the only amber allowed on paper */
 
   --bg: var(--paper);
   --fg: var(--ink);
@@ -90,7 +107,7 @@
   --searchresults-header-fg: var(--ink-soft);
   --searchresults-border-color: var(--rule);
   --searchresults-li-bg: var(--paper-panel);
-  --search-mark-bg: #E8C879;
+  --search-mark-bg: oklch(from var(--wl-warning, #7A4E00) calc(l + 0.32) c h);
 
   --code-bg: var(--paper-sunk);
   --code-fg: var(--ink);
@@ -102,21 +119,21 @@
    -------------------------------------------------------------------------- */
 
 .navy {
-  --crt:          #0B0B0C;
-  --crt-panel:    #121214;
-  --crt-sunk:     #161618;
-  --phosphor:     #FFB000;
-  --phosphor-dim: #A87400;
-  --ink:          #DEDFDA;
-  --ink-soft:     #8C8E88;
-  --rule:         #26262A;
-  --rule-strong:  #3A3A40;
+  --crt:          var(--wl-background, #0B0B0C);
+  --crt-panel:    var(--wl-card, #121214);
+  --crt-sunk:     var(--wl-muted, #161618);
+  --phosphor:     var(--wl-terminal-yellow, #FFB000);
+  --phosphor-dim: var(--wl-terminal-dim, #A87400);
+  --ink:          var(--wl-foreground, #DEDFDA);
+  --ink-soft:     var(--wl-muted-foreground, #8C8E88);
+  --rule:         var(--wl-border, #26262A);
+  --rule-strong:  var(--wl-input, #3A3A40);
 
   --bg: var(--crt);
   --fg: var(--ink);
-  --sidebar-bg: #0E0E10;
+  --sidebar-bg: var(--wl-sidebar, #0E0E10);
   --sidebar-fg: var(--ink-soft);
-  --sidebar-non-existant: #4A4A50;
+  --sidebar-non-existant: var(--wl-input, #4A4A50);
   --sidebar-active: var(--phosphor);
   --sidebar-spacer: var(--rule);
   --scrollbar: var(--rule-strong);
@@ -135,11 +152,11 @@
   --searchbar-border-color: var(--rule);
   --searchbar-bg: var(--crt-panel);
   --searchbar-fg: var(--ink);
-  --searchbar-shadow-color: #000;
+  --searchbar-shadow-color: var(--wl-background, #000);
   --searchresults-header-fg: var(--ink-soft);
   --searchresults-border-color: var(--rule);
   --searchresults-li-bg: var(--crt-panel);
-  --search-mark-bg: #5C3E00;
+  --search-mark-bg: oklch(from var(--wl-terminal-yellow, #FFB000) calc(l - 0.42) c h);
 
   --code-bg: var(--crt-panel);
   --code-fg: var(--ink);
