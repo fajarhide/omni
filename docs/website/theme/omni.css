@@ -405,11 +405,51 @@ blockquote p:last-child { margin-bottom: 0; }
 
 #mdbook-menu-bar { background: var(--bg); border-bottom: 1px solid transparent; }
 #mdbook-menu-bar.sticky, #mdbook-menu-bar:not(.folded) { border-bottom-color: var(--rule); }
+
+/* mdBook leaves the bar's three groups to stretch to its full height and lays
+   `.right-buttons` out as a block, which had three consequences at once: the
+   site links became a row of their own stacked above the icons, the icons sat
+   at a different height from the wordmark, and the sidebar toggle rendered
+   15px higher than the two buttons beside it because a label and a button
+   settle their line boxes differently. The bar was 77px of mostly air.
+
+   One centred flex row for the bar, one for each group. */
+#mdbook-menu-bar {
+  display: flex;
+  align-items: center;
+  min-height: var(--menu-bar-height);
+}
+#mdbook-menu-bar .left-buttons,
+#mdbook-menu-bar .right-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+/* The theme picker is absolutely positioned when it opens, so it is out of
+   flow and takes no space in the row it now lives in. */
+/* 3.4rem is 34px against this book's 10px root, which is the 3rem icon mdBook
+   draws plus a little room. Sizing the box under the icon is what made it
+   overflow its own button. */
+#mdbook-menu-bar .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 3.4rem;
+  width: 3.4rem;
+  padding: 0;
+}
+
 #mdbook-menu-bar h1.menu-title {
   font-family: var(--font-display);
   font-weight: var(--wl-weight-display);
   font-size: var(--text-lede);
   letter-spacing: 0.01em;
+  /* The title is the only thing between the two groups, so it takes the slack
+     and centres itself in what is left rather than sitting wherever the
+     preceding group happens to end. */
+  flex: 1;
+  margin: 0;
+  text-align: center;
 }
 
 /* --------------------------------------------------------------------------
@@ -434,9 +474,13 @@ blockquote p:last-child { margin-bottom: 0; }
   display: flex;
   align-items: center;
   gap: 1.15rem;
-  margin-right: 1.15rem;
-  padding-right: 1.15rem;
+  margin-right: 0.9rem;
+  padding-right: 0.9rem;
   border-right: 1px solid var(--rule);
+  /* Stops the four links wrapping under the icons on a narrow desktop, which
+     is the shape this whole block exists to prevent. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .site-links a {
