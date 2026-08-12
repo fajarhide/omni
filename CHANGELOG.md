@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`kubectl run` container stdout was judged as kubectl output, so every payload line was dropped (#497)**: `wraps_another_command` recognised `exec` and not `run`, so `kubectl run --rm -i -- <cmd>` was routed to the kubectl grammar. An eight-line probe came back as `pod "omni-repro" deleted` plus a marker: the one line kubectl prints itself survived and the eight the command was run for did not. `run` now counts as a wrapper for `kubectl`, `docker` and `podman`, the same as `exec`.
+
+  The failure is silent in the direction that matters, because a probe returning nothing is a plausible result and nothing in the delivered text separates it from an answer that was thrown away. **The two doors disagreed**: the same payload through `hooks::post_tool` was never rewritten, so only `hooks::pipe` destroyed it, which is why a post-hook probe reported no defect. The corpus cannot arbitrate the widening to `docker` and `podman`: it holds two `podman run` and no `kubectl run` in 6,656 commands.
+
 ## [0.7.2] - 2026-08-12
 
 The release that stopped four published numbers from being wrong, and paid 0.06% to
