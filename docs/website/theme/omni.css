@@ -61,6 +61,14 @@
   --font-body:    var(--wl-font-sans, 'IBM Plex Sans', system-ui, sans-serif);
   --font-mono:    var(--wl-font-mono, 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace);
 
+  /* mdBook's general.css carries `code { font-family: var(--mono-font)
+     !important }`, so a `code` rule here loses whatever its specificity or
+     order. Its variable is the seam that works, and it is the same one the
+     palette already goes through. Without this, every code block and inline
+     span in the manual renders in Source Code Pro while the rest of the site
+     is on the design system's mono. */
+  --mono-font: var(--font-mono);
+
   /* 68 characters at this size. Long enough for a wide reference table to
      breathe, short enough that prose is read rather than skimmed. */
   --doc-measure: 46rem;
