@@ -79,21 +79,46 @@ when counted in tokens, `sed` and `cargo` move down.
 The bar was set before the measurement: if OMNI does not win, the claim does not ship.
 It wins, and the half it loses is published with it.
 
-`OMNI_BENCH_RTK=/path/to/rtk` adds the arm. Without it the harness runs as before, so
-CI never needs a competitor installed.
+`OMNI_BENCH_RTK` and `OMNI_BENCH_LEANCTX` each add an arm when they name a binary.
+Without them the harness runs as before, so CI never needs a competitor installed. The
+lean-ctx arm spawns a process per trace, so a full run takes tens of minutes rather
+than the seconds the others add.
 
-| | bytes | saved |
-|---|---|---|
-| omni, filters only | 6,469,047 to 6,292,856 | **2.7%** |
-| rtk `pipe` | 6,469,047 to 6,067,012 | **6.2%** |
-| omni, with the ledger | 6,469,047 to 5,502,733 | **14.9%** |
-| rtk `pipe` + omni's ledger | 6,469,047 to 5,330,551 | **17.6%** |
+| | bytes | saved | |
+|---|---|---|---|
+| omni, filters only | 6,469,047 to 6,292,856 | **2.7%** | |
+| rtk `pipe` | 6,469,047 to 6,067,012 | **6.2%** | 872 of 6,656 claimed by a filter |
+| lean-ctx `compress` | 6,469,047 to 6,073,757 | **6.1%** | 134 of 6,656 shortened |
+| omni, with the ledger | 6,469,047 to 5,506,627 | **14.9%** | |
+| rtk `pipe` + omni's ledger | 6,469,047 to 5,333,483 | **17.6%** | |
 
 **rtk's filters are better than ours**, by 3.5 points on the same bytes, over 872 of
 6,656 traces. That is not a rounding difference and it is not argued away here. It is
 also not bought by truncation, which was the first explanation tried and dropped: rtk
 marked a cut in only 33 of the 872 outputs it claimed, so its patterns are simply
 better.
+
+**rtk and lean-ctx land a tenth of a point apart, from opposite shapes.** rtk claims
+872 commands and averages 461 bytes off each. lean-ctx shortens 134 and averages
+2,950, six times more per command it touches. One is broad and shallow, the other
+narrow and deep, and the aggregate hides that completely, which is why the counts are
+in the table beside the percentages.
+
+Those two counts are not like for like, and the harness reports them differently for
+that reason. rtk's counts a **mapped filter**, whether or not it saved a byte, because
+it is handed the filter name. lean-ctx reports no filter name, so its count is an
+**actual reduction**.
+
+**lean-ctx has no ledger row**, and that is a limit of the measurement rather than of
+the tool. Its preview path reports `compressed_bytes` and never emits the compressed
+text, so stacking our ledger on it could only be estimated, and an estimate beside four
+measurements is the blend this page exists to avoid.
+
+**headroom is not here either**, for a different reason. Its equivalent is
+`cross_turn_dedup.py`, a whole-conversation deduplicator rather than a per-payload
+filter, so it belongs against the ledger and not against the filters. A prior run put
+the two at parity to one decimal place; re-deriving that on the current pipeline is
+tracked in [#468](https://github.com/fajarhide/omni/issues/468).
 
 **The ledger is the difference**, and the last row is the honest way to say why. It
 adds 12.2 points on top of our filters and 11.4 on top of theirs, so it is orthogonal
