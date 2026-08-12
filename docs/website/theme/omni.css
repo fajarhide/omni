@@ -149,9 +149,11 @@
 /* The three built-in themes this design does not cover. A half-styled theme
    reads as a bug, so they are removed from the picker rather than left to
    render in mdBook's own colours. */
-#theme-list li a#coal,
-#theme-list li a#ayu,
-#theme-list li a#rust { display: none; }
+/* Buttons, not anchors, and hiding the button leaves its empty row behind, so
+   the row is what gets hidden. */
+#mdbook-theme-list li:has(#mdbook-theme-coal),
+#mdbook-theme-list li:has(#mdbook-theme-ayu),
+#mdbook-theme-list li:has(#mdbook-theme-rust) { display: none; }
 
 /* --------------------------------------------------------------------------
    Page
@@ -312,8 +314,8 @@ blockquote p:last-child { margin-bottom: 0; }
    eyebrow the site uses for the same job.
    -------------------------------------------------------------------------- */
 
-#sidebar { font-size: 0.9rem; }
-#sidebar .sidebar-scrollbox { padding: 1.5rem 1.5rem 4rem; }
+#mdbook-sidebar { font-size: 0.9rem; }
+#mdbook-sidebar .sidebar-scrollbox { padding: 1.5rem 1.5rem 4rem; }
 
 .chapter li.chapter-item { line-height: 1.5; margin: 0.34em 0; }
 
@@ -339,13 +341,59 @@ blockquote p:last-child { margin-bottom: 0; }
 /* Nested chapters sit under their parent without a bullet or a number. */
 .chapter li > ol.section { padding-left: 0.9rem; }
 
-#menu-bar { background: var(--bg); border-bottom: 1px solid transparent; }
-#menu-bar.sticky, #menu-bar:not(.folded) { border-bottom-color: var(--rule); }
-#menu-bar h1.menu-title {
+#mdbook-menu-bar { background: var(--bg); border-bottom: 1px solid transparent; }
+#mdbook-menu-bar.sticky, #mdbook-menu-bar:not(.folded) { border-bottom-color: var(--rule); }
+#mdbook-menu-bar h1.menu-title {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: 0.01em;
+}
+
+/* --------------------------------------------------------------------------
+   The way back to the site (#477), injected by theme/siteframe.js.
+
+   The manual matched the palette and not the frame, so nothing on 37 pages
+   linked home and `Docs` in the site navbar was a one-way door. These are the
+   site's own destinations in the site's own quiet style, not a second
+   navigation: the sidebar is the navigation.
+   -------------------------------------------------------------------------- */
+
+#mdbook-menu-bar .menu-title .site-home {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+#mdbook-menu-bar .menu-title .site-home:hover {
+  border-bottom-color: currentColor;
+}
+
+.site-links {
+  display: flex;
+  align-items: center;
+  gap: 1.15rem;
+  margin-right: 1.15rem;
+  padding-right: 1.15rem;
+  border-right: 1px solid var(--rule);
+}
+
+.site-links a {
+  font-family: var(--font-body);
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding: 2px 0;
+}
+.site-links a:hover {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}
+
+/* On a phone the icon buttons already crowd the bar, and the sidebar toggle
+   matters more there than a link to the journal. */
+@media (max-width: 700px) {
+  .site-links { display: none; }
 }
 
 /* --------------------------------------------------------------------------
@@ -392,12 +440,12 @@ blockquote p:last-child { margin-bottom: 0; }
    Search
    -------------------------------------------------------------------------- */
 
-#searchbar {
+#mdbook-searchbar {
   font-family: var(--font-body);
   border-radius: 4px;
   padding: 0.6em 0.8em;
 }
-#searchresults a { border-bottom: 0; }
+#mdbook-searchresults a { border-bottom: 0; }
 mark { border-radius: 2px; padding: 0 0.15em; }
 
 /* --------------------------------------------------------------------------

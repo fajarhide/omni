@@ -23,7 +23,7 @@ no-section-label = true
 git-repository-url = "https://github.com/fajarhide/omni"
 edit-url-template = "https://github.com/fajarhide/omni/edit/main/docs/website/{path}"
 additional-css = ["theme/omni.css"]
-additional-js = ["theme/pagetoc.js"]
+additional-js = ["theme/pagetoc.js", "theme/siteframe.js"]
 
 [output.html.playground]
 runnable = false
