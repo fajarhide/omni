@@ -446,7 +446,11 @@ fn replay_execution_traces_net_savings() {
         omni::store::sqlite::Store::open_path(&ledger_dir.path().join("ledger.db")).ok();
     let (mut ledger_total, mut ledger_calls) = (0u64, 0u64);
     // #448. `OMNI_BENCH_PROJECT=off` drops the project scope so the two can be
-    // measured apart; the floor arm is `OMNI_PROJECT_FLOOR_MULT` in the ledger.
+    // measured apart. There is no env var for the floor: it is
+    // `guard::limits::PROJECT_FLOOR_MULT`, and changing the arm means changing
+    // the constant. An `OMNI_PROJECT_FLOOR_MULT` was advertised here and read by
+    // nothing but this file's own reporting line, so setting it relabelled the
+    // output without moving the arm (#472).
     let project_scope = std::env::var("OMNI_BENCH_PROJECT").ok().as_deref() != Some("off");
     let (mut mark_session, mut mark_project) = (0u64, 0u64);
     // #450's three gates, in repeated bytes the ledger never got to claim.
@@ -752,7 +756,7 @@ fn replay_execution_traces_net_savings() {
     );
     println!(
         "ledger arm:      project_scope={project_scope} floor_mult={} bytes={ledger_total} markers: {mark_session} session, {mark_project} project",
-        std::env::var("OMNI_PROJECT_FLOOR_MULT").unwrap_or_else(|_| "6".into())
+        omni::guard::limits::PROJECT_FLOOR_MULT
     );
 
     // #450. Every repeated byte the ledger was handed, attributed to the gate

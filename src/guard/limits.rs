@@ -100,6 +100,20 @@ pub const MIN_LEDGER_INPUT: usize = 264;
 /// than missed.
 pub const MIN_LEDGER_RUN_GAIN: usize = 150;
 
+/// How much more a project-scope fold must save than a session-scope one.
+///
+/// A session fold is free: the agent is holding those bytes and the handle only
+/// costs it a re-read it can decline. A project fold is not: the lines went to a
+/// different session, so if the agent needs them it pays a retrieval it has no
+/// say in. Three times the session gain is where #448's replay put the knee.
+///
+/// It lives here rather than inline in `ledger::Origin::min_gain` because
+/// `bench_replay` reports the arm's floor, and the two drifted: the harness
+/// printed a hardcoded 6 for an arm that had run at 3 since #448 moved it, which
+/// is the one line anyone tuning this reads to confirm which arm they just ran
+/// (#472).
+pub const PROJECT_FLOOR_MULT: usize = 3;
+
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking, e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that

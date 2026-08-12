@@ -40,7 +40,7 @@
 
 use std::collections::HashSet;
 
-use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN};
+use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, PROJECT_FLOOR_MULT};
 use crate::store::sqlite::Store;
 
 /// Which history a run was found in, because the two cannot make the same claim.
@@ -93,7 +93,7 @@ impl Origin {
     fn min_gain(self) -> usize {
         match self {
             Self::Session => MIN_LEDGER_RUN_GAIN,
-            Self::Project => MIN_LEDGER_RUN_GAIN * 3,
+            Self::Project => MIN_LEDGER_RUN_GAIN * PROJECT_FLOOR_MULT,
         }
     }
 }
