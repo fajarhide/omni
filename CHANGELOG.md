@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A snake_case tool name never reached its own distiller (#488)**: `distil_tool_reply` matches `Bash`, `Read`, `Grep` and `WebFetch` exactly. The Pi and OpenAI-shaped branches normalised the name before that check and the ClaudeCode branch, the shape a third-party integrator is most likely to send, passed it through, so `bash` fell to the generic arm and reached neither the per-tool distiller nor the ledger.
+
+  **The failure looked like success, which is why it lasted.** The generic arm still shortens, and on a real shell corpus `bash` reported 59.9% against `Bash`'s 37.6%: the wrong path scored better because it was keeping the first thirty lines and discarding the rest, where the right one folds only what the agent has already been shown.
+
+- **Two sessions minted in the same millisecond were one session (#490)**: the id was `timestamp_millis()` alone, and `INSERT OR REPLACE INTO sessions` kept one of the pair. On a machine running several agents, two `SessionStart` hooks landing together is exactly the case. The id is now `{millis}-{pid}-{counter}`, all stdlib. The millisecond stays first because four call sites slice `session_id[..8]` for display.
+
+  This does not make the id meaningful. It is still minted state rather than an identity the host supplied, which is why the ledger scopes on `host_session()` instead.
+
 - **`kubectl run` container stdout was judged as kubectl output, so every payload line was dropped (#497)**: `wraps_another_command` recognised `exec` and not `run`, so `kubectl run --rm -i -- <cmd>` was routed to the kubectl grammar. An eight-line probe came back as `pod "omni-repro" deleted` plus a marker: the one line kubectl prints itself survived and the eight the command was run for did not. `run` now counts as a wrapper for `kubectl`, `docker` and `podman`, the same as `exec`.
 
   The failure is silent in the direction that matters, because a probe returning nothing is a plausible result and nothing in the delivered text separates it from an answer that was thrown away. **The two doors disagreed**: the same payload through `hooks::post_tool` was never rewritten, so only `hooks::pipe` destroyed it, which is why a post-hook probe reported no defect. The corpus cannot arbitrate the widening to `docker` and `podman`: it holds two `podman run` and no `kubectl run` in 6,656 commands.
