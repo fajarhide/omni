@@ -6,8 +6,9 @@
 
      1. Mono type means a machine emitted it. Sans means a person wrote it.
         Never mix the two inside one block.
-     2. Amber phosphor appears only inside a black terminal. It is the
-        instrument's colour, so it never leaks onto the page.
+     2. Yellow appears only inside the terminal. It is the instrument's
+        colour, so it never leaks onto the page. The accent both themes
+        spend is --accent, the same one omni.weekndlabs.com uses.
 
    Rule 2 is also what decides the dark theme. mdBook's `light` is the site's
    paper; its `navy` is the instrument, which is the one place amber belongs.
@@ -78,7 +79,7 @@
   --ink-soft:    var(--wl-muted-foreground, #56585A);
   --rule:        var(--wl-border, #C6C8C1);
   --rule-strong: var(--wl-input, #A9ABA3);
-  --accent:      var(--wl-warning, #7A4E00);   /* the only amber allowed on paper */
+  --accent:      var(--wl-ring, #7A4E00);      /* the house accent, as on the site */
 
   --bg: var(--paper);
   --fg: var(--ink);
@@ -122,6 +123,7 @@
   --crt:          var(--wl-background, #0B0B0C);
   --crt-panel:    var(--wl-card, #121214);
   --crt-sunk:     var(--wl-muted, #161618);
+  --accent:       var(--wl-ring, #FFB000);
   --phosphor:     var(--wl-terminal-yellow, #FFB000);
   --phosphor-dim: var(--wl-terminal-dim, #A87400);
   --ink:          var(--wl-foreground, #DEDFDA);
@@ -134,12 +136,12 @@
   --sidebar-bg: var(--wl-sidebar, #0E0E10);
   --sidebar-fg: var(--ink-soft);
   --sidebar-non-existant: var(--wl-input, #4A4A50);
-  --sidebar-active: var(--phosphor);
+  --sidebar-active: var(--accent);
   --sidebar-spacer: var(--rule);
   --scrollbar: var(--rule-strong);
   --icons: var(--ink-soft);
-  --icons-hover: var(--phosphor);
-  --links: var(--phosphor);
+  --icons-hover: var(--accent);
+  --links: var(--accent);
   --inline-code-color: var(--ink);
   --theme-popup-bg: var(--crt-panel);
   --theme-popup-border: var(--rule);
