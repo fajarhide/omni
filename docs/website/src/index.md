@@ -1,3 +1,4 @@
+#
 # OMNI
 
 Your agent reads terminal output. Most of that output is noise, and you pay for
