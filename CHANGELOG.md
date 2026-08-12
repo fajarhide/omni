@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-12
+
+Three fixes about mistaken identity. A tool name, a session and a command's output
+were each taken for something they were not, and in every case the substitution was
+invisible from the outside: the tool name scored a *higher* saving on the wrong path,
+two sessions merged without an error, and a probe whose answer had been deleted read
+exactly like a probe that found nothing.
+
 ### Fixed
 - **A snake_case tool name never reached its own distiller (#488)**: `distil_tool_reply` matches `Bash`, `Read`, `Grep` and `WebFetch` exactly. The Pi and OpenAI-shaped branches normalised the name before that check and the ClaudeCode branch, the shape a third-party integrator is most likely to send, passed it through, so `bash` fell to the generic arm and reached neither the per-tool distiller nor the ledger.
 
