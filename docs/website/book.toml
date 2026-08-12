@@ -1,0 +1,40 @@
+[book]
+title = "OMNI"
+description = "Semantic Signal Engine for AI agents. What it is, how it decides, and every command it has."
+authors = ["fajarhide"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+# Published under /docs on omni.weekndlabs.com. Page links are relative and work
+# at any prefix; this is what the 404 page and the search index need in order to
+# build absolute URLs that do not drop the prefix.
+site-url = "/docs/"
+# Built-in theme names, restyled wholesale in theme/omni.css. Registering a
+# genuinely new name would mean forking index.hbs, which is a lot of template to
+# own for a rename.
+default-theme = "light"
+preferred-dark-theme = "navy"
+no-section-label = true
+git-repository-url = "https://github.com/fajarhide/omni"
+edit-url-template = "https://github.com/fajarhide/omni/edit/main/docs/website/{path}"
+additional-css = ["theme/omni.css"]
+additional-js = ["theme/pagetoc.js"]
+
+[output.html.playground]
+runnable = false
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-boolean-and = true
+boost-title = 3
+boost-hierarchy = 2
+
+[output.html.fold]
+enable = true
+level = 1

@@ -12,6 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
+  [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/zHTuvZhF2M)
   [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
@@ -242,6 +243,7 @@ sama, siap disalin.
 * [Kontribusi](../CONTRIBUTING.md): pipeline, standar kode, gate CI, dan cara menambah distiller. Satu dokumen, bukan empat.
 * [CHANGELOG.md](../CHANGELOG.md): apa yang sudah rilis, beserta bukti di balik tiap entri
 * [SECURITY.md](../SECURITY.md): cara melaporkan kerentanan
+* [Discord](https://discord.gg/zHTuvZhF2M): bertanya, atau melaporkan hal yang OMNI salah tangani
 
 ---
 

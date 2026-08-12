@@ -32,3 +32,6 @@ target/
 # repo during testing. It is a per-project file for OMNI's users, not part of
 # OMNI's own source, and it was committed by accident once (#363).
 .cursor/
+
+# mdBook build output for docs/website. The source is tracked, the render is not.
+docs/website/book/

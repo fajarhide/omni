@@ -12,6 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
+  [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/zHTuvZhF2M)
   [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
@@ -241,6 +242,7 @@ tiện sao chép.
 * [Đóng góp](../CONTRIBUTING.md): pipeline, chuẩn code, các cổng CI, và cách thêm một distiller. Một tài liệu, không phải bốn
 * [CHANGELOG.md](../CHANGELOG.md): những gì đã phát hành, kèm bằng chứng cho từng mục
 * [SECURITY.md](../SECURITY.md): cách báo cáo lỗ hổng
+* [Discord](https://discord.gg/zHTuvZhF2M): đặt câu hỏi, hoặc báo cáo điều OMNI làm sai
 
 ---
 

@@ -12,6 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
+  [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/zHTuvZhF2M)
   [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
@@ -282,6 +283,7 @@ irm omni.weekndlabs.com/install.ps1 | iex
 * [المساهمة](../CONTRIBUTING.md): خط المعالجة، ومعايير الكود، وبوابات CI، وكيفية إضافة مُقطِّر. وثيقة واحدة بدل أربع
 * [CHANGELOG.md](../CHANGELOG.md): ما الذي صدر، مع الدليل خلف كل بند
 * [SECURITY.md](../SECURITY.md): كيفية الإبلاغ عن ثغرة
+* [Discord](https://discord.gg/zHTuvZhF2M): اطرح سؤالاً، أو أبلغ عن خطأ ارتكبه OMNI
 
 </div>
 
