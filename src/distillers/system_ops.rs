@@ -535,17 +535,122 @@ fn distill_tree_output(input: &str) -> String {
 /// can only ever cover the case nobody actually runs (#344). The keys that went
 /// through unredacted include `DB_POSTGRESDB_PASSWORD` eight times, plus
 /// `API_KEY_N8N`, `SSH_PRIVATE_KEY` and an access token.
+/// True when `KEY` is the *only* reason the name looked sensitive.
+///
+/// `KEY` is the weakest pattern in the list. It is the one that fires on
+/// `ssh_key`, `primary_key` and `local_network_gateway_key`, which in HCL and
+/// Terraform are map lookups and references rather than credentials. Every other
+/// pattern is either a whole word that means secret (`PASSWORD`, `TOKEN`,
+/// `SECRET`) or a vendor prefix, and those are not open to argument.
+///
+/// So only this one lets the value have a say. `ANTHROPIC_API_KEY` matches
+/// `ANTHROPIC_` and `API_` as well, so it is never weak, which is what stops the
+/// value rule from waving through `sk-ant-abc123` on the grounds that it is
+/// lowercase and short (#486).
+fn only_the_key_pattern_matched(key: &str) -> bool {
+    let k = key.trim().trim_start_matches("export ").trim();
+    if k.is_empty() || !k.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return false;
+    }
+    let upper = k.to_uppercase();
+    let segments: Vec<&str> = upper.split('_').filter(|s| !s.is_empty()).collect();
+    let Some(first) = segments.first() else {
+        return false;
+    };
+    !SENSITIVE_PATTERNS.iter().any(|p| {
+        if *p == "KEY" {
+            return false;
+        }
+        match p.strip_suffix('_') {
+            Some(prefix) => *first == prefix,
+            None if p.contains('_') => {
+                let want: Vec<&str> = p.split('_').collect();
+                segments.windows(want.len()).any(|w| w == want.as_slice())
+            }
+            None => segments.iter().any(|s| s == p || s.ends_with(p)),
+        }
+    })
+}
+
+/// A value that carries no secret, so redacting it only destroys the line.
+///
+/// The key name cannot decide this on its own: `ssh_key` is a credential in one
+/// file and a public-key path in the next, and in HCL and Terraform a `*_key`
+/// suffix is usually a map lookup or a reference. `local_network_gateway_key`
+/// naming which peer a tunnel points at was delivered as `[REDACTED]`, which is
+/// the whole content of the line gone with nothing saying so (#486).
+///
+/// So the value gets a say. A lowercase identifier with no entropy is not a
+/// credential: no capitals, no base64 or hex run, and short. Anything else stays
+/// redacted, because the direction of doubt has not changed. Hiding a value that
+/// did not need hiding is recoverable; printing a secret is not.
+fn looks_like_plain_identifier(value: &str) -> bool {
+    let v = value.trim().trim_matches(['"', '\'']).trim();
+    if v.is_empty() || v.len() >= 40 {
+        return false;
+    }
+    let mut chars = v.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_lowercase() || first.is_ascii_digit()) {
+        return false;
+    }
+    v.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+}
+
+/// One line's redaction decision and its replacement, so the two callers cannot
+/// disagree about either.
+///
+/// #408 unified the *predicate* and left two copies of the *application*, which
+/// is why `cat` of an HCL file kept destroying `local_network_gateway_key` after
+/// `redact_sensitive_assignments` had been fixed: `distill_env_output` carried
+/// its own copy and routed that content (#486). Third time this repository has
+/// paid for two copies of one rule.
+///
+/// `None` means deliver the line as written.
+fn redact_assignment(key: &str, value: &str) -> Option<String> {
+    if !is_sensitive_key(key) || value.trim().is_empty() {
+        return None;
+    }
+    // The value only gets a say when `KEY` alone made the name look sensitive.
+    // Letting it speak for every pattern would wave through `sk-ant-abc123`,
+    // which is lowercase, short and a credential.
+    if only_the_key_pattern_matched(key) && looks_like_plain_identifier(value) {
+        return None;
+    }
+    // The surrounding syntax survives, so a redacted assignment still parses.
+    // The old form ate the spacing and the quotes, so an HCL line came out as
+    // `key =[REDACTED]`, which is neither valid nor informative.
+    let lead: String = value.chars().take_while(|c| c.is_whitespace()).collect();
+    let quoted = value.trim_start().starts_with('"');
+    Some(format!(
+        "{lead}{}",
+        if quoted {
+            "\"[REDACTED]\""
+        } else {
+            "[REDACTED]"
+        }
+    ))
+}
+
 pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
     let mut out = String::with_capacity(input.len());
-    let mut hit = false;
+    let mut redacted = 0u32;
 
     for line in input.lines() {
         let trimmed = line.trim_end();
         match trimmed.find('=') {
-            Some(eq) if is_sensitive_key(&trimmed[..eq]) && eq + 1 < trimmed.len() => {
-                hit = true;
+            Some(eq)
+                if let Some(replacement) =
+                    redact_assignment(&trimmed[..eq], &trimmed[eq + 1..]) =>
+            {
+                redacted += 1;
                 out.push_str(&trimmed[..eq]);
-                out.push_str("=[REDACTED]\n");
+                out.push('=');
+                out.push_str(&replacement);
+                out.push('\n');
             }
             _ => {
                 out.push_str(trimmed);
@@ -553,7 +658,10 @@ pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
             }
         }
     }
-    hit.then_some(out)
+    // Anything dropped leaves a marker, which this path never emitted, so a
+    // reader who did not already know the file had no signal that a value had
+    // been cut. `distill_env_output` has said so all along; this now matches it.
+    (redacted > 0).then(|| format!("[OMNI: {redacted} sensitive value(s) redacted]\n{out}"))
 }
 
 /// A key whose *value* must never be delivered. Trimmed so an indented or
@@ -619,10 +727,12 @@ pub fn distill_env_output(input: &str) -> String {
         // One predicate, not two. This arm carried its own copy of the substring
         // match, so fixing only `is_sensitive_key` would have left `env` output
         // redacting `passed=` while every other command stopped (#408).
-        if is_sensitive_key(key) {
+        if let Some(replacement) = redact_assignment(key, &trimmed[eq_pos + 1..]) {
             redacted_count += 1;
             out.push_str(key);
-            out.push_str("=[REDACTED]\n");
+            out.push('=');
+            out.push_str(&replacement);
+            out.push('\n');
         } else {
             out.push_str(trimmed);
             out.push('\n');
@@ -915,6 +1025,38 @@ mod tests {
             "}",
         ];
         assert!(!is_tree_output(&source));
+    }
+
+    /// The reporter's three lines, and the one that must still go (#486).
+    ///
+    /// `*_key` in HCL and Terraform is usually a map lookup or a reference. The
+    /// name alone cannot tell, so the value decides, but only when `KEY` was the
+    /// only thing that matched: `ANTHROPIC_API_KEY` also matches `ANTHROPIC_` and
+    /// `API_`, and its value is lowercase and short, so a value rule on its own
+    /// would have waved it through.
+    #[test]
+    fn keeps_hcl_identifiers_and_still_redacts_real_secrets() {
+        let input = "local_network_gateway_key = \"lng-example-staging\"\n\
+                     primary_key = \"lng-example\"\n\
+                     ssh_key = \"not-a-secret-name\"\n\
+                     ANTHROPIC_API_KEY=sk-ant-abc123\n\
+                     API_KEY=aGVsbG93b3JsZGJhc2U2NGlzaHZhbHVl\n";
+        let out = redact_sensitive_assignments(input).expect("two secrets are still redacted");
+
+        for kept in ["lng-example-staging", "lng-example", "not-a-secret-name"] {
+            assert!(out.contains(kept), "identifier destroyed: {kept}\n{out}");
+        }
+        for gone in ["sk-ant-abc123", "aGVsbG93b3JsZGJhc2U2NGlzaHZhbHVl"] {
+            assert!(!out.contains(gone), "secret delivered: {gone}\n{out}");
+        }
+        assert!(
+            out.starts_with("[OMNI: 2 sensitive value(s) redacted]"),
+            "a cut with no marker is a silent one: {out}"
+        );
+        assert!(
+            out.contains("local_network_gateway_key = \"lng-example-staging\""),
+            "the surrounding syntax has to survive so the line still parses: {out}"
+        );
     }
 
     #[test]
