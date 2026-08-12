@@ -629,10 +629,27 @@ fn wraps_another_command(command: &str) -> bool {
         // `ssh host '<cmd>'`, but not `ssh host` alone, which is interactive and
         // produces nothing to distil either way.
         Some("ssh") => true,
-        // `kubectl exec … -- <cmd>`, `docker exec … <cmd>`, `podman exec …`.
-        Some("kubectl") | Some("docker") | Some("podman") => {
-            command.split_whitespace().any(|t| t == "exec")
-        }
+        // `kubectl exec … -- <cmd>`, `docker exec … <cmd>`, `podman exec …`,
+        // and `run`, which is the same thing with a container created first.
+        //
+        // `kubectl run --rm -i -- <cmd>` is the standard way to probe from inside
+        // a cluster, and its stdout is arbitrary program output. Routed here it
+        // was judged against kubectl's grammar, which `curl` headers, `nc`
+        // results and `openssl` output were never going to match, so all eight
+        // payload lines were discarded and the one line kubectl prints itself,
+        // `pod "…" deleted`, was kept (#497).
+        //
+        // That reads like a probe that ran and found nothing, which is a
+        // plausible answer, so there is no way to tell it from the endpoint
+        // actually being silent without a retrieval on every call.
+        //
+        // `run` is included for docker and podman too. The reasoning does not
+        // change with the binary, and fixing one door and leaving the others is
+        // how #112 and #234 kept coming back. The corpus cannot arbitrate:
+        // 6,656 recorded commands hold two `podman run` and no `kubectl run`.
+        Some("kubectl") | Some("docker") | Some("podman") => command
+            .split_whitespace()
+            .any(|t| t == "exec" || t == "run"),
         // `az aks command invoke -c '<cmd>'`.
         Some("az") => command.contains("command invoke"),
         _ => false,
@@ -1103,6 +1120,16 @@ mod tests {
         assert!(wraps_another_command("kubectl exec pod -- ls"));
         assert!(wraps_another_command("az aks command invoke -c 'ls'"));
         assert!(wraps_another_command("ssh host 'ls'"));
+
+        // `run` creates the container first and then hands back the program's
+        // stdout, which is the same thing `exec` does (#497). The reported case
+        // lost all eight payload lines and kept `pod "…" deleted`, which reads
+        // like a probe that found nothing.
+        assert!(wraps_another_command(
+            "kubectl -n probe run p --rm -i --restart=Never --image=busybox --command -- sh -c 'echo hi'"
+        ));
+        assert!(wraps_another_command("docker run --rm busybox echo hi"));
+        assert!(wraps_another_command("podman run --rm alpine ls"));
 
         assert!(!wraps_another_command("kubectl get pods"));
         assert!(!wraps_another_command("az aks show -n cluster"));
