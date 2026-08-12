@@ -203,7 +203,21 @@ mod tests {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_command("cargo build");
+        // Both rows, so the session is continuable: continuation is scoped by
+        // project since #482, and a `sessions` row alone is a state the product
+        // never leaves behind.
+        //
+        // It has to continue for this test to mean anything. A fresh session
+        // returns output only when it found watch paths or a prompt to register,
+        // and `/tmp` has neither on Windows, so without this the assertion below
+        // passes on macOS and Linux and fails on the runner.
         store.upsert_session(&state);
+        store.sync_agent_session(
+            &crate::agents::multiagent::detect_agent_id(),
+            &state.session_id,
+            &crate::agents::multiagent::project_hash("/tmp"),
+            &serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string()),
+        );
 
         let session = Arc::new(Mutex::new(SessionState::new())); // dipatcher state doesn't matter much for SessionStart
 
