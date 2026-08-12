@@ -139,10 +139,62 @@ fn page(store: &Store) -> String {
         } else {
             0.0
         };
+        // `216444` was reaching the page raw while the CLI printed `216K` from
+        // this very function, which is public and two files away (#463).
         rows.push_str(&format!(
-            "<tr><td>{}</td><td class=\"n\">{calls}</td><td class=\"n\">{raw_tokens}</td><td class=\"n\">{filtered_tokens}</td><td class=\"n\">{pct:.1}%</td></tr>",
-            escape(label)
+            "<tr><td>{}</td><td class=\"n\">{calls}</td><td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{pct:.1}%</td></tr>",
+            escape(label),
+            super::stats::format_exact_tokens(*raw_tokens),
+            super::stats::format_exact_tokens(*filtered_tokens)
         ));
+    }
+
+    // Top Commands and Agent Distribution, from the same two calls that feed the
+    // CLI tables, so the footer's "same figures as omni stats" stays true.
+    let mut commands = String::new();
+    if let Ok(raw) = store.filter_breakdown(0) {
+        for (name, calls, pct, _) in super::stats::group_and_calculate_stats(raw, 0)
+            .iter()
+            .filter(|(_, _, pct, _)| *pct > 0.0)
+            .take(10)
+        {
+            commands.push_str(&format!(
+                "<tr><td>{}</td><td class=\"n\">{calls}</td><td class=\"n\">{pct:.1}%</td></tr>",
+                escape(name)
+            ));
+        }
+    }
+    if commands.is_empty() {
+        commands.push_str(
+            "<tr><td class=\"muted\" colspan=\"3\">no command has saved anything yet</td></tr>",
+        );
+    }
+
+    let mut agents = String::new();
+    if let Ok(rows) = store.get_agent_breakdown(0) {
+        let total: u64 = rows.iter().map(|r| r.calls).sum();
+        for r in rows.iter().filter(|r| r.calls > 0) {
+            let share = if total > 0 {
+                100.0 * r.calls as f64 / total as f64
+            } else {
+                0.0
+            };
+            let saved = if r.input_bytes > 0 {
+                100.0 * (1.0 - r.output_bytes as f64 / r.input_bytes as f64)
+            } else {
+                0.0
+            };
+            agents.push_str(&format!(
+                "<tr><td>{}</td><td class=\"n\">{}</td><td class=\"n\">{share:.1}%</td><td class=\"n\">{saved:.1}%</td></tr>",
+                escape(super::stats::agent_display_name(&r.agent_id)),
+                r.calls
+            ));
+        }
+    }
+    if agents.is_empty() {
+        agents.push_str(
+            "<tr><td class=\"muted\" colspan=\"4\">no agent has been recorded yet</td></tr>",
+        );
     }
 
     let mut gates = String::new();
@@ -179,6 +231,10 @@ footer {{ margin-top: 3rem; font-size: .8rem; opacity: .6; }}
 <h2>Pipeline diagnostic</h2>
 <p class="muted">How much one host's tool output shrank. Not a product claim.</p>
 <table><tr><th>window</th><th class="n">calls</th><th class="n">tokens in</th><th class="n">tokens out</th><th class="n">saved</th></tr>{rows}</table>
+<h2>Top commands</h2>
+<table><tr><th>command</th><th class="n">calls</th><th class="n">saved</th></tr>{commands}</table>
+<h2>Agent distribution</h2>
+<table><tr><th>agent</th><th class="n">calls</th><th class="n">share</th><th class="n">saved</th></tr>{agents}</table>
 <h2>Why payloads were passed through</h2>
 <table><tr><th>gate</th><th class="n">calls</th></tr>{gates}</table>
 <footer>Read-only, from ~/.omni/omni.db. Same figures as <code>omni stats</code>. Reload to refresh.</footer>

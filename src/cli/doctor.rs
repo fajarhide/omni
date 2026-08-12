@@ -277,7 +277,11 @@ fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
         return format!("{heading} {tier}, {hidden} {checks} [OK]\n");
     }
 
-    let mut out = format!("{heading}\n");
+    // The tier goes on the heading here too. The `kept.is_empty()` branch above
+    // already writes it inline, so appending a separate `Distill tier:` row only
+    // in this branch gave the list two shapes: a one-liner for a clean host and
+    // a block with a trailing row for any host with a note (#463). One shape.
+    let mut out = format!("{heading} {tier}\n");
     for line in kept {
         out.push_str(line);
         out.push('\n');
@@ -289,7 +293,6 @@ fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
             ""
         ));
     }
-    out.push_str(&tier_row);
     out
 }
 
@@ -334,19 +337,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     let mut all_ok = true;
     let mut warnings: Vec<String> = Vec::new();
-    println!(
-        "\n{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    println!();
+    super::print_rule();
     println!(" {}: Installation Diagnostics", "OMNI Doctor".bold().cyan());
-    println!(
-        "{}",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    super::print_rule();
 
     // 1. Binary Version
     let status = crate::guard::update::get_status();
@@ -377,12 +371,11 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     // was built from.
     if unreleased_entries() > 0 {
         println!(
-            "  {:<15} {} {}",
-            "".bright_black(),
+            "  {} {}",
             format!("[{} UNRELEASED]", unreleased_entries())
                 .yellow()
                 .bold(),
-            "changes built into this binary are in no release, cut a tag".bright_black()
+            "built into this binary, in no release. Cut a tag".bright_black()
         );
     }
 
@@ -613,12 +606,18 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     // line, which on this machine meant the MCP-only explanation ten times in a
     // block of a hundred lines (#426). The per-host line above still names the
     // tier, so nothing #351 asked for is lost.
-    println!(
-        "   {:<15} {}",
-        "".bright_black(),
-        "Full = model-facing distill active · Handoff-first = built-in tool output not rewritten, omni_run distils what you route through it · MCP-only = memory and session state, no shell distill"
-            .bright_black()
-    );
+    // One line per tier. As a single sentence it ran to 206 columns from an
+    // empty 15-wide label, so it wrapped mid-word in any normal terminal and
+    // sat under a rule a third of its length (#463). The `·` separators were
+    // already doing the splitting; this just believes them.
+    for tier in [
+        "Full = model-facing distill active",
+        "Handoff-first = built-in tool output not rewritten, omni_run distils",
+        "                what you route through it",
+        "MCP-only = memory and session state, no shell distill",
+    ] {
+        println!("   {}", tier.bright_black());
+    }
 
     if !any_agent_ok {
         warnings.push(
@@ -727,12 +726,9 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             println!("  {} {}", "•".yellow(), w);
         }
     }
-    println!(
-        "\n{}\n",
-        "─────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    println!();
+    super::print_rule();
+    println!();
 
     Ok(())
 }
@@ -954,7 +950,10 @@ mod tests {
 
         assert!(out.contains("Plugin:         not installed"), "{out}");
         assert!(out.contains("2 more checks [OK]"), "{out}");
-        assert!(out.contains("Distill tier:"), "{out}");
+        // The tier rides the heading, the same shape the clean-host one-liner
+        // uses. A trailing `Distill tier:` row here was the second shape (#463).
+        assert!(out.lines().next().unwrap().ends_with("MCP-only"), "{out}");
+        assert!(!out.contains("Distill tier:"), "{out}");
     }
 
     #[test]

@@ -215,8 +215,7 @@ impl AgentIntegration for CodexIntegration {
                 crate::agent_report!(
                     "   {:<15} {}",
                     "Trust:".bright_black(),
-                    "recorded; Codex re-checks the hash, so re-approve after any upgrade"
-                        .bright_black()
+                    "recorded; re-approve after any upgrade (hash re-checked)".bright_black()
                 );
             }
         } else {
