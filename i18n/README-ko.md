@@ -12,7 +12,8 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/zHTuvZhF2M)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 
@@ -147,10 +148,12 @@ OMNI는 둘 다 고치고, 그 밖에서는 비켜섭니다.
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-전체 코퍼스, 분류별 내역, 픽스처와 지연 표는
-**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)** 에 있습니다. 재현은
-`cargo test --release --test bench_replay -- --ignored`.
+이 수치는 직접 재현할 수 있습니다:
 
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
 ## 빠른 시작과 설치
 
 OMNI는 설정이 대단히 쉽고, 터미널에 네이티브로 통합됩니다.
@@ -234,9 +237,10 @@ irm omni.weekndlabs.com/install.ps1 | iex
 
 ## 더 알아보기
 
-* [동작 방식과 비용](../docs/ARCHITECTURE.md): 파이프라인, RewindStore, Memory OS
-* [벤치마크 전문](../docs/BENCHMARKS.md): 코퍼스, 분류별, 픽스처, 지연
-* [기여하기](../CONTRIBUTING.md): `make ci`가 통과하면 준비 끝
+* [기여하기](../CONTRIBUTING.md): 파이프라인, 코드 표준, CI 게이트, 디스틸러 추가 방법. 네 개가 아니라 하나의 문서로
+* [CHANGELOG.md](../CHANGELOG.md): 무엇이 릴리스되었는지, 각 항목의 근거와 함께
+* [SECURITY.md](../SECURITY.md): 취약점 신고 방법
+* [Discord](https://discord.gg/zHTuvZhF2M): 질문하거나, OMNI가 잘못 처리한 것을 신고하기
 
 ---
 
@@ -249,7 +253,7 @@ brew install fajarhide/tap/omni && omni init
 이것은 에이전트 AI 시대를 위해 만들어진, 애정에서 출발한 프로젝트입니다. 토큰 비용을 아끼러 오셨든, 무료 모델을 시험해 보러 오셨든, 최고의 에이전트 도구 벨트를 함께 만들러 오셨든, 기여는 언제나 환영합니다!
 
 - **개발**: 소스에서 빌드하고 싶으신가요? `make ci`와 `cargo build`를 실행하세요. 자세한 내용은 [CONTRIBUTING.md](../CONTRIBUTING.md)를 보세요.
-- **라이선스**: [MIT License](../LICENSE)
+- **라이선스**: [Apache License 2.0](../LICENSE)
 
 <!-- Star History -->
 <p align="center">

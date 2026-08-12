@@ -12,7 +12,8 @@
 [![Release](https://img.shields.io/github/v/release/fajarhide/omni)](https://github.com/fajarhide/omni/releases)
   [![Rust](https://img.shields.io/badge/built_with-Rust-dca282.svg)](https://www.rust-lang.org/)
   [![MCP](https://img.shields.io/badge/MCP-compatible-green.svg?style=flat-square)](https://modelcontextprotocol.io/)
-  [![License: MIT](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
+  [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/zHTuvZhF2M)
+  [![License: Apache 2.0](https://img.shields.io/github/license/fajarhide/omni)](https://github.com/fajarhide/omni/blob/main/LICENSE)
   [![Hits](https://hits.sh/github.com/fajarhide/omni.svg)](https://hits.sh/github.com/fajarhide/omni/)
 </br></br>
 
@@ -150,10 +151,12 @@ hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 <img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
 </div>
 
-Korpus lengkap, rincian per kelas, fixture dan tabel latensi:
-**[docs/BENCHMARKS.md](../docs/BENCHMARKS.md)**. Reproduksi dengan
-`cargo test --release --test bench_replay -- --ignored`.
+Angka-angka itu bisa Anda reproduksi sendiri, di mesin Anda:
 
+```bash
+OMNI_BENCH_DB=~/.omni/omni.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
 ## Mulai Cepat & Instalasi
 
 OMNI sangat mudah disiapkan. Ia terintegrasi secara native ke terminal Anda.
@@ -237,9 +240,10 @@ sama, siap disalin.
 
 ## Selengkapnya
 
-* [Cara kerjanya, dan berapa biayanya](../docs/ARCHITECTURE.md): pipeline, RewindStore, Memory OS
-* [Tolok ukur lengkap](../docs/BENCHMARKS.md): korpus, per kelas, fixture, latensi
-* [Kontribusi](../CONTRIBUTING.md): jalankan `make ci` dan Anda sudah ikut
+* [Kontribusi](../CONTRIBUTING.md): pipeline, standar kode, gate CI, dan cara menambah distiller. Satu dokumen, bukan empat.
+* [CHANGELOG.md](../CHANGELOG.md): apa yang sudah rilis, beserta bukti di balik tiap entri
+* [SECURITY.md](../SECURITY.md): cara melaporkan kerentanan
+* [Discord](https://discord.gg/zHTuvZhF2M): bertanya, atau melaporkan hal yang OMNI salah tangani
 
 ---
 
@@ -252,7 +256,7 @@ brew install fajarhide/tap/omni && omni init
 Ini proyek yang lahir dari kesenangan, dibangun untuk era AI Agentik. Entah Anda datang untuk menghemat biaya token, mencoba model gratis, atau ikut membangun toolbelt agentik terbaik, kontribusi selalu diterima!
 
 - **Pengembangan**: ingin membangun dari sumber? Jalankan `make ci` dan `cargo build`. Baca [CONTRIBUTING.md](../CONTRIBUTING.md) untuk detailnya.
-- **Lisensi**: [MIT License](../LICENSE)
+- **Lisensi**: [Apache License 2.0](../LICENSE)
 
 <!-- Star History -->
 <p align="center">

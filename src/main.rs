@@ -408,7 +408,7 @@ fn main() {
             // `let _`, not `.expect()` (#155): the reader owns the other end of
             // this pipe. `omni --help | head -1` closes it mid-write, the write
             // returns EPIPE, and an `.expect()` turns an ordinary end-of-pipe
-            // into a panic with a backtrace note. `CLAUDE.md` forbids `.expect()`
+            // into a panic with a backtrace note. `CONTRIBUTING.md` forbids `.expect()`
             // on IO for exactly this reason. Nothing can be done about a reader
             // that has gone away, so nothing is what we do.
             let _ = e.print();

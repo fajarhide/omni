@@ -389,7 +389,7 @@ pub fn install_omni_hooks(exe_path: &str) -> anyhow::Result<()> {
 
 /// The path is a parameter so the tests drive this without setting `HOME`.
 /// `cargo` runs tests in parallel and a `set_var` here would decide where an
-/// unrelated test writes, which is the failure mode `AGENTS.md` calls out.
+/// unrelated test writes, which is the failure mode `CONTRIBUTING.md` calls out.
 fn install_omni_hooks_at(hooks_path: &PathBuf, exe_path: &str) -> anyhow::Result<()> {
     if let Some(parent) = hooks_path.parent() {
         fs::create_dir_all(parent)?;

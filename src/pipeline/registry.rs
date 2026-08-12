@@ -374,7 +374,7 @@ fn command_specificity(base: &str, full_cmd: &str) -> u8 {
 }
 
 // ---------------------------------------------------------------------------
-// Command to distiller. `CLAUDE.md` puts every command-to-behaviour mapping in
+// Command to distiller. `CONTRIBUTING.md` puts every command-to-behaviour mapping in
 // this file, and this half of it lived in `distillers/mod.rs` as twenty
 // `if matches!(base, …)` blocks until #194.
 //
@@ -560,7 +560,7 @@ pub fn passes_through_verbatim(command: &str) -> bool {
             | "rg"
             | "ag"
             // Format renderers. Their whole job is to emit something a later step
-            // parses, which is the format-safe contract stated in `AGENTS.md`,
+            // parses, which is the format-safe contract stated in `CONTRIBUTING.md`,
             // and the collapse fallback would leave that payload unparseable.
             // `kubectl get pod -o json | jq -r '...'` lost three of four lines
             // before this (#269).

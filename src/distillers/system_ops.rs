@@ -172,7 +172,7 @@ fn is_find_output(lines: &[&str]) -> bool {
 /// A fingerprint must be a token no sibling format also prints. Box-drawing
 /// connectors fail that test: `tree` prints them, and so does every document
 /// that describes a file layout, 25 markdown files in this repository alone,
-/// `CLAUDE.md` among them. Matching on `any` connector meant one such line
+/// `CONTRIBUTING.md` among them. Matching on `any` connector meant one such line
 /// classified the whole payload, and `distill_tree_output` replaced a 127-line
 /// prose guide with `tree: 127 entries` (#236). The `directories`/`files` half
 /// was looser still: it fired on a *comment* in this very file that names both

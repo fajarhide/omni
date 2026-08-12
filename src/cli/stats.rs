@@ -832,7 +832,7 @@ fn run_default(store: &Store) -> Result<()> {
     }
 
     // #435. The headline is session lifetime, because that is the meter #357
-    // promoted and ROADMAP.md calls the number that decides progress. The
+    // promoted and `CONTRIBUTING.md` calls the number that decides progress. The
     // distillation percentage below it is a diagnostic for one host's pipeline
     // and says so, which is the whole of the correction: it was never wrong, it
     // was presented as the product number after the project stopped treating it
