@@ -452,8 +452,34 @@ pub struct DistillSummary {
 }
 
 impl SessionState {
+    /// A session id that identifies a session.
+    ///
+    /// It was `timestamp_millis()` alone, so two sessions created in the same
+    /// millisecond were the same session, and `INSERT OR REPLACE INTO sessions`
+    /// kept one of them (#490). That is not hypothetical on a machine running
+    /// several agents: two `SessionStart` hooks landing together is exactly when
+    /// it fires.
+    ///
+    /// The millisecond stays first because four call sites slice
+    /// `session_id[..8]` for display, and it keeps ids roughly sortable by age.
+    /// The process id separates concurrent hooks, which are separate processes,
+    /// and the counter separates sessions minted inside one process. Both are
+    /// stdlib; a uuid crate for this would be a dependency to avoid a format
+    /// string.
+    ///
+    /// This does not make the id meaningful. It is still minted state rather than
+    /// an identity the host supplied, which is why the ledger scopes on
+    /// `host_session()` instead. The fuller fix is to stop minting where a host
+    /// id exists, and it is not this one.
     pub fn new() -> Self {
-        let id = format!("{}", chrono::Utc::now().timestamp_millis());
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static MINTED: AtomicU64 = AtomicU64::new(0);
+        let id = format!(
+            "{}-{}-{}",
+            chrono::Utc::now().timestamp_millis(),
+            std::process::id(),
+            MINTED.fetch_add(1, Ordering::Relaxed)
+        );
         let now = chrono::Utc::now().timestamp();
         let mut state = Self {
             session_id: id,
@@ -620,6 +646,44 @@ impl SessionState {
                     && gap >= PRESSURE_WARNING_COOLDOWN
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::SessionState;
+
+    /// Two sessions are two sessions (#490).
+    ///
+    /// The id was a millisecond clock reading, so a pair minted in the same
+    /// millisecond collided and `INSERT OR REPLACE INTO sessions` kept one. Found
+    /// while writing #482's regression test, which creates two states back to
+    /// back and could not tell them apart.
+    #[test]
+    fn mints_a_distinct_id_every_time() {
+        let ids: Vec<String> = (0..1000).map(|_| SessionState::new().session_id).collect();
+        let unique: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "ids collided: {} distinct out of {}",
+            unique.len(),
+            ids.len()
+        );
+    }
+
+    /// Four call sites render `session_id[..8]`, and byte slicing panics off a
+    /// char boundary, so the id has to stay ASCII and long enough to survive it.
+    #[test]
+    fn stays_sliceable_for_display() {
+        let id = SessionState::new().session_id;
+        assert!(id.len() >= 12, "too short to slice: {id}");
+        assert!(id.is_ascii(), "not ascii, [..8] could panic: {id}");
+        // The assertion above is the boundary proof clippy wants, and slicing is
+        // the point of the test: it reproduces exactly what the four display call
+        // sites do.
+        #[allow(clippy::string_slice, reason = "asserted ascii on the line above")]
+        let _ = &id[..8];
     }
 }
 
