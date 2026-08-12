@@ -46,6 +46,27 @@ behaviour rather than a gap.
 
 ---
 
+## The second read is free
+
+An agent re-reads the same file constantly. Without OMNI it pays for every byte
+again. With OMNI the second read is one marker carrying a handle, because those bytes
+are already in its context, and `omni retrieve <hash>` hands the file back in full if
+it is ever needed.
+
+<table>
+<tr>
+<td align="center"><b>Without OMNI</b><br/><sub><code>cat</code> twice: the same 7.6 KB, twice</sub></td>
+<td align="center"><b>With OMNI</b><br/><sub>second read 214 B, <b>97.2%</b> smaller</sub></td>
+</tr>
+<tr>
+<td valign="top"><img src="media/demo-ledger-without.gif" alt="the same file read twice with no OMNI: two identical screens of source" width="400" /></td>
+<td valign="top"><img src="media/demo-ledger-with.gif" alt="the same file read twice through OMNI: the second returns one marker line and a retrieval handle" width="400" /></td>
+</tr>
+</table>
+
+This is the half a filter cannot reach. No pattern in that file is noise, so nothing
+in it can be dropped on its own merits. It goes because the agent has already seen it.
+
 ## The same `git log`, side by side
 
 Without OMNI, one commit's `Author` / `Date` / body already fills the screen. With
@@ -160,11 +181,11 @@ Every figure OMNI publishes states the corpus it came from and the week it cover
 because `execution_traces` is pruned after seven days and a number that outlives its
 corpus cannot be checked by anyone, us included.
 
-On the 2026-08-04 to 08-11 UTC window, replayed on the release binary over real
+On the 2026-08-04 to 08-11 UTC window, replayed on the 0.7.3 release binary over real
 command executions that reached a model:
 
 * Build and test output: **76.9%**. File re-reads, the largest class: **0.0%** from
-  the filters and **25.2%** from the ledger, which is the gap the ledger exists for.
+  the filters and **25.0%** from the ledger, which is the gap the ledger exists for.
 * **97.3% of calls saved nothing at all**, and we publish that because it tells you
   what the rest are worth. **No call came back larger** in this measurement.
   There were 2 until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
@@ -176,10 +197,10 @@ adds on top:
 
 | Class | Calls | Input | Filters | + ledger |
 |---|---|---|---|---|
-| other | 4,145 | 2.95 MB | 0.6% | **6.8%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.2%** |
+| other | 4,145 | 2.95 MB | 0.6% | **6.9%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.0%** |
 | search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.3%** |
-| `git`, `gh` | 661 | 609 KB | 4.4% | **22.3%** |
+| `git`, `gh` | 661 | 609 KB | 4.4% | **22.1%** |
 | build and test | 69 | 94 KB | 76.9% | **78.0%** |
 | infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
 | **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |

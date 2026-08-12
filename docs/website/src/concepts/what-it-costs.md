@@ -45,17 +45,17 @@ is why no published figure can be re-derived a week after it was measured.
 
 The thing you came for, and the honest version has two halves.
 
-**What it saves.** Over 6,656 real commands on 0.7.2: 14.9% fewer bytes across the
+**What it saves.** Over 6,656 real commands on 0.7.3: 14.9% fewer bytes across the
 whole mix. By class, the spread is enormous:
 
 | class | filters | with the ledger |
 |---|---|---|
 | build and test | 76.9% | 78.0% |
-| file reads | 0.0% | 25.2% |
-| `git`, `gh` | 4.4% | 22.3% |
+| file reads | 0.0% | 25.0% |
+| `git`, `gh` | 4.4% | 22.1% |
 | search | 4.8% | 13.3% |
 | infra | 4.4% | 8.2% |
-| everything else | 0.6% | 6.8% |
+| everything else | 0.6% | 6.9% |
 
 **What it costs.** Every marker is bytes the agent pays for, and 97.3% of calls save
 nothing while still paying the pipeline's latency. On short output the marker can

@@ -81,7 +81,7 @@ From the 6,656-trace replay:
 That last row is correct behaviour rather than a gap. You cannot strip lines from a
 file the agent asked to see without guessing which parts it meant, and guessing is
 what the trust floor forbids. [The ledger](../concepts/the-ledger.md) is what reaches
-that class, and it takes 25.2% of it without guessing anything.
+that class, and it takes 25.0% of it without guessing anything.
 
 ## Checking them
 
