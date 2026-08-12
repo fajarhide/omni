@@ -303,7 +303,19 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
 
     Some(NormalizedInput {
         agent: AgentFormat::ClaudeCode,
-        tool_name: parsed.tool_name,
+        // Normalised here too. The Pi and OpenAI-shaped branches already did it,
+        // and this one, the shape a third-party integrator is most likely to
+        // send, passed the name straight through. `distil_tool_reply` matches
+        // `"Bash"`, `"Read"`, `"Grep"` and `"WebFetch"` exactly, so a host naming
+        // its tools in snake_case fell to the generic arm and never reached the
+        // per-tool distiller or the ledger (#488).
+        //
+        // The failure looked like success, which is why it survived: the generic
+        // arm still shortens the output, and on a real shell corpus `bash`
+        // reported 59.9% against `Bash`'s 37.6%. The wrong one looked better,
+        // because it was keeping the first thirty lines and throwing the rest
+        // away rather than folding what the agent had already been shown.
+        tool_name: normalize_tool_name(&parsed.tool_name),
         command,
         content,
         agent_id,
@@ -710,6 +722,45 @@ fn normalize_tool_name(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// A snake_case tool name has to reach the same arm as its PascalCase twin
+    /// (#488).
+    ///
+    /// `distil_tool_reply` matches `"Bash"`, `"Read"`, `"Grep"` and `"WebFetch"`
+    /// exactly. The Pi and OpenAI-shaped branches normalised before that; the
+    /// ClaudeCode branch, the shape a third-party integrator is most likely to
+    /// send, passed the name through, so `bash` fell to the generic arm and never
+    /// reached the per-tool distiller or the ledger.
+    ///
+    /// The failure looked like success, which is the reason to guard it: the
+    /// generic arm still shortens, and on a real corpus `bash` reported 59.9%
+    /// against `Bash`'s 37.6%, because it was keeping the first thirty lines
+    /// rather than folding what had already been shown.
+    #[test]
+    fn normalizes_tool_names_on_the_claude_code_shape() {
+        for (sent, want) in [
+            ("bash", "Bash"),
+            ("shell", "Bash"),
+            ("read_file", "Read"),
+            ("search_files", "Grep"),
+            ("web_fetch", "WebFetch"),
+            ("Bash", "Bash"),
+        ] {
+            let payload = serde_json::json!({
+                "session_id": "s",
+                "hook_event_name": "PostToolUse",
+                "tool_name": sent,
+                "tool_input": {"command": "x"},
+                "tool_response": {"stdout": "some output that is long enough to matter"},
+            })
+            .to_string();
+            let got = super::normalize(&payload).map(|n| n.tool_name);
+            assert_eq!(
+                got.as_deref(),
+                Some(want),
+                "{sent} did not reach the {want} arm"
+            );
+        }
+    }
 
     /// Review finding: the guard tested for "unknown", a value
     /// `detect_agent_id` never produces. Its real fallback is "terminal", so a
