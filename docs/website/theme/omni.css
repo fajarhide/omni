@@ -483,19 +483,25 @@ blockquote p:last-child { margin-bottom: 0; }
   font-size: var(--text-label);
   letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
-  color: var(--sidebar-non-existant);
+  /* --sidebar-non-existant is the greyed-out-chapter colour and is far too
+     faint to label a rail with. */
+  color: var(--ink-soft);
   margin-bottom: 0.7em;
 }
 
-.pagetoc a {
+/* `.content a:link` in chrome.css is 0,2,1 and this outline lives inside
+   .content, so a bare `.pagetoc a` lost and every entry rendered in the accent
+   as though all five were current. Matching :link here is what levels it. */
+.pagetoc a:link,
+.pagetoc a:visited {
   display: block;
   color: var(--ink-soft);
   padding: 0.24em 0;
   text-decoration: none;
   border: 0;
 }
-.pagetoc a:hover { color: var(--fg); }
-.pagetoc a.active { color: var(--links); }
+.pagetoc a:link:hover, .pagetoc a:visited:hover { color: var(--fg); }
+.pagetoc a.active:link, .pagetoc a.active:visited { color: var(--links); }
 .pagetoc a.h3 { padding-left: 0.8rem; font-size: 0.95em; }
 
 /* Below this the outline has nowhere to live without stealing from the text.
@@ -523,6 +529,19 @@ mark { border-radius: var(--wl-radius-control); padding: 0 0.15em; }
 
 .nav-chapters { font-family: var(--font-body); }
 .nav-wrapper { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+
+/* mdBook's wide-screen chapter arrows are full-height columns pinned to the
+   edges of `.page`. That worked while the text was centred with 340px of empty
+   space either side. Anchored to the sidebar, the left one sits on top of the
+   first words of every paragraph. The pair at the foot of the article says the
+   same thing with the chapter's name attached, so the arrows go and that pair
+   stops being mobile-only. */
+.nav-wide-wrapper { display: none; }
+/* chrome.css sets `.nav-wrapper { display: none }` and only turns it back on
+   under 1080px, because above that the arrows were doing the job. With them
+   gone it has to be on at every width, or a desktop reader has no way to the
+   next chapter at all. */
+.content .nav-wrapper { display: block; }
 
 /* --------------------------------------------------------------------------
    Small screens
