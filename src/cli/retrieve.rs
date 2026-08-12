@@ -60,6 +60,19 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
     match store.retrieve_rewind(handle) {
         Some(content) => {
+            // The frame goes to stderr and the payload to stdout, byte for byte.
+            // #463 asked for this surface to be framed like the others, and a
+            // header on stdout would have done it by editing archived bytes that
+            // a caller is about to paste or parse. Same rule the pipeline holds
+            // itself to: what a later step reads is not ours to decorate.
+            let lines = content.lines().count();
+            eprintln!(
+                "{} {} · {} lines · {}",
+                "omni retrieve".bold().cyan(),
+                handle.bright_black(),
+                lines,
+                super::stats::format_bytes(content.len() as u64).bright_black()
+            );
             print!("{content}");
             if !content.ends_with('\n') {
                 println!();

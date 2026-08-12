@@ -36,7 +36,7 @@ pub fn run_patterns(args: &[String], store: &Store) -> Result<()> {
     if let Some(tool) = tool_family {
         println!(" Filtering by tool: {}", tool.yellow());
     }
-    println!(" ──────────────────────────────────────────────────────────────");
+    super::print_rule();
 
     if patterns.is_empty() {
         println!("   {}", "No recurring patterns found yet.".bright_black());

@@ -22,6 +22,35 @@ pub mod version;
 use anyhow::{Result, bail};
 use colored::*;
 
+/// The width every framed surface draws to.
+///
+/// Before this there were five: 41 in `doctor`, `learn`, `session` and `init`,
+/// 49 in `stats`, 62 in `patterns` and `query`, 66 and 40 in `diff`, 70 in one
+/// line of `learn`. None of them matched the content they framed, so `stats`
+/// drew a 49-column rule around a 90-column table and `doctor` a 41-column rule
+/// over a 206-column line (#463). One constant is what stops them drifting apart
+/// again; 76 leaves margin inside the 80-column default rather than filling it.
+pub const WIDTH: usize = 76;
+
+/// The horizontal rule shared by every framed surface.
+pub fn print_rule() {
+    println!("{}", "─".repeat(WIDTH).bright_black().bold());
+}
+
+/// A column separator built from the widths it sits under, so a header and its
+/// rule cannot disagree.
+///
+/// `omni stats --detail` carried a five-group separator under a four-column
+/// header because the `#` group was copied from the table above it, leaving a
+/// 56-column rule under a 43-column header (#463).
+pub fn column_rule(widths: &[usize]) -> String {
+    widths
+        .iter()
+        .map(|w| "─".repeat(*w))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The flags one subcommand accepts, as `(spec, description)`, where `spec` is
 /// the flag and any aliases exactly as help should show them: `"--today, -d"`.
 ///
@@ -124,6 +153,29 @@ fn nearest(name: &str, flags: Flags) -> Option<&'static str> {
         .filter(|(_, distance)| *distance <= MAX_DISTANCE)
         .min_by_key(|(_, distance)| *distance)
         .map(|(flag, _)| flag)
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+
+    /// The rule is built from the widths it sits under, so a group cannot be
+    /// added or copied in without the arithmetic saying so. `omni stats
+    /// --detail` shipped a five-group rule under a four-column header (#463).
+    #[test]
+    fn a_rule_is_exactly_as_wide_as_the_columns_it_frames() {
+        let widths = [16, 6, 7, 19];
+        let rule = column_rule(&widths);
+
+        let expected = widths.iter().sum::<usize>() + widths.len() - 1;
+        assert_eq!(rule.chars().count(), expected, "{rule}");
+        assert_eq!(rule.split(' ').count(), widths.len(), "{rule}");
+    }
+
+    #[test]
+    fn every_framed_surface_draws_the_same_width() {
+        assert_eq!("─".repeat(WIDTH).chars().count(), WIDTH);
+    }
 }
 
 #[cfg(test)]

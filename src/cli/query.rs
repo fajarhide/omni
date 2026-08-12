@@ -100,7 +100,7 @@ fn render_result(result: &OmniQLQueryResult) {
         "OmniQL Results".bold().bright_white(),
         result.query_type.bright_black()
     );
-    println!(" ──────────────────────────────────────────────────────────────");
+    super::print_rule();
 
     if result.results.is_empty() {
         println!("   {}", "No results found.".bright_black());

@@ -42,44 +42,29 @@ pub fn run_diff(args: &[String]) -> Result<()> {
         0.0
     };
 
-    println!(
-        "\n{}",
-        "──────────────────────────────────────────────────────────────────".bright_black()
-    );
+    println!();
+    super::print_rule();
     println!(
         " {} {}",
         "OMNI SIGNAL INTELLIGENCE:".bold().bright_cyan(),
         "Comparison Mode".bright_white()
     );
-    println!(
-        "{}",
-        "──────────────────────────────────────────────────────────────────".bright_black()
-    );
+    super::print_rule();
 
     // Before Block
     println!("\n [ {} ]", "RAW INPUT (NOISY)".bold().red());
-    println!(
-        "{}",
-        " ────────────────────────────────────────".bright_black()
-    );
     for line in truncate_lines(&input, 12) {
         println!("  {}", line.bright_black());
     }
 
     // After Block
     println!("\n [ {} ]", "OMNI DISTILLED (SIGNAL)".bold().green());
-    println!(
-        "{}",
-        " ────────────────────────────────────────".bright_black()
-    );
     for line in truncate_lines(&output, 12) {
         println!("  {}", line.bright_white());
     }
 
-    println!(
-        "\n{}",
-        "──────────────────────────────────────────────────────────────────".bright_black()
-    );
+    println!();
+    super::print_rule();
 
     let savings_str = format!("{:.1}% signal efficiency", savings_pct);
     let efficiency_colored = if savings_pct > 70.0 {
@@ -111,10 +96,7 @@ pub fn run_diff(args: &[String]) -> Result<()> {
         )
         .bright_blue()
     );
-    println!(
-        "{}",
-        "──────────────────────────────────────────────────────────────────".bright_black()
-    );
+    super::print_rule();
 
     Ok(())
 }
@@ -124,7 +106,7 @@ fn truncate_lines(s: &str, max_lines: usize) -> Vec<String> {
     let mut result = Vec::new();
 
     for &line in lines.iter().take(max_lines) {
-        let truncated = crate::util::text::display_truncate_with_ellipsis(line, 57);
+        let truncated = crate::util::text::display_truncate_with_ellipsis(line, super::WIDTH - 5);
         result.push(truncated);
     }
 

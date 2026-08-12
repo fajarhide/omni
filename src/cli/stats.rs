@@ -30,8 +30,10 @@ pub fn format_exact_tokens(tokens: u64) -> String {
     }
 }
 
-pub fn format_bar(pct: f64) -> String {
-    let width = 20;
+/// `width` is the column the bar has to live in, not a fixed 20. The detail
+/// table gives it 12 so the whole row fits `cli::WIDTH`; the wider single-column
+/// listings still pass 20.
+pub fn format_bar(pct: f64, width: usize) -> String {
     let filled = ((pct / 100.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     "█".repeat(filled)
@@ -122,7 +124,17 @@ fn max_width<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> usize {
         .unwrap_or(0)
 }
 
-fn group_and_calculate_stats(
+/// The bar column inside the two framed tables. Narrower than the 20 the
+/// single-column listings use, so a full row lands inside `cli::WIDTH`.
+const DETAIL_BAR: usize = 12;
+
+/// The one width every command name is shortened to.
+///
+/// It is a constant because two call sites disagreeing by a single column is
+/// what made the `Agent` column report commands it had never resolved (#471).
+const CMD_KEY_WIDTH: usize = 18;
+
+pub(crate) fn group_and_calculate_stats(
     items: Vec<(String, u64, u64, u64, u64, u64)>,
     limit: usize,
 ) -> Vec<(String, u64, f64, u64)> {
@@ -130,7 +142,7 @@ fn group_and_calculate_stats(
 
     for (cmd, calls, input, output, raw_tok, filt_tok) in items {
         // Group by the shortened version so things like "npm install x" and "npm install y" combine
-        let key = shorten_command(&cmd, 18);
+        let key = shorten_command(&cmd, CMD_KEY_WIDTH);
         let entry = grouped.entry(key).or_insert((0, 0, 0, 0, 0));
         entry.0 += calls;
         entry.1 += input;
@@ -205,7 +217,7 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
 /// branch in `agents::multiagent::detect_agent_id` for the life of the feature.
 /// A detection gap now shows up in the table as `Unknown` instead of looking
 /// like ordinary shell usage.
-fn agent_display_name(agent_id: &str) -> &str {
+pub(crate) fn agent_display_name(agent_id: &str) -> &str {
     match agent_id {
         "claude_code" | "claude" => "Claude Code",
         "cursor" => "Cursor AI",
@@ -231,12 +243,7 @@ fn agent_display_name(agent_id: &str) -> &str {
 }
 
 fn print_separator() {
-    println!(
-        "{}",
-        "─────────────────────────────────────────────────"
-            .bright_black()
-            .bold()
-    );
+    super::print_rule();
 }
 
 /// Read by both `print_help` and `super::check_flags`, so this list is what
@@ -854,8 +861,7 @@ fn run_default(store: &Store) -> Result<()> {
             format_number(sessions).cyan()
         );
         let compaction_line = if compacted == 0 {
-            "  none of them ended at a compaction, so this measures sessions, not the window"
-                .to_string()
+            "  none ended at a compaction, so this measures sessions, not the window".to_string()
         } else {
             format!("  {compacted} of them ended at a compaction, which is what the window costs")
         };
@@ -865,7 +871,7 @@ fn run_default(store: &Store) -> Result<()> {
     println!(
         "  {} {}",
         "Pipeline diagnostic:".bold().bright_white(),
-        "how much one host's tool output shrank, not a product claim"
+        "one host's tool output, not a product claim"
             .bright_black()
             .italic()
     );
@@ -903,7 +909,7 @@ fn run_default(store: &Store) -> Result<()> {
     // when the model-facing figure was 29.3%.
     println!(
         "  {}",
-        "Counts calls whose result reached a model. Terminal output is excluded, no context holds it."
+        "Counts calls whose result reached a model. Terminal output is excluded:\n  no context holds it."
             .bright_black()
             .italic()
     );
@@ -1168,12 +1174,15 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     };
 
     // Per-command with agent info
-    let cmd_agent_data = store
-        .get_per_command_with_agent(since, 200)
-        .unwrap_or_default();
+    let cmd_agent_data = store.get_per_command_with_agent(since).unwrap_or_default();
     let mut cmd_agent_counts: HashMap<String, HashMap<String, u64>> = HashMap::new();
     for (cmd, agent_id, calls, _, _) in &cmd_agent_data {
-        let key = shorten_command(cmd, 19);
+        // `group_and_calculate_stats` keys the rows this table displays with
+        // `shorten_command(cmd, 18)`. Keying the agent map at 19 built a second
+        // namespace: every command whose two-token prefix ran past 18 cut at a
+        // different place on each side, the lookup below missed, and the miss
+        // was reported as a fact (#471).
+        let key = shorten_command(cmd, CMD_KEY_WIDTH);
         let entry = cmd_agent_counts.entry(key).or_default();
         *entry.entry(agent_id.clone()).or_insert(0) += *calls;
     }
@@ -1181,24 +1190,23 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     if !display_filters.is_empty() {
         println!("\n {}", "By Command:".bold().bright_white());
         println!(
-            "   {}  {:<20} {:<12} {:>4} {:>7}  {:>10}  {}",
+            "  {:>3} {:<w_cmd$} {:<11} {:>5} {:>6} {:>6} {}",
             "#".bright_black(),
             "CLI".bright_black(),
             "Agent".bright_black(),
             "Count".bright_black(),
-            "Savings".bright_black(),
-            "Tokens Reduced".bright_black(),
-            "Signal Strength".bright_black()
+            "Saved".bright_black(),
+            "Tokens".bright_black(),
+            "Signal".bright_black(),
+            w_cmd = CMD_KEY_WIDTH
         );
         println!(
-            "   {} {}",
-            "──".bright_black(),
-            "──────────────────── ──────────── ───── ──────── ────────────── ────────────────────"
-                .bright_black()
+            "  {}",
+            super::column_rule(&[3, CMD_KEY_WIDTH, 11, 5, 6, 6, DETAIL_BAR]).bright_black()
         );
 
         for (i, (name, cnt, pct, tokens_saved)) in display_filters.iter().enumerate() {
-            let bar = format_bar(*pct);
+            let bar = format_bar(*pct, DETAIL_BAR);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
             } else {
@@ -1210,20 +1218,19 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 "".clear()
             };
 
-            let display_name = if name.chars().count() > 19 {
-                let mut s: String = name.chars().take(16).collect();
-                s.push_str("...");
-                s
-            } else {
-                (*name).clone()
-            };
-
-            // Pick the dominant agent for this command key by highest call count.
+            // Look up by the key, render from the key. These were one variable,
+            // which is how #471 happened and how it nearly shipped twice: fitting
+            // `cat package.json` into the column produced `cat package.jso...`,
+            // and searching the agent map for *that* missed a key that was
+            // sitting right there. What is displayed is never what is looked up.
             let agent_label = cmd_agent_counts
-                .get(&display_name)
+                .get(name.as_str())
                 .and_then(|agents| agents.iter().max_by_key(|(_, calls)| *calls))
                 .map(|(agent_id, _)| agent_display_name(agent_id))
-                .unwrap_or("Terminal");
+                // `Unknown`, never `Terminal`: a lookup that missed has not
+                // established that a human ran this in a shell, and `:202`
+                // already says why those two facts must not be folded (#471).
+                .unwrap_or("Unknown");
 
             let tokens_str = if *tokens_saved > 0 {
                 format!("-{}", format_exact_tokens(*tokens_saved))
@@ -1231,8 +1238,11 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 String::new()
             };
 
+            let display_name =
+                crate::util::text::display_truncate_with_ellipsis(name, CMD_KEY_WIDTH - 3);
+
             println!(
-                "  {:>2}. {:<20} {:<12} {:>4}x  {:>5.1}%  {:>14}  {}{}",
+                "  {:>2}. {:<w_cmd$} {:<11} {:>4}x {:>5.1}% {:>6} {:<w_bar$}{}",
                 i + 1,
                 display_name.bright_cyan(),
                 agent_label.bright_blue(),
@@ -1240,7 +1250,9 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 pct,
                 tokens_str.bright_magenta(),
                 bar_colored,
-                suffix
+                suffix,
+                w_cmd = CMD_KEY_WIDTH,
+                w_bar = DETAIL_BAR
             );
         }
 
@@ -1251,25 +1263,22 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 .count();
             let hidden_zero = grouped_filters.len() - filtered_count;
 
-            if filtered_count > 10 {
+            // One footnote, not two. Both named `--all-commands`, and together
+            // they ran past the frame they sit inside (#463).
+            if filtered_count > 10 || hidden_zero > 0 {
+                let hidden = if hidden_zero > 0 {
+                    format!(", {hidden_zero} at 0% hidden")
+                } else {
+                    String::new()
+                };
                 println!(
                     "\n   {}",
                     format!(
-                        "Showing top 10 of {} commands with active savings. --all-commands to see all",
-                        filtered_count
+                        "Top 10 of {filtered_count} with savings{hidden}. --all-commands shows all"
                     )
                     .bright_black()
                     .italic()
                 );
-            }
-
-            if hidden_zero > 0 {
-                println!(
-                     "   {}",
-                     format!("({} noise commands with 0% savings hidden. Use --all-commands to see all).", hidden_zero)
-                         .bright_black()
-                         .italic()
-                 );
             }
         }
     }
@@ -1328,17 +1337,23 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     if !grouped_agents.is_empty() {
         let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n {}", "Agent Distribution:".bold().bright_white());
+        // Number then bar, the order By Command already uses. Padding the bar
+        // and right-aligning the percentage after it left a hole across the row
+        // whenever savings were low, which is most rows.
         println!(
-            "   {:<16} {:>6} {:>7}  {}",
+            "  {:<16} {:>6} {:>7} {:>6} {}",
             "Agent".bright_black(),
             "Count".bright_black(),
             "Share".bright_black(),
-            "Savings".bright_black()
+            "Saved".bright_black(),
+            "Signal".bright_black()
         );
+        // Five groups under a five-column header. It carried five under *four*,
+        // because the leading `──` was copied from the By Command table's `#`
+        // column, leaving a 56-column rule under a 43-column header (#463).
         println!(
-            "   {} {}",
-            "──".bright_black(),
-            "────────────── ────── ─────── ────────────────────".bright_black()
+            "  {}",
+            super::column_rule(&[16, 6, 7, 6, DETAIL_BAR]).bright_black()
         );
 
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
@@ -1355,7 +1370,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             } else {
                 0.0
             };
-            let bar = format_bar(savings);
+            let bar = format_bar(savings, DETAIL_BAR);
             let bar_colored = if savings > 80.0 {
                 bar.bright_green()
             } else if savings > 40.0 {
@@ -1364,12 +1379,12 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 bar.bright_red()
             };
             println!(
-                "   {:<16} {:>5}x  {:>5.1}%  {} {:.1}%",
+                "  {:<16} {:>5}x {:>6.1}% {:>5.1}% {}",
                 name.bright_cyan(),
                 count,
                 pct,
-                bar_colored,
                 savings,
+                bar_colored,
             );
             // #163: the excluded rows are named, not silently missing. A count
             // that shrinks without explanation reads as OMNI having stopped
@@ -1378,7 +1393,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 && u > 0
             {
                 println!(
-                    "   {:<16} {:>5}x  {}",
+                    "  {:<16} {:>5}x {}",
                     "".bright_black(),
                     u,
                     "not counted, never applied (#158), or read at a terminal (#212)"
@@ -1671,7 +1686,7 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
             path
         };
 
-        let bar = format_bar(savings);
+        let bar = format_bar(savings, 20);
         let bar_colored = if savings > 80.0 {
             bar.bright_green()
         } else if savings > 40.0 {
@@ -1854,11 +1869,46 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// The agent map is keyed by `shorten_command(cmd, CMD_KEY_WIDTH)`, and the
+    /// cell is that key cut again to fit the column. They are different strings
+    /// for any name that fills the column, so looking the agent up by what is
+    /// on screen misses a key that is present. That is #471, and writing the fix
+    /// reintroduced it once: `cat package.json` is 16 characters, survives the
+    /// key intact, renders as `cat package.jso...`, and the row came back
+    /// `Unknown` against a database with no unknown rows in it.
+    #[test]
+    fn the_rendered_name_is_not_the_lookup_key() {
+        let key = shorten_command("cat package.json", CMD_KEY_WIDTH);
+        let rendered = crate::util::text::display_truncate_with_ellipsis(&key, CMD_KEY_WIDTH - 3);
+
+        assert_eq!(
+            key, "cat package.json",
+            "the key is the whole short command"
+        );
+        assert_ne!(
+            key, rendered,
+            "if these were ever equal the conflation would stop being visible, \
+             and the lookup must still use the key"
+        );
+
+        let mut agents: HashMap<String, HashMap<String, u64>> = HashMap::new();
+        agents
+            .entry(key.clone())
+            .or_default()
+            .insert("claude_code".to_string(), 1);
+
+        assert!(agents.contains_key(&key), "keyed lookup resolves");
+        assert!(
+            !agents.contains_key(&rendered),
+            "the rendered cell is not a key and must never be used as one"
+        );
+    }
+
     #[test]
     fn test_format_bar() {
-        assert_eq!(format_bar(100.0), "████████████████████");
-        assert_eq!(format_bar(50.0), "██████████");
-        assert_eq!(format_bar(0.0), "");
+        assert_eq!(format_bar(100.0, 20), "████████████████████");
+        assert_eq!(format_bar(50.0, 20), "██████████");
+        assert_eq!(format_bar(0.0, 20), "");
     }
 
     #[test]
