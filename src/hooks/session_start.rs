@@ -308,7 +308,6 @@ pub fn process_before_agent_start_payload(
         return None;
     }
 
-
     let summary = build_summary_with_context(&state, now, &store, &cwd_for_ctx);
     let summary_truncated = crate::util::text::safe_truncate_with_ellipsis(summary.trim(), 797);
     if summary_truncated.is_empty() {

@@ -225,10 +225,18 @@ mod tests {
     #[test]
     fn routes_before_agent_start_to_startup_logic() {
         let (store, _dir) = get_store();
-        // Seed a recent session so BeforeAgentStart has something to summarize
+        // Seed a recent session so BeforeAgentStart has something to summarize.
+        // Both rows, because continuation is scoped by project since #482 and a
+        // `sessions` row on its own is a state the product never leaves behind.
         let mut state = SessionState::new();
         state.add_command("cargo build");
         store.upsert_session(&state);
+        store.sync_agent_session(
+            &crate::agents::multiagent::detect_agent_id(),
+            &state.session_id,
+            &crate::agents::multiagent::project_hash("/tmp"),
+            &serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string()),
+        );
 
         let session = Arc::new(Mutex::new(SessionState::new()));
 
