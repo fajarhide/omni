@@ -100,12 +100,33 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
         return None;
     }
 
+    // The project decides which session may be continued, so it is resolved
+    // before the decision rather than after it (#482).
+    let cwd_for_ctx = if parsed.working_directory.is_empty() {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string())
+    } else {
+        parsed.working_directory.clone()
+    };
+    let proj_hash = multiagent::project_hash(&cwd_for_ctx);
+    let agent_id = multiagent::detect_agent_id();
+
     let now = Utc::now().timestamp();
     let mut should_continue = false;
     let mut prev_state: Option<SessionState> = None;
 
+    // Scoped to this project. The old lookup was
+    // `SELECT ... FROM sessions ORDER BY last_active DESC LIMIT 1`, which has no
+    // project in it, so opening a second repository inside the TTL continued the
+    // first one's session and inherited its task hint, hot files, active errors
+    // and command history. One session id was measured spanning six projects.
+    //
+    // Asking per project also handles going back: A, then B, then A again inside
+    // the window resumes A's own session rather than refusing because the newest
+    // session belongs to B.
     if !cfg.force_fresh
-        && let Some(state) = store.find_latest_session()
+        && let Some(state) = store.find_latest_session_for_project(&agent_id, &proj_hash)
     {
         let age_mins = (now - state.last_active) / 60;
         if cfg.force_continue || age_mins < cfg.ttl_mins {
@@ -115,17 +136,6 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     }
 
     if should_continue && let Some(state) = prev_state {
-        let cwd_for_ctx = if parsed.working_directory.is_empty() {
-            std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
-        } else {
-            parsed.working_directory.clone()
-        };
-
-        // Auto-sync agent session for multi-agent awareness
-        let proj_hash = multiagent::project_hash(&cwd_for_ctx);
-        let agent_id = multiagent::detect_agent_id();
         let state_json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
         store.sync_agent_session(&agent_id, &state.session_id, &proj_hash, &state_json);
 
@@ -181,6 +191,22 @@ pub fn process_payload(input_str: &str, store: Arc<Store>, cfg: SessionConfig) -
     };
 
     store.upsert_session(&new_state);
+    // A fresh session records which project it belongs to, which only the
+    // continued branch used to do. Without this the scoping above can never fire:
+    // the first session in a repository would leave no `agent_sessions` row, so
+    // the next one would find nothing to continue and start fresh again, forever
+    // (#482).
+    //
+    // It also closes a gap that predates that. `get_active_agents_for_project`
+    // reads the same table, so multi-agent awareness could not see an agent whose
+    // session had just started, which is exactly when a second agent most wants
+    // to know about it.
+    store.sync_agent_session(
+        &multiagent::detect_agent_id(),
+        &new_state.session_id,
+        &multiagent::project_hash(&cwd),
+        &serde_json::to_string(&new_state).unwrap_or_else(|_| "{}".to_string()),
+    );
     let start_msg = format!("Fresh session started (Client ID: {})", parsed.session_id);
     store.index_event(&new_state.session_id, "SessionStart", &start_msg);
 
@@ -261,14 +287,9 @@ pub fn process_before_agent_start_payload(
         return None;
     }
 
-    let state = store.find_latest_session()?;
-
-    let now = Utc::now().timestamp();
-    let age_mins = (now - state.last_active) / 60;
-    if !cfg.force_continue && age_mins >= cfg.ttl_mins {
-        return None;
-    }
-
+    // `BeforeAgentStart` is the second door into continuation, and it carried the
+    // same unscoped lookup as `SessionStart`. Fixing one and leaving the other is
+    // the failure this repository keeps repeating, so both ask per project (#482).
     let cwd_for_ctx = if parsed.working_directory.is_empty() {
         std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
@@ -276,6 +297,16 @@ pub fn process_before_agent_start_payload(
     } else {
         parsed.working_directory.clone()
     };
+    let state = store.find_latest_session_for_project(
+        &multiagent::detect_agent_id(),
+        &multiagent::project_hash(&cwd_for_ctx),
+    )?;
+
+    let now = Utc::now().timestamp();
+    let age_mins = (now - state.last_active) / 60;
+    if !cfg.force_continue && age_mins >= cfg.ttl_mins {
+        return None;
+    }
 
     let summary = build_summary_with_context(&state, now, &store, &cwd_for_ctx);
     let summary_truncated = crate::util::text::safe_truncate_with_ellipsis(summary.trim(), 797);
@@ -569,6 +600,23 @@ mod tests {
         }
     }
 
+    /// A previous session, as the product actually leaves one behind.
+    ///
+    /// `upsert_session` alone is not that. Since #482 a session records the
+    /// project it belongs to in `agent_sessions`, and continuation is scoped by
+    /// it, so a fixture that writes only the `sessions` row describes a state the
+    /// code never produces and then asserts against it. Six tests were doing
+    /// exactly that and passed only because continuation ignored the project.
+    fn seed_previous_session(store: &Arc<Store>, state: &SessionState, cwd: &str) {
+        store.upsert_session(state);
+        store.sync_agent_session(
+            &multiagent::detect_agent_id(),
+            &state.session_id,
+            &multiagent::project_hash(cwd),
+            &serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string()),
+        );
+    }
+
     #[test]
     fn fresh_session_exits_without_output() {
         let (store, _dir) = get_store();
@@ -599,7 +647,7 @@ mod tests {
         let cwd = dir.path().to_string_lossy().to_string();
         let mut state = SessionState::new();
         state.add_command("cargo test");
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, &cwd);
         let project_hash = crate::agents::multiagent::project_hash(&cwd);
         store.upsert_project_knowledge(&project_hash, "toolchain_rust", "1.97.0", 0.95);
 
@@ -627,6 +675,93 @@ mod tests {
         );
     }
 
+    /// A session belongs to one project (#482).
+    ///
+    /// The lookup used to be `ORDER BY last_active DESC LIMIT 1` over every
+    /// session on the machine, so opening a second repository inside the TTL
+    /// continued the first one's session and inherited its task hint, hot files,
+    /// active errors and command history. Measured on a live database, one
+    /// session id spanned six project paths.
+    ///
+    /// `force_continue` is on deliberately: this must hold because the projects
+    /// differ, not because the session aged out.
+    #[test]
+    fn does_not_continue_a_session_from_another_project() {
+        let (store, _dir) = get_store();
+
+        let mut state = SessionState::new();
+        state.add_command("cargo test");
+        state.add_error("missing semicolon");
+        state.add_hot_file("src/main.rs");
+        seed_previous_session(&store, &state, "/tmp/project-a");
+
+        let input = json!({
+            "hookEventName": "SessionStart",
+            "sessionId": "in-project-b",
+            "workingDirectory": "/tmp/project-b",
+        });
+        let mut cfg = default_config();
+        cfg.force_continue = true;
+
+        let out = process_payload(&input.to_string(), store.clone(), cfg);
+
+        // A fresh session emits either nothing or a watch-path reply; what it
+        // must never carry is the other project's state.
+        let body = out.unwrap_or_default();
+        assert!(
+            !body.contains("missing semicolon"),
+            "project B inherited project A's active error: {body}"
+        );
+        assert!(
+            !body.contains("src/main.rs"),
+            "project B inherited project A's hot files: {body}"
+        );
+    }
+
+    /// The other half of the same rule: scoping must not break returning.
+    ///
+    /// A, then B, then A again inside the window resumes A's own session. A guard
+    /// that merely refused when the newest session belonged elsewhere would fail
+    /// this, and would have looked like a fix.
+    #[test]
+    fn still_continues_when_returning_to_an_earlier_project() {
+        let (store, _dir) = get_store();
+
+        // Ids are set by hand because `SessionState::new` mints them from a
+        // millisecond clock, so two states built back to back collide and the
+        // second overwrites the first (#490). This test is about scoping, not
+        // about id minting, so it uses ids that are actually distinct.
+        let mut a = SessionState::new();
+        a.session_id = "sess-a".to_string();
+        a.add_error("error from project a");
+        seed_previous_session(&store, &a, "/tmp/project-a");
+
+        let mut b = SessionState::new();
+        b.session_id = "sess-b".to_string();
+        b.add_error("error from project b");
+        seed_previous_session(&store, &b, "/tmp/project-b");
+
+        let input = json!({
+            "hookEventName": "SessionStart",
+            "sessionId": "back-in-a",
+            "workingDirectory": "/tmp/project-a",
+        });
+        let mut cfg = default_config();
+        cfg.force_continue = true;
+
+        let out = process_payload(&input.to_string(), store.clone(), cfg)
+            .expect("returning to a project with history continues it");
+
+        assert!(
+            out.contains("error from project a"),
+            "returning to A did not resume A: {out}"
+        );
+        assert!(
+            !out.contains("error from project b"),
+            "returning to A resumed B, which is the bug wearing a different hat: {out}"
+        );
+    }
+
     #[test]
     fn continue_session_injects_summary() {
         let (store, _dir) = get_store();
@@ -635,7 +770,7 @@ mod tests {
         state.add_command("cargo test");
         state.add_error("missing semicolon");
         state.add_hot_file("src/main.rs");
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "SessionStart",
@@ -661,7 +796,7 @@ mod tests {
         let mut state = SessionState::new();
         state.add_hot_file(&"A".repeat(400));
         state.add_error(&"B".repeat(400));
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "SessionStart",
@@ -685,7 +820,7 @@ mod tests {
     fn force_fresh_overrides_continue() {
         let (store, _dir) = get_store();
         let state = SessionState::new();
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "SessionStart",
@@ -706,7 +841,7 @@ mod tests {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.last_active = Utc::now().timestamp() - (500 * 60); // 500 minutes ago
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "SessionStart",
@@ -778,7 +913,13 @@ mod tests {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.add_command("cargo test");
-        store.upsert_session(&state);
+        seed_previous_session(
+            &store,
+            &state,
+            &std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string()),
+        );
 
         let input = json!({
             "hookEventName": "BeforeAgentStart",
@@ -799,7 +940,7 @@ mod tests {
         let mut state = SessionState::new();
         state.add_command("cargo build");
         state.add_hot_file("src/main.rs");
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "BeforeAgentStart",
@@ -865,7 +1006,7 @@ mod tests {
         let (store, _dir) = get_store();
         let mut state = SessionState::new();
         state.last_active = Utc::now().timestamp() - (500 * 60);
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "BeforeAgentStart",
@@ -893,7 +1034,7 @@ mod tests {
         let mut state = SessionState::new();
         state.add_hot_file("secret.txt");
         state.add_command("cat secret.txt");
-        store.upsert_session(&state);
+        seed_previous_session(&store, &state, "/tmp");
 
         let input = json!({
             "hookEventName": "SessionStart",

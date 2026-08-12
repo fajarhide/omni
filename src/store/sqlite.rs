@@ -1264,6 +1264,40 @@ impl SqliteBackend {
         );
     }
 
+    /// The most recent session **this agent had in this project**.
+    ///
+    /// `sessions` has no project column and its id is a wall-clock stamp, so the
+    /// project comes from `agent_sessions`, which is already keyed
+    /// `(agent_id, project_hash)` and already written on every session start and
+    /// end. Joining is what lets a session be found for one repository without
+    /// giving `sessions` a schema it does not have.
+    ///
+    /// Returning `None` for a project this agent has never worked in is the
+    /// answer, not a miss: the caller then starts fresh, which is what should
+    /// happen the first time you open a repository (#482).
+    pub fn find_latest_session_for_project(
+        &self,
+        agent_id: &str,
+        project_hash: &str,
+    ) -> Option<SessionState> {
+        let conn = self.pool.get().ok()?;
+        let state_json: Option<String> = conn
+            .query_row(
+                "SELECT s.state_json
+                 FROM sessions s
+                 JOIN agent_sessions a ON a.session_id = s.id
+                 WHERE a.agent_id = ?1 AND a.project_hash = ?2
+                 ORDER BY s.last_active DESC
+                 LIMIT 1",
+                params![agent_id, project_hash],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap_or(None);
+
+        state_json.and_then(|json| serde_json::from_str(&json).ok())
+    }
+
     pub fn find_latest_session(&self) -> Option<SessionState> {
         let conn = match self.pool.get() {
             Ok(c) => c,
