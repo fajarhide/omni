@@ -184,10 +184,12 @@ adds on top:
 | infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
 | **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |
 
-Head to head against rtk on that corpus, including the half we lose: rtk's filters
-take 6.2% where ours take 2.7%, and our ledger takes 14.9% against their 6.2%. Run
-their filters with our ledger and you get 17.6%, which is the largest number on the
-page and not ours.
+Head to head on that corpus, including the half we lose. Filters alone: rtk 6.2%,
+lean-ctx 6.1%, ours 2.7%. With our ledger, 14.9%. Run rtk's filters with our ledger
+and you get 17.6%, which is the largest number on the page and not ours.
+
+The two competitors land a tenth of a point apart from opposite shapes: rtk averages
+461 bytes off each of 872 commands, lean-ctx 2,950 off each of 134.
 
 Reproduce all of it:
 

@@ -85,8 +85,9 @@ orthogonal to whose patterns run:
 |---|---|---|
 | omni, filters only | 6,469,047 to 6,292,856 | 2.7% |
 | rtk `pipe` | 6,469,047 to 6,067,012 | 6.2% |
-| omni, with the ledger | 6,469,047 to 5,502,733 | **14.9%** |
-| rtk `pipe` + omni's ledger | 6,469,047 to 5,330,551 | 17.6% |
+| lean-ctx `compress` | 6,469,047 to 6,073,757 | 6.1% |
+| omni, with the ledger | 6,469,047 to 5,506,627 | **14.9%** |
+| rtk `pipe` + omni's ledger | 6,469,047 to 5,333,483 | 17.6% |
 
 The last row is deliberate. A reader who wants the largest possible number would run
 their filters with our ledger, and saying so is cheaper than being caught not saying
