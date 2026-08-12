@@ -651,8 +651,15 @@ mod tests {
         let segments = scorer::score_with_command(input, "env", None);
         let output = distill_with_command(&segments, input, "env", None);
 
+        // The redactor prepends `[OMNI: N sensitive value(s) redacted]` since
+        // #486, so the count is compared without it. The invariant being guarded
+        // is that no line is *dropped*, and a header is not a dropped line.
+        let body: Vec<&str> = output
+            .lines()
+            .filter(|l| !l.starts_with("[OMNI: "))
+            .collect();
         assert_eq!(
-            output.lines().count(),
+            body.len(),
             input.lines().count(),
             "every line must survive; env is still an enumeration (#200)"
         );
