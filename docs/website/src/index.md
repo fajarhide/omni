@@ -54,7 +54,7 @@ whenever they conflict.
 
 ## The honest numbers
 
-Replayed over 6,656 real commands on 2026-08-11 against 0.7.0: **15.4% fewer bytes**
+Replayed over 6,656 real commands on 2026-08-12 against 0.7.2: **14.9% fewer bytes**
 across the whole mix, and **97.3% of calls saved nothing at all** because there was
 nothing to save. The full method, the corpus window, and the head to head against rtk
 including the part OMNI loses are in [Benchmarks](develop/benchmarks.md).

@@ -24,7 +24,7 @@ the count and a handle. Everything else passes through byte for byte.
 It reaches the class nothing else can. File reads are the largest class in the
 corpus, and the filters save **0.0%** of them, correctly: you cannot strip lines from
 a file the agent asked to see without guessing which parts it meant. The ledger takes
-26.3% of that same class without guessing anything, because those lines were already
+25.2% of that same class without guessing anything, because those lines were already
 delivered once.
 
 ## Two scopes, two different claims
@@ -77,16 +77,16 @@ run around it, so the frames either side still fold.
 
 ## What it is worth
 
-From the same replay, the ledger is 12.7 points on top of OMNI's own filters and 11.9
+From the same replay, the ledger is 12.2 points on top of OMNI's own filters and 11.4
 points on top of a competitor's, which is the clearest statement that it is
 orthogonal to whose patterns run:
 
 | | bytes | saved |
 |---|---|---|
-| omni, filters only | 6,469,047 to 6,291,784 | 2.7% |
+| omni, filters only | 6,469,047 to 6,292,856 | 2.7% |
 | rtk `pipe` | 6,469,047 to 6,067,012 | 6.2% |
-| omni, with the ledger | 6,469,047 to 5,470,574 | **15.4%** |
-| rtk `pipe` + omni's ledger | 6,469,047 to 5,298,714 | 18.1% |
+| omni, with the ledger | 6,469,047 to 5,502,733 | **14.9%** |
+| rtk `pipe` + omni's ledger | 6,469,047 to 5,330,551 | 17.6% |
 
 The last row is deliberate. A reader who wants the largest possible number would run
 their filters with our ledger, and saying so is cheaper than being caught not saying

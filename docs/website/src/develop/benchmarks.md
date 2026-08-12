@@ -17,10 +17,18 @@ is pruned to seven days, so a corpus is gone a week after it is measured. An ear
 9,965-trace run cannot be re-derived by anyone, us included. Hold the window open with
 `OMNI_TRACE_RETENTION_DAYS` while a measurement is in flight.
 
-**These were re-derived on 0.7.0 and the previous ones are gone rather than kept for
-comparison.** 0.7.0 changed the rule deciding whether the ledger folds a run, so every
-number measured before it describes a pipeline that no longer exists. Quoting both
-would invite a reader to treat the difference as a trend when it is two programs.
+**These were re-derived on 0.7.2 and the previous ones are gone rather than kept for
+comparison.** Two releases have changed the rule deciding whether the ledger folds a
+run, so a number measured before either describes a pipeline that no longer exists.
+Quoting both would invite a reader to treat the difference as a trend when it is two
+programs.
+
+**The aggregate moved from 15.4% to 14.9% between 0.7.0 and 0.7.2, and that is a fix
+rather than a regression.** 0.7.2 stopped folding any line that states a failure, so a
+repeated `TypeError` survives a re-run instead of being replaced by a pointer. Refusing
+to fold the error channel costs half a point of ratio, and it is the trade this project
+says it makes whenever the two conflict. The rtk arm below reproduced its earlier figure
+to the byte, which is what rules out a different corpus as the explanation.
 
 ## Method
 
@@ -37,16 +45,16 @@ would invite a reader to treat the difference as a trend when it is two programs
 
 ## The headline
 
-Replayed 2026-08-11 on 0.7.0 over **6,656 traces covering 2026-08-04 02:56 to 08-11
+Replayed 2026-08-12 on 0.7.2 over **6,656 traces covering 2026-08-04 02:56 to 08-11
 03:34 UTC**, every one `agent_id='claude_code'`.
 
-- **15.4% fewer bytes** across the mix (6.47 MB to 5.47 MB), of which the filters are
+- **14.9% fewer bytes** across the mix (6.47 MB to 5.50 MB), of which the filters are
   2.7% and the ledger is the rest.
 - **2.8% fewer tokens** from the filters alone, by `cl100k_base`. This corpus measures
   **3.592 bytes per token**, which is what the shipped 3.6 estimate was calibrated
   against.
 - **97.3% of calls saved nothing at all.** Every byte of the saving comes from the
-  other 2.7%, which is 183 calls.
+  other 2.7%, which is 181 calls.
 - **Not one call of 6,656 came back larger.** Two did until a stream-writer line-ending
   bug was fixed, and the count was published while it stood.
 
@@ -76,10 +84,10 @@ CI never needs a competitor installed.
 
 | | bytes | saved |
 |---|---|---|
-| omni, filters only | 6,469,047 to 6,291,784 | **2.7%** |
+| omni, filters only | 6,469,047 to 6,292,856 | **2.7%** |
 | rtk `pipe` | 6,469,047 to 6,067,012 | **6.2%** |
-| omni, with the ledger | 6,469,047 to 5,470,574 | **15.4%** |
-| rtk `pipe` + omni's ledger | 6,469,047 to 5,298,714 | **18.1%** |
+| omni, with the ledger | 6,469,047 to 5,502,733 | **14.9%** |
+| rtk `pipe` + omni's ledger | 6,469,047 to 5,330,551 | **17.6%** |
 
 **rtk's filters are better than ours**, by 3.5 points on the same bytes, over 872 of
 6,656 traces. That is not a rounding difference and it is not argued away here. It is
@@ -88,7 +96,7 @@ marked a cut in only 33 of the 872 outputs it claimed, so its patterns are simpl
 better.
 
 **The ledger is the difference**, and the last row is the honest way to say why. It
-adds 12.7 points on top of our filters and 11.9 on top of theirs, so it is orthogonal
+adds 12.2 points on top of our filters and 11.4 on top of theirs, so it is orthogonal
 to whose patterns run. That row also says plainly that a reader who wants the largest
 number would run their filters with our ledger.
 
@@ -114,16 +122,16 @@ they used.
 
 | class | calls | input | filters | + ledger |
 |---|---|---|---|---|
-| other | 4,145 | 2.95 MB | 0.7% | **7.1%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **26.3%** |
-| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.5%** |
-| `git`, `gh` | 661 | 609 KB | 4.4% | **22.9%** |
-| build and test | 69 | 94 KB | 76.9% | **78.3%** |
+| other | 4,145 | 2.95 MB | 0.6% | **6.8%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.2%** |
+| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.3%** |
+| `git`, `gh` | 661 | 609 KB | 4.4% | **22.3%** |
+| build and test | 69 | 94 KB | 76.9% | **78.0%** |
 | infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
-| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **15.4%** |
+| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |
 
 **The filters are excellent where there is noise and irrelevant where there is not.**
-File reads are 1.54 MB and the filters take 0.0% of them, which is correct: you cannot
+File reads are 1.60 MB and the filters take 0.0% of them, which is correct: you cannot
 strip lines from a file the agent asked to see without guessing which parts it meant.
 
 **The mix moves.** `cargo` is 94.7% in this window across 16 calls and 267 KB, where an

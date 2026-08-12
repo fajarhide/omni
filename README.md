@@ -160,11 +160,11 @@ Every figure OMNI publishes states the corpus it came from and the week it cover
 because `execution_traces` is pruned after seven days and a number that outlives its
 corpus cannot be checked by anyone, us included.
 
-On the 2026-08-03 to 08-10 UTC window, replayed on the release binary over real
+On the 2026-08-04 to 08-11 UTC window, replayed on the release binary over real
 command executions that reached a model:
 
 * Build and test output: **76.9%**. File re-reads, the largest class: **0.0%** from
-  the filters and **26.3%** from the ledger, which is the gap the ledger exists for.
+  the filters and **25.2%** from the ledger, which is the gap the ledger exists for.
 * **97.3% of calls saved nothing at all**, and we publish that because it tells you
   what the rest are worth. **No call came back larger** in this measurement.
   There were 2 until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
@@ -176,17 +176,17 @@ adds on top:
 
 | Class | Calls | Input | Filters | + ledger |
 |---|---|---|---|---|
-| other | 4,145 | 2.95 MB | 0.7% | **7.1%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **26.3%** |
-| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.5%** |
-| `git`, `gh` | 661 | 609 KB | 4.4% | **22.9%** |
-| build and test | 69 | 94 KB | 76.9% | **78.3%** |
+| other | 4,145 | 2.95 MB | 0.6% | **6.8%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.2%** |
+| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.3%** |
+| `git`, `gh` | 661 | 609 KB | 4.4% | **22.3%** |
+| build and test | 69 | 94 KB | 76.9% | **78.0%** |
 | infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
-| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **15.4%** |
+| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |
 
 Head to head against rtk on that corpus, including the half we lose: rtk's filters
-take 6.2% where ours take 2.7%, and our ledger takes 15.4% against their 6.2%. Run
-their filters with our ledger and you get 18.1%, which is the largest number on the
+take 6.2% where ours take 2.7%, and our ledger takes 14.9% against their 6.2%. Run
+their filters with our ledger and you get 17.6%, which is the largest number on the
 page and not ours.
 
 Reproduce all of it:
