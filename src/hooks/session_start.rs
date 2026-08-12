@@ -727,10 +727,11 @@ mod tests {
     fn still_continues_when_returning_to_an_earlier_project() {
         let (store, _dir) = get_store();
 
-        // Ids are set by hand because `SessionState::new` mints them from a
-        // millisecond clock, so two states built back to back collide and the
-        // second overwrites the first (#490). This test is about scoping, not
-        // about id minting, so it uses ids that are actually distinct.
+        // Ids are set by hand so this test cannot depend on how they are minted.
+        // It was a workaround when `SessionState::new` read a millisecond clock
+        // and two states built back to back collided; #490 fixed that, and the
+        // explicit ids stay because a scoping test should not be able to fail for
+        // a reason that has nothing to do with scoping.
         let mut a = SessionState::new();
         a.session_id = "sess-a".to_string();
         a.add_error("error from project a");
