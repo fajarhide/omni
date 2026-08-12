@@ -861,8 +861,7 @@ fn run_default(store: &Store) -> Result<()> {
             format_number(sessions).cyan()
         );
         let compaction_line = if compacted == 0 {
-            "  none of them ended at a compaction, so this measures sessions, not the window"
-                .to_string()
+            "  none ended at a compaction, so this measures sessions, not the window".to_string()
         } else {
             format!("  {compacted} of them ended at a compaction, which is what the window costs")
         };
@@ -872,7 +871,7 @@ fn run_default(store: &Store) -> Result<()> {
     println!(
         "  {} {}",
         "Pipeline diagnostic:".bold().bright_white(),
-        "how much one host's tool output shrank, not a product claim"
+        "one host's tool output, not a product claim"
             .bright_black()
             .italic()
     );
@@ -910,7 +909,7 @@ fn run_default(store: &Store) -> Result<()> {
     // when the model-facing figure was 29.3%.
     println!(
         "  {}",
-        "Counts calls whose result reached a model. Terminal output is excluded, no context holds it."
+        "Counts calls whose result reached a model. Terminal output is excluded:\n  no context holds it."
             .bright_black()
             .italic()
     );
@@ -1219,15 +1218,13 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 "".clear()
             };
 
-            // `group_and_calculate_stats` already shortened these to
-            // `CMD_KEY_WIDTH`, so re-cutting here at a third width only broke
-            // the lookup below. Kept as a guard for names that arrive longer.
-            let display_name =
-                crate::util::text::display_truncate_with_ellipsis(name, CMD_KEY_WIDTH - 3);
-
-            // Pick the dominant agent for this command key by highest call count.
+            // Look up by the key, render from the key. These were one variable,
+            // which is how #471 happened and how it nearly shipped twice: fitting
+            // `cat package.json` into the column produced `cat package.jso...`,
+            // and searching the agent map for *that* missed a key that was
+            // sitting right there. What is displayed is never what is looked up.
             let agent_label = cmd_agent_counts
-                .get(&display_name)
+                .get(name.as_str())
                 .and_then(|agents| agents.iter().max_by_key(|(_, calls)| *calls))
                 .map(|(agent_id, _)| agent_display_name(agent_id))
                 // `Unknown`, never `Terminal`: a lookup that missed has not
@@ -1240,6 +1237,9 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             } else {
                 String::new()
             };
+
+            let display_name =
+                crate::util::text::display_truncate_with_ellipsis(name, CMD_KEY_WIDTH - 3);
 
             println!(
                 "  {:>2}. {:<w_cmd$} {:<11} {:>4}x {:>5.1}% {:>6} {:<w_bar$}{}",
@@ -1263,25 +1263,22 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 .count();
             let hidden_zero = grouped_filters.len() - filtered_count;
 
-            if filtered_count > 10 {
+            // One footnote, not two. Both named `--all-commands`, and together
+            // they ran past the frame they sit inside (#463).
+            if filtered_count > 10 || hidden_zero > 0 {
+                let hidden = if hidden_zero > 0 {
+                    format!(", {hidden_zero} at 0% hidden")
+                } else {
+                    String::new()
+                };
                 println!(
                     "\n   {}",
                     format!(
-                        "Showing top 10 of {} commands with active savings. --all-commands to see all",
-                        filtered_count
+                        "Top 10 of {filtered_count} with savings{hidden}. --all-commands shows all"
                     )
                     .bright_black()
                     .italic()
                 );
-            }
-
-            if hidden_zero > 0 {
-                println!(
-                     "   {}",
-                     format!("({} noise commands with 0% savings hidden. Use --all-commands to see all).", hidden_zero)
-                         .bright_black()
-                         .italic()
-                 );
             }
         }
     }
@@ -1867,6 +1864,41 @@ mod tests {
         let args: Vec<String> = vec!["stats".into(), "--json".into()];
         let result = run(&args, &store);
         assert!(result.is_ok());
+    }
+
+    /// The agent map is keyed by `shorten_command(cmd, CMD_KEY_WIDTH)`, and the
+    /// cell is that key cut again to fit the column. They are different strings
+    /// for any name that fills the column, so looking the agent up by what is
+    /// on screen misses a key that is present. That is #471, and writing the fix
+    /// reintroduced it once: `cat package.json` is 16 characters, survives the
+    /// key intact, renders as `cat package.jso...`, and the row came back
+    /// `Unknown` against a database with no unknown rows in it.
+    #[test]
+    fn the_rendered_name_is_not_the_lookup_key() {
+        let key = shorten_command("cat package.json", CMD_KEY_WIDTH);
+        let rendered = crate::util::text::display_truncate_with_ellipsis(&key, CMD_KEY_WIDTH - 3);
+
+        assert_eq!(
+            key, "cat package.json",
+            "the key is the whole short command"
+        );
+        assert_ne!(
+            key, rendered,
+            "if these were ever equal the conflation would stop being visible, \
+             and the lookup must still use the key"
+        );
+
+        let mut agents: HashMap<String, HashMap<String, u64>> = HashMap::new();
+        agents
+            .entry(key.clone())
+            .or_default()
+            .insert("claude_code".to_string(), 1);
+
+        assert!(agents.contains_key(&key), "keyed lookup resolves");
+        assert!(
+            !agents.contains_key(&rendered),
+            "the rendered cell is not a key and must never be used as one"
+        );
     }
 
     #[test]

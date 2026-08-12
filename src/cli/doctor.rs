@@ -371,12 +371,11 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     // was built from.
     if unreleased_entries() > 0 {
         println!(
-            "  {:<15} {} {}",
-            "".bright_black(),
+            "  {} {}",
             format!("[{} UNRELEASED]", unreleased_entries())
                 .yellow()
                 .bold(),
-            "changes built into this binary are in no release, cut a tag".bright_black()
+            "built into this binary, in no release. Cut a tag".bright_black()
         );
     }
 
