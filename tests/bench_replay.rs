@@ -316,6 +316,49 @@ fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
     }
 }
 
+/// What lean-ctx would deliver for one payload, in bytes.
+///
+/// `compress diff - --shell "<cmd>" --json` is its own preview path: the payload
+/// arrives on stdin and `--shell` names the command that produced it, which is
+/// the same courtesy the rtk arm extends. It is not in `lean-ctx --help`, only in
+/// `lean-ctx help all`.
+///
+/// **It reports rather than emits.** The command prints `compressed_bytes` and a
+/// line diff, never the compressed text, so this arm can measure lean-ctx and
+/// cannot stack our ledger on top of it the way the rtk arm does. That asymmetry
+/// is why there is no `lean-ctx + our ledger` row: the row would have to be
+/// estimated, and an estimate next to four measurements is the kind of blend this
+/// harness exists to avoid.
+///
+/// Anything it declines to claim gets its bytes back, matching the rtk arm and
+/// omni's own passthrough.
+fn lean_ctx_bytes(bin: &str, cmd: &str, raw: &str) -> usize {
+    use std::io::Write;
+    let producer = omni::pipeline::registry::sole_output_command(cmd).unwrap_or(cmd);
+    let Ok(mut child) = std::process::Command::new(bin)
+        .args(["compress", "diff", "-", "--shell", producer, "--json"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return raw.len();
+    };
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(raw.as_bytes());
+    }
+    let Ok(out) = child.wait_with_output() else {
+        return raw.len();
+    };
+    // A missing or unparseable field means the payload was not claimed, not that
+    // it compressed to nothing. Falling back to `raw.len()` keeps an unclaimed
+    // command a passthrough instead of a free win.
+    serde_json::from_slice::<serde_json::Value>(&out.stdout)
+        .ok()
+        .and_then(|v| v.get("compressed_bytes")?.as_u64())
+        .map_or(raw.len(), |n| n as usize)
+}
+
 fn base_command(cmd: &str) -> String {
     cmd.split_whitespace()
         .find(|t| !t.contains('=') && !t.starts_with('-'))
@@ -446,7 +489,11 @@ fn replay_execution_traces_net_savings() {
         omni::store::sqlite::Store::open_path(&ledger_dir.path().join("ledger.db")).ok();
     let (mut ledger_total, mut ledger_calls) = (0u64, 0u64);
     // #448. `OMNI_BENCH_PROJECT=off` drops the project scope so the two can be
-    // measured apart; the floor arm is `OMNI_PROJECT_FLOOR_MULT` in the ledger.
+    // measured apart. There is no env var for the floor: it is
+    // `guard::limits::PROJECT_FLOOR_MULT`, and changing the arm means changing
+    // the constant. An `OMNI_PROJECT_FLOOR_MULT` was advertised here and read by
+    // nothing but this file's own reporting line, so setting it relabelled the
+    // output without moving the arm (#472).
     let project_scope = std::env::var("OMNI_BENCH_PROJECT").ok().as_deref() != Some("off");
     let (mut mark_session, mut mark_project) = (0u64, 0u64);
     // #450's three gates, in repeated bytes the ledger never got to claim.
@@ -467,6 +514,9 @@ fn replay_execution_traces_net_savings() {
     let rtk_ledger_store =
         omni::store::sqlite::Store::open_path(&rtk_ledger_dir.path().join("ledger.db")).ok();
     let mut rtk_ledger_total = 0u64;
+    // Second competitor arm, same rule: off unless the binary is named.
+    let lean_ctx = std::env::var("OMNI_BENCH_LEANCTX").ok();
+    let (mut lc_total, mut lc_claimed) = (0u64, 0u64);
 
     let counter = Counter::new();
     let (mut n, mut raw_total, mut out_total) = (0u64, 0u64, 0u64);
@@ -639,6 +689,18 @@ fn replay_execution_traces_net_savings() {
             rtk_ledger_total += after.map_or(rtk_text.len() as u64, |v| v.len() as u64);
         }
 
+        if let Some(bin) = &lean_ctx {
+            let got = lean_ctx_bytes(bin, &t.command, &t.raw);
+            lc_total += got as u64;
+            // "Claimed" here means it actually shortened the payload, since
+            // lean-ctx reports no filter name to key on the way rtk does. That
+            // makes this count stricter than rtk's, which counts a mapped filter
+            // whether or not it saved a byte, and the two are not comparable.
+            if got < t.raw.len() {
+                lc_claimed += 1;
+            }
+        }
+
         let c = per_class.entry(trace_class(&t.command)).or_default();
         c.0 += 1;
         c.1 += r;
@@ -752,7 +814,7 @@ fn replay_execution_traces_net_savings() {
     );
     println!(
         "ledger arm:      project_scope={project_scope} floor_mult={} bytes={ledger_total} markers: {mark_session} session, {mark_project} project",
-        std::env::var("OMNI_PROJECT_FLOOR_MULT").unwrap_or_else(|_| "6".into())
+        omni::guard::limits::PROJECT_FLOOR_MULT
     );
 
     // #450. Every repeated byte the ledger was handed, attributed to the gate
@@ -816,11 +878,15 @@ fn replay_execution_traces_net_savings() {
         );
     }
 
-    // P4. One corpus, two tools, one command that reproduces it. rtk is handed
-    // the exact filter name for each command, which its own hook has to infer, so
-    // the comparison is tilted in its favour rather than ours.
-    if let Some(_r) = &rtk {
-        println!("\n--- head to head, same corpus (rtk given its filter name) ---");
+    // P4. One corpus, one command that reproduces it, and every competitor handed
+    // the command that produced each payload, which their own hooks have to infer.
+    // The comparison is tilted in their favour rather than ours, deliberately.
+    //
+    // Each arm is off unless its binary is named, so CI never needs a competitor
+    // installed. A missing arm prints nothing rather than a zero, because a zero
+    // in this table reads as a measurement.
+    if rtk.is_some() || lean_ctx.is_some() {
+        println!("\n--- head to head, same corpus (each tool given its command) ---");
         println!(
             "{:<22} {:>12} -> {:>12}  {:>7}",
             "omni, filters only",
@@ -835,21 +901,36 @@ fn replay_execution_traces_net_savings() {
             ledger_total,
             format!("{:.1}%", saved(raw_total, ledger_total))
         );
-        println!(
-            "{:<22} {:>12} -> {:>12}  {:>7}   ({rtk_claimed} of {n} claimed by a filter)",
-            "rtk pipe",
-            raw_total,
-            rtk_total,
-            format!("{:.1}%", saved(raw_total, rtk_total))
-        );
-        println!(
-            "{:<22} {:>12} -> {:>12}  {:>7}",
-            "rtk pipe + our ledger",
-            raw_total,
-            rtk_ledger_total,
-            format!("{:.1}%", saved(raw_total, rtk_ledger_total))
-        );
-        println!("rtk marked a cut in {rtk_marked} of the {rtk_claimed} it claimed");
+        if rtk.is_some() {
+            println!(
+                "{:<22} {:>12} -> {:>12}  {:>7}   ({rtk_claimed} of {n} claimed by a filter)",
+                "rtk pipe",
+                raw_total,
+                rtk_total,
+                format!("{:.1}%", saved(raw_total, rtk_total))
+            );
+            println!(
+                "{:<22} {:>12} -> {:>12}  {:>7}",
+                "rtk pipe + our ledger",
+                raw_total,
+                rtk_ledger_total,
+                format!("{:.1}%", saved(raw_total, rtk_ledger_total))
+            );
+            println!("rtk marked a cut in {rtk_marked} of the {rtk_claimed} it claimed");
+        }
+        if lean_ctx.is_some() {
+            println!(
+                "{:<22} {:>12} -> {:>12}  {:>7}   ({lc_claimed} of {n} shortened)",
+                "lean-ctx compress",
+                raw_total,
+                lc_total,
+                format!("{:.1}%", saved(raw_total, lc_total))
+            );
+            // No `lean-ctx + our ledger` row on purpose: its preview reports byte
+            // counts and never hands back the compressed text, so that row could
+            // only be estimated. See `lean_ctx_bytes`.
+            println!("lean-ctx reports bytes rather than emitting them, so it has no ledger row");
+        }
     }
 
     // #395's gate. Printed next to the classes rather than in place of them,
