@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The README now demos the half we win on (#503)**: the existing pair shows `git log` compression, which is filter work, and filters are 2.7% on our own corpus against rtk's 6.2%. A new pair shows the ledger instead: the same file read twice in one session, where the second read comes back as one marker and a retrieval handle. Measured on 0.7.3 through the Homebrew binary, `cat src/guard/limits.rs` twice is 7.6 KB then 214 B, a 97.2% reduction on the second call.
+
+  **Figures re-measured on 0.7.3 across the manual and the translations.** Same 6,656-trace corpus, so the only variable is the build. The aggregate is unchanged at 14.9% and three cells moved: other 6.8 to 6.9, file read 25.2 to 25.0, `git` 22.3 to 22.1. The tape carries `unset OMNI_PASSTHROUGH`, because `vhs` inherits the recorder's environment and a stray passthrough records a second read that never folds, which is the claim backwards.
+
 ## [0.7.3] - 2026-08-12
 
 Three fixes about mistaken identity. A tool name, a session and a command's output

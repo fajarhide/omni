@@ -24,7 +24,7 @@ the count and a handle. Everything else passes through byte for byte.
 It reaches the class nothing else can. File reads are the largest class in the
 corpus, and the filters save **0.0%** of them, correctly: you cannot strip lines from
 a file the agent asked to see without guessing which parts it meant. The ledger takes
-25.2% of that same class without guessing anything, because those lines were already
+25.0% of that same class without guessing anything, because those lines were already
 delivered once.
 
 ## Two scopes, two different claims

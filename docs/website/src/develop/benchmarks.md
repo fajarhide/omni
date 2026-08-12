@@ -17,7 +17,7 @@ is pruned to seven days, so a corpus is gone a week after it is measured. An ear
 9,965-trace run cannot be re-derived by anyone, us included. Hold the window open with
 `OMNI_TRACE_RETENTION_DAYS` while a measurement is in flight.
 
-**These were re-derived on 0.7.2 and the previous ones are gone rather than kept for
+**These were re-derived on 0.7.3 and the previous ones are gone rather than kept for
 comparison.** Two releases have changed the rule deciding whether the ledger folds a
 run, so a number measured before either describes a pipeline that no longer exists.
 Quoting both would invite a reader to treat the difference as a trend when it is two
@@ -45,7 +45,7 @@ to the byte, which is what rules out a different corpus as the explanation.
 
 ## The headline
 
-Replayed 2026-08-12 on 0.7.2 over **6,656 traces covering 2026-08-04 02:56 to 08-11
+Replayed 2026-08-12 on 0.7.3 over **6,656 traces covering 2026-08-04 02:56 to 08-11
 03:34 UTC**, every one `agent_id='claude_code'`.
 
 - **14.9% fewer bytes** across the mix (6.47 MB to 5.50 MB), of which the filters are
@@ -147,10 +147,10 @@ they used.
 
 | class | calls | input | filters | + ledger |
 |---|---|---|---|---|
-| other | 4,145 | 2.95 MB | 0.6% | **6.8%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.2%** |
+| other | 4,145 | 2.95 MB | 0.6% | **6.9%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.0%** |
 | search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.3%** |
-| `git`, `gh` | 661 | 609 KB | 4.4% | **22.3%** |
+| `git`, `gh` | 661 | 609 KB | 4.4% | **22.1%** |
 | build and test | 69 | 94 KB | 76.9% | **78.0%** |
 | infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
 | **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |
