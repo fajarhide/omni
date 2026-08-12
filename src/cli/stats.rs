@@ -1337,19 +1337,23 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     if !grouped_agents.is_empty() {
         let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
         println!("\n {}", "Agent Distribution:".bold().bright_white());
+        // Number then bar, the order By Command already uses. Padding the bar
+        // and right-aligning the percentage after it left a hole across the row
+        // whenever savings were low, which is most rows.
         println!(
-            "  {:<16} {:>6} {:>7} {}",
+            "  {:<16} {:>6} {:>7} {:>6} {}",
             "Agent".bright_black(),
             "Count".bright_black(),
             "Share".bright_black(),
-            "Savings".bright_black()
+            "Saved".bright_black(),
+            "Signal".bright_black()
         );
-        // Four groups under a four-column header. It carried five, because the
-        // leading `──` was copied from the By Command table's `#` column, which
-        // is what made a 56-column rule sit under a 43-column header (#463).
+        // Five groups under a five-column header. It carried five under *four*,
+        // because the leading `──` was copied from the By Command table's `#`
+        // column, leaving a 56-column rule under a 43-column header (#463).
         println!(
             "  {}",
-            super::column_rule(&[16, 6, 7, DETAIL_BAR + 7]).bright_black()
+            super::column_rule(&[16, 6, 7, 6, DETAIL_BAR]).bright_black()
         );
 
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
@@ -1375,13 +1379,12 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 bar.bright_red()
             };
             println!(
-                "  {:<16} {:>5}x {:>6.1}% {:<w_bar$} {:>5.1}%",
+                "  {:<16} {:>5}x {:>6.1}% {:>5.1}% {}",
                 name.bright_cyan(),
                 count,
                 pct,
-                bar_colored,
                 savings,
-                w_bar = DETAIL_BAR
+                bar_colored,
             );
             // #163: the excluded rows are named, not silently missing. A count
             // that shrinks without explanation reads as OMNI having stopped
