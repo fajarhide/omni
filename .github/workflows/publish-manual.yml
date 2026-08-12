@@ -1,0 +1,62 @@
+# The manual's source lives here and is published by weekndlabs/omni-pages,
+# which clones this repository during its own Vercel build. Vercel builds that
+# project when that project is pushed and at no other time, so without this a
+# change to docs/website/ sits merged and unpublished until something unrelated
+# happens to deploy over there. That is exactly what #487 did: merged at 09:48,
+# still not serving at 12:00, because the last build was an unrelated merge.
+#
+# One POST to a Vercel Deploy Hook is the whole mechanism. It carries no payload
+# and grants nothing: the URL is the credential, which is why it is a secret and
+# not a repository variable.
+#
+# Setting it up, once:
+#   Vercel > omni-pages > Settings > Git > Deploy Hooks > Create Hook
+#     name   publish-manual
+#     branch main
+#   then paste the URL into
+#   Settings > Secrets and variables > Actions > New repository secret
+#     name   OMNI_PAGES_DEPLOY_HOOK
+#
+# Without the secret this job skips rather than fails, so a fork does not get a
+# red tick for a hook it has no business holding.
+name: Publish manual
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/website/**'
+  # For the case the path filter cannot see: a release, or a rebuild wanted
+  # after a change to the publisher rather than to the prose.
+  workflow_dispatch:
+
+concurrency:
+  group: publish-manual
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask omni-pages to rebuild
+        env:
+          HOOK: ${{ secrets.OMNI_PAGES_DEPLOY_HOOK }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOOK:-}" ]; then
+            echo "OMNI_PAGES_DEPLOY_HOOK is not set, so the manual will not"
+            echo "republish until omni-pages is deployed some other way."
+            echo "See the header of this workflow for how to create it."
+            exit 0
+          fi
+          # Vercel answers 201 with a job id. Fail loudly on anything else: a
+          # deleted or rotated hook returns 404, and a silent skip there is how
+          # this stops working without anyone noticing.
+          code="$(curl -sS -X POST -o /tmp/hook.json -w '%{http_code}' "${HOOK}")"
+          echo "deploy hook answered ${code}"
+          cat /tmp/hook.json
+          echo
+          [ "${code}" = "201" ] || { echo "expected 201"; exit 1; }
