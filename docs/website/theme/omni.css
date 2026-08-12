@@ -219,6 +219,14 @@ body { font-size: var(--text-body); line-height: var(--wl-leading-body); -webkit
   margin-inline-start: 0;
   margin-inline-end: auto;
   padding-inline-start: 1.5rem;
+  /* The page title's box started level with the bottom of the menu bar on 37 of
+     38 pages, measured: bar bottom 51, h1 top 51, gap 0. A heading's own top
+     margin collapses straight through `main`, which has no padding or border to
+     stop it, so the answer has to be padding here rather than a margin
+     anywhere. index.md had been carrying a bare `#` on line 1 to buy the space;
+     it renders to nothing at all, which is why that page measured 18 and the
+     other 37 measured 0. */
+  padding-block-start: 4rem;
 }
 
 /* Below the point where the outline plus the measure fit beside the sidebar,
