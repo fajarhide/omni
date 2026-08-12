@@ -359,6 +359,65 @@ fn lean_ctx_bytes(bin: &str, cmd: &str, raw: &str) -> usize {
         .map_or(raw.len(), |n| n as usize)
 }
 
+/// Bytes headroom's cross-turn dedup leaves, over the same blocks the ledger saw.
+///
+/// One python process for the whole corpus rather than one per payload: the arm
+/// is a whole-conversation transform, so it needs every session's blocks in order
+/// anyway, and the lean-ctx arm's per-trace spawning is what makes a full run take
+/// tens of minutes.
+///
+/// Three things the module makes you learn the hard way, all of them cheap to
+/// state and expensive to find:
+///
+/// - the dataclass field is `text`, not `output`, and `turn` must be a stable
+///   absolute ordinal because it is printed into the pointer it leaves behind.
+/// - the module has to be registered in `sys.modules` **before** `exec_module`,
+///   or `@dataclass` raises `AttributeError: 'NoneType' object has no attribute
+///   '__dict__'`, which reads like a corrupt file and is not.
+/// - it needs python3.13. The 3.8 commonly first on `PATH` cannot parse it.
+///
+/// Returns `None` when anything at all goes wrong, because a competitor arm that
+/// silently reports zero would read as a win.
+fn headroom_total(module: &str, blocks: &BTreeMap<String, Vec<String>>) -> Option<u64> {
+    let dir = tempfile::tempdir().ok()?;
+    let payload = dir.path().join("blocks.json");
+    std::fs::write(&payload, serde_json::to_vec(blocks).ok()?).ok()?;
+
+    let driver = dir.path().join("drive.py");
+    std::fs::write(
+        &driver,
+        r#"import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("ctd", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+sys.modules["ctd"] = m          # @dataclass resolves its owning module by name
+spec.loader.exec_module(m)
+
+total = 0
+for _session, texts in json.load(open(sys.argv[2])).items():
+    blocks = [m.DedupBlock(text=t, turn=i) for i, t in enumerate(texts)]
+    folded, _stats = m.dedup_blocks(blocks)
+    total += sum(len(b.text) for b in folded)
+print(total)
+"#,
+    )
+    .ok()?;
+
+    let out = std::process::Command::new("python3.13")
+        .arg(&driver)
+        .arg(module)
+        .arg(&payload)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        eprintln!(
+            "headroom arm failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
 fn base_command(cmd: &str) -> String {
     cmd.split_whitespace()
         .find(|t| !t.contains('=') && !t.starts_with('-'))
@@ -517,6 +576,15 @@ fn replay_execution_traces_net_savings() {
     // Second competitor arm, same rule: off unless the binary is named.
     let lean_ctx = std::env::var("OMNI_BENCH_LEANCTX").ok();
     let (mut lc_total, mut lc_claimed) = (0u64, 0u64);
+    // Third arm, and the only one that is not a filter. `OMNI_BENCH_HEADROOM`
+    // names headroom's `transforms/cross_turn_dedup.py`, which is the same idea
+    // as our ledger rather than the same idea as rtk: whole-conversation verbatim
+    // dedup, not per-payload pattern stripping. So it is fed exactly what the
+    // ledger is fed, post-filter output grouped by session in recorded order,
+    // and compared against `ledger_total` rather than against `out_total`.
+    let headroom = std::env::var("OMNI_BENCH_HEADROOM").ok();
+    let mut hr_blocks: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut hr_structured = 0u64;
 
     let counter = Counter::new();
     let (mut n, mut raw_total, mut out_total) = (0u64, 0u64, 0u64);
@@ -660,6 +728,26 @@ fn replay_execution_traces_net_savings() {
             None => o,
         };
         ledger_total += l;
+
+        if headroom.is_some() {
+            // The same bytes the ledger saw, behind the same gate. A structured
+            // payload is never handed to either engine, so its bytes are counted
+            // verbatim rather than offered for dedup: passing it would credit
+            // headroom for bytes our own gate refuses to touch, which would
+            // flatter it on a rule it never agreed to.
+            //
+            // Ordering is the loop's, which is the recorded order, and
+            // prefix-monotonicity depends on that as much for their design as
+            // for ours.
+            if omni::pipeline::format::sniff(&distilled).is_none() {
+                hr_blocks
+                    .entry(t.session.clone())
+                    .or_default()
+                    .push(distilled.to_string());
+            } else {
+                hr_structured += o;
+            }
+        }
 
         if let Some(rtk) = &rtk {
             let rtk_text = rtk_out(rtk, &t.command, &t.raw);
@@ -885,7 +973,7 @@ fn replay_execution_traces_net_savings() {
     // Each arm is off unless its binary is named, so CI never needs a competitor
     // installed. A missing arm prints nothing rather than a zero, because a zero
     // in this table reads as a measurement.
-    if rtk.is_some() || lean_ctx.is_some() {
+    if rtk.is_some() || lean_ctx.is_some() || headroom.is_some() {
         println!("\n--- head to head, same corpus (each tool given its command) ---");
         println!(
             "{:<22} {:>12} -> {:>12}  {:>7}",
@@ -918,6 +1006,30 @@ fn replay_execution_traces_net_savings() {
             );
             println!("rtk marked a cut in {rtk_marked} of the {rtk_claimed} it claimed");
         }
+        if let Some(module) = &headroom {
+            match headroom_total(module, &hr_blocks) {
+                Some(deduped) => {
+                    let total = deduped + hr_structured;
+                    println!(
+                        "{:<22} {:>12} -> {:>12}  {:>7}   (their dedup, our filters)",
+                        "headroom dedup",
+                        raw_total,
+                        total,
+                        format!("{:.1}%", saved(raw_total, total))
+                    );
+                    // The row that decides anything. Both arms are the same
+                    // filters and the same blocks; only the dedup engine differs,
+                    // so a gap here is the engine and nothing else.
+                    println!(
+                        "our ledger {:.1}% against their dedup {:.1}% on identical input",
+                        saved(raw_total, ledger_total),
+                        saved(raw_total, total)
+                    );
+                }
+                None => println!("headroom arm did not run; see the error above"),
+            }
+        }
+
         if lean_ctx.is_some() {
             println!(
                 "{:<22} {:>12} -> {:>12}  {:>7}   ({lc_claimed} of {n} shortened)",
