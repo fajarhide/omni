@@ -32,12 +32,12 @@
    -------------------------------------------------------------------------- */
 
 @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/ibm-plex-sans-400.woff2') format('woff2'); }
-@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/ibm-plex-sans-500.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: var(--wl-weight-medium); font-display: swap; src: url('../fonts/ibm-plex-sans-500.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/ibm-plex-sans-600.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Sans Condensed'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/ibm-plex-sans-condensed-600.woff2') format('woff2'); }
-@font-face { font-family: 'IBM Plex Sans Condensed'; font-style: normal; font-weight: 700; font-display: swap; src: url('../fonts/ibm-plex-sans-condensed-700.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans Condensed'; font-style: normal; font-weight: var(--wl-weight-display); font-display: swap; src: url('../fonts/ibm-plex-sans-condensed-700.woff2') format('woff2'); }
 @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/ibm-plex-mono-400.woff2') format('woff2'); }
-@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/ibm-plex-mono-500.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: var(--wl-weight-medium); font-display: swap; src: url('../fonts/ibm-plex-mono-500.woff2') format('woff2'); }
 
 /* --------------------------------------------------------------------------
    Every value in this file that decides how the book looks is a --wl-* token
@@ -178,11 +178,11 @@
 
 html { font-family: var(--font-body); -webkit-text-size-adjust: 100%; }
 
-body { font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+body { font-size: var(--wl-text-body); line-height: var(--wl-leading-body); -webkit-font-smoothing: antialiased; }
 
 .content main { max-width: var(--doc-measure); }
 
-.content p, .content li { line-height: 1.72; }
+.content p, .content li { line-height: var(--wl-leading-body); }
 .content p { margin: 0 0 1.15em; }
 .content ul, .content ol { margin: 0 0 1.15em; padding-left: 1.35em; }
 .content li + li { margin-top: 0.35em; }
@@ -197,39 +197,39 @@ body { font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
 
 .content h1, .content h2, .content h3, .content h4 {
   font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.15;
+  font-weight: var(--wl-weight-semibold);
+  letter-spacing: var(--wl-tracking-section);
+  line-height: var(--wl-leading-heading);
   text-wrap: balance;
 }
 
 .content h1 {
-  font-size: 2.45rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.05;
+  font-size: var(--wl-text-display);
+  font-weight: var(--wl-weight-display);
+  letter-spacing: var(--wl-tracking-hero);
+  line-height: var(--wl-leading-hero);
   margin: 0 0 0.55em;
 }
 
 /* Whitespace separates sections, not a border. The one exception is h2, which
    marks the joints a reader scans for. */
 .content h2 {
-  font-size: 1.6rem;
+  font-size: var(--wl-text-title);
   margin: 2.9em 0 0.75em;
   padding-bottom: 0.3em;
   border-bottom: 1px solid var(--rule);
 }
 
-.content h3 { font-size: 1.16rem; margin: 2.2em 0 0.6em; }
-.content h4 { font-size: 1rem; margin: 1.8em 0 0.5em; color: var(--ink-soft); }
+.content h3 { font-size: var(--wl-text-lede); margin: 2.2em 0 0.6em; }
+.content h4 { font-size: var(--wl-text-body); margin: 1.8em 0 0.5em; color: var(--ink-soft); }
 
 .content h1 a.header, .content h2 a.header,
 .content h3 a.header, .content h4 a.header { color: inherit; }
 
 /* The paragraph directly under an h1 is the page's lede. */
 .content h1 + p {
-  font-size: 1.1rem;
-  line-height: 1.62;
+  font-size: var(--wl-text-lede);
+  line-height: var(--wl-leading-body);
   color: var(--ink-soft);
 }
 
@@ -245,7 +245,7 @@ code { font-family: var(--font-mono); font-size: 0.875em; }
 .content :not(pre) > code {
   background: var(--code-bg);
   border: 1px solid var(--code-border);
-  border-radius: 3px;
+  border-radius: var(--wl-radius-control);
   padding: 0.05em 0.35em;
   color: var(--inline-code-color);
 }
@@ -253,7 +253,7 @@ code { font-family: var(--font-mono); font-size: 0.875em; }
 .content pre {
   background: var(--code-bg);
   border: 1px solid var(--code-border);
-  border-radius: 4px;
+  border-radius: var(--wl-radius-control);
   padding: 0.95rem 1.05rem;
   margin: 1.5em 0;
   overflow-x: auto;
@@ -261,13 +261,13 @@ code { font-family: var(--font-mono); font-size: 0.875em; }
 
 .content pre code {
   font-size: 0.845em;
-  line-height: 1.62;
+  line-height: var(--wl-leading-body);
   background: none;
   border: 0;
   padding: 0;
 }
 
-.content pre > .buttons { opacity: 0; transition: opacity 140ms ease; }
+.content pre > .buttons { opacity: 0; transition: opacity var(--wl-duration-fast) var(--wl-ease-out); }
 .content pre:hover > .buttons { opacity: 0.6; }
 
 /* --------------------------------------------------------------------------
@@ -281,14 +281,14 @@ code { font-family: var(--font-mono); font-size: 0.875em; }
   width: 100%;
   border-collapse: collapse;
   margin: 1.6em 0;
-  font-size: 0.94rem;
+  font-size: var(--wl-text-body);
 }
 
 .content table thead th {
   font-family: var(--font-mono);
-  font-weight: 400;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  font-weight: var(--wl-weight-body);
+  font-size: var(--wl-text-label);
+  letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
   color: var(--ink-soft);
   text-align: left;
@@ -331,7 +331,7 @@ blockquote p:last-child { margin-bottom: 0; }
    eyebrow the site uses for the same job.
    -------------------------------------------------------------------------- */
 
-#mdbook-sidebar { font-size: 0.9rem; }
+#mdbook-sidebar { font-size: var(--wl-text-body); }
 #mdbook-sidebar .sidebar-scrollbox { padding: 1.5rem 1.5rem 4rem; }
 
 .chapter li.chapter-item { line-height: 1.5; margin: 0.34em 0; }
@@ -341,13 +341,13 @@ blockquote p:last-child { margin-bottom: 0; }
   border-bottom: 1px solid transparent;
 }
 .chapter li.chapter-item a:hover { color: var(--fg); }
-.chapter li.chapter-item a.active { font-weight: 500; }
+.chapter li.chapter-item a.active { font-weight: var(--wl-weight-medium); }
 
 .chapter li.part-title {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 400;
-  letter-spacing: 0.14em;
+  font-size: var(--wl-text-label);
+  font-weight: var(--wl-weight-body);
+  letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
   color: var(--sidebar-non-existant);
   margin: 2.2em 0 0.7em;
@@ -362,8 +362,8 @@ blockquote p:last-child { margin-bottom: 0; }
 #mdbook-menu-bar.sticky, #mdbook-menu-bar:not(.folded) { border-bottom-color: var(--rule); }
 #mdbook-menu-bar h1.menu-title {
   font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.05rem;
+  font-weight: var(--wl-weight-display);
+  font-size: var(--wl-text-lede);
   letter-spacing: 0.01em;
 }
 
@@ -396,7 +396,7 @@ blockquote p:last-child { margin-bottom: 0; }
 
 .site-links a {
   font-family: var(--font-body);
-  font-size: 0.86rem;
+  font-size: var(--wl-text-meta);
   color: var(--ink-soft);
   text-decoration: none;
   border-bottom: 1px solid transparent;
@@ -424,7 +424,7 @@ blockquote p:last-child { margin-bottom: 0; }
   width: var(--toc-width);
   max-height: calc(100vh - 8rem);
   overflow-y: auto;
-  font-size: 0.82rem;
+  font-size: var(--wl-text-meta);
   line-height: 1.5;
   border-left: 1px solid var(--rule);
   padding-left: 0.9rem;
@@ -432,8 +432,8 @@ blockquote p:last-child { margin-bottom: 0; }
 
 .pagetoc-label {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.14em;
+  font-size: var(--wl-text-label);
+  letter-spacing: var(--wl-tracking-label);
   text-transform: uppercase;
   color: var(--sidebar-non-existant);
   margin-bottom: 0.7em;
@@ -459,11 +459,11 @@ blockquote p:last-child { margin-bottom: 0; }
 
 #mdbook-searchbar {
   font-family: var(--font-body);
-  border-radius: 4px;
+  border-radius: var(--wl-radius-control);
   padding: 0.6em 0.8em;
 }
 #mdbook-searchresults a { border-bottom: 0; }
-mark { border-radius: 2px; padding: 0 0.15em; }
+mark { border-radius: var(--wl-radius-control); padding: 0 0.15em; }
 
 /* --------------------------------------------------------------------------
    Footer navigation
@@ -477,7 +477,6 @@ mark { border-radius: 2px; padding: 0 0.15em; }
    -------------------------------------------------------------------------- */
 
 @media (max-width: 700px) {
-  .content h1 { font-size: 1.95rem; }
-  .content h2 { font-size: 1.35rem; }
-  .content table { font-size: 0.88rem; }
+  .content h2 { font-size: var(--wl-text-subtitle); }
+  .content table { font-size: var(--wl-text-meta); }
 }
