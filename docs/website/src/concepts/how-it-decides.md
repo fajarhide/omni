@@ -1,12 +1,15 @@
 # How it decides what to cut
 
-The pipeline is fixed and every payload walks the same six stages:
+The pipeline is fixed and every payload walks the same stages:
 
 ```
-Read → Guard → Score → Collapse → Distill → Persist
+Read → Guard → Score → Distill → [Collapse] → Ledger → Route → Persist
 ```
 
 None of them is allowed to invent anything, and each one is allowed to decline.
+Collapse is bracketed because it is a fallback rather than a step: it runs only when
+the distilled form failed to beat the guardrail. [The pipeline, stage by
+stage](../develop/pipeline.md) has the diagram and the reasoning.
 
 ## Guard
 
@@ -31,17 +34,6 @@ The tiering happens **before** any distiller sees the block, which matters when 
 are debugging why a distiller behaved oddly: the tier may already have decided the
 outcome, so probe the segment tiers before rewriting the distiller.
 
-## Collapse
-
-Runs of near-identical lines become one line stating the count. Twenty
-`Downloading foo v1.2.3` lines become one.
-
-Two things about this stage surprise people. It runs **before** the distiller, so a
-distiller is often reading `[N similar lines collapsed]` markers rather than the
-original output, and a distiller written as though it sees raw text will misbehave.
-And which collapse mode fires is chosen by specificity, so a `kubectl` command piped
-into `grep` may take the infrastructure path rather than the log path.
-
 ## Distill
 
 Now a tool-specific filter runs, chosen by matching the command. The `cargo test`
@@ -61,6 +53,25 @@ and the caller hands back the raw bytes. That is the difference between "I read 
 and here is what matters" and "I recognised nothing and here is a confident summary
 of it", and it is enforced by the compiler for all 12 rather than by each author
 remembering to check.
+
+## Collapse
+
+Runs of near-identical lines become one line stating the count. Twenty
+`Downloading foo v1.2.3` lines become one.
+
+Two things about this stage surprise people. It runs **after** the distiller and only
+when the distiller did not earn its keep: both hooks distill the raw bytes, ask
+`beats_guardrail`, and reach for the collapsed form only if that fails. So a distiller
+always reads the original output, never `[N similar lines collapsed]` markers. And
+which collapse mode fires is chosen by specificity, so a `kubectl` command piped into
+`grep` may take the infrastructure path rather than the log path.
+
+## Ledger
+
+Everything above judges this payload on its own. The ledger is the one stage that
+judges it against what the agent has already been shown, replacing a run of repeated
+lines with a marker and a handle. It is the largest single source of savings and it
+has its own page: [The ledger](the-ledger.md).
 
 ## Persist
 
