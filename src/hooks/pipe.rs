@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use colored::Colorize;
-use std::io::{BufRead, IsTerminal, Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -11,7 +11,7 @@ use std::time::Instant;
 /// input. Shared with `hooks::post_tool` via `guard::limits` (`CONTRIBUTING.md` SSOT).
 use crate::guard::limits::{MAX_OUTPUT_BYTES, MIN_REDUCTION_PCT};
 
-use crate::pipeline::{Route, SessionState, collapse, scorer, toml_filter};
+use crate::pipeline::{Route, SessionState, collapse, scorer};
 use crate::store::sqlite::Store;
 use crate::store::transcript::{Transcript, TranscriptEntry};
 
@@ -53,18 +53,6 @@ impl PipelineResult {
     }
 }
 
-/// The stream-mode TOML filter that governs `cmd`, if any. Stream-mode filters
-/// emit distilled output line-by-line as it arrives, before a wrapped command's
-/// exit code is known, so callers that gate on exit status (`omni exec`, #122)
-/// must treat a stream-mode command as un-gateable and keep it streaming.
-/// Semantics match Phase 0.5: the first filter that matches, and only if it is
-/// stream-mode.
-pub fn stream_filter_for(cmd: &str) -> Option<toml_filter::TomlFilter> {
-    let filters = toml_filter::load_all_filters();
-    let f = filters.iter().find(|filter| filter.matches(cmd))?;
-    f.stream_mode.then(|| f.clone())
-}
-
 pub fn run_inner<R: Read, W: Write, E: Write>(
     input: R,
     mut output: W,
@@ -104,11 +92,6 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
             );
         }
         return Ok(());
-    }
-
-    // Phase 0.5: Streaming Distillation Check
-    if let Some(filter) = command_to_use.and_then(stream_filter_for) {
-        return stream_distill(input, output, error, filter, store, session, command_to_use);
     }
 
     let start_time = Instant::now();
@@ -213,172 +196,6 @@ fn read_input<R: Read, W: Write>(mut input: R, mut output: W) -> Result<Option<S
     }
 }
 
-fn stream_distill<R: Read, W: Write, E: Write>(
-    input: R,
-    output: W,
-    mut error: E,
-    filter: toml_filter::TomlFilter,
-    store: Option<Arc<Store>>,
-    session: Option<Arc<Mutex<SessionState>>>,
-    command_name: Option<&str>,
-) -> Result<()> {
-    let start_time = Instant::now();
-    let mut reader = std::io::BufReader::new(input);
-    let mut truncated_output = crate::util::stream::TruncatingWriter::new(output, MAX_OUTPUT_BYTES);
-
-    let mut raw_bytes = 0;
-    let mut line_buffer = Vec::new();
-
-    // Streaming loop
-    loop {
-        line_buffer.clear();
-        // We read byte by byte until \n or \r to support progress bars correctly
-        let mut b = [0u8; 1];
-        let mut eof = false;
-        loop {
-            match reader.read(&mut b) {
-                Ok(0) => {
-                    eof = true;
-                    break;
-                }
-                Ok(_) => {
-                    let ch = b[0];
-                    line_buffer.push(ch);
-                    if ch == b'\n' {
-                        break;
-                    }
-                    if ch == b'\r' {
-                        // Splitting on a bare `\r` is deliberate, so a progress
-                        // bar redraw is its own line. A `\r` followed straight by
-                        // `\n` is not a redraw, it is one Windows line ending, and
-                        // reading it as two put the `\n` on a line of its own,
-                        // where it trimmed to empty and was dropped: every CRLF
-                        // payload came out as CR (#411). Peek rather than read, so
-                        // a `\r` that is a redraw leaves the next byte for the
-                        // next line.
-                        if let Ok(next) = reader.fill_buf()
-                            && next.first() == Some(&b'\n')
-                        {
-                            line_buffer.push(b'\n');
-                            reader.consume(1);
-                        }
-                        break;
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-
-        if line_buffer.is_empty() && eof {
-            break;
-        }
-
-        raw_bytes += line_buffer.len();
-
-        let line_str = String::from_utf8_lossy(&line_buffer);
-        let clean_line = line_str.trim_end_matches(['\n', '\r']);
-        // The line's own terminator, byte for byte, and empty when the input's
-        // last line had none. The old code chose between `\r` and `\n` and always
-        // wrote one, which did two things (#398). It appended a newline the input
-        // never had, so a passthrough came back one byte larger than it went in,
-        // against a published claim that no call ever grows: 2 of 7,032 replayed
-        // traces, both `podman run`, both exactly +1. And it rewrote every CRLF
-        // as LF, because `read_until(b'\n')` leaves the `\r` inside the trimmed
-        // part and the branch then only saw the `\n`.
-        let terminator = line_str.strip_prefix(clean_line).unwrap_or("");
-
-        // We apply filter line by line, which is why this is `apply_line`: the
-        // whole-payload `apply` ends in the `on_empty` zero-state, and answering
-        // "this filtered down to nothing" once per stripped line turned every
-        // piece of noise into a success sentence (#406).
-        let filtered = filter.apply_line(clean_line);
-        if !filtered.trim().is_empty() {
-            truncated_output.write_all(filtered.as_bytes())?;
-            truncated_output.write_all(terminator.as_bytes())?;
-            truncated_output.flush()?;
-        }
-
-        // Stop completely if the stream limit is reached
-        if truncated_output.is_truncated() {
-            break;
-        }
-
-        if eof {
-            break;
-        }
-    }
-
-    let filtered_bytes = truncated_output.bytes_written();
-
-    // Persist streaming stats without saving full input/output to prevent memory spikes
-    if let Some(s) = store {
-        use crate::pipeline::DistillResult;
-        let session_id = with_session(&session, |g| g.session_id.clone())
-            .unwrap_or_else(|| "pipe_session".to_string());
-
-        let agent_id = resolve_pipe_agent_id();
-        let project_path = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        let cmd = command_name.unwrap_or("");
-
-        let reduction = if raw_bytes > 0 {
-            100.0 * (1.0 - (filtered_bytes as f64 / raw_bytes as f64))
-        } else {
-            0.0
-        };
-
-        if !crate::guard::env::is_quiet() {
-            let msg = format!(
-                "{} {:.1}% reduction ({} → {}) {}ms (Streaming)",
-                "⏺".cyan(),
-                reduction,
-                crate::cli::stats::format_bytes(raw_bytes as u64).bright_black(),
-                crate::cli::stats::format_bytes(filtered_bytes as u64).green(),
-                start_time.elapsed().as_millis().to_string().bright_black()
-            );
-            let _ = writeln!(error, "{} {}", "[OMNI Active]".bold().cyan(), msg);
-        }
-
-        let distill_result = DistillResult {
-            output: format!(
-                "[Streaming Mode - Output omitted from memory. Raw: {}, Filtered: {}]",
-                raw_bytes, filtered_bytes
-            ),
-            route: Route::Keep,
-            filter_name: filter.name.clone(),
-            score: 0.0,
-            context_score: 0.0,
-            input_bytes: raw_bytes,
-            output_bytes: filtered_bytes,
-            latency_ms: start_time.elapsed().as_millis() as u64,
-            rewind_hash: None,
-            segments_kept: 0,
-            segments_dropped: 0,
-            collapse_savings: None,
-            raw_tokens: (raw_bytes / 4),
-            filtered_tokens: (filtered_bytes / 4),
-            delivered_bytes: delivered_bytes(filtered_bytes),
-        };
-
-        s.record_distillation(&session_id, &distill_result, cmd, &project_path, &agent_id);
-
-        if let Some(sess) = &session {
-            let tracker = crate::session::tracker::SessionTracker::new(sess.clone(), s.clone());
-            tracker.track_command(
-                cmd,
-                "[Streaming Mode - Input Omitted]",
-                &distill_result,
-                !std::io::stdout().is_terminal(),
-            );
-        }
-    }
-
-    Ok(())
-}
-
 fn with_session<F, R>(session: &Option<Arc<Mutex<SessionState>>>, f: F) -> Option<R>
 where
     F: FnOnce(&SessionState) -> R,
@@ -423,144 +240,102 @@ fn distill(
     // keyed on that name does it just as readily as a Rust distiller.
     let output_command = command_name.and_then(crate::pipeline::registry::sole_output_command);
 
-    let mut matched_toml = None;
-    if let Some(cmd) = output_command {
-        let filters = toml_filter::load_all_filters();
-        if let Some(f) = filters.iter().find(|filter| filter.matches(cmd)) {
-            matched_toml = Some(f.clone());
-        }
-    }
+    let (mut output, filter_name, kept_count, dropped_count, collapse_savings, mut route) = {
+        let cmd = command_name.unwrap_or("");
 
-    // A TOML filter only gets to short-circuit the distiller if it actually beat
-    // the guardrail. `sys_build_domain` matches every `cargo` invocation but strips
-    // only `Compiling`-style lines, so on `cargo test` it won the `find()` race,
-    // shadowed TestDistiller, cut 1%, and had that cut thrown away by best_output()
-    //, reporting 0% on output the distiller reduces by 94%. Weak filter, fall
-    // through; a filter that earns its match still wins, user filters included.
-    let toml_hit = matched_toml.and_then(|f| match f.apply_batch(&input_text) {
-        toml_filter::BatchFilterOutcome::Passthrough => {
-            Some((input_text.clone(), f.name, Route::Passthrough))
-        }
-        toml_filter::BatchFilterOutcome::Filtered(out) => crate::guard::limits::beats_guardrail(
-            out.len(),
-            input_text.len(),
-        )
-        .then_some((out, f.name, Route::Keep)),
-    });
+        // Pure Command Architecture: Resolve profile
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
 
-    // A TOML filter used to return `None` for the rewind hash unconditionally, so
-    // a filter that shortened the output archived nothing and marked nothing:
-    // exactly the guarantee #271 closed for the distiller path, still open one
-    // branch over. The archive decision is shared now, below, and both arms hand
-    // it the same thing: the bytes about to be emitted.
-    let (mut output, filter_name, kept_count, dropped_count, collapse_savings, mut route) =
-        if let Some((out, name, route)) = toml_hit {
-            (out, name, 0, 0, None, route)
-        } else {
-            let cmd = command_name.unwrap_or("");
+        // Score and distill the tool's REAL output. #116: a distiller parses
+        // its input, so feeding it `collapse`'s `[N similar lines collapsed]`
+        // markers makes it read OMNI's own scaffolding as data (a pod table
+        // became `k8s: 2 pods | [5 (lines)`). Collapse is the fallback only for
+        // commands no distiller handles (below).
+        let segments = scorer::score_segments(
+            &input_text,
+            profile.segmentation,
+            session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+            cmd,
+        );
 
-            // Pure Command Architecture: Resolve profile
-            let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let mut out = crate::distillers::distill_with_command(
+            &segments,
+            &input_text,
+            cmd,
+            session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
+        );
 
-            // Score and distill the tool's REAL output. #116: a distiller parses
-            // its input, so feeding it `collapse`'s `[N similar lines collapsed]`
-            // markers makes it read OMNI's own scaffolding as data (a pod table
-            // became `k8s: 2 pods | [5 (lines)`). Collapse is the fallback only for
-            // commands no distiller handles (below).
-            let segments = scorer::score_segments(
-                &input_text,
-                profile.segmentation,
-                session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-                cmd,
-            );
-
-            let mut out = crate::distillers::distill_with_command(
-                &segments,
-                &input_text,
-                cmd,
-                session.as_ref().and_then(|m| m.lock().ok()).as_deref(),
-            );
-
-            // When no distiller meaningfully reduced the raw output, it punted
-            // (returned the input) or produced a near-copy that misses the
-            // guardrail, fall back to the collapsed form for its line savings.
-            // `best_output` still drops back to raw if even the collapse is too
-            // weak, so this only ever helps. A distiller that earned its summary
-            // keeps it; the markers never reached the distiller in the first place.
-            // Enumeration commands (`ls`/`find`/`ps`/…) return the input verbatim
-            // by design; collapsing them would drop rows that are the answer, so
-            // never fall back to collapse for them (#200).
-            // The verbatim check asks the resolved command, not the string the
-            // user typed: the whole of `kubectl get pods -o json | jq -r '...'`
-            // reads as `kubectl` and lets collapse rewrite a payload the next
-            // step parses (#269).
-            let collapse_savings_data =
-                if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
-                    || !output_command
-                        .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
-                {
-                    None
-                } else {
-                    let collapse_result = collapse::collapse(&input_text, &profile.collapse);
-                    out = collapse_result.collapsed_lines.join("\n");
-                    if collapse_result.original_lines > collapse_result.collapsed_to {
-                        Some((collapse_result.original_lines, collapse_result.collapsed_to))
-                    } else {
-                        None
-                    }
-                };
-
-            let d_count = segments.iter().filter(|s| s.final_score() < 0.3).count();
-            let k_count = segments.len() - d_count;
-
-            // Auto-learn trigger
-            if !cmd.is_empty() && input_text.len() > 100 {
-                let poor =
-                    segments.len() > 5 && (d_count as f32 / segments.len().max(1) as f32) < 0.3;
-                if poor {
-                    crate::session::learn::queue_for_learn(&input_text, cmd);
-                }
-            }
-
-            // Determine Route
-            let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
-            let route = if ratio >= 0.7 {
-                Route::Keep
-            } else if ratio >= 0.3 {
-                Route::Soft
+        // When no distiller meaningfully reduced the raw output, it punted
+        // (returned the input) or produced a near-copy that misses the
+        // guardrail, fall back to the collapsed form for its line savings.
+        // `best_output` still drops back to raw if even the collapse is too
+        // weak, so this only ever helps. A distiller that earned its summary
+        // keeps it; the markers never reached the distiller in the first place.
+        // Enumeration commands (`ls`/`find`/`ps`/…) return the input verbatim
+        // by design; collapsing them would drop rows that are the answer, so
+        // never fall back to collapse for them (#200).
+        // The verbatim check asks the resolved command, not the string the
+        // user typed: the whole of `kubectl get pods -o json | jq -r '...'`
+        // reads as `kubectl` and lets collapse rewrite a payload the next
+        // step parses (#269).
+        let collapse_savings_data =
+            if crate::guard::limits::beats_guardrail(out.len(), input_text.len())
+                || !output_command
+                    .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
+            {
+                None
             } else {
-                Route::Passthrough
+                let collapse_result = collapse::collapse(&input_text, &profile.collapse);
+                out = collapse_result.collapsed_lines.join("\n");
+                if collapse_result.original_lines > collapse_result.collapsed_to {
+                    Some((collapse_result.original_lines, collapse_result.collapsed_to))
+                } else {
+                    None
+                }
             };
 
-            // A distiller that emitted more lines than it consumed restructured
-            // rather than cut, so calling the result partial is a false claim
-            // about a complete answer. `distill_grep_output` folds a repeated
-            // `path:` prefix into a header: 11 matches become 15 lines holding all
-            // 11, the byte ratio lands in `Soft`, and the banner said the output
-            // was incomplete (#335). Same guard as `hooks::post_tool`.
-            if route == Route::Soft && out.lines().count() <= input_text.lines().count() {
-                out.push_str("\n[Partial signal - omni learn recommended]\n");
-            }
+        let d_count = segments.iter().filter(|s| s.final_score() < 0.3).count();
+        let k_count = segments.len() - d_count;
 
-            // Safety truncation. The marker carries the line count: `ps aux` lost
-            // 416 of 556 rows here behind a bare `[OMNI: output truncated]` while
-            // the footer reported it as a 62.2% saving (#219).
-            crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES, |dropped| {
-                store.and_then(|s| s.store_rewind(dropped))
-            });
-
-            (
-                out,
-                cmd.split_whitespace()
-                    .next()
-                    .unwrap_or("[pipe]")
-                    .to_string(),
-                k_count,
-                d_count,
-                collapse_savings_data,
-                route,
-            )
+        // Determine Route
+        let ratio = 1.0 - (out.len() as f32 / input_text.len().max(1) as f32);
+        let route = if ratio >= 0.7 {
+            Route::Keep
+        } else if ratio >= 0.3 {
+            Route::Soft
+        } else {
+            Route::Passthrough
         };
+
+        // A distiller that emitted more lines than it consumed restructured
+        // rather than cut, so calling the result partial is a false claim
+        // about a complete answer. `distill_grep_output` folds a repeated
+        // `path:` prefix into a header: 11 matches become 15 lines holding all
+        // 11, the byte ratio lands in `Soft`, and the banner said the output
+        // was incomplete (#335). Same guard as `hooks::post_tool`.
+        if route == Route::Soft && out.lines().count() <= input_text.lines().count() {
+            out.push_str("\n[Partial signal]\n");
+        }
+
+        // Safety truncation. The marker carries the line count: `ps aux` lost
+        // 416 of 556 rows here behind a bare `[OMNI: output truncated]` while
+        // the footer reported it as a 62.2% saving (#219).
+        crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES, |dropped| {
+            store.and_then(|s| s.store_rewind(dropped))
+        });
+
+        (
+            out,
+            cmd.split_whitespace()
+                .next()
+                .unwrap_or("[pipe]")
+                .to_string(),
+            k_count,
+            d_count,
+            collapse_savings_data,
+            route,
+        )
+    };
 
     // The ledger stage, which this path did not have until #416. `post_tool`
     // has run it since #397 and `pipe` never did, so a command the pre-hook
@@ -1161,150 +936,6 @@ mod tests {
         let out_str = String::from_utf8(out).expect("must succeed");
 
         assert_eq!(out_str, input);
-    }
-
-    /// #398. Two of 7,032 replayed traces came back **one byte larger** than they
-    /// went in, against a published claim that no call ever grows. Both are
-    /// `podman run`, which `docker.toml` claims in stream mode.
-    ///
-    /// Neither line here matches a strip pattern, so the filter changes nothing
-    /// and the only difference the writer can make is the terminator. The
-    /// fixture deliberately ends without a newline, which is the case the old
-    /// writer could not represent: it chose between `\r` and `\n` and always
-    /// wrote one.
-    ///
-    /// This could not be written until #406 landed, because before it a stripped
-    /// line came back as the `on_empty` sentence and swamped a one byte delta.
-    ///
-    /// CRLF is deliberately not asserted here. The reader breaks a line on `\r`
-    /// as well as `\n`, on purpose, so a progress bar redraw is its own line;
-    /// that splits `\r\n` into two reads and drops the second. Pre-existing,
-    /// unchanged by this fix, and filed separately.
-    #[test]
-    fn adds_no_terminator_the_input_did_not_have() {
-        let input = "Resolved short name alpine\ndone";
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_inner(
-            input.as_bytes(),
-            &mut out,
-            &mut err,
-            None,
-            None,
-            Some("podman run --rm alpine true"),
-        )
-        .expect("must succeed");
-
-        assert_eq!(
-            String::from_utf8_lossy(&out),
-            input,
-            "the stream writer invented a line ending"
-        );
-    }
-
-    /// #411, and the test that was written for #410 and deliberately withheld,
-    /// because the defect it caught was a different one in the same two lines.
-    ///
-    /// The reader splits on a bare `\r` on purpose, so a progress bar redraw is
-    /// its own line. That turned `\r\n` into two reads: the first ended `...\r`
-    /// and the second was a lone `\n`, which trims to empty and is dropped, so
-    /// every CRLF payload came out as CR.
-    #[test]
-    fn keeps_the_line_endings_the_input_arrived_with() {
-        let input = "Resolved short name alpine\r\ndone\r\n";
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_inner(
-            input.as_bytes(),
-            &mut out,
-            &mut err,
-            None,
-            None,
-            Some("podman run --rm alpine true"),
-        )
-        .expect("must succeed");
-
-        assert_eq!(String::from_utf8_lossy(&out), input, "CRLF was rewritten");
-    }
-
-    /// The `\r` split has to survive the fix, or a progress bar redraw stops
-    /// being its own line and the reader buffers a whole download in one.
-    #[test]
-    fn still_breaks_a_line_on_a_carriage_return_that_is_a_redraw() {
-        // Not `Downloading ...`: `docker.toml` strips that prefix, so those lines
-        // would vanish for a correct reason and the test would pass on the wrong
-        // one. These match no strip pattern, so only the reader can lose them.
-        let input = "layer a 10%\rlayer a 90%\rdone\n";
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_inner(
-            input.as_bytes(),
-            &mut out,
-            &mut err,
-            None,
-            None,
-            Some("podman run --rm alpine true"),
-        )
-        .expect("must succeed");
-
-        assert_eq!(String::from_utf8_lossy(&out), input);
-    }
-
-    /// #406. `docker.toml` is stream-mode, strips `^Copying blob ` and sets
-    /// `on_empty`. The stream loop applies the filter one line at a time, so the
-    /// whole-payload zero-state fired for every stripped line and each piece of
-    /// noise came back as `docker: image operation completed successfully`.
-    ///
-    /// Both halves matter: the output grew where it was meant to shrink, and it
-    /// asserted a successful image operation once per line it recognised nothing
-    /// in.
-    #[test]
-    fn never_answers_the_payload_zero_state_for_a_single_stripped_line() {
-        let input = "Resolved short name alpine\n\
-                     Copying blob sha256:aaa111\n\
-                     Copying blob sha256:bbb222\n\
-                     Copying config sha256:ccc333\n\
-                     done\n";
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-
-        run_inner(
-            input.as_bytes(),
-            &mut out,
-            &mut err,
-            None,
-            None,
-            Some("podman run --rm alpine true"),
-        )
-        .expect("must succeed");
-
-        let out_str = String::from_utf8_lossy(&out);
-        assert!(
-            !out_str.contains("image operation completed successfully"),
-            "a stripped line was reported as a completed operation: {out_str:?}"
-        );
-        assert!(
-            out.len() <= input.len(),
-            "stripping three lines grew the output: {out_str:?}"
-        );
-    }
-
-    /// The zero-state still exists for the payload it was written for, or the
-    /// fix above would have deleted a real feature instead of scoping it.
-    #[test]
-    fn still_answers_the_zero_state_for_a_whole_payload() {
-        let filter = toml_filter::load_all_filters()
-            .into_iter()
-            .find(|f| f.matches("podman run --rm alpine true"))
-            .expect("docker.toml must claim this command");
-
-        assert_eq!(
-            filter.apply("Copying blob sha256:aaa111\nCopying config sha256:ccc333"),
-            "docker: image operation completed successfully"
-        );
     }
 
     /// #456 reached through the sibling door. `post_tool` declined a recovery

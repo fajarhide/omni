@@ -64,7 +64,6 @@ than forming an impression.
 
 | tool | what it does |
 |---|---|
-| `omni_learn` | Detect noise patterns in text and suggest signals |
 | `omni_find_noise` | Analyse recent raw traces for repetitive noise |
 
 > Advisory only, and the learner treats "repeated" as "noise". It has suggested

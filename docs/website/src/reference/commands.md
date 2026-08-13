@@ -31,7 +31,6 @@ cmd | omni                # distill any command's output through a pipe
 
 | command | what it does |
 |---|---|
-| [`learn`](cmd/learn.md) | Build filters from the noise in your own history |
 | [`exec`](cmd/exec.md) | Run one command through OMNI, to see what it would do |
 | [`query`](cmd/rest.md#query) | Search past distillations |
 | [`patterns`](cmd/rest.md#patterns) | Errors that keep coming back |

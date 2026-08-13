@@ -342,7 +342,6 @@ fn test_cli_help() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("stats"), "Help should list stats command");
     assert!(stdout.contains("doctor"), "Help should list doctor command");
-    assert!(stdout.contains("learn"), "Help should list learn command");
     assert!(
         stdout.contains("session"),
         "Help should list session command"

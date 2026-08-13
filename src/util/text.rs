@@ -213,7 +213,10 @@ mod tests {
             "the last line of the stream was cut: {}",
             &s[s.len().saturating_sub(400)..]
         );
-        assert!(s.starts_with("2026-07-08T21:00:00Z"), "the head went instead");
+        assert!(
+            s.starts_with("2026-07-08T21:00:00Z"),
+            "the head went instead"
+        );
     }
 
     /// The elided middle is handed to the caller's store, and the marker names
@@ -251,8 +254,14 @@ mod tests {
             Some("nope".to_string())
         });
 
-        assert!(!offered, "content over the cap was still offered to the store");
-        assert!(!s.contains("omni retrieve"), "promised a handle it has not: {s}");
+        assert!(
+            !offered,
+            "content over the cap was still offered to the store"
+        );
+        assert!(
+            !s.contains("omni retrieve"),
+            "promised a handle it has not: {s}"
+        );
     }
 
     /// The cut trims back to a line boundary, so nothing downstream is handed

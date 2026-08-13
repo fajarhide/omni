@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-use crate::hooks::pipe::{run_inner, stream_filter_for};
+use crate::hooks::pipe::run_inner;
 use crate::pipeline::SessionState;
 use crate::store::sqlite::Store;
 
@@ -97,22 +97,7 @@ pub fn run_exec(
 
     let mut child_stdout = child.stdout.take().expect("Failed to open stdout");
 
-    let status = if stream_filter_for(&cmd_name).is_some() {
-        // Stream-mode command: distilled output is emitted line-by-line as it
-        // arrives, before the exit code is known, so the exit-code gate below
-        // cannot apply. Keep the live-streaming behavior.
-        let stdout = std::io::stdout().lock();
-        let stderr = std::io::stderr().lock();
-        run_inner(
-            child_stdout,
-            stdout,
-            stderr,
-            store.clone(),
-            session.clone(),
-            Some(&cmd_name),
-        )?;
-        child.wait()?
-    } else {
+    let status = {
         // Buffered path: drain stdout first (draining before wait() avoids the
         // classic full-pipe deadlock), then gate on the real exit code. #122: a
         // command that exited non-zero passes its stdout through verbatim and is

@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **The elided middle is archived and the marker names the handle**, which was the half of #219 that never landed. Content over `MAX_REWIND_BYTES` is not offered to the store, and the marker then says nothing rather than promising a retrieval that would fail.
 
 ### Removed
+- **The TOML filter layer is gone (#505, finishing #449)**: `signals/` (48 files), `src/pipeline/toml_filter.rs` (1,364 lines), the `rust-embed` dependency, `omni learn`, the `omni_learn` MCP tool, `omni doctor --test-filter / --benchmark / --coverage / --validate`, and the stream-mode path that only TOML filters could select.
+
+  **Re-measured on 0.7.3 over the same 6,656-trace corpus with `load_all_filters` stubbed to empty:** the aggregate is 2.7% / 14.9% with the layer and 2.7% / 14.9% without it. Ledger-arm bytes move 5,506,126 to 5,508,144, so the whole layer was worth **2,018 bytes over 6,656 commands, 0.031% of the corpus**, and infra scored better without it (4.4% / 8.2% becomes 4.7% / 8.5%). Measured by removal on the release binary, 40 interleaved runs each, it cost **5 to 7 ms per hook** against a 10 ms budget, with p90 going 21.4 ms to 10.5 ms.
+
+  **What replaces it: nothing.** A tool that needs handling gets a Rust distiller, which is snapshot-tested and cannot be shadowed by whichever regex matched first, the failure #110 filed twice. `omni_find_noise` still reports recurring patterns, now as a finding with its sample line rather than as a TOML snippet to paste. `src/session/correction.rs` went with it: it was reachable only from `omni learn`.
+
 - **Three dependencies that were paying for nothing (#507)**: `is-terminal` is `std::io::IsTerminal`, stable since 1.70 against a pinned 1.97, and `src/hooks/pipe.rs` was the only importer while every call site in it already wrote `std::io::stdout().is_terminal()`. `tempfile` was listed under both `[dependencies]` and `[dev-dependencies]` while every use of it under `src/` sits inside `#[cfg(test)]`. `benches/pipeline.rs` and its `[[bench]]` target were 50 lines behind `criterion` that neither CI nor the `Makefile` ever invoked, for a method the project measured and rejected: the shipped latency figure came from A/B on the release binary after a unit-test timer overstated the same number by roughly 2x.
 
   `cargo tree --edges normal` goes 220 to 218 unique crates, and the full tree 265 to 237. No runtime behaviour changes.

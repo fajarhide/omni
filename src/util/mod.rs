@@ -1,6 +1,5 @@
 pub mod changelog;
 pub mod command_family;
-pub mod stream;
 pub mod text;
 
 #[allow(unused_imports)]

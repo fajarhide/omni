@@ -61,8 +61,8 @@ fn distill(&self, segments: &[OutputSegment], input: &str,
 and the caller hands back the raw bytes. The invariant lives in the trait rather than
 in each author remembering to call a helper, so it holds for all 12 by construction.
 
-A matching signal in `signals/` short-circuits this stage entirely. Check there before
-concluding anything about the Rust code.
+The TOML layer that used to short-circuit this stage was retired in 0.7.4, so the Rust
+code is now the only thing that can claim a command.
 
 ## The ledger
 

@@ -89,12 +89,6 @@ enum OmniCommand {
         #[arg(allow_hyphen_values = true, num_args = 0..)]
         extra: Vec<String>,
     },
-    /// Auto-generate filters from history
-    #[command(trailing_var_arg = true, disable_help_flag = true)]
-    Learn {
-        #[arg(allow_hyphen_values = true, num_args = 0..)]
-        extra: Vec<String>,
-    },
     /// Query distillation history (OmniQL)
     #[command(trailing_var_arg = true, disable_help_flag = true)]
     Query {
@@ -249,11 +243,6 @@ const COMMANDS: &[(&str, &str, &str)] = &[
         "SEE WHAT IT SAVED",
         "session",
         "What this session has spent, and on what",
-    ),
-    (
-        "TUNE IT",
-        "learn",
-        "Build filters from the noise in your own history",
     ),
     (
         "TUNE IT",
@@ -588,12 +577,6 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                Some(OmniCommand::Learn { .. }) => {
-                    if let Err(e) = cli::learn::run_learn(&args) {
-                        eprintln!("[omni] Auto-Learn error: {}", e);
-                        std::process::exit(1);
-                    }
-                }
                 Some(OmniCommand::Query { .. }) => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::query::run_query(&args, &store) {
@@ -723,12 +706,6 @@ fn main() {
                                 std::process::exit(1);
                             }
                         },
-                        "learn" => {
-                            if let Err(e) = cli::learn::run_learn(&args) {
-                                eprintln!("[omni] Auto-Learn error: {}", e);
-                                std::process::exit(1);
-                            }
-                        }
                         "query" => match Store::open() {
                             Ok(store) => {
                                 if let Err(e) = cli::query::run_query(&args, &store) {

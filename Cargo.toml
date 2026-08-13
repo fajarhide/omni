@@ -73,7 +73,6 @@ toml = "0.8"
 
 # Misc
 ureq = { version = "2", features = ["json"] }
-rust-embed = "8"
 strsim = "0.11"
 schemars = "1.2.1"
 unicode-width = "0.2.2"

@@ -44,7 +44,7 @@ The footer, on `omni exec` and pipe mode. Input size, output size, and how long 
 pipeline took.
 
 ```
-[Partial signal - omni learn recommended]
+[Partial signal]
 ```
 
 The pipeline recognised some of the output but not all of it.

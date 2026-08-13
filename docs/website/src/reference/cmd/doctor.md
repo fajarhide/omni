@@ -16,10 +16,6 @@ database, hook installation per host, MCP server registration, and signal loadin
 |---|---|
 | `--fix` | Repair configuration and integration issues automatically |
 | `--detail` | Print every integration row, not only the ones needing attention |
-| `--test-filter <name>` | Run the inline tests for one signal |
-| `--benchmark` | Run signal tests and report the slow ones, over 5 ms |
-| `--coverage` | Analyse signal coverage against your past commands |
-| `--validate <file.toml>` | Validate a TOML signal file, syntax and tests |
 | `--json` | Machine readable |
 | `--help`, `-h` | Help |
 
