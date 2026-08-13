@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-08-13
+
+A release about claims that were not true: a documented escape hatch that did
+nothing on the host it mattered on, a manual that named commands which exit 1,
+a distiller cutting prose it never read, and a project scope that split its own
+history every time someone opened a worktree.
+
 ### Fixed
 - **`omni init` exited 1 with no tty, so the one documented setup line was the one an agent could not run (#528)**: the no-flag path opens a `dialoguer::Select`, which can only fail without a terminal, and the failure read `IO error: not a terminal` and named no remedy. It now configures the host that ran the command, read from the environment the same way the exec and pipe paths already read it, and says which host it picked and how to pick another. A host it cannot name, a plain shell included, gets an error listing `omni init --claude`, `--all` and `--help`.
 
