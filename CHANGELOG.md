@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Drawing the pipeline found the page describing it backwards.** `Collapse` was documented as running before `Distill` and feeding it markers. That was true until #116 and wrong for the two releases since: both hooks score and distill the **raw** bytes, and the collapsed form is used only when the distilled one misses `beats_guardrail`. The prose and the stage summary are corrected. `kubectl_table_distills_from_raw_not_collapse_markers` was already pinning the real behaviour, so the code was right and only the description was wrong.
 
   `media/architecture.svg` is deleted. Nothing referenced it, and it carried the drop shadows and mono-for-everything the new set avoids.
+- **Any process in the group could be credited as the command that produced stdin (#516)**: `detect_sibling_command`'s first pass returned the first non-shell line of `ps -o command= -g <pgid>`, with no test that the process had anything to do with the payload. Two failures came out of it, and the second is the one with the row count.
+
+  **Output stopped being deterministic.** Benchmarked through a Node harness whose process group holds an `esbuild --service=... --ping` daemon, a 4,421 byte application log was attributed to esbuild and folded to 129 bytes on one run, then passed through unchanged on the next: same binary, same stdin, same machine, minutes apart. `AGENTS.md` requires deterministic hook output and `ledger` opens by calling determinism a rule it must not break; this sat above both.
+
+  **Its own shell exclusion never fired.** The guard tested `starts_with("zsh ")` and Claude Code invokes `/bin/zsh -c`, so **282 of 289 pipe-path rows in the maintainer's database recorded `/bin/zsh` as the producing command**, dragging the whole shell-snapshot wrapper into `filter_name` and `command`. Re-running the same benchmark on the fix moves all 123 rows from the esbuild path to `[pipe]`.
+
+  The pass is gone. What remains parses an actual `cmd | omni` pipeline out of the group's command lines, which is evidence rather than proximity, and now lives in a pure `pipeline_in` that a test can drive.
+
 
 ### Added
 - **The ledger records which agent it showed each line to (#509)**: `ledger_lines` was keyed `(scope, line_hash)` with no agent anywhere, and the project scope is the working directory string alone. Two agents in one repo therefore write into one history and read from it, so a fold can hand agent B a `from an earlier session` marker for bytes only agent A ever received, and nothing in the data could say how often that happens.

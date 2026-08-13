@@ -698,6 +698,38 @@ fn emit_output<W: Write, E: Write>(
     Ok(())
 }
 
+/// The command feeding `omni` in a `cmd | omni` pipeline, read out of `ps` output.
+///
+/// Pure so it can be tested: everything above it is `ps` plumbing that a unit test
+/// cannot drive, and everything that decides *which* command gets the credit is here.
+///
+/// **There used to be a pass above this one that returned the first non-shell process
+/// in the group, whatever it was (#516).** A process sharing a process group is not
+/// evidence about what is on stdin, and it produced two failures. It attributed a
+/// payload to an unrelated daemon, so a Node harness whose group held an
+/// `esbuild --service=... --ping` had a 4,421 byte application log routed as esbuild
+/// output, folded to 129 bytes on one run and passed through on the next: identical
+/// stdin, identical binary, two answers. And its own shell exclusion never fired,
+/// because it tested `starts_with("zsh ")` while Claude Code invokes `/bin/zsh -c`,
+/// so **282 of 289 pipe-path rows in the maintainer's database recorded `/bin/zsh` as
+/// the producing command**, carrying the whole shell-snapshot wrapper with them.
+///
+/// What is left needs an actual pipe and an actual `omni` on the right of it, which is
+/// evidence rather than proximity. No match means no command, which is a state the
+/// pipeline already supports: `filter_name` becomes `[pipe]` and the payload takes the
+/// generic path.
+fn pipeline_in(siblings: &str) -> Option<String> {
+    siblings
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            (line.contains("sh ") || line.contains("zsh ") || line.contains("bash "))
+                && line.contains('|')
+                && line.contains("omni")
+        })
+        .find_map(extract_command_from_pipeline)
+}
+
 fn detect_sibling_command() -> Option<String> {
     use std::process::Command;
 
@@ -732,39 +764,9 @@ fn detect_sibling_command() -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
 
-    // 5. Pass 1: Look for an active sibling (real process) in PGID
-    for line in siblings.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.contains("omni") {
-            continue;
-        }
-
-        // Exclude common shells and ps itself
-        if line.starts_with("ps ")
-            || line.starts_with("sh ")
-            || line.starts_with("zsh ")
-            || line.starts_with("bash ")
-            || line.starts_with("grep ")
-        {
-            continue;
-        }
-
-        // Found a candidate sibling command
-        return Some(line.to_string());
-    }
-
-    // 6. Pass 2: Fallback to parsing shell command lines in the PGID
-    for line in siblings.lines() {
-        let line = line.trim();
-        if (line.contains("sh ") || line.contains("zsh ") || line.contains("bash "))
-            && line.contains('|')
-            && line.contains("omni")
-        {
-            #[allow(clippy::collapsible_if)]
-            if let Some(cmd) = extract_command_from_pipeline(line) {
-                return Some(cmd);
-            }
-        }
+    // 5. Parse a real `cmd | omni` pipeline out of the group's command lines.
+    if let Some(cmd) = pipeline_in(&siblings) {
+        return Some(cmd);
     }
 
     // 7. Pass 3: Fallback to Parent Command if no sibling found
@@ -937,6 +939,52 @@ mod tests {
         let out_str = String::from_utf8(out).expect("must succeed");
 
         assert_eq!(out_str, input);
+    }
+
+    /// #516. A process that merely shares a process group is not evidence about what
+    /// is on stdin, and the pass that treated it as evidence made output depend on
+    /// which unrelated daemon happened to be alive. This is the exact `ps -o command=`
+    /// block from the run that produced the report.
+    #[test]
+    fn an_unrelated_daemon_in_the_group_is_not_the_command() {
+        let siblings = "\
+node /path/to/tokenbench/node_modules/.bin/tsx core/src/cli.ts --tools omni
+/path/to/node_modules/@esbuild/darwin-arm64/bin/esbuild --service=0.28.2 --ping
+omni";
+
+        assert_eq!(
+            pipeline_in(siblings),
+            None,
+            "a sibling process was credited as the command that produced stdin"
+        );
+    }
+
+    /// The other half of #516, and the bigger one by row count: the old pass excluded
+    /// shells with `starts_with("zsh ")`, and Claude Code runs `/bin/zsh -c`, so the
+    /// exclusion never fired and 282 of 289 pipe-path rows recorded `/bin/zsh` as the
+    /// producing command, wrapper and all.
+    #[test]
+    fn an_absolute_path_shell_is_not_the_command() {
+        let siblings = "/bin/zsh -c source ~/.claude/shell-snapshots/snap.sh 2>/dev/null || true && eval 'npx tsx cli.ts'";
+
+        assert_eq!(
+            pipeline_in(siblings),
+            None,
+            "the shell wrapper was credited as the command: {:?}",
+            pipeline_in(siblings)
+        );
+    }
+
+    /// What survives, and why the pass is not simply deleted: a real pipeline names
+    /// the command feeding omni, and that is evidence rather than proximity.
+    #[test]
+    fn a_real_pipeline_still_names_its_command() {
+        let siblings = "/bin/zsh -c cat /var/log/app.log | omni\nomni";
+
+        assert_eq!(
+            pipeline_in(siblings),
+            Some("cat /var/log/app.log".to_string())
+        );
     }
 
     /// #456 reached through the sibling door. `post_tool` declined a recovery
