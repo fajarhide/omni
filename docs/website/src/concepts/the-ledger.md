@@ -59,52 +59,12 @@ ledger does not store knowledge. It stores receipts.
 
 ## The flow, one command at a time
 
-```
-  command output
-        │
-        ▼
-  ┌───────────────┐   structured?  ──yes──▶  untouched, ledger never sees it
-  │  format sniff │
-  └───────┬───────┘
-          │ no
-          ▼
-  ┌───────────────────────────────────────────────┐
-  │ split into lines, hash each one (trimmed)     │
-  └───────┬───────────────────────────────────────┘
-          │
-          ▼
-  ┌───────────────────────────────────────────────┐
-  │ which have been seen?                         │
-  │   session scope   ──▶ Origin::Session         │
-  │   project scope   ──▶ Origin::Project         │
-  │   states a failure ─▶ never folded            │
-  └───────┬───────────────────────────────────────┘
-          │
-          ▼
-  ┌───────────────────────────────────────────────┐
-  │ group consecutive lines that agree            │
-  │ per run: does it save more than its marker?   │
-  └───────┬───────────────────────────────────────┘
-          │ yes                          │ no
-          ▼                              ▼
-  ┌────────────────────┐          run stays verbatim
-  │ archive the run    │
-  │ (rewind_store)     │──failed──▶ run stays verbatim
-  └────────┬───────────┘
-           │ stored
-           ▼
-  ┌────────────────────┐
-  │ write the marker   │
-  └────────┬───────────┘
-           │
-           ▼
-  record every line that was DELIVERED, into both scopes
-           │
-           ▼
-     output to the agent
-```
+![Four questions decide a fold: does the line state a failure, has it been shown before, does the run save more than its marker costs, and did the archive write succeed. Any no sends the lines out verbatim.](../media/the-ledger-decision.svg)
 
-Two details in that diagram are easy to read past and are the whole correctness story.
+Structured payloads never get this far: the same format sniff that gates collapse gates
+this stage too.
+
+Two details are easy to read past and are the whole correctness story.
 
 The archive happens **before** the marker, so a handle never names content that was
 not stored. And what gets recorded is what was **delivered**, not what arrived: a run

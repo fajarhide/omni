@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>One tool call, end to end</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper: #E3E4E0; --ink: #16161A; --muted: #56585A; --accent: #7A4E00;
+      --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+      --font-display: 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif;
+      --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans); background: var(--paper); color: var(--ink);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 600; letter-spacing: -0.01em; line-height: 1.15; margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · OMNI</p>
+    <h1>One tool call, end to end</h1>
+
+    <svg viewBox="0 96 1000 604" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hook-lifecycle-title hook-lifecycle-desc">
+      <title id="hook-lifecycle-title">One tool call, end to end</title>
+      <desc id="hook-lifecycle-desc">A single Bash tool call passes through OMNI twice: the pre-hook rewrites the command before the shell runs it, and the post-hook distills the output afterwards, consulting the local database for lines already shown and archiving what it removes before the host returns the reply to the agent.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#56585A"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7A4E00"/></marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#56585A" stroke-width="1.2"/></marker>
+      </defs>
+
+      <rect x="0" y="96" width="1000" height="604" fill="#E3E4E0"/>
+
+      <!-- ── lifelines ───────────────────────────────────────────────────── -->
+      <line x1="110" y1="176" x2="110" y2="620" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="300" y1="176" x2="300" y2="620" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="500" y1="176" x2="500" y2="620" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="700" y1="176" x2="700" y2="620" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="890" y1="176" x2="890" y2="620" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- ── activation bars ─────────────────────────────────────────────── -->
+      <rect x="296" y="216" width="8" height="360" fill="rgba(22,22,26,0.06)" stroke="#56585A" stroke-width="0.8"/>
+      <rect x="496" y="252" width="8" height="36" fill="rgba(22,22,26,0.06)" stroke="#56585A" stroke-width="0.8"/>
+      <rect x="496" y="396" width="8" height="144" fill="rgba(22,22,26,0.06)" stroke="#56585A" stroke-width="0.8"/>
+      <rect x="696" y="324" width="8" height="36" fill="rgba(22,22,26,0.06)" stroke="#56585A" stroke-width="0.8"/>
+
+      <!-- ── messages ────────────────────────────────────────────────────── -->
+
+      <!-- 1 -->
+      <line x1="110" y1="216" x2="292" y2="216" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="172" y="196" width="60" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="202" y="205" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">BASH(CMD)</text>
+
+      <!-- 2 -->
+      <line x1="304" y1="252" x2="492" y2="252" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="368" y="232" width="64" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="400" y="241" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PRETOOLUSE</text>
+
+      <!-- 3 return -->
+      <line x1="492" y1="288" x2="308" y2="288" stroke="#56585A" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="356" y="268" width="88" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="400" y="277" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">MAYBE REWRITTEN</text>
+
+      <!-- 4 -->
+      <line x1="304" y1="324" x2="692" y2="324" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="576" y="304" width="68" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="610" y="313" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RUN IT, RAW</text>
+
+      <!-- 5 return -->
+      <line x1="692" y1="360" x2="308" y2="360" stroke="#56585A" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="576" y="340" width="48" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="600" y="349" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">STDOUT</text>
+
+      <!-- 6 -->
+      <line x1="304" y1="396" x2="492" y2="396" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="356" y="376" width="88" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="400" y="385" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POSTTOOLUSE</text>
+
+      <!-- 7 -->
+      <line x1="504" y1="432" x2="882" y2="432" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="588" y="412" width="104" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="640" y="421" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SEEN THESE LINES?</text>
+
+      <!-- 8 return -->
+      <line x1="882" y1="468" x2="508" y2="468" stroke="#56585A" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="748" y="448" width="84" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="790" y="457" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">THE ONES IT HAS</text>
+
+      <!-- 9 async -->
+      <line x1="504" y1="504" x2="882" y2="504" stroke="#56585A" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-open)"/>
+      <rect x="592" y="484" width="96" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="640" y="493" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ARCHIVE THE CUT</text>
+
+      <!-- 10 headline -->
+      <line x1="492" y1="540" x2="308" y2="540" stroke="#7A4E00" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#arrow-accent)"/>
+      <rect x="340" y="520" width="120" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="400" y="529" fill="#7A4E00" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">updatedToolOutput</text>
+
+      <!-- 11 return -->
+      <line x1="292" y1="576" x2="118" y2="576" stroke="#56585A" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="148" y="556" width="116" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="206" y="565" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WHAT THE AGENT READS</text>
+
+      <!-- ── actors ──────────────────────────────────────────────────────── -->
+
+      <rect x="30" y="120" width="160" height="56" rx="6" fill="#E3E4E0"/>
+      <rect x="30" y="120" width="160" height="56" rx="6" fill="rgba(86,88,90,0.10)" stroke="#8A8C8E" stroke-width="1"/>
+      <text x="110" y="146" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Agent</text>
+      <text x="110" y="163" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">the model</text>
+
+      <rect x="220" y="120" width="160" height="56" rx="6" fill="#E3E4E0"/>
+      <rect x="220" y="120" width="160" height="56" rx="6" fill="rgba(22,22,26,0.03)" stroke="rgba(22,22,26,0.30)" stroke-width="1"/>
+      <text x="300" y="146" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Host</text>
+      <text x="300" y="163" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">runs the hooks</text>
+
+      <rect x="420" y="120" width="160" height="56" rx="6" fill="#E3E4E0"/>
+      <rect x="420" y="120" width="160" height="56" rx="6" fill="rgba(122,78,0,0.08)" stroke="#7A4E00" stroke-width="1"/>
+      <text x="500" y="146" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">OMNI</text>
+      <text x="500" y="163" fill="#7A4E00" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">twice per call</text>
+
+      <rect x="620" y="120" width="160" height="56" rx="6" fill="#E3E4E0"/>
+      <rect x="620" y="120" width="160" height="56" rx="6" fill="rgba(22,22,26,0.03)" stroke="rgba(22,22,26,0.30)" stroke-width="1"/>
+      <text x="700" y="146" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Shell</text>
+      <text x="700" y="163" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">unchanged</text>
+
+      <rect x="810" y="120" width="160" height="56" rx="6" fill="#E3E4E0"/>
+      <rect x="810" y="120" width="160" height="56" rx="6" fill="rgba(22,22,26,0.05)" stroke="#56585A" stroke-width="1"/>
+      <text x="890" y="146" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">omni.db</text>
+      <text x="890" y="163" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">local sqlite</text>
+
+      <!-- ── legend ──────────────────────────────────────────────────────── -->
+      <line x1="30" y1="648" x2="970" y2="648" stroke="rgba(22,22,26,0.10)" stroke-width="0.8"/>
+      <text x="30" y="668" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <line x1="110" y1="664" x2="146" y2="664" stroke="#56585A" stroke-width="1.2"/>
+      <text x="158" y="668" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">call</text>
+
+      <line x1="216" y1="664" x2="252" y2="664" stroke="#56585A" stroke-width="1.2" stroke-dasharray="4,3"/>
+      <text x="264" y="668" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">return</text>
+
+      <line x1="340" y1="664" x2="376" y2="664" stroke="#56585A" stroke-width="1" stroke-dasharray="4,3"/>
+      <polyline points="376,660 384,664 376,668" fill="none" stroke="#56585A" stroke-width="1.2"/>
+      <text x="396" y="668" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">nothing waits on it</text>
+
+      <line x1="556" y1="664" x2="592" y2="664" stroke="#7A4E00" stroke-width="1.4" stroke-dasharray="4,3"/>
+      <text x="604" y="668" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">the one reply that decides what the call cost</text>
+    </svg>
+  </div>
+</body>
+</html>

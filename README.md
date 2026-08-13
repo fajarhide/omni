@@ -44,6 +44,11 @@ context is still there.
 are never touched. Most commands are handed back unchanged, and that is the intended
 behaviour rather than a gap.
 
+<img src="docs/website/src/media/where-omni-sits.svg" alt="OMNI runs as two hooks around a tool call: a pre-hook before the command, a post-hook that distills the output before the agent reads it, with everything it removes archived to a local SQLite database that omni retrieve reads back." width="820" />
+
+It runs as two hooks around a tool call your agent host already makes. Nothing proxies
+your shell, and the database never leaves the machine.
+
 ---
 
 ## The second read is free

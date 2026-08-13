@@ -14,6 +14,13 @@ into the host's configuration.
 | `omni --mcp` | Run as an MCP server over stdio |
 | `cmd \| omni` | Pipe mode, no host involved |
 
+## One call, both hooks
+
+![One Bash tool call passes through OMNI twice: the pre-hook may rewrite the command before the shell runs it, and the post-hook distills the output afterwards, reading the local database for lines already shown and archiving what it removes.](../media/hook-lifecycle.svg)
+
+The shell runs whatever the pre-hook handed it and never knows OMNI exists. Only the
+reply is rewritten, which is why nothing here can change what your command did.
+
 ## What each one does
 
 **Pre-tool** decides whether a command should be routed through OMNI at all, and can
