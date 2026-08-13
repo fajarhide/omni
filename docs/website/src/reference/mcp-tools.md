@@ -1,6 +1,6 @@
 # MCP tools
 
-`omni init` registers OMNI as an MCP server, which gives the agent **26 tools** it can
+`omni init` registers OMNI as an MCP server, which gives the agent **25 tools** it can
 call itself without going through you.
 
 Confirm the list against your own binary rather than this page:

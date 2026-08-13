@@ -69,13 +69,16 @@ Read-only, same database, binds loopback and nothing else.
 ## Digging further
 
 ```sh
-omni history                     # recent distillations with per-call ratios
+omni stats --detail              # per-command and per-route breakdown
 omni query errors in last 5 commands
 omni query warnings from cargo
 omni query timeline today
 omni patterns                    # errors that keep coming back
 omni patterns --tool cargo
 ```
+
+`omni_history` gives the same per-call rows to an MCP client. There is no `omni history`
+subcommand; this page listed one until 0.7.4.
 
 `omni query` speaks a small fixed query language rather than free text. The supported
 forms are listed in its own help.

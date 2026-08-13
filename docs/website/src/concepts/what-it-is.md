@@ -34,17 +34,11 @@ remembers what your agent has already been shown, and never guesses when it is u
 
 Every serious agent host can run a program when a tool finishes and use what that
 program returns. Claude Code calls it a `PostToolUse` hook, Cursor and the others have
-their own name for the same idea. OMNI installs itself there.
+their own name for the same idea. OMNI installs itself there, and in the matching slot
+before the tool runs, which it uses only to hand a matched command to itself. The
+command still runs unchanged; the shell never knows.
 
-```
-your command  →  the host runs it  →  raw output
-                                          │
-                                    OMNI's hook
-                                          │
-                              distilled output  →  the agent's context
-                                          │
-                                   raw output  →  local SQLite archive
-```
+![OMNI runs as two hooks around a tool call: a pre-hook before the command, a post-hook that distills the output before the agent reads it, with everything it removes archived to a local SQLite database that omni retrieve reads back.](../media/where-omni-sits.svg)
 
 Two consequences follow from that position, and they are the reason this shape was
 chosen over a proxy.

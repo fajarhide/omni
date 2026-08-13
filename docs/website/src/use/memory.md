@@ -80,8 +80,10 @@ omni engram --json
 ```sh
 omni query errors in last 5 commands
 omni patterns                # errors that keep coming back across sessions
-omni insight                 # via MCP: top recurring issues project-wide
 ```
+
+`omni_insight` ranks the same recurring issues project-wide, and is an MCP tool with no
+CLI equivalent. It was listed in the block above as though you could run it.
 
 ## What it cannot do
 

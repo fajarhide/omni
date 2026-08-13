@@ -15,9 +15,9 @@ src/
 ├── guard/               safety, limits, trust bounds, env hygiene
 ├── hooks/               the entry points, and the dispatcher that routes them
 ├── ledger/              cross-turn line dedup
-├── mcp/                 the MCP server and its 26 tools
-├── pipeline/            scorer, collapse, registry, format gate, toml filters
-├── session/             tracking, learning, correction
+├── mcp/                 the MCP server and its 25 tools
+├── pipeline/            scorer, collapse, registry, format gate
+├── session/             tracking, learning, adaptive thresholds
 ├── store/               SQLite and transcripts
 └── util/                command families, token estimation
 ```

@@ -73,7 +73,7 @@ with every other host's and no figure about either is meaningful.
 omni doctor
 
 hermes plugins list | grep omni        # expect: omni-signal-engine enabled
-hermes tools list | grep mcp_omni_     # expect 26 tools, after a restart
+hermes tools list | grep mcp_omni_     # expect 25 tools, after a restart
 ```
 
 Then a functional check on a real fixture:
