@@ -600,6 +600,40 @@ fn looks_like_plain_identifier(value: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
+/// A brace expression is code, not a value.
+///
+/// #486 gave the value a say and taught it one shape, a lowercase identifier, so
+/// the bare `key` was still an exact hit on everything else. React requires a
+/// `key` prop on every list item and Biome and Prettier put it on its own line
+/// once an element has more than a couple of attributes, which makes `key={item}`
+/// the most common `key=` line in a `.tsx` file. It came back as
+/// `key=[REDACTED]`, and the line is no longer valid TSX, so an agent that reads
+/// a component and writes it back produces a syntax error (#530).
+///
+/// The caller scopes this to the weak `KEY` pattern, so a JSON-valued
+/// `GOOGLE_CREDENTIALS={"type":"service_account",…}` is still redacted.
+fn looks_like_code_expression(value: &str) -> bool {
+    value.trim_start().starts_with('{')
+}
+
+/// A shell expansion names a value instead of holding one.
+///
+/// `PASS`, `TOKEN` and `AUTH` are strong patterns, so the value never gets a say
+/// (see `only_the_key_pattern_matched`), and this repo's own smoke test was
+/// reading back `PASS=[REDACTED]` for `PASS=$((PASS + 1))` (#532). An expansion
+/// carries no credential material whatever the key is called, which is why this
+/// one rule applies to every pattern and the identifier rule does not.
+///
+/// The `$` has to be unquoted and followed by an expansion opener or a name.
+/// `PASSWORD="$3cr3t!"` and `PASSWORD=$3cr3t!` are literals that happen to start
+/// with the character, and both stay redacted.
+fn looks_like_shell_expansion(value: &str) -> bool {
+    let Some(rest) = value.trim_start().strip_prefix('$') else {
+        return false;
+    };
+    rest.starts_with(['(', '{']) || rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+}
+
 /// One line's redaction decision and its replacement, so the two callers cannot
 /// disagree about either.
 ///
@@ -611,13 +645,15 @@ fn looks_like_plain_identifier(value: &str) -> bool {
 ///
 /// `None` means deliver the line as written.
 fn redact_assignment(key: &str, value: &str) -> Option<String> {
-    if !is_sensitive_key(key) || value.trim().is_empty() {
+    if !is_sensitive_key(key) || value.trim().is_empty() || looks_like_shell_expansion(value) {
         return None;
     }
     // The value only gets a say when `KEY` alone made the name look sensitive.
     // Letting it speak for every pattern would wave through `sk-ant-abc123`,
     // which is lowercase, short and a credential.
-    if only_the_key_pattern_matched(key) && looks_like_plain_identifier(value) {
+    if only_the_key_pattern_matched(key)
+        && (looks_like_plain_identifier(value) || looks_like_code_expression(value))
+    {
         return None;
     }
     // The surrounding syntax survives, so a redacted assignment still parses.
@@ -1057,6 +1093,51 @@ mod tests {
             out.contains("local_network_gateway_key = \"lng-example-staging\""),
             "the surrounding syntax has to survive so the line still parses: {out}"
         );
+    }
+
+    /// The remaining exact-match case after #486: the bare `key`, which is the
+    /// prop React requires on every list item (#530). The `.tsx` has to come back
+    /// as written, because reading a component to edit it is the reason to `cat`
+    /// one, and a redacted brace expression does not parse.
+    #[test]
+    fn keeps_jsx_key_props_and_still_redacts_a_json_credential() {
+        let tsx = "const rows = items.map((item) => (\n  <li\n    className=\"row\"\n    key={item}\n  >\n    {item}\n  </li>\n))\n";
+        assert!(
+            redact_sensitive_assignments(tsx).is_none(),
+            "nothing in this file is a credential, so the file is delivered as written"
+        );
+
+        // `GOOGLE_CREDENTIALS` matches `CREDENTIALS`, not only the weak `KEY`, so
+        // the value never gets a say and a JSON blob stays redacted.
+        let env = "GOOGLE_CREDENTIALS={\"type\":\"service_account\",\"private_key\":\"abc\"}\n";
+        let out = redact_sensitive_assignments(env).expect("a JSON credential is still a secret");
+        assert!(!out.contains("service_account"), "secret delivered:\n{out}");
+    }
+
+    /// #532, found in `tests/smoke_test.sh`: a counter in this repository's own
+    /// suite read back as `PASS=[REDACTED]`. The literals beside it are the reason
+    /// the rule checks what follows the `$` rather than the character alone.
+    #[test]
+    fn keeps_shell_expansions_and_still_redacts_literal_secrets() {
+        let script = "PASS=$((PASS + 1))\n\
+                      TOKEN=${GITHUB_TOKEN}\n\
+                      AUTH=$(cat /tmp/t)\n\
+                      SECRET=$MY_SECRET\n\
+                      PASSWORD=\"$3cr3t!\"\n\
+                      API_KEY=sk-ant-realsecret123\n";
+        let out = redact_sensitive_assignments(script).expect("two literals are still redacted");
+
+        for kept in [
+            "$((PASS + 1))",
+            "${GITHUB_TOKEN}",
+            "$(cat /tmp/t)",
+            "$MY_SECRET",
+        ] {
+            assert!(out.contains(kept), "expansion destroyed: {kept}\n{out}");
+        }
+        for gone in ["3cr3t!", "sk-ant-realsecret123"] {
+            assert!(!out.contains(gone), "secret delivered: {gone}\n{out}");
+        }
     }
 
     #[test]

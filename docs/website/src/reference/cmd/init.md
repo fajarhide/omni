@@ -4,12 +4,20 @@ Installs OMNI into an agent: writes the hook configuration where that host reads
 and registers the MCP server.
 
 ```sh
-omni init              # interactive menu
+omni init              # interactive menu, or the current host when there is no terminal
 omni init --claude
 omni init --all
 ```
 
 Idempotent. Running it again after an upgrade is the right move, not a risk.
+
+## With no flags
+
+On a terminal, a menu. Without one, which is how an agent runs it, the menu cannot
+be drawn, so `omni init` configures the host it is running inside and prints which
+one that is. A host it cannot name from the environment, a plain shell included,
+gets an error listing the flags rather than a guess: installing into a host nobody
+asked for is the worse of the two failures.
 
 ## Hosts
 

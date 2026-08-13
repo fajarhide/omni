@@ -176,6 +176,14 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
+**Claude Code, from inside the session:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+This installs a skill, not the binary. The skill is what tells the agent how to get
+the binary, verify it, and read the markers OMNI leaves when it shortens output.
+
 Then run your commands normally. There is nothing to prefix and no proxy to wrap.
 
 ---

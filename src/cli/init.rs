@@ -2,6 +2,7 @@ use colored::*;
 use serde_json::Value;
 use std::env;
 use std::fs;
+use std::io::IsTerminal;
 
 /// Read by `print_help` and `super::check_flags` (#151). The first
 /// `AGENT_FLAGS` entries are the agents; the rest are Claude-specific, which is
@@ -84,6 +85,48 @@ fn print_help() {
     println!();
 }
 
+/// The `init` target for a host `detect_agent_id` recognises, or `None` when
+/// there is no integration to point it at.
+///
+/// Two id vocabularies exist and neither can be derived from the other:
+/// `detect_agent_id` names agents so `omni stats` can group rows, and `init`
+/// names install targets. `windsurf`, `aider` and `vscode_continue` are real
+/// answers over there with nothing to install over here, and `terminal` is a
+/// plain shell.
+fn init_id_for_agent(agent_id: &str) -> Option<&'static str> {
+    match agent_id {
+        "claude_code" => Some("claude"),
+        "cursor" => Some("cursor"),
+        "cline" => Some("cline"),
+        "codex_cli" => Some("codex"),
+        "antigravity" => Some("antigravity"),
+        "vscode" => Some("vscode"),
+        _ => None,
+    }
+}
+
+/// Which host to configure when there is no terminal to ask on.
+///
+/// `omni init` is the line the README, the Homebrew caption, the landing page and
+/// `install.sh` all print, and the audience for this tool is agents, which run it
+/// with no tty. `dialoguer` can only fail there, so the one documented setup
+/// command exited 1 on `IO error: not a terminal` and named no remedy (#528).
+///
+/// The host running the command is the host to configure, and OMNI already reads
+/// that from the environment on the exec and pipe paths. Anything it cannot name
+/// is an error that lists the flags, rather than a guess: installing into a host
+/// nobody asked for is the worse failure of the two.
+fn non_interactive_host() -> anyhow::Result<&'static str> {
+    let agent = crate::agents::multiagent::detect_agent_id();
+    init_id_for_agent(&agent).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no terminal to prompt on, and the host here reads as `{agent}`. \
+             Name one instead: `omni init --claude`, every host with \
+             `omni init --all`, or see them all with `omni init --help`."
+        )
+    })
+}
+
 pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     if args
         .iter()
@@ -141,6 +184,10 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         && !is_hook
         && !is_mcp;
 
+    // Set when the menu could not be shown, so `target_ids` below installs into
+    // the host that ran the command instead of erroring on the absent tty (#528).
+    let mut detected: Option<&'static str> = None;
+
     if no_flags {
         println!(
             "\n{} {}: Setup OMNI for your preferred AI Agent\n",
@@ -148,6 +195,23 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
             "init".bold().yellow()
         );
 
+        if !std::io::stdin().is_terminal() {
+            let host = non_interactive_host()?;
+            detected = Some(host);
+            println!(
+                "  {} No terminal to prompt on, so the host running this command is the one being configured: {}",
+                "ℹ".blue(),
+                host.bold()
+            );
+            println!(
+                "  {}\n",
+                "Pick another with omni init --cursor, or take every host with omni init --all"
+                    .bright_black()
+            );
+        }
+    }
+
+    if no_flags && detected.is_none() {
         let items = vec![
             "Claude Code (Anthropic)",
             "Cursor AI",
@@ -217,7 +281,9 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    let target_ids = if is_all {
+    let target_ids = if let Some(host) = detected {
+        vec![host]
+    } else if is_all {
         vec![
             "claude",
             "cursor",
@@ -384,6 +450,39 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every host the no-tty path can pick has to be a real install target, or
+    /// `omni init` reports it and installs nothing. The two id vocabularies are
+    /// maintained in different files, so a rename on either side breaks this
+    /// quietly (#528).
+    #[test]
+    fn maps_detected_hosts_onto_real_install_targets() {
+        let known: Vec<&str> = crate::agents::all_integrations()
+            .iter()
+            .map(|a| a.id())
+            .collect();
+
+        for agent in [
+            "claude_code",
+            "cursor",
+            "cline",
+            "codex_cli",
+            "antigravity",
+            "vscode",
+        ] {
+            let target = init_id_for_agent(agent).expect("detected host lost its install target");
+            assert!(
+                known.contains(&target),
+                "{agent} maps to `{target}`, which no integration answers to: {known:?}"
+            );
+        }
+
+        // A plain shell, and three hosts with nothing here to install into. All
+        // four have to reach the error that names the flags.
+        for agent in ["terminal", "windsurf", "aider", "vscode_continue"] {
+            assert_eq!(init_id_for_agent(agent), None, "{agent}");
+        }
+    }
 
     /// `AGENT_FLAGS` is a hand-maintained index into `FLAGS`. Getting it wrong
     /// files an agent under "CLAUDE SPECIFIC FLAGS" in help and nothing else
