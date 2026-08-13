@@ -182,6 +182,48 @@ fn every_documented_count_matches_the_code() {
     );
 }
 
+/// Every marker the ledger can print, against the page that lists them.
+///
+/// #522 added a second pair of forms, for a fold that covers the whole reply,
+/// and the manual kept listing two of four for a release (#526). The check in
+/// this file could not see it: a marker is neither a command nor a count. It is
+/// the cheapest of the three to guard, because the templates are string
+/// literals in one file.
+///
+/// Matched on the stable half of each template, before the first `{`, since the
+/// rest is a runtime count and a handle.
+#[test]
+fn every_marker_the_ledger_can_print_is_documented() {
+    let root = repo_root();
+    let ledger = std::fs::read_to_string(root.join("src/ledger/mod.rs")).expect("read ledger");
+    let page = std::fs::read_to_string(root.join("docs/website/src/use/markers.md"))
+        .expect("read markers.md");
+
+    let templates: BTreeSet<String> = regex::Regex::new(r#""(\[OMNI: [^"]*)""#)
+        .expect("valid regex")
+        .captures_iter(&ledger)
+        .map(|c| {
+            let t = c.get(1).expect("group 1").as_str();
+            // "[OMNI: {lines} lines already shown, …" → "[OMNI: "
+            // "[OMNI: identical to {lines} …"         → "[OMNI: identical to "
+            t.split('{').next().unwrap_or(t).to_string()
+        })
+        .collect();
+
+    assert!(
+        templates.len() >= 2,
+        "found {} marker templates in the ledger, so the scan is no longer reading them",
+        templates.len()
+    );
+
+    let missing: Vec<&String> = templates.iter().filter(|t| !page.contains(*t)).collect();
+    assert!(
+        missing.is_empty(),
+        "the ledger can print markers `use/markers.md` never shows: {missing:?}\n\
+         A reader meets these in their own output and has nowhere to look them up."
+    );
+}
+
 /// The scan itself, because a checker that reads nothing reports no problems.
 #[test]
 fn the_scan_reaches_the_manual_and_the_readme() {

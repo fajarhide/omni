@@ -387,8 +387,10 @@ fn fold_cross_turn(
     if crate::pipeline::format::sniff(&text).is_some() {
         return text;
     }
+    // The repository, not the directory this ran in: a worktree or a second
+    // checkout is the same project and must share its history (#525).
     let project = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| crate::paths::project_key(&p))
         .unwrap_or_else(|_| "unknown".to_string());
     crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
@@ -713,7 +715,9 @@ pub fn process_payload(
     if let (Some(s), Some(scope)) = (store.as_ref(), normalized.host_session_id.as_deref())
         && crate::pipeline::format::sniff(&final_out).is_none()
         && let Some(view) = crate::ledger::Ledger::new(s, scope)
-            .with_project(&project_path)
+            .with_project(crate::paths::project_key(std::path::Path::new(
+                &project_path,
+            )))
             .by(_agent_id)
             .project(&final_out)
     {
