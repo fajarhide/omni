@@ -5,6 +5,7 @@
 # Understanding it
 
 - [What OMNI is](concepts/what-it-is.md)
+- [Where OMNI helps](concepts/use-cases.md)
 - [How it decides what to cut](concepts/how-it-decides.md)
 - [Nothing is deleted](concepts/nothing-is-deleted.md)
 - [The ledger](concepts/the-ledger.md)

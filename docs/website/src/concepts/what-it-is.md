@@ -1,23 +1,34 @@
 # What OMNI is
 
-A local program that edits what your AI agent reads, before the agent reads it.
+**A small program on your machine that edits what your AI agent reads, before the agent
+reads it.**
 
-That is the whole idea. Everything else in this section is about the rules it follows
-while doing it, and those rules are more interesting than the editing.
+That is the whole idea. Everything else on this page is about the rules it follows while
+doing it, and the rules are more interesting than the editing.
 
 ## The problem it exists for
 
-An agent working in a terminal spends most of its context on output nobody chose to
-send it. A test run is 400 lines of `ok` and one line that matters. A build is a
-compile log and a verdict. A file gets read, then read again three turns later
-because nothing remembered the first read.
+An agent working in a terminal spends most of its context on output nobody chose to send
+it:
 
-None of that is free. It fills the context window, which ends the session sooner, and
-it costs a re-read every time the conversation is compacted.
+- a test run is 400 lines of `ok` and one line that matters
+- a build is a compile log wrapped around a one-word verdict
+- a file gets read, then read again three turns later, because nothing remembered the
+  first read
 
-The usual answers are worse than the problem. Truncating output cuts the end, which is
-where the verdict lives. Summarising with a model costs a call per command. Telling
-the agent to be careful works until it is busy.
+None of that is free. It fills the context window, which ends your session sooner, and
+you pay for it again every time the conversation is compacted.
+
+The obvious fixes are all worse than the problem:
+
+| The fix | Why it fails |
+|---|---|
+| Truncate long output | It cuts the end, and the end is where the verdict lives |
+| Ask a model to summarise | An inference call per command, and a summariser that can be wrong |
+| Tell the agent to be careful | Works until the agent is busy, which is always |
+
+OMNI is the fourth option: a program that knows what `cargo test` output looks like,
+remembers what your agent has already been shown, and never guesses when it is unsure.
 
 ## Where it sits
 
@@ -65,6 +76,9 @@ Four things, in order, and any of them may decide to do nothing:
 
 Then the raw input goes into the archive, and the agent gets the result plus a marker
 saying what happened.
+
+If you would rather see this as situations than as stages,
+[Where OMNI helps](use-cases.md) has six of them with the measured saving on each.
 
 ## What it is not
 
