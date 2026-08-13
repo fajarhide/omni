@@ -28,16 +28,33 @@ cd omni
 cargo build --release
 ```
 
+**From inside Claude Code**, if you would rather have the agent do the rest:
+
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+That installs a skill, not the binary. The skill carries the install commands below,
+the verification step, and how to read the markers, so the agent stops guessing at
+any of the three. Everything on this page still applies; the plugin only means
+someone else types it.
+
 ## Wire it into your agent
 
 ```sh
-omni init            # interactive menu
+omni init            # the host you are running in, or a menu if you have a terminal
 omni init --claude   # or --cursor, --codex, --gemini, and 11 more
 omni init --all      # every host, and a .vscode/mcp.json in the current directory
 ```
 
 `omni init` writes hooks and registers the MCP server. It is idempotent, so running it
 again after an upgrade is the right move rather than a risk.
+
+With no terminal to prompt on, which is how an agent runs it, `omni init` configures
+the host it is running inside instead of failing on the absent menu. It says which
+host it picked. If it cannot name the host, a plain shell for instance, it stops and
+asks for a flag rather than installing into somewhere nobody asked for.
 
 Every supported flag is in [init](../reference/cmd/init.md). Which hosts get what is
 in [Supported agents](../reference/agents.md), and that page matters more than it

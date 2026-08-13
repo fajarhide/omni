@@ -35,6 +35,11 @@ cargo check --quiet 2>/dev/null || true
 sed -i.bak 's/"version": ".*"/"version": "'$NEW'"/' plugins/openclaw/openclaw.plugin.json
 rm -f plugins/openclaw/openclaw.plugin.json.bak
 
+# 4b. Update the Claude Code plugin version. Setting it pins the plugin, so a
+# release that forgets this leaves every installed copy on the previous one.
+sed -i.bak 's/"version": ".*"/"version": "'$NEW'"/' plugins/claude-code/.claude-plugin/plugin.json
+rm -f plugins/claude-code/.claude-plugin/plugin.json.bak
+
 # 5. Verify build
 echo "Verifying build..."
 cargo build --quiet
