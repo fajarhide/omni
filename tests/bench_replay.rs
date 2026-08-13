@@ -1162,6 +1162,15 @@ fn ignores_lines_under_the_floor() {
 
 /// The ledger's own marker, measured rather than assumed, so
 /// `SESSION_MARKER_LEN` cannot drift away from the string it stands for.
+///
+/// **The fixture folds a run, not a whole payload, and that is load-bearing.**
+/// Since #519 a fold that covers the entire output renders a different, longer
+/// marker, because `N lines already shown` reads as a claim about part of the
+/// output and leaves a fully elided reply indistinguishable from a command that
+/// printed nothing. `SESSION_MARKER_LEN` stands for the run marker, which is what
+/// the attribution above is counting, so the payload carries one line this
+/// session has not seen. An earlier fixture repeated the whole text and started
+/// measuring the wrong string the moment the second one existed.
 #[test]
 fn session_marker_len_matches_the_ledger() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1171,7 +1180,11 @@ fn session_marker_len_matches_the_ledger() {
         .collect();
     let ledger = omni::ledger::Ledger::new(&store, "s1");
     ledger.project(&text);
-    let view = ledger.project(&text).expect("a full repeat folds");
+    let view = ledger
+        .project(&format!(
+            "{text}a line this session has never been shown before\n"
+        ))
+        .expect("the repeated head folds");
 
     let marker = view
         .lines()

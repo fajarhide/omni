@@ -444,6 +444,73 @@ mod tests {
         assert!(second.contains("lines already shown"));
     }
 
+    /// #519. A re-run of an identical command folded into one run covering the
+    /// whole payload, and `N lines already shown` reads as a claim about part of
+    /// the output. A reader could not tell a fully elided reply from a command
+    /// that printed nothing, and re-running is exactly how a fix gets verified.
+    #[test]
+    fn a_whole_payload_fold_says_it_is_identical() {
+        let (store, _d) = temp_store();
+        let text = payload();
+        let ledger = Ledger::new(&store, "s1");
+
+        ledger.project(&text);
+        let second = ledger.project(&text).expect("a repeat is projectable");
+
+        assert!(
+            second.contains("identical to"),
+            "a fully folded reply must state the identity: {second:?}"
+        );
+        assert_eq!(
+            second.lines().count(),
+            1,
+            "one marker, not a marker plus commentary: {second:?}"
+        );
+    }
+
+    /// The count in that marker is the reader's only check on it, so it has to be
+    /// the payload's own line count. #519 shipped `43 lines already shown` beside
+    /// `42 lines omitted` for a 43 line payload, and neither number was wrong on
+    /// its own.
+    #[test]
+    fn the_whole_payload_marker_counts_the_whole_payload() {
+        let (store, _d) = temp_store();
+        let text = payload();
+        let ledger = Ledger::new(&store, "s1");
+
+        ledger.project(&text);
+        let second = ledger.project(&text).expect("a repeat is projectable");
+
+        assert!(
+            second.contains(&format!("the {} lines", text.lines().count())),
+            "expected {} lines in {second:?}",
+            text.lines().count()
+        );
+    }
+
+    /// The partial case keeps the run wording, because there it is true: some of
+    /// this was shown before and the rest is new. Guarding the fix from becoming
+    /// "every fold claims the output is identical".
+    #[test]
+    fn a_partial_fold_keeps_the_run_wording() {
+        let (store, _d) = temp_store();
+        let text = payload();
+        let ledger = Ledger::new(&store, "s1");
+
+        ledger.project(&text);
+        let extended = format!("{text}\nsomething this session has never seen before\n");
+        let second = ledger.project(&extended).expect("the repeated head folds");
+
+        assert!(
+            second.contains("lines already shown") && !second.contains("identical to"),
+            "a partial fold must not claim identity: {second:?}"
+        );
+        assert!(
+            second.contains("never seen before"),
+            "the new line has to survive: {second:?}"
+        );
+    }
+
     /// The promise the marker makes. A handle that does not resolve to the exact
     /// bytes it replaced makes every other guarantee here worthless.
     #[test]

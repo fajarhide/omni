@@ -1295,6 +1295,49 @@ mod tests {
         assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
     }
 
+    /// #519 at the boundary where it was reported. The ledger folds the whole
+    /// payload, and the rewind marker used to measure "what survived" *after*
+    /// that fold, so it counted the ledger's own marker as surviving content and
+    /// reported the same loss again under a second handle. A 43 line re-run came
+    /// back as `43 lines already shown` plus `42 lines omitted`, two ids, and an
+    /// arithmetic that reconciles with nothing.
+    ///
+    /// Driven through `process_payload` rather than the ledger, because both
+    /// markers are correct in isolation and only the hook sees them together.
+    #[test]
+    fn a_re_run_comes_back_as_one_marker_with_one_handle() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let body = (0..60)
+            .map(|i| format!("  {:3}  /alpha/item-{i:02}\n", 100 - i))
+            .collect::<String>();
+        let payload = serde_json::json!({
+            "session_id": "s-519",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 rank.py"},
+            "tool_response": {"stdout": body, "stderr": ""}
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(store.clone()), None);
+        let second =
+            process_payload(&payload, Some(store.clone()), None).expect("the repeat is rewritten");
+
+        let markers = second.matches("[OMNI:").count();
+        assert_eq!(markers, 1, "expected one marker, got {markers}: {second}");
+
+        let handles: std::collections::HashSet<&str> = second
+            .split("omni retrieve ")
+            .skip(1)
+            .filter_map(|t| t.split([']', ' ']).next())
+            .collect();
+        assert_eq!(
+            handles.len(),
+            1,
+            "one reply must name one archive: {second}"
+        );
+    }
+
     /// #509 at the boundary the unit test cannot see: the hook has three agent
     /// ids in scope and only one of them is the resolved host. Asserting a
     /// literal here would read the ambient environment (`CLAUDECODE` is set
