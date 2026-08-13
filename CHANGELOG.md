@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The manual is checked against the code it describes (#520)**: `tests/docs_match_the_code.rs` asserts that every `omni <cmd>` written inside a shell fence is a subcommand `main.rs` dispatches, and that counts stated in prose match what they count. This class had been fixed by hand four times: #180 named two deleted subcommands, #185 two removed flags, #390 four whole documents, and the #521 sweep found `omni history` and `omni insight` in shell blocks that exit 1, plus a tool count reading 26 against 25. Every round was found by a person happening to open one page.
+
+  **The subcommand list is read from `main.rs` rather than copied**, so the check cannot become the second list that drifts from the first, which is the defect it exists to catch. A structural change that defeats the scan empties the set and a sanity assertion fails loudly instead of the suite passing vacuously. Probing the real binary would be the more honest level and is unsafe here: `reset` drops the database, `dashboard` binds a port and blocks, `update` reaches the network.
+
+  **Fence-scoped on purpose.** `integrations/loops.md` names `omni handoff` in prose precisely to say it is not a subcommand. Proven by reintroducing both defects #521 fixed: the gate reports `use/memory.md:83 omni insight` and `reference/mcp-tools.md:3 says 26 MCP tools, the code has 25`. Prose describing the pipeline in the wrong order, the fourth kind #521 found, is not checkable here and is not claimed to be.
+
 ### Fixed
 - **A re-run of an identical command came back as two markers and zero content lines (#519)**: the ledger folded the whole payload, then the rewind marker measured "what survived" *after* that fold, counted the ledger's own marker as surviving content, and reported the same loss again under a second handle. A 43 line re-run delivered `43 lines already shown` followed by `42 lines omitted`, two ids, and an arithmetic that reconciles with nothing. Same defect as #301, one stage further up: the counts now describe the distiller, taken before the ledger runs, and the ledger accounts for itself.
 
