@@ -3,8 +3,7 @@
 
 use anyhow::Result;
 use colored::Colorize;
-use is_terminal::IsTerminal;
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, IsTerminal, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 

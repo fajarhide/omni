@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **The elided middle is archived and the marker names the handle**, which was the half of #219 that never landed. Content over `MAX_REWIND_BYTES` is not offered to the store, and the marker then says nothing rather than promising a retrieval that would fail.
 
+### Removed
+- **Three dependencies that were paying for nothing (#507)**: `is-terminal` is `std::io::IsTerminal`, stable since 1.70 against a pinned 1.97, and `src/hooks/pipe.rs` was the only importer while every call site in it already wrote `std::io::stdout().is_terminal()`. `tempfile` was listed under both `[dependencies]` and `[dev-dependencies]` while every use of it under `src/` sits inside `#[cfg(test)]`. `benches/pipeline.rs` and its `[[bench]]` target were 50 lines behind `criterion` that neither CI nor the `Makefile` ever invoked, for a method the project measured and rejected: the shipped latency figure came from A/B on the release binary after a unit-test timer overstated the same number by roughly 2x.
+
+  `cargo tree --edges normal` goes 220 to 218 unique crates, and the full tree 265 to 237. No runtime behaviour changes.
+
 ### Changed
 - **The README now demos the half we win on (#503)**: the existing pair shows `git log` compression, which is filter work, and filters are 2.7% on our own corpus against rtk's 6.2%. A new pair shows the ledger instead: the same file read twice in one session, where the second read comes back as one marker and a retrieval handle. Measured on 0.7.3 through the Homebrew binary, `cat src/guard/limits.rs` twice is 7.6 KB then 214 B, a 97.2% reduction on the second call.
 

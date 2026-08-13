@@ -25,8 +25,8 @@ name = "omni"
 path = "src/main.rs"
 
 [target.'cfg(unix)'.dependencies]
-# Only to restore default SIGPIPE (#155). Already in the tree via rusqlite and
-# tempfile, so this adds no compilation — it just makes the use direct.
+# Only to restore default SIGPIPE (#155). Already in the tree via rusqlite, so
+# this adds no compilation, it just makes the use direct.
 libc = "0.2"
 
 [dependencies]
@@ -71,11 +71,7 @@ colored = "2"
 # Config (TOML DSL filters)
 toml = "0.8"
 
-# Terminal detection
-is-terminal = "0.4"
-
 # Misc
-tempfile = "3"
 ureq = { version = "2", features = ["json"] }
 rust-embed = "8"
 strsim = "0.11"
@@ -86,16 +82,11 @@ dialoguer = "0.11"
 [dev-dependencies]
 insta = "1"  # snapshot testing
 tempfile = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
 # Exact token counting for tests/bench_replay.rs only (#392). Deliberately NOT a
 # runtime dependency: #174 removed cl100k counting from the hook after measuring
 # it at 34.3 ms against a 10 ms budget. The benchmark has no such budget, and a
 # published token figure that came from a bytes divisor is not a token figure.
 tiktoken-rs = "0.12"
-
-[[bench]]
-name = "pipeline"
-harness = false
 
 [profile.release]
 opt-level = 3
