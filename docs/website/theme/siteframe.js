@@ -27,6 +27,24 @@
     { href: 'https://discord.gg/zHTuvZhF2M', text: 'Discord', external: true },
   ];
 
+  // The manual is English only, and the README is not. A reader who arrived
+  // through the Indonesian or Japanese README used to land here with no way back
+  // to their own language, so this points at the translations that already exist
+  // and are already maintained rather than pretending 35 pages are translated.
+  //
+  // Absolute GitHub URLs on purpose. These files live in the omni repository, not
+  // in the site, so there is no relative path from /docs/ that reaches them.
+  var REPO = 'https://github.com/fajarhide/omni/blob/main/';
+  var LANGS = [
+    { code: 'EN', label: 'English', href: REPO + 'README.md' },
+    { code: 'ID', label: 'Bahasa Indonesia', href: REPO + 'i18n/README-id.md' },
+    { code: 'JA', label: '日本語', href: REPO + 'i18n/README-ja.md' },
+    { code: 'ZH', label: '简体中文', href: REPO + 'i18n/README-zh.md' },
+    { code: 'KO', label: '한국어', href: REPO + 'i18n/README-ko.md' },
+    { code: 'VI', label: 'Tiếng Việt', href: REPO + 'i18n/README-vi.md' },
+    { code: 'AR', label: 'العربية', href: REPO + 'i18n/README-ar.md' },
+  ];
+
   function depth() {
     // mdBook stamps the page's own distance from the book root as
     // `path_to_root`: "" at the root, "../" one level down. Taking it from there
@@ -80,6 +98,41 @@
     // Before mdBook's icon buttons, so print/repo/edit stay where a returning
     // reader expects them at the far right.
     bar.insertBefore(nav, bar.firstChild);
+    bar.insertBefore(languageMenu(), nav.nextSibling);
+  }
+
+  /// A `<details>` rather than a scripted dropdown.
+  ///
+  /// Click-to-open, click-outside-to-close, Escape and keyboard focus are all
+  /// behaviour the element already has, and every line of JS that reimplements
+  /// them is a line that can get the accessibility wrong. The only script here is
+  /// closing it after a choice, which a plain `<details>` does not do because the
+  /// link navigates away in a new tab.
+  function languageMenu() {
+    var details = document.createElement('details');
+    details.className = 'lang-menu';
+
+    var summary = document.createElement('summary');
+    summary.setAttribute('aria-label', 'Choose a language');
+    summary.title = 'Read the introduction in another language';
+    summary.textContent = 'EN';
+    details.appendChild(summary);
+
+    var list = document.createElement('div');
+    list.className = 'lang-list';
+    LANGS.forEach(function (l) {
+      var a = document.createElement('a');
+      a.href = l.href;
+      a.textContent = l.label;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.addEventListener('click', function () {
+        details.open = false;
+      });
+      list.appendChild(a);
+    });
+    details.appendChild(list);
+    return details;
   }
 
   if (document.readyState === 'loading') {

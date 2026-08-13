@@ -511,6 +511,78 @@ blockquote p:last-child { margin-bottom: 0; }
 }
 
 /* --------------------------------------------------------------------------
+   Language menu, built by theme/siteframe.js.
+
+   A `<details>` element, so open/close, Escape and keyboard focus come from the
+   browser rather than from script. It survives on a phone where `.site-links`
+   does not: a reader who arrived from a translated README is exactly the reader
+   most likely to be on one.
+   -------------------------------------------------------------------------- */
+
+.lang-menu {
+  position: relative;
+  margin-right: 0.6rem;
+  flex: none;
+}
+
+.lang-menu > summary {
+  font-family: var(--font-body);
+  font-size: var(--text-meta);
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 2px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  list-style: none;
+  user-select: none;
+}
+
+/* Both spellings: `::marker` is the standard and Safari still needs the WebKit
+   pseudo-element to drop the disclosure triangle. */
+.lang-menu > summary::marker,
+.lang-menu > summary::-webkit-details-marker {
+  display: none;
+  content: '';
+}
+
+.lang-menu > summary:hover,
+.lang-menu[open] > summary {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.lang-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  /* Anchored right: the menu sits near the end of the bar, so a left-anchored
+     panel would hang off the viewport on a narrow window. */
+  right: 0;
+  z-index: 60;
+  min-width: 11rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.35rem 0;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+.lang-list a {
+  font-family: var(--font-body);
+  font-size: var(--text-meta);
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding: 0.35rem 0.85rem;
+  white-space: nowrap;
+}
+
+.lang-list a:hover {
+  color: var(--fg);
+  background: var(--rule);
+}
+
+/* --------------------------------------------------------------------------
    Right-hand page outline, built by theme/pagetoc.js.
    -------------------------------------------------------------------------- */
 
