@@ -46,6 +46,14 @@ OMNI_PASSTHROUGH=1 <your command>
 Skips the pipeline entirely. Use it when you are debugging OMNI itself and need to
 see what a command really printed, or when reading a file whose exact bytes matter.
 
+The prefix works on every path, including inside an agent, but not for the reason it
+looks like. A hook is a separate process the host spawned, so it inherits the host's
+environment and never sees a variable you assign in front of a command. What it does
+see is the command string, so OMNI reads the assignment there. Two consequences worth
+knowing: only a **leading** assignment counts, the same position a shell would apply
+it in, and `echo OMNI_PASSTHROUGH=1` mentions the name without setting anything and is
+still distilled. Exporting it for the whole session works the ordinary way.
+
 This is the single most useful environment variable here, and it is the first thing
 to reach for when you suspect OMNI has changed something it should not have. If the
 output is identical with and without it, OMNI was not involved.

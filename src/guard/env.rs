@@ -232,3 +232,70 @@ mod tests {
         assert_eq!(validate_loop_context(None, None, Some(10_000_000)), Ok(()));
     }
 }
+
+/// `OMNI_PASSTHROUGH=1 <cmd>` written on the command line, which the hook can
+/// only ever see as text (#534).
+///
+/// The manual documents that prefix as "raw output, every time", and on
+/// `omni exec` and the pipe it is, because the variable is read by the same
+/// process. The Claude Code `PostToolUse` hook is a separate process spawned by
+/// the host: it inherits the host's environment and an assignment typed in
+/// front of the command never reaches it. The prefix was inert on the one host
+/// the promise matters on, and nothing said so.
+///
+/// The command string does reach the hook, so the assignment is honoured by
+/// reading it there. Only leading assignments count, the same shape a shell
+/// would apply them in: `echo OMNI_PASSTHROUGH=1` mentions the name and sets
+/// nothing, and must keep being distilled.
+pub fn command_asks_for_passthrough(command: &str) -> bool {
+    for token in command.split_whitespace() {
+        match token.split_once('=') {
+            Some((key, value)) if key.eq_ignore_ascii_case("OMNI_PASSTHROUGH") => {
+                return means_enabled(value);
+            }
+            // Another leading assignment: keep looking past it.
+            Some((key, _))
+                if !key.is_empty()
+                    && !key.starts_with(|c: char| c.is_ascii_digit())
+                    && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') => {}
+            // The command itself has started; anything after this is an argument.
+            _ => return false,
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod command_passthrough_tests {
+    use super::command_asks_for_passthrough;
+
+    #[test]
+    fn honours_the_prefix_the_manual_documents() {
+        assert!(command_asks_for_passthrough(
+            "OMNI_PASSTHROUGH=1 cat secrets.env"
+        ));
+        assert!(command_asks_for_passthrough(
+            "OMNI_PASSTHROUGH=true kubectl get pods -o yaml"
+        ));
+        // Past another assignment, the way a shell applies them.
+        assert!(command_asks_for_passthrough(
+            "FOO=1 OMNI_PASSTHROUGH=on cargo test"
+        ));
+    }
+
+    #[test]
+    fn an_off_value_is_not_an_escape_hatch() {
+        assert!(!command_asks_for_passthrough("OMNI_PASSTHROUGH=0 cat file"));
+        assert!(!command_asks_for_passthrough("cat file"));
+    }
+
+    /// The line between an assignment and a mention. Naming the variable as an
+    /// argument sets nothing, so it must not turn distillation off.
+    #[test]
+    fn a_mention_is_not_an_assignment() {
+        assert!(!command_asks_for_passthrough("echo OMNI_PASSTHROUGH=1"));
+        assert!(!command_asks_for_passthrough(
+            "grep -r OMNI_PASSTHROUGH=1 src/"
+        ));
+    }
+}

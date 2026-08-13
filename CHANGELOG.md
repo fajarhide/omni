@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`OMNI_PASSTHROUGH=1 <cmd>` did nothing on the Claude Code hook path (#534)**: the manual documents that prefix as "raw output, every time" in four places, including `OMNI_PASSTHROUGH=1 kubectl get pods -o yaml`, which is exactly the case where someone needs exact bytes. It held for `omni exec` and the pipe, where the variable is read by the same process, and not on the host the promise matters on: a `PostToolUse` hook is a process the host spawned, so it inherits the host's environment and never sees an assignment typed in front of a command. The escape hatch was inert and nothing said so.
+
+  **The command string does reach the hook**, so the assignment is honoured by reading it there. Only a leading assignment counts, the position a shell would apply it in, so `echo OMNI_PASSTHROUGH=1` mentions the name without setting anything and is still distilled. Proven at the hook boundary rather than on the predicate, because the predicate was always right about the text it was given: `the_prefix_the_manual_documents_reaches_the_hook` feeds `process_payload` the same output twice and asserts the prefixed call returns nothing where the bare one rewrites.
+
+  **The first version of that test passed its own control by accident**, on a fixture that was never rewritten at all, which would have made the whole assertion vacuous. It now primes the ledger first so the unprefixed call is certain to be folded.
+
+### Fixed
 - **A worktree was a different project, so its ledger history was too (#525, first step)**: the project scope was `current_dir()` and nothing else, so the same repository reached by another path opened a separate history. Measured before the fix: 31 project scopes on the maintainer's database, one repository split across **six** of them, with 2,759 lines (15.6% of that project's history) stranded in scopes nothing would consult again. Four of the six were created in a single day of ordinary work, because a git worktree is a different directory. `paths::project_key` resolves the repository root and both ledger doors use it.
 
   **A linked worktree is why this is not a walk up to `.git`.** There, `.git` is a *file* holding `gitdir: <main>/.git/worktrees/<name>`, so stopping at the first `.git` returns the worktree root and splits the history exactly as before while looking like a fix. The gitdir is read and resolved back to the main checkout, and an unreadable or unfamiliar `.git` file falls back to the directory rather than to a guess. Proven by replacing the resolution with the naive walk, which fails `a_linked_worktree_answers_the_main_checkout`.
