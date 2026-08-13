@@ -397,6 +397,35 @@ fn fold_cross_turn(
         .unwrap_or(text)
 }
 
+/// A tool reply on its way to the agent, distilled or not, through the ledger.
+///
+/// The three non-Bash arms used to chain the ledger onto the distiller's
+/// `Option`, so a payload the distiller declined was never folded across turns
+/// either. That coupling is wrong in both directions and it hid until #523
+/// changed how often `readfile` declines: the ledger's claim is about what the
+/// agent has already been shown, which has nothing to do with whether a
+/// distiller understood today's payload. File reads are the class the ledger
+/// earns the most on, and they are also the class most likely to be declined.
+///
+/// `None` when neither stage changed anything, so the host keeps its own bytes
+/// rather than being handed an identical copy and a saving that did not happen.
+fn reply_through_ledger(
+    store: Option<&Arc<Store>>,
+    normalized: &crate::hooks::normalize::NormalizedInput,
+    content: &str,
+    distilled: Option<String>,
+) -> Option<String> {
+    let shortened = distilled.and_then(|d| archive_tool_reply(store, content, d));
+    let carried = shortened.is_some();
+    let text = shortened.unwrap_or_else(|| content.to_string());
+
+    let folded = fold_cross_turn(store, normalized, text);
+    if !carried && folded == content {
+        return None;
+    }
+    Some(wrap_hook_output(normalized.raw_response.as_ref(), folded))
+}
+
 fn distil_tool_reply(
     normalized: &crate::hooks::normalize::NormalizedInput,
     content: &str,
@@ -434,38 +463,38 @@ fn distil_tool_reply(
                     .unwrap_or(0)
             };
 
-            return Some(
+            return Some(reply_through_ledger(
+                store,
+                normalized,
+                content,
                 crate::distillers::readfile::distill_readfile_with_context(
                     content,
                     filepath,
                     count_dependents,
-                )
-                .and_then(|d| archive_tool_reply(store, content, d))
-                .map(|d| fold_cross_turn(store, normalized, d))
-                .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
-            );
+                ),
+            ));
         }
         "Grep" => {
             if !agent_config.grep_enabled() {
                 return Some(None);
             }
-            return Some(
-                distill_grep(content)
-                    .and_then(|d| archive_tool_reply(store, content, d))
-                    .map(|d| fold_cross_turn(store, normalized, d))
-                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
-            );
+            return Some(reply_through_ledger(
+                store,
+                normalized,
+                content,
+                distill_grep(content),
+            ));
         }
         "WebFetch" => {
             if !agent_config.webfetch_enabled() {
                 return Some(None);
             }
-            return Some(
-                process_web_content(content)
-                    .and_then(|d| archive_tool_reply(store, content, d))
-                    .map(|d| fold_cross_turn(store, normalized, d))
-                    .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
-            );
+            return Some(reply_through_ledger(
+                store,
+                normalized,
+                content,
+                process_web_content(content),
+            ));
         }
         "Edit" | "Write" | "Create" | "Move" | "Delete" | "Replace" => return None,
         "MultiEdit" => {
