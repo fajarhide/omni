@@ -274,7 +274,11 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
         return true;
     }
 
-    if crate::guard::env::is_passthrough() {
+    // The process environment, and the assignment the user typed in front of the
+    // command, which is the only form that reaches a hook the host spawned (#534).
+    if crate::guard::env::is_passthrough()
+        || crate::guard::env::command_asks_for_passthrough(&normalized.command)
+    {
         return true;
     }
 
@@ -1414,6 +1418,49 @@ mod tests {
             ledger,
             vec![distilled.clone()],
             "the ledger filed lines under a different agent than the call they came from ({distilled})"
+        );
+    }
+
+    /// #534, at the level the promise is made. The manual says
+    /// `OMNI_PASSTHROUGH=1 <cmd>` gives raw output every time. The hook is a
+    /// process the host spawned, so it inherits the host's environment and never
+    /// sees that assignment as a variable; the only place it exists is the
+    /// command string. A predicate test cannot show this, because the predicate
+    /// was always right about the text it was given.
+    #[test]
+    fn the_prefix_the_manual_documents_reaches_the_hook() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let noisy: String = (0..200)
+            .map(|i| format!("# comment line {i} explaining a step in the script\n"))
+            .collect();
+        let payload = |cmd: &str| {
+            json!({
+                "session_id": "s-534",
+                "tool_name": "Bash",
+                "tool_input": {"command": cmd},
+                "tool_response": {"stdout": noisy, "stderr": ""}
+            })
+            .to_string()
+        };
+
+        // Primed so the ledger will certainly fold the repeat: a fixture that
+        // merely "looks noisy" can land under the route threshold and return
+        // None for the wrong reason, which is how the first version of this
+        // test passed its control assertion by accident.
+        let _ = process_payload(&payload("cat synth.sh"), Some(store.clone()), None);
+        assert!(
+            process_payload(&payload("cat synth.sh"), Some(store.clone()), None).is_some(),
+            "the fixture has to be rewritten without the prefix, or this proves nothing"
+        );
+        assert_eq!(
+            process_payload(
+                &payload("OMNI_PASSTHROUGH=1 cat synth.sh"),
+                Some(store.clone()),
+                None
+            ),
+            None,
+            "the escape hatch the manual documents did nothing on the hook path"
         );
     }
 
