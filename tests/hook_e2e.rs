@@ -363,8 +363,22 @@ fn every_advertised_command_routes() {
     let help = String::from_utf8_lossy(&cmd.arg("help").output().expect("run").stdout).to_string();
 
     for name in [
-        "init", "doctor", "update", "reset", "stats", "retrieve", "dashboard", "diff", "session",
-        "exec", "remember", "goal", "patterns", "engram", "query", "version",
+        "init",
+        "doctor",
+        "update",
+        "reset",
+        "stats",
+        "retrieve",
+        "dashboard",
+        "diff",
+        "session",
+        "exec",
+        "remember",
+        "goal",
+        "patterns",
+        "engram",
+        "query",
+        "version",
     ] {
         assert!(help.contains(name), "help does not list `{name}`");
 
