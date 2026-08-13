@@ -54,7 +54,8 @@ else
 fi
 
 # 6. Stage and commit
-git add Cargo.toml Cargo.lock plugins/openclaw/openclaw.plugin.json
+git add Cargo.toml Cargo.lock plugins/openclaw/openclaw.plugin.json \
+  plugins/claude-code/.claude-plugin/plugin.json
 git commit -m "chore: bump version to $NEW"
 
 echo ""
