@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo tree --edges normal` goes 220 to 218 unique crates, and the full tree 265 to 237. No runtime behaviour changes.
 
 ### Changed
+- **The ledger page now says how it remembers (#511)**: it explained what the ledger is worth and which claim each marker makes, and never store, retrieve or forget. Added the premise the whole design follows from, a flow of one command through the stage, the two tables and why hashes and bytes live apart, retrieval as an exact lookup with no ranking or candidate set, and the three ways it forgets: compaction drops the session scope, 30 days prunes both, and nothing is evicted by size. Also what two agents in one repo share, which is the project scope keyed on the directory alone (#509), and the corresponding note on `Reading the markers` and `Memory across sessions`.
+
+  The page carried a warning about #465 as a live defect. It has been closed since 0.7.3, so the text now describes the fix, that only delivered lines are recorded, as part of the flow.
+
 - **The README now demos the half we win on (#503)**: the existing pair shows `git log` compression, which is filter work, and filters are 2.7% on our own corpus against rtk's 6.2%. A new pair shows the ledger instead: the same file read twice in one session, where the second read comes back as one marker and a retrieval handle. Measured on 0.7.3 through the Homebrew binary, `cat src/guard/limits.rs` twice is 7.6 KB then 214 B, a 97.2% reduction on the second call.
 
   **Figures re-measured on 0.7.3 across the manual and the translations.** Same 6,656-trace corpus, so the only variable is the build. The aggregate is unchanged at 14.9% and three cells moved: other 6.8 to 6.9, file read 25.2 to 25.0, `git` 22.3 to 22.1. The tape carries `unset OMNI_PASSTHROUGH`, because `vhs` inherits the recorder's environment and a stray passthrough records a second read that never folds, which is the claim backwards.
