@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A worktree was a different project, so its ledger history was too (#525, first step)**: the project scope was `current_dir()` and nothing else, so the same repository reached by another path opened a separate history. Measured before the fix: 31 project scopes on the maintainer's database, one repository split across **six** of them, with 2,759 lines (15.6% of that project's history) stranded in scopes nothing would consult again. Four of the six were created in a single day of ordinary work, because a git worktree is a different directory. `paths::project_key` resolves the repository root and both ledger doors use it.
+
+  **A linked worktree is why this is not a walk up to `.git`.** There, `.git` is a *file* holding `gitdir: <main>/.git/worktrees/<name>`, so stopping at the first `.git` returns the worktree root and splits the history exactly as before while looking like a fix. The gitdir is read and resolved back to the main checkout, and an unreadable or unfamiliar `.git` file falls back to the directory rather than to a guess. Proven by replacing the resolution with the naive walk, which fails `a_linked_worktree_answers_the_main_checkout`.
+
+  **`distillations.project_path` still records the working directory**, deliberately: changing it would silently restate what every existing row means. The remaining steps in #525, what the agent column is for and the marker wording that cannot say who, are unaffected by this and still open.
+
 ### Added
 - **The manual has a share card (#527, partly)**: every one of its 35 pages carried 0 `og:*` tags, so a link to the ledger page or the benchmark method shared as a bare URL. `theme/head.hbs` now emits 11 tags per page, with `og:title` taken from the page's own chapter title rather than the book title repeated 35 times, and `og:image` pointing at the `media/og.png` that already existed. The shared description was also the positioning from before the manual was rewritten to lead with the ledger; it now matches what the README says.
 

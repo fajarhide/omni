@@ -347,7 +347,9 @@ fn distill(
     if let (Some(s), Some(scope)) = (store, host_session())
         && crate::pipeline::format::sniff(&output).is_none()
         && let Some(view) = crate::ledger::Ledger::new(s, scope)
-            .with_project(&project_path)
+            .with_project(crate::paths::project_key(std::path::Path::new(
+                &project_path,
+            )))
             .by(resolve_pipe_agent_id())
             .project(&output)
     {

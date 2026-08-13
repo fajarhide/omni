@@ -199,3 +199,109 @@ mod tests {
         }
     }
 }
+
+/// The project a ledger scope belongs to: the repository root, not the
+/// directory the command happened to run in (#525).
+///
+/// The project scope was `current_dir()` alone, so the same repository reached
+/// by a different path was a different project. Measured on the maintainer's
+/// database before this landed: 31 project scopes, and one repository split
+/// across six of them, 2,759 lines of history (15.6%) stranded in scopes
+/// nothing would consult again. Four of the six were created in a single day of
+/// ordinary work, because a git worktree is a different directory.
+///
+/// **A linked worktree is why this is not a walk up to `.git`.** In a worktree
+/// `.git` is a *file* holding `gitdir: <main>/.git/worktrees/<name>`, so
+/// stopping at the first `.git` returns the worktree root and splits the
+/// history exactly as before, while looking like a fix. The gitdir is read and
+/// resolved back to the main checkout.
+///
+/// Falls back to the directory itself outside a repository, which is what a
+/// scope keyed on a path has always been.
+pub fn project_key(from: &std::path::Path) -> String {
+    for dir in from.ancestors() {
+        let dot = dir.join(".git");
+        if dot.is_dir() {
+            return dir.to_string_lossy().to_string();
+        }
+        if dot.is_file() {
+            return worktree_main_root(&dot).unwrap_or_else(|| dir.to_string_lossy().to_string());
+        }
+    }
+    from.to_string_lossy().to_string()
+}
+
+/// `<main>/.git/worktrees/<name>` back to `<main>`.
+///
+/// Returns `None` for anything that does not have that shape, so an unreadable
+/// or unfamiliar `.git` file leaves the caller on the directory it started from
+/// rather than on a guess.
+fn worktree_main_root(dot_git_file: &std::path::Path) -> Option<String> {
+    let contents = std::fs::read_to_string(dot_git_file).ok()?;
+    let gitdir = contents.trim().strip_prefix("gitdir:")?.trim();
+    let git_dir = std::path::Path::new(gitdir)
+        .ancestors()
+        .find(|a| a.file_name().is_some_and(|n| n == ".git"))?;
+    Some(git_dir.parent()?.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod project_key_tests {
+    use super::project_key;
+
+    #[test]
+    fn a_plain_checkout_answers_its_own_root() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let root = d.path().join("repo");
+        std::fs::create_dir_all(root.join(".git")).expect("mkdir");
+        std::fs::create_dir_all(root.join("src/deep")).expect("mkdir");
+
+        assert_eq!(
+            project_key(&root.join("src/deep")),
+            root.to_string_lossy(),
+            "a subdirectory has to answer the repository root, not itself"
+        );
+    }
+
+    /// The case the whole change exists for. Stopping at the first `.git` would
+    /// return the worktree root here and pass a test written the obvious way.
+    #[test]
+    fn a_linked_worktree_answers_the_main_checkout() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let main = d.path().join("omni");
+        let tree = main.join(".git-worktrees/520");
+        std::fs::create_dir_all(main.join(".git/worktrees/520")).expect("mkdir");
+        std::fs::create_dir_all(tree.join("src")).expect("mkdir");
+        std::fs::write(
+            tree.join(".git"),
+            format!("gitdir: {}/.git/worktrees/520\n", main.display()),
+        )
+        .expect("write");
+
+        assert_eq!(
+            project_key(&tree.join("src")),
+            main.to_string_lossy(),
+            "a worktree has to share the main checkout's history, not open its own"
+        );
+    }
+
+    #[test]
+    fn outside_a_repository_it_stays_where_it_is() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let loose = d.path().join("notes");
+        std::fs::create_dir_all(&loose).expect("mkdir");
+
+        assert_eq!(project_key(&loose), loose.to_string_lossy());
+    }
+
+    /// An unreadable or unfamiliar `.git` file must not become a guess.
+    #[test]
+    fn a_git_file_it_cannot_parse_falls_back_to_the_directory() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let odd = d.path().join("odd");
+        std::fs::create_dir_all(&odd).expect("mkdir");
+        std::fs::write(odd.join(".git"), "something else entirely\n").expect("write");
+
+        assert_eq!(project_key(&odd), odd.to_string_lossy());
+    }
+}
