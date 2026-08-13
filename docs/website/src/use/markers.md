@@ -35,6 +35,16 @@ on the directory, so anything running in this repository contributes to it. See
 [what two agents share](../concepts/the-ledger.md#what-two-agents-in-one-repo-share).
 
 ```
+[OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: identical to 40 lines from an earlier session, omni retrieve bc7e821a4340073e]
+```
+
+The same two claims, for a reply that is repeated **in full**. When the fold covers
+every line, the marker is the whole output rather than a gap inside it, so it says
+`identical to` and you get one line where a re-run would have printed the same
+hundreds. Anything less than the whole reply keeps the wording above.
+
+```
 [N similar lines collapsed]
 ```
 
