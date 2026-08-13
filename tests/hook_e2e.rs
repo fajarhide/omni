@@ -333,6 +333,54 @@ fn test_cli_version() {
     );
 }
 
+/// #151 in the other direction, and the one guarantee #506's parser rewrite had
+/// to keep. `omni init --curser` exited 0 and installed nothing; a top-level flag
+/// nobody parsed is the same defect one level up. Written before clap was removed,
+/// so it is a guard rather than a description of what replaced it.
+#[test]
+fn an_unknown_top_level_flag_is_rejected() {
+    let (mut cmd, _db) = omni_cmd();
+    let output = cmd
+        .arg("--zzz-not-a-real-flag")
+        .output()
+        .expect("Failed to run");
+
+    assert!(
+        !output.status.success(),
+        "an unparsed flag exited 0: stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Every command the help advertises has to reach its module. The old version of
+/// this asked clap for the subcommand list, which stopped being a source of truth
+/// when clap stopped routing (#506); the help text a user actually reads is the
+/// better one to check against.
+#[test]
+fn every_advertised_command_routes() {
+    let (mut cmd, _db) = omni_cmd();
+    let help = String::from_utf8_lossy(&cmd.arg("help").output().expect("run").stdout).to_string();
+
+    for name in [
+        "init", "doctor", "update", "reset", "stats", "retrieve", "dashboard", "diff", "session",
+        "exec", "remember", "goal", "patterns", "engram", "query", "version",
+    ] {
+        assert!(help.contains(name), "help does not list `{name}`");
+
+        let (mut c, _d) = omni_cmd();
+        let out = c
+            .args([name, "--zzz-not-a-real-flag"])
+            .output()
+            .expect("run");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("unknown command"),
+            "`{name}` is advertised but does not route: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn test_cli_help() {
     let (mut cmd, _db) = omni_cmd();
