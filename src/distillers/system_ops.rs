@@ -1127,7 +1127,12 @@ mod tests {
                       API_KEY=sk-ant-realsecret123\n";
         let out = redact_sensitive_assignments(script).expect("two literals are still redacted");
 
-        for kept in ["$((PASS + 1))", "${GITHUB_TOKEN}", "$(cat /tmp/t)", "$MY_SECRET"] {
+        for kept in [
+            "$((PASS + 1))",
+            "${GITHUB_TOKEN}",
+            "$(cat /tmp/t)",
+            "$MY_SECRET",
+        ] {
             assert!(out.contains(kept), "expansion destroyed: {kept}\n{out}");
         }
         for gone in ["3cr3t!", "sk-ant-realsecret123"] {
