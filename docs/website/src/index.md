@@ -9,13 +9,20 @@ locally, it needs no API key, and once it is installed you never type its name a
 brew install fajarhide/tap/omni && omni init
 ```
 
+Inside Claude Code, two lines and the agent does the rest:
+
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
 ## The problem, in one screen
 
 Your agent runs a test suite. Four hundred lines come back, one of them matters.
 
 ```
 $ cargo test
-    Compiling omni v0.7.3
+    Compiling omni v0.7.4
      Running unittests src/lib.rs
 running 412 tests
 test pipeline::scorer::tests::scores_errors_critical ... ok
