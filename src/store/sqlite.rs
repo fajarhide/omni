@@ -484,6 +484,29 @@ impl SqliteBackend {
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger_lines(ts);
 
+            -- What a fold actually drew on, which nothing recorded before (#533).
+            -- `ledger_lines` says a line was seen; it cannot say a marker was ever
+            -- issued against it, by which scope, or whose bytes it replaced. So
+            -- the value of cross-agent reuse was unrecoverable from the corpus
+            -- after the fact, and `PROJECT_FLOOR_MULT` has been pricing that case
+            -- since #448 without ever being checked against it.
+            --
+            -- One row per (origin, source agent) per fold, so the query that
+            -- settles the decision is a GROUP BY rather than a replay:
+            --   SELECT origin, agent_id = source_agent AS same, SUM(bytes)
+            --   FROM ledger_folds GROUP BY 1, 2;
+            CREATE TABLE IF NOT EXISTS ledger_folds (
+                id           INTEGER PRIMARY KEY,
+                ts           INTEGER NOT NULL,
+                scope        TEXT NOT NULL,
+                agent_id     TEXT NOT NULL,
+                source_agent TEXT NOT NULL,
+                origin       TEXT NOT NULL,
+                lines        INTEGER NOT NULL,
+                bytes        INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ledger_folds_ts ON ledger_folds(ts);
+
             -- 5. FTS5 for session events
             CREATE VIRTUAL TABLE IF NOT EXISTS session_events USING fts5(
                 session_id UNINDEXED,
@@ -1655,17 +1678,28 @@ impl SqliteBackend {
         );
     }
 
-    /// Which of `hashes` this scope has already been shown.
+    /// Which of `hashes` this scope has already been shown, and to whom.
     ///
     /// Asked as a bounded `IN` probe rather than by loading the scope's whole
     /// line set, because each hook is its own process: a session with 100,000
     /// recorded lines would pay to read all of them to ask about 200. Chunked
     /// under SQLite's default 32,766 parameter ceiling with room to spare.
     ///
-    /// Fails to an empty set. A ledger that cannot read is a ledger that has
+    /// The agent comes back with the hash because a fold cannot otherwise say
+    /// whose bytes it replaced, and that is the whole question #533 has to price:
+    /// a project-scoped fold drawing on another agent's lines is the reuse that
+    /// keying the scope on `(repo, agent)` would end. `INSERT OR IGNORE` keeps
+    /// the first writer, so this names the agent actually shown that line rather
+    /// than the last one to repeat it.
+    ///
+    /// Fails to an empty map. A ledger that cannot read is a ledger that has
     /// seen nothing, which costs a missed reduction and never a false claim.
-    pub fn ledger_seen(&self, scope: &str, hashes: &[String]) -> std::collections::HashSet<String> {
-        let mut found = std::collections::HashSet::new();
+    pub fn ledger_seen(
+        &self,
+        scope: &str,
+        hashes: &[String],
+    ) -> std::collections::HashMap<String, String> {
+        let mut found = std::collections::HashMap::new();
         let Ok(conn) = self.pool.get() else {
             return found;
         };
@@ -1682,7 +1716,7 @@ impl SqliteBackend {
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT line_hash FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
+                "SELECT line_hash, agent_id FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
             );
             let Ok(mut stmt) = conn.prepare_cached(&sql) else {
                 continue;
@@ -1690,7 +1724,9 @@ impl SqliteBackend {
             let params: Vec<&dyn rusqlite::ToSql> = std::iter::once(&scope as &dyn rusqlite::ToSql)
                 .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
                 .collect();
-            if let Ok(rows) = stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0)) {
+            if let Ok(rows) = stmt.query_map(params.as_slice(), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            }) {
                 found.extend(rows.flatten());
             }
         }
@@ -1725,6 +1761,46 @@ impl SqliteBackend {
             };
             for h in hashes {
                 let _ = stmt.execute(params![scope, h, ts, agent_id]);
+            }
+        }
+        let _ = tx.commit();
+    }
+
+    /// Records what one call's folds drew on, grouped by origin and source agent.
+    ///
+    /// Written after the view is decided rather than while it is being built, so
+    /// a store that cannot be reached costs a measurement and never a marker.
+    /// Same reasoning as `ledger_record` above: the ledger's writes are evidence,
+    /// and evidence must not be able to change the output.
+    pub fn ledger_record_folds(&self, scope: &str, agent_id: &str, folds: &[FoldRecord]) {
+        if folds.is_empty() {
+            return;
+        }
+        let Ok(mut conn) = self.pool.get() else {
+            return;
+        };
+        let ts = chrono::Utc::now().timestamp();
+        let Ok(tx) = conn.transaction() else {
+            return;
+        };
+        {
+            let Ok(mut stmt) = tx.prepare_cached(
+                "INSERT INTO ledger_folds
+                     (ts, scope, agent_id, source_agent, origin, lines, bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            ) else {
+                return;
+            };
+            for f in folds {
+                let _ = stmt.execute(params![
+                    ts,
+                    scope,
+                    agent_id,
+                    f.source_agent,
+                    f.origin,
+                    f.lines as i64,
+                    f.bytes as i64
+                ]);
             }
         }
         let _ = tx.commit();
@@ -1820,6 +1896,14 @@ impl SqliteBackend {
         //
         // Rows are 16 bytes of hash plus a scope key, so the cost is bounded by
         // distinct lines emitted in the window rather than by bytes shown.
+        // Pruned in the same window as the lines it describes. `passthrough_events`
+        // shipped with no cleanup at all and grew unbounded, so a new table gets
+        // its deletion in the same commit as its schema rather than a follow-up.
+        let _ = conn.execute(
+            "DELETE FROM ledger_folds WHERE ts < ?1",
+            params![ts_threshold],
+        );
+
         let _ = conn.execute(
             "DELETE FROM ledger_lines WHERE ts < ?1",
             params![ts_threshold],
@@ -2405,6 +2489,23 @@ impl SqliteBackend {
 }
 
 // ── v0.5.7 Row Types ─────────────────────────────────────────────────
+
+/// One fold's worth of evidence: whose lines it replaced, and how much.
+///
+/// Grouped by the caller so a payload folding twenty runs from one agent writes
+/// one row rather than twenty. The recipient is on the call, not the row, since
+/// it is the same for every fold in a payload.
+#[derive(Debug, Clone)]
+pub struct FoldRecord {
+    /// The agent that was shown these lines first, from `ledger_lines.agent_id`.
+    pub source_agent: String,
+    /// `session` or `project`. Kept as a string because it is read by SQL far
+    /// more often than by Rust, and a query should not have to know an enum's
+    /// discriminants.
+    pub origin: &'static str,
+    pub lines: usize,
+    pub bytes: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct PatternMemoryRow {

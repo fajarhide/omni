@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A fold now records what it drew on (#533, first step)**: `ledger_lines` says a line was *seen*. It cannot say a marker was ever issued against it, under which scope, or whose bytes it replaced, so the value of cross-agent reuse was unrecoverable from the corpus after the fact. `PROJECT_FLOOR_MULT = 3` prices exactly that case and was calibrated in #448 on cross-session repetition within a single agent, which is to say it has never been checked against the thing it charges for.
+
+  `ledger_folds` takes one row per (origin, source agent) per call, so the query that settles the open decision is a `GROUP BY` rather than a replay. `ledger_seen` returns the agent alongside the hash to make the source answerable at all, and `INSERT OR IGNORE` on the line table means that names the agent actually shown the line rather than the last one to repeat it.
+
+  **The decision the rows are for is deliberately not taken here.** Whether the project scope stays shared or becomes `(repo, agent)` is a choice between two unmeasured options until the corpus has run, and choosing early is what this project keeps refusing to do. Deletion ships in the same commit as the schema, pruned in the same window as the lines it describes, because `passthrough_events` shipped with no cleanup and grew unbounded.
+
 ## [0.7.4] - 2026-08-13
 
 A release about claims that were not true: a documented escape hatch that did
