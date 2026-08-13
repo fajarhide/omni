@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The 50 KB safety truncation kept the head and cut the answer (#508)**: on a 1,400 line synthetic log the cut returned 817 routine `status=200` lines and removed the single `RuntimeError: FATAL: connection pool exhausted` line, which was the last in the stream, under a footer reporting 42% saved. On the stdout of a failing command the answer is at the end: the stack trace, the exit reason, the last error before the process died. The cut is now a middle elision that reserves a fifth of the budget for the tail, so both ends survive.
+
+  **The elided middle is archived and the marker names the handle**, which was the half of #219 that never landed. Content over `MAX_REWIND_BYTES` is not offered to the store, and the marker then says nothing rather than promising a retrieval that would fail.
+
 ### Changed
 - **The README now demos the half we win on (#503)**: the existing pair shows `git log` compression, which is filter work, and filters are 2.7% on our own corpus against rtk's 6.2%. A new pair shows the ledger instead: the same file read twice in one session, where the second read comes back as one marker and a retrieval handle. Measured on 0.7.3 through the Homebrew binary, `cat src/guard/limits.rs` twice is 7.6 KB then 214 B, a 97.2% reduction on the second call.
 

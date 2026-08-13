@@ -1014,7 +1014,12 @@ pub fn process_payload(
 
     // Safety truncation, shared with `hooks::pipe` so the cap and its marker
     // cannot drift apart, this path spelled the limit `50_000` inline (#219).
-    crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
+    // The elided middle goes to the store so the marker can name a way back.
+    crate::util::text::truncate_with_marker(
+        &mut final_out,
+        crate::guard::limits::MAX_OUTPUT_BYTES,
+        |dropped| store.as_ref().and_then(|s| s.store_rewind(dropped)),
+    );
 
     // A passthrough hands back exactly what the command produced, so there is
     // nothing to replace. Emitting those identical bytes with a marker on top

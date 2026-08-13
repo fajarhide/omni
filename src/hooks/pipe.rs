@@ -546,7 +546,9 @@ fn distill(
             // Safety truncation. The marker carries the line count: `ps aux` lost
             // 416 of 556 rows here behind a bare `[OMNI: output truncated]` while
             // the footer reported it as a 62.2% saving (#219).
-            crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES);
+            crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES, |dropped| {
+                store.and_then(|s| s.store_rewind(dropped))
+            });
 
             (
                 out,
@@ -658,7 +660,9 @@ fn distill(
     // Safety truncation. The marker carries the line count: `ps aux` lost 416 of
     // 556 rows here behind a bare `[OMNI: output truncated]` while the footer
     // reported it as a 62.2% saving (#219).
-    crate::util::text::truncate_with_marker(&mut output, MAX_OUTPUT_BYTES);
+    crate::util::text::truncate_with_marker(&mut output, MAX_OUTPUT_BYTES, |dropped| {
+        store.and_then(|s| s.store_rewind(dropped))
+    });
 
     PipelineResult {
         session_id,
