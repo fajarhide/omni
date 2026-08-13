@@ -229,15 +229,7 @@ impl OmniServer {
     pub async fn omni_retrieve(&self, params: Parameters<OmniRetrieveParams>) -> String {
         let hash = params.0.hash;
         if let Some(content) = self.store.retrieve_rewind(&hash) {
-            // Record retrieve event for adaptive compression feedback loop
-            let cmd_prefix = self
-                .store
-                .find_command_for_hash(&hash)
-                .unwrap_or_else(|| "unknown".to_string());
-            let agent_id = std::env::var("OMNI_AGENT_ID")
-                .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
-            let family = crate::util::command_family::command_family(&cmd_prefix);
-            self.store.record_retrieve_event(&family, &hash, &agent_id);
+            self.store.record_rewind_pull(&hash);
             content
         } else {
             format!("Not found: {}", hash)
