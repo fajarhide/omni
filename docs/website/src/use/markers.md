@@ -30,6 +30,10 @@ project, and this agent has never seen them. The wording is deliberately not "al
 shown", because that would be false. Folding them is a bet that the agent will not
 need them, and it carries three times the profitability bar for that reason.
 
+That other session may also have been a different agent. The project history is keyed
+on the directory, so anything running in this repository contributes to it. See
+[what two agents share](../concepts/the-ledger.md#what-two-agents-in-one-repo-share).
+
 ```
 [N similar lines collapsed]
 ```

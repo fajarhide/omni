@@ -16,6 +16,13 @@ The short answer to "will OMNI still know my project after a month away" is yes 
 the conclusions and no for the raw bytes. The boundary that matters in practice:
 `omni retrieve` on content archived more than 30 days ago will not resolve.
 
+The ledger has one more way of forgetting that is not on a clock. **At compaction its
+session half is dropped entirely**, because compaction is where the agent stops
+holding what it was shown, and every "already shown" claim becomes false at the same
+moment. If folding seems to stop after a long session compacts, that is this, working.
+The project half survives, and [The ledger](../concepts/the-ledger.md#forget) explains
+the split.
+
 ## Pinning a goal
 
 ```sh

@@ -469,10 +469,17 @@ impl SqliteBackend {
             -- costs 16 bytes a line rather than a second copy of the corpus.
             -- WITHOUT ROWID because every read is a primary-key probe and the
             -- table is nothing but its key.
+            -- `agent_id` is recorded and read by nothing on the hook path (#509).
+            -- The project scope is the working directory and nothing else, so two
+            -- agents in one repo share a history and neither the fold nor the
+            -- marker can tell them apart. Keying on the agent would end that, and
+            -- would also give up whatever cross-agent reuse is real, which is the
+            -- question this column exists to answer before the key changes.
             CREATE TABLE IF NOT EXISTS ledger_lines (
                 scope     TEXT NOT NULL,
                 line_hash TEXT NOT NULL,
                 ts        INTEGER NOT NULL,
+                agent_id  TEXT NOT NULL DEFAULT 'unknown',
                 PRIMARY KEY (scope, line_hash)
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger_lines(ts);
@@ -751,6 +758,13 @@ impl SqliteBackend {
         );
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN filtered_tokens INTEGER DEFAULT 0",
+            [],
+        );
+        // #509. `INSERT OR IGNORE` keeps the first writer, so an existing row is
+        // the agent that first emitted that line into that scope and the default
+        // is honest about rows written before anyone was recorded.
+        let _ = conn.execute(
+            "ALTER TABLE ledger_lines ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'unknown'",
             [],
         );
         // #212: `output_bytes` is what the distiller returned, which is not the
@@ -1670,7 +1684,7 @@ impl SqliteBackend {
     /// One transaction and one cached statement for the whole batch: this is the
     /// loop where `prepare_cached` actually pays, unlike the one-shot statements
     /// a hook process runs once each.
-    pub fn ledger_record(&self, scope: &str, hashes: &[String]) {
+    pub fn ledger_record(&self, scope: &str, hashes: &[String], agent_id: &str) {
         let Ok(mut conn) = self.pool.get() else {
             return;
         };
@@ -1680,12 +1694,13 @@ impl SqliteBackend {
         };
         {
             let Ok(mut stmt) = tx.prepare_cached(
-                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts) VALUES (?1, ?2, ?3)",
+                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id)
+                 VALUES (?1, ?2, ?3, ?4)",
             ) else {
                 return;
             };
             for h in hashes {
-                let _ = stmt.execute(params![scope, h, ts]);
+                let _ = stmt.execute(params![scope, h, ts, agent_id]);
             }
         }
         let _ = tx.commit();
