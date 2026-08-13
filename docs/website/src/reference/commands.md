@@ -57,14 +57,10 @@ omni --mcp
 
 ## A note on how flags are parsed
 
-`clap` routes the subcommand and then hands each module the raw `env::args()`, so
-every module parses its own flags. Two consequences worth knowing:
+A match on the first argument routes the subcommand and hands the module the raw
+`env::args()`, so every module parses its own flags and declares its own accepted
+set. `cli::check_flags` rejects anything outside that set, which is what stops
+`omni stats --detial` printing the default overview and exiting 0.
 
-An unknown flag is not always an error. `omni stats --detial` once printed the default
-overview and exited 0, and `omni init --curser` ran the interactive default while
-installing nothing that was asked for. Check the output matches what you asked for.
-
-Per-command help is real and worth reading: `omni <command> --help`. A few commands
-(`exec`, `diff`, `remember`, `version`) fall through to a generic clap help that
-documents less than the module actually accepts. Where that happens, this reference
-records what the source accepts rather than what the help prints.
+Per-command help is real and worth reading: `omni <command> --help`. Where this
+reference and the help disagree, this records what the source accepts.

@@ -35,8 +35,7 @@ The `--` form is the one people reach for and the one that does not work.
 | `--agent <id>` | Record the run under a given `agent_id` |
 | `--help`, `-h` | Help |
 
-Neither appears in the generic clap help this command falls through to. They are real
-and are what the pre-hook uses when it rewrites a command into `omni exec`.
+Both are what the pre-hook uses when it rewrites a command into `omni exec`.
 
 `--session` is worth knowing when you are investigating ledger behaviour: it is the
 only way to drive two distinct sessions by hand and see the difference between an

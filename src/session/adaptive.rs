@@ -44,9 +44,13 @@ pub fn analyze(store: &Store, project_hash: &str) -> Vec<AdaptiveInsight> {
                 cmd, count
             ),
             affected_item: Some(cmd.clone()),
+            // `omni learn --loosen` went with the filter layer (#505), and
+            // there is no user-facing knob to suggest in its place. Naming the
+            // command and the count is the whole of what a reader can act on:
+            // the next step is an issue, not a config change.
             suggested_action: format!(
-                "Run `omni learn --loosen {}` to relax the filter.",
-                binary
+                "`{binary}` may be over-distilled. Open an issue at \
+                 github.com/fajarhide/omni with the raw output."
             ),
         });
     }
