@@ -1178,6 +1178,30 @@ impl SqliteBackend {
         Some(rewind_key)
     }
 
+    /// Records a handle pulled back into an agent's context, whichever door it
+    /// came through.
+    ///
+    /// `get_retrieve_rate` reads what this writes and raises the route
+    /// thresholds when a command family keeps needing its full output. The CLI
+    /// was not writing it, and the CLI is the door the mechanism advertises:
+    /// the marker prints `omni retrieve <handle>`, a shell command. Measured on
+    /// the maintainer's install before the fix, 49 pulls counted on
+    /// `rewind_store.retrieved` against 19 rows here (#512).
+    ///
+    /// Deliberately **not** inside `retrieve_rewind`. `store::query` reads
+    /// archived content to answer reports, and counting those would inflate the
+    /// rate with reads no agent asked for, which is the same defect in the
+    /// other direction.
+    pub fn record_rewind_pull(&self, hash: &str) {
+        let cmd = self
+            .find_command_for_hash(hash)
+            .unwrap_or_else(|| "unknown".to_string());
+        let agent_id = std::env::var("OMNI_AGENT_ID")
+            .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
+        let family = crate::util::command_family::command_family(&cmd);
+        self.record_retrieve_event(&family, hash, &agent_id);
+    }
+
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
         let conn = match self.pool.get() {
             Ok(c) => c,

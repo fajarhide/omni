@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A rewind pull counted only when it came through MCP (#512)**: `get_retrieve_rate` raises the route thresholds for a command family whose full output keeps being needed, and it reads `retrieve_events`. Only the MCP tool wrote there, while the marker prints `omni retrieve <handle>`, a shell command, so the mechanism advertised the door it did not count. Measured before the fix on the maintainer's install: 49 pulls on `rewind_store.retrieved` against 19 rows in `retrieve_events`. Both doors now call one `record_rewind_pull`, kept out of `retrieve_rewind` on purpose, because `store::query` reads archived content to answer reports and counting those would inflate the same rate from the other side.
+
+  **The rows that did land were keyed on a family nothing could ever match.** `command_family` returned the first whitespace token for anything unrecognised, so `OMNI_DB_PATH=/tmp/<uuid>/d.db cargo test` filed under the path itself, a per-invocation string, and 6 of the 19 existing rows are that shape. Leading `KEY=value` assignments are now skipped, with the key constrained to an environment name so `--replace=x` and paths carrying an `=` are left alone.
+
+### Changed
+- **Four diagrams, drawn from the code rather than from the docs**: where OMNI sits, in the README; the pipeline, on `The pipeline, stage by stage`; the ledger's fold decision, on `The ledger`; and one tool call's two hooks, on `Hooks`. Sources live in `docs/diagrams/` and export to `docs/website/src/media/`, so the site and the README read one file rather than two copies that drift. They are drawn in the manual's own tokens instead of a diagram-tool default.
+
+  **Drawing the pipeline found the page describing it backwards.** `Collapse` was documented as running before `Distill` and feeding it markers. That was true until #116 and wrong for the two releases since: both hooks score and distill the **raw** bytes, and the collapsed form is used only when the distilled one misses `beats_guardrail`. The prose and the stage summary are corrected. `kubectl_table_distills_from_raw_not_collapse_markers` was already pinning the real behaviour, so the code was right and only the description was wrong.
+
+  `media/architecture.svg` is deleted. Nothing referenced it, and it carried the drop shadows and mono-for-everything the new set avoids.
+
 ### Added
 - **The ledger records which agent it showed each line to (#509)**: `ledger_lines` was keyed `(scope, line_hash)` with no agent anywhere, and the project scope is the working directory string alone. Two agents in one repo therefore write into one history and read from it, so a fold can hand agent B a `from an earlier session` marker for bytes only agent A ever received, and nothing in the data could say how often that happens.
 

@@ -24,6 +24,9 @@ target/
 /.omni/
 /filters_compiled/
 *.html
+# The diagram sources are the editable original for everything under
+# docs/website/src/media; the blanket rule above would drop them silently.
+!docs/diagrams/*.html
 .agents
 # insta writes these when a snapshot fails; only the accepted .snap is reviewed
 *.snap.new

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 96 1000 856" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ledger-decision-title ledger-decision-desc">
+      <title id="ledger-decision-title">What the ledger folds</title>
+      <desc id="ledger-decision-desc">Four questions decide whether a run of output lines is replaced by a marker: whether it states a failure, whether it has been shown before, whether folding it saves more than the marker costs, and whether the archive write succeeded. Any no sends the lines out verbatim.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#56585A"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7A4E00"/></marker>
+      </defs>
+
+      <rect x="0" y="96" width="1000" height="856" fill="#E3E4E0"/>
+
+      <!-- ── arrows first ────────────────────────────────────────────────── -->
+
+      <!-- the spine -->
+      <line x1="380" y1="168" x2="380" y2="192" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="380" y1="280" x2="380" y2="312" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="392" y="284" width="24" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="404" y="293" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">NO</text>
+
+      <line x1="380" y1="400" x2="380" y2="432" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="392" y="404" width="28" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="406" y="413" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">YES</text>
+
+      <line x1="380" y1="504" x2="380" y2="536" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <line x1="380" y1="624" x2="380" y2="656" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="392" y="628" width="28" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="406" y="637" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">YES</text>
+
+      <line x1="380" y1="744" x2="380" y2="776" stroke="#7A4E00" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="392" y="748" width="28" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="406" y="757" fill="#7A4E00" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">YES</text>
+
+      <!-- the four ways out, every one of them straight to verbatim -->
+      <line x1="460" y1="240" x2="692" y2="240" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="500" y="212" width="28" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="514" y="221" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">YES</text>
+
+      <line x1="460" y1="360" x2="692" y2="360" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="500" y="332" width="24" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="512" y="341" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">NO</text>
+
+      <line x1="460" y1="584" x2="692" y2="584" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="500" y="556" width="24" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="512" y="565" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">NO</text>
+
+      <line x1="460" y1="704" x2="692" y2="704" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="500" y="676" width="24" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="512" y="685" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle">NO</text>
+
+      <!-- ── nodes ───────────────────────────────────────────────────────── -->
+
+      <!-- start -->
+      <rect x="284" y="120" width="192" height="48" rx="20" fill="#E3E4E0"/>
+      <rect x="284" y="120" width="192" height="48" rx="20" fill="rgba(86,88,90,0.10)" stroke="#8A8C8E" stroke-width="1"/>
+      <text x="380" y="149" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">A line of output</text>
+
+      <!-- d1 -->
+      <path d="M 380,192 L 460,240 L 380,288 L 300,240 Z" fill="#E3E4E0"/>
+      <path d="M 380,192 L 460,240 L 380,288 L 300,240 Z" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="380" y="238" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">states a</text>
+      <text x="380" y="252" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">failure?</text>
+
+      <!-- d2 -->
+      <path d="M 380,312 L 460,360 L 380,408 L 300,360 Z" fill="#E3E4E0"/>
+      <path d="M 380,312 L 460,360 L 380,408 L 300,360 Z" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="380" y="358" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">shown</text>
+      <text x="380" y="372" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">before?</text>
+
+      <!-- group -->
+      <rect x="268" y="432" width="224" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="268" y="432" width="224" height="72" rx="6" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="380" y="463" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Group with its neighbours</text>
+      <text x="380" y="481" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">one run, one origin</text>
+
+      <!-- d3 -->
+      <path d="M 380,536 L 460,584 L 380,632 L 300,584 Z" fill="#E3E4E0"/>
+      <path d="M 380,536 L 460,584 L 380,632 L 300,584 Z" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="380" y="578" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">pays for</text>
+      <text x="380" y="592" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">its marker?</text>
+      <!-- Left of the diamond, not under it: the spine runs down x=380. -->
+      <text x="288" y="576" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="end">150 B if this session</text>
+      <text x="288" y="592" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="end">saw it, 450 B if</text>
+      <text x="288" y="608" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="end">another one did</text>
+
+      <!-- d4 -->
+      <path d="M 380,656 L 460,704 L 380,752 L 300,704 Z" fill="#E3E4E0"/>
+      <path d="M 380,656 L 460,704 L 380,752 L 300,704 Z" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="380" y="702" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">archived</text>
+      <text x="380" y="716" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">first?</text>
+
+      <!-- the fold, focal -->
+      <rect x="268" y="776" width="224" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="268" y="776" width="224" height="72" rx="6" fill="rgba(122,78,0,0.08)" stroke="#7A4E00" stroke-width="1"/>
+      <text x="380" y="807" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">One marker, one handle</text>
+      <text x="380" y="825" fill="#7A4E00" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">the only case bytes shrink</text>
+
+      <!-- the verbatim rail -->
+      <rect x="692" y="192" width="216" height="560" rx="6" fill="#E3E4E0"/>
+      <rect x="692" y="192" width="216" height="560" rx="6" fill="rgba(22,22,26,0.05)" stroke="#56585A" stroke-width="1"/>
+      <rect x="700" y="200" width="44" height="12" rx="2" fill="transparent" stroke="rgba(86,88,90,0.40)" stroke-width="0.8"/>
+      <text x="722" y="209" fill="#56585A" font-size="7" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DEFAULT</text>
+      <text x="800" y="464" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Out verbatim</text>
+      <text x="800" y="484" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">and recorded as</text>
+      <text x="800" y="500" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">delivered</text>
+
+      <!-- ── legend ──────────────────────────────────────────────────────── -->
+      <line x1="44" y1="888" x2="956" y2="888" stroke="rgba(22,22,26,0.10)" stroke-width="0.8"/>
+      <text x="44" y="908" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <text x="124" y="908" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">Only lines that went out verbatim are recorded as shown. A folded run never reached the agent, so it is not.</text>
+      <text x="124" y="928" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">At compaction the session half of that record is dropped, because the premise it rests on stops being true.</text>
+    </svg>

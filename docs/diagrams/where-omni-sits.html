@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Where OMNI sits</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper:       #E3E4E0;
+      --paper-2:     #DBDCD6;
+      --ink:         #16161A;
+      --muted:       #56585A;
+      --rule:        #C6C8C1;
+      --accent:      #7A4E00;
+      --font-sans:    'IBM Plex Sans', system-ui, sans-serif;
+      --font-display: 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif;
+      --font-mono:    'IBM Plex Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 600; letter-spacing: -0.01em; line-height: 1.15;
+      color: var(--ink); margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · OMNI</p>
+    <h1>Where OMNI sits</h1>
+
+    <!-- viewBox crops to the drawn band: content runs y=112..560, plus 32px of air. -->
+    <svg viewBox="0 80 1000 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="where-omni-sits-title where-omni-sits-desc">
+      <title id="where-omni-sits-title">Where OMNI sits</title>
+      <desc id="where-omni-sits-desc">OMNI runs as two hooks around an agent's tool call: a pre-hook rewrites matched commands, and a post-hook distills the command's output before the agent reads it, archiving what it removes to a local SQLite database that omni retrieve reads back.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#56585A"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7A4E00"/></marker>
+      </defs>
+
+      <rect x="0" y="80" width="1000" height="500" fill="#E3E4E0"/>
+
+      <!-- ── arrows first, so nodes sit on top ───────────────────────────── -->
+
+      <!-- 1. agent → pre-hook -->
+      <line x1="216" y1="148" x2="296" y2="148" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="228" y="120" width="56" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="256" y="129" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TOOL CALL</text>
+
+      <!-- 2. pre-hook → command -->
+      <line x1="488" y1="148" x2="568" y2="148" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="496" y="120" width="64" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="528" y="129" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">REWRITTEN</text>
+
+      <!-- 3. command → post-hook (vertical) -->
+      <line x1="668" y1="184" x2="668" y2="280" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="688" y="220" width="48" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="712" y="229" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">STDOUT</text>
+
+      <!-- 4. pipeline → agent, the payoff -->
+      <line x1="440" y1="324" x2="224" y2="324" stroke="#7A4E00" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="272" y="296" width="104" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="324" y="305" fill="#7A4E00" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">DISTILLED REPLY</text>
+
+      <!-- 5. pipeline → db, archive (down) -->
+      <line x1="496" y1="360" x2="496" y2="416" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="404" y="382" width="52" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="430" y="391" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ARCHIVE</text>
+
+      <!-- 6. db → pipeline, the ledger read (up) -->
+      <line x1="568" y1="424" x2="568" y2="368" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="600" y="382" width="76" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="638" y="391" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SEEN BEFORE?</text>
+
+      <!-- 7. db → omni retrieve -->
+      <line x1="440" y1="456" x2="224" y2="456" stroke="#56585A" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <rect x="292" y="428" width="64" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="324" y="437" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ON DEMAND</text>
+
+      <!-- 8. omni retrieve → agent -->
+      <line x1="132" y1="424" x2="132" y2="368" stroke="#56585A" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+      <!-- ── nodes ───────────────────────────────────────────────────────── -->
+
+      <!-- agent host -->
+      <rect x="48" y="112" width="168" height="248" rx="6" fill="#E3E4E0"/>
+      <rect x="48" y="112" width="168" height="248" rx="6" fill="rgba(86,88,90,0.10)" stroke="#8A8C8E" stroke-width="1"/>
+      <rect x="56" y="120" width="36" height="12" rx="2" fill="transparent" stroke="rgba(86,88,90,0.40)" stroke-width="0.8"/>
+      <text x="74" y="129" fill="#56585A" font-size="7" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HOST</text>
+      <text x="132" y="224" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Agent host</text>
+      <text x="132" y="244" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">claude code · codex</text>
+      <text x="132" y="260" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">cursor · mcp hosts</text>
+
+      <!-- pre-hook -->
+      <rect x="304" y="112" width="184" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="304" y="112" width="184" height="72" rx="6" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <rect x="312" y="120" width="32" height="12" rx="2" fill="transparent" stroke="rgba(22,22,26,0.40)" stroke-width="0.8"/>
+      <text x="328" y="129" fill="#16161A" font-size="7" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HOOK</text>
+      <text x="396" y="154" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">PreToolUse</text>
+      <text x="396" y="171" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">omni --pre-hook</text>
+
+      <!-- the command -->
+      <rect x="576" y="112" width="184" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="576" y="112" width="184" height="72" rx="6" fill="rgba(22,22,26,0.03)" stroke="rgba(22,22,26,0.30)" stroke-width="1"/>
+      <rect x="584" y="120" width="36" height="12" rx="2" fill="transparent" stroke="rgba(22,22,26,0.30)" stroke-width="0.8"/>
+      <text x="602" y="129" fill="#56585A" font-size="7" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SHELL</text>
+      <text x="668" y="154" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">The command</text>
+      <text x="668" y="171" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">runs unchanged</text>
+
+      <!-- post-hook + pipeline, focal -->
+      <rect x="440" y="288" width="320" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="440" y="288" width="320" height="72" rx="6" fill="rgba(122,78,0,0.08)" stroke="#7A4E00" stroke-width="1"/>
+      <rect x="448" y="296" width="32" height="12" rx="2" fill="transparent" stroke="rgba(122,78,0,0.40)" stroke-width="0.8"/>
+      <text x="464" y="305" fill="#7A4E00" font-size="7" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HOOK</text>
+      <text x="600" y="330" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">PostToolUse · the pipeline</text>
+      <text x="600" y="347" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">sniff · score · distill · ledger</text>
+
+      <!-- the store -->
+      <rect x="440" y="424" width="184" height="64" rx="6" fill="#E3E4E0"/>
+      <rect x="440" y="424" width="184" height="64" rx="6" fill="rgba(22,22,26,0.05)" stroke="#56585A" stroke-width="1"/>
+      <rect x="448" y="432" width="32" height="12" rx="2" fill="transparent" stroke="rgba(86,88,90,0.40)" stroke-width="0.8"/>
+      <text x="464" y="441" fill="#56585A" font-size="7" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DISK</text>
+      <text x="532" y="462" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">omni.db</text>
+      <text x="532" y="478" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">never leaves the machine</text>
+
+      <!-- the recovery door -->
+      <rect x="48" y="424" width="168" height="64" rx="6" fill="#E3E4E0"/>
+      <rect x="48" y="424" width="168" height="64" rx="6" fill="rgba(22,22,26,0.02)" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="132" y="454" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">omni retrieve</text>
+      <text x="132" y="472" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">the original bytes</text>
+
+      <!-- ── legend ──────────────────────────────────────────────────────── -->
+      <line x1="48" y1="536" x2="952" y2="536" stroke="rgba(22,22,26,0.10)" stroke-width="0.8"/>
+      <text x="48" y="556" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <rect x="128" y="546" width="16" height="12" rx="2" fill="rgba(122,78,0,0.08)" stroke="#7A4E00" stroke-width="1"/>
+      <text x="152" y="556" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">where the work happens</text>
+
+      <rect x="316" y="546" width="16" height="12" rx="2" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="340" y="556" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">OMNI</text>
+
+      <rect x="412" y="546" width="16" height="12" rx="2" fill="rgba(22,22,26,0.03)" stroke="rgba(22,22,26,0.30)" stroke-width="1"/>
+      <text x="436" y="556" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">not ours</text>
+
+      <rect x="512" y="546" width="16" height="12" rx="2" fill="rgba(22,22,26,0.05)" stroke="#56585A" stroke-width="1"/>
+      <text x="536" y="556" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">state on disk</text>
+
+      <line x1="640" y1="552" x2="676" y2="552" stroke="#56585A" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="688" y="556" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">only when the agent asks</text>
+    </svg>
+  </div>
+</body>
+</html>

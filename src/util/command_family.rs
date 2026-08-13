@@ -1,12 +1,33 @@
+/// True for a leading shell variable assignment, `KEY=value`.
+///
+/// The key has to look like an environment name, so `--out=file` and a path
+/// carrying an `=` are not mistaken for one. Without this the family of
+/// `OMNI_DB_PATH=/tmp/x/d.db cargo test` was the path itself: a per-invocation
+/// string that can never match a later command, which is how `retrieve_events`
+/// filled with rows nothing could ever read back (#512).
+fn is_env_assignment(token: &str) -> bool {
+    match token.split_once('=') {
+        Some((key, _)) => {
+            !key.is_empty()
+                && !key.starts_with(|c: char| c.is_ascii_digit())
+                && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        None => false,
+    }
+}
+
 pub fn command_family(cmd: &str) -> String {
     let c = cmd.trim();
     if c.is_empty() {
         return "unknown".to_string();
     }
 
-    let mut parts = c.split_whitespace();
+    let mut parts = c.split_whitespace().skip_while(|t| is_env_assignment(t));
     let first = parts.next().unwrap_or("");
     let second = parts.next().unwrap_or("");
+    if first.is_empty() {
+        return "unknown".to_string();
+    }
 
     match first {
         "git" => match second {
@@ -53,5 +74,19 @@ mod tests {
     fn falls_back_to_binary() {
         assert_eq!(command_family("python script.py"), "python");
         assert_eq!(command_family(""), "unknown");
+    }
+
+    /// #512. The family is a key other commands have to match, so a leading
+    /// assignment carrying a per-invocation path made the row unreadable.
+    #[test]
+    fn skips_leading_environment_assignments() {
+        assert_eq!(
+            command_family("OMNI_DB_PATH=/tmp/a1b2/d.db cargo test foo"),
+            "cargo test"
+        );
+        assert_eq!(command_family("FOO=1 BAR=2 git status -s"), "git status");
+        // Not assignments: a long flag, and a bare assignment with nothing after it.
+        assert_eq!(command_family("rg --replace=x pattern"), "rg");
+        assert_eq!(command_family("FOO=1"), "unknown");
     }
 }

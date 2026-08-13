@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The pipeline, stage by stage</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper: #E3E4E0; --ink: #16161A; --muted: #56585A; --accent: #7A4E00;
+      --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+      --font-display: 'IBM Plex Sans Condensed', 'IBM Plex Sans', system-ui, sans-serif;
+      --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans); background: var(--paper); color: var(--ink);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 600; letter-spacing: -0.01em; line-height: 1.15; margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · OMNI</p>
+    <h1>The pipeline, stage by stage</h1>
+
+    <!-- viewBox crops to the drawn band: content runs y=140..560, plus air. -->
+    <svg viewBox="0 104 1000 496" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="the-pipeline-title the-pipeline-desc">
+      <title id="the-pipeline-title">The pipeline, stage by stage</title>
+      <desc id="the-pipeline-desc">A command's output passes a format sniff that sends structured payloads through untouched, is scored and then distilled from the raw bytes, and only falls back to line collapse when the distilled form fails the guardrail, before the ledger folds what was already shown.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#56585A"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#7A4E00"/></marker>
+      </defs>
+
+      <rect x="0" y="104" width="1000" height="496" fill="#E3E4E0"/>
+
+      <!-- ── arrows first ────────────────────────────────────────────────── -->
+
+      <!-- rail: sniff → score → distill -->
+      <line x1="204" y1="176" x2="220" y2="176" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="388" y1="176" x2="404" y2="176" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- rail: ledger → route -->
+      <line x1="756" y1="176" x2="772" y2="176" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- distill → the guardrail -->
+      <line x1="492" y1="212" x2="492" y2="260" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- guardrail YES → ledger (elbow, up into the bottom edge) -->
+      <path d="M 552,300 H 668 Q 676,300 676,292 V 220" fill="none" stroke="#7A4E00" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <rect x="576" y="272" width="28" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="590" y="281" fill="#7A4E00" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+
+      <!-- guardrail NO → collapse -->
+      <line x1="492" y1="340" x2="492" y2="364" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="508" y="346" width="24" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="520" y="355" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+
+      <!-- collapse → ledger (elbow) -->
+      <path d="M 572,404 H 628 Q 636,404 636,396 V 220" fill="none" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- sniff → out, the format-safe exit -->
+      <line x1="124" y1="212" x2="124" y2="444" stroke="#56585A" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <rect x="140" y="300" width="72" height="12" rx="2" fill="#E3E4E0"/>
+      <text x="176" y="309" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" text-anchor="middle" letter-spacing="0.06em">STRUCTURED</text>
+
+      <!-- ── nodes ───────────────────────────────────────────────────────── -->
+
+      <!-- 1. sniff -->
+      <rect x="44" y="140" width="160" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="44" y="140" width="160" height="72" rx="6" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="124" y="176" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Sniff</text>
+      <text x="124" y="193" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">json · yaml · csv · tsv</text>
+
+      <!-- 2. score -->
+      <rect x="228" y="140" width="160" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="228" y="140" width="160" height="72" rx="6" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="308" y="176" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Score</text>
+      <text x="308" y="193" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">tiers every block</text>
+
+      <!-- 3. distill, focal: it reads the raw bytes -->
+      <rect x="412" y="140" width="160" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="412" y="140" width="160" height="72" rx="6" fill="rgba(122,78,0,0.08)" stroke="#7A4E00" stroke-width="1"/>
+      <text x="492" y="176" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Distill</text>
+      <text x="492" y="193" fill="#7A4E00" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">reads the RAW bytes</text>
+
+      <!-- 4. ledger -->
+      <rect x="596" y="140" width="160" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="596" y="140" width="160" height="72" rx="6" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="676" y="176" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Ledger</text>
+      <text x="676" y="193" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">fold what was shown</text>
+
+      <!-- 5. route and persist -->
+      <rect x="772" y="140" width="184" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="772" y="140" width="184" height="72" rx="6" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="864" y="176" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Route &amp; persist</text>
+      <text x="864" y="193" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">keep · soft · passthrough</text>
+
+      <!-- the guardrail decision -->
+      <path d="M 492,260 L 552,300 L 492,340 L 432,300 Z" fill="#E3E4E0"/>
+      <path d="M 492,260 L 552,300 L 492,340 L 432,300 Z" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="492" y="296" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">beats the</text>
+      <text x="492" y="310" fill="#16161A" font-size="11" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">guardrail?</text>
+
+      <!-- the fallback -->
+      <rect x="412" y="364" width="160" height="72" rx="6" fill="#E3E4E0"/>
+      <rect x="412" y="364" width="160" height="72" rx="6" fill="rgba(22,22,26,0.02)" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="492" y="396" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Collapse</text>
+      <text x="492" y="413" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">the fallback, not a stage</text>
+
+      <!-- the untouched exit -->
+      <rect x="44" y="444" width="320" height="64" rx="6" fill="#E3E4E0"/>
+      <rect x="44" y="444" width="320" height="64" rx="6" fill="rgba(22,22,26,0.05)" stroke="#56585A" stroke-width="1"/>
+      <text x="204" y="474" fill="#16161A" font-size="12" font-weight="600" font-family="'IBM Plex Sans', sans-serif" text-anchor="middle">Out, byte for byte</text>
+      <text x="204" y="492" fill="#56585A" font-size="9" font-family="'IBM Plex Mono', monospace" text-anchor="middle">unsure means structured</text>
+
+      <!-- ── legend ──────────────────────────────────────────────────────── -->
+      <line x1="44" y1="540" x2="956" y2="540" stroke="rgba(22,22,26,0.10)" stroke-width="0.8"/>
+      <text x="44" y="560" fill="#56585A" font-size="8" font-family="'IBM Plex Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+      <rect x="124" y="550" width="16" height="12" rx="2" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="148" y="560" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">stage</text>
+
+      <path d="M 236,556 L 250,550 L 264,556 L 250,562 Z" fill="#ffffff" stroke="#16161A" stroke-width="1"/>
+      <text x="276" y="560" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">decision</text>
+
+      <rect x="356" y="550" width="16" height="12" rx="2" fill="rgba(22,22,26,0.02)" stroke="rgba(22,22,26,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="380" y="560" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">fallback, only when the stage above failed</text>
+
+      <line x1="668" y1="556" x2="704" y2="556" stroke="#7A4E00" stroke-width="1.4"/>
+      <text x="716" y="560" fill="#56585A" font-size="9" font-family="'IBM Plex Sans', sans-serif">the path a working distiller takes</text>
+    </svg>
+  </div>
+</body>
+</html>

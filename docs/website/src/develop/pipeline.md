@@ -1,11 +1,16 @@
 # The pipeline, stage by stage
 
+![The pipeline: sniff, score and distill run on the raw bytes, collapse is a fallback taken only when the distilled form fails the guardrail, then the ledger folds what was already shown.](../media/the-pipeline.svg)
+
 ```
-Read → Guard → Score → Collapse → Distill → Persist
+Read → Guard → Score → Distill → [Collapse] → Ledger → Route → Persist
 ```
 
 The order is fixed. This page is about what each stage may and may not do, which is
 where the bugs live.
+
+The brackets around Collapse are the part people get wrong, including this page until
+recently. It is a fallback, not a step.
 
 ## Guard
 
@@ -39,10 +44,15 @@ Pure function. No IO.
 
 Runs of near-identical lines become `[N similar lines collapsed]`.
 
-Two things about this stage catch people out.
+**It runs after Distill, and only when Distill did not earn its keep.** Both hooks
+score and distill the **raw** content, then ask `beats_guardrail`; only if that fails
+does the collapsed form get used instead. A distiller therefore sees the original
+text, never collapse markers.
 
-**It runs before Distill.** Distillers are fed collapse markers, not raw output. A
-distiller written as though it sees the original text will misread it.
+This page said the opposite until 0.7.4, which was true before #116 and wrong for two
+releases after it. The behaviour is pinned by
+`kubectl_table_distills_from_raw_not_collapse_markers`: the bug it guards against is a
+column parser reading `[30 similar lines collapsed]` as a pod row.
 
 **The mode is picked by specificity.** A `kubectl … | grep` payload exercises the
 Infra path rather than the Log path, so a fixture chosen to test a collapse guard can
