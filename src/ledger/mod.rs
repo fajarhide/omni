@@ -82,6 +82,28 @@ impl Origin {
         }
     }
 
+    /// What to say when the fold covered the payload and nothing else came back.
+    ///
+    /// `N lines already shown` is a claim about a *run*, and it reads as one:
+    /// some of this was shown before, the rest is new. When the run is the whole
+    /// output there is no rest, and the same wording leaves a reader unable to
+    /// tell a fully elided reply from a command that printed nothing. Re-running
+    /// a command is how a failure gets verified and how a fix gets confirmed, so
+    /// reading `no output` there is the expensive misreading (#519).
+    ///
+    /// It states the identity instead, which is the fact the re-run was asking
+    /// for and is strictly more information than the run wording carried.
+    fn whole_output_marker(self, lines: usize, handle: &str) -> String {
+        match self {
+            Self::Session => format!(
+                "[OMNI: identical to the {lines} lines already shown, omni retrieve {handle}]"
+            ),
+            Self::Project => format!(
+                "[OMNI: identical to {lines} lines from an earlier session, omni retrieve {handle}]"
+            ),
+        }
+    }
+
     /// The bytes a fold has to save, after paying for its own marker.
     ///
     /// Session scope pays a marker. Project scope pays a marker **and** the
@@ -300,8 +322,24 @@ impl<'a> Ledger<'a> {
             // than the marker replacing it costs. The marker is rendered rather
             // than estimated, so the test cannot drift from the string it is
             // weighing, and the handle's length is fixed (#450).
+            // One run covering every line means the reply is this marker and
+            // nothing else, which needs different wording (#519). Decided here
+            // rather than at the emit site so the affordability test below weighs
+            // the string that will actually be sent: the whole-output wording is
+            // longer, and the first draft of this weighed the short one and
+            // emitted the long one, which is the drift the rest of this comment
+            // exists to prevent.
+            let covers_everything = run.start == 0 && run.end == lines.len();
+            let render = |o: Origin, handle: &str| {
+                if covers_everything {
+                    o.whole_output_marker(run.end - run.start, handle)
+                } else {
+                    o.marker(run.end - run.start, handle)
+                }
+            };
+
             let long_enough = run.seen.is_some_and(|o| {
-                let marker = o.marker(run.end - run.start, &"0".repeat(HANDLE_LEN)).len();
+                let marker = render(o, &"0".repeat(HANDLE_LEN)).len();
                 body.len() >= marker + o.min_gain()
             });
 
@@ -315,7 +353,7 @@ impl<'a> Ledger<'a> {
                 .zip(run.seen)
             {
                 Some((handle, origin)) => {
-                    out.push_str(&origin.marker(run.end - run.start, &handle));
+                    out.push_str(&render(origin, &handle));
                     // The run carried its own terminator, so the marker needs one
                     // only when the text it replaced ended a line. A run at the
                     // very end of an output with no trailing newline does not.
