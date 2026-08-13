@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The 50 KB safety truncation kept the head and cut the answer (#508)**: on a 1,400 line synthetic log the cut returned 817 routine `status=200` lines and removed the single `RuntimeError: FATAL: connection pool exhausted` line, which was the last in the stream, under a footer reporting 42% saved. On the stdout of a failing command the answer is at the end: the stack trace, the exit reason, the last error before the process died. The cut is now a middle elision that reserves a fifth of the budget for the tail, so both ends survive.
+
+  **The elided middle is archived and the marker names the handle**, which was the half of #219 that never landed. Content over `MAX_REWIND_BYTES` is not offered to the store, and the marker then says nothing rather than promising a retrieval that would fail.
+
+### Removed
+- **The TOML filter layer is gone (#505, finishing #449)**: `signals/` (48 files), `src/pipeline/toml_filter.rs` (1,364 lines), the `rust-embed` dependency, `omni learn`, the `omni_learn` MCP tool, `omni doctor --test-filter / --benchmark / --coverage / --validate`, and the stream-mode path that only TOML filters could select.
+
+  **Re-measured on 0.7.3 over the same 6,656-trace corpus with `load_all_filters` stubbed to empty:** the aggregate is 2.7% / 14.9% with the layer and 2.7% / 14.9% without it. Ledger-arm bytes move 5,506,126 to 5,508,144, so the whole layer was worth **2,018 bytes over 6,656 commands, 0.031% of the corpus**, and infra scored better without it (4.4% / 8.2% becomes 4.7% / 8.5%). Measured by removal on the release binary, 40 interleaved runs each, it cost **5 to 7 ms per hook** against a 10 ms budget, with p90 going 21.4 ms to 10.5 ms.
+
+  **Reproduced on this branch**, 40 interleaved runs of the release binary against a 121-line `kubectl get pods -A` payload: median 16.5 ms to 11.1 ms, p90 18.0 ms to 12.3 ms, and both binaries emit a byte-identical 122 B, so the Rust distiller does the same job unaided. The three removals together take the release binary from 9,925,456 to 9,173,952 bytes.
+
+  **What replaces it: nothing.** A tool that needs handling gets a Rust distiller, which is snapshot-tested and cannot be shadowed by whichever regex matched first, the failure #110 filed twice. `omni_find_noise` still reports recurring patterns, now as a finding with its sample line rather than as a TOML snippet to paste. `src/session/correction.rs` went with it: it was reachable only from `omni learn`.
+
+- **clap, and the second dispatch table it needed (#506)**: `OmniArgs` and `OmniCommand` were 141 lines of derive, and 15 of 17 arms matched `Some(OmniCommand::X { .. })`, discarded every field clap had filled in, and handed the raw `env::args()` to a module that parsed it again. 18 files under `src/cli/` do that second parse. What clap actually decided was seven hidden boolean flags, which is now a 15-line scan.
+
+  **Collapsing the two dispatch tables found a real gap.** `remember` and `goal` existed only in the clap arm and were absent from the `external_subcommand` fallback, so anything clap failed to classify as a subcommand reached `unknown` and exited 1. `omni init --curser` had the same shape in reverse: the fallback's `init` arm was `let _ = run_init(&args)`, swallowing the error #151 was filed for while the clap arm handled it correctly. Both are fixed by there being one table.
+
+  **`omni remember` was the one subcommand that used clap's result**, so it hand-parses now through the same `check_flags` every other subcommand uses. Its `--project-scoped` was `default_value_t = true` on a plain bool, meaning the flag could not change anything and global scope was unreachable despite the help text calling it the default; `--global` is the half that was missing.
+
+- **Three dependencies that were paying for nothing (#507)**: `is-terminal` is `std::io::IsTerminal`, stable since 1.70 against a pinned 1.97, and `src/hooks/pipe.rs` was the only importer while every call site in it already wrote `std::io::stdout().is_terminal()`. `tempfile` was listed under both `[dependencies]` and `[dev-dependencies]` while every use of it under `src/` sits inside `#[cfg(test)]`. `benches/pipeline.rs` and its `[[bench]]` target were 50 lines behind `criterion` that neither CI nor the `Makefile` ever invoked, for a method the project measured and rejected: the shipped latency figure came from A/B on the release binary after a unit-test timer overstated the same number by roughly 2x.
+
+  `cargo tree --edges normal` goes 220 to 218 unique crates, and the full tree 265 to 237. No runtime behaviour changes.
+
 ### Changed
 - **The README now demos the half we win on (#503)**: the existing pair shows `git log` compression, which is filter work, and filters are 2.7% on our own corpus against rtk's 6.2%. A new pair shows the ledger instead: the same file read twice in one session, where the second read comes back as one marker and a retrieval handle. Measured on 0.7.3 through the Homebrew binary, `cat src/guard/limits.rs` twice is 7.6 KB then 214 B, a 97.2% reduction on the second call.
 

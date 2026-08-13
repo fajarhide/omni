@@ -7,7 +7,6 @@ pub mod producer;
 pub mod registry;
 pub mod scorer;
 pub mod semantic;
-pub mod toml_filter;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};

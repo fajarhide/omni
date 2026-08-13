@@ -3,7 +3,6 @@
 
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
-use crate::session::learn::detect_patterns;
 use crate::store::sqlite::Store;
 
 use rmcp::handler::server::wrapper::Parameters;
@@ -112,12 +111,6 @@ pub struct OmniServer {
 #[derive(Deserialize, JsonSchema)]
 pub struct OmniRetrieveParams {
     pub hash: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct OmniLearnParams {
-    pub text: String,
-    pub apply: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -344,54 +337,6 @@ impl OmniServer {
             }
             other => format!("Unknown action '{}'. Use: get, set, list, forget.", other),
         }
-    }
-
-    #[tool(
-        name = "omni_learn",
-        description = "Detect noise patterns in text and suggest TOML filters"
-    )]
-    pub async fn omni_learn(&self, params: Parameters<OmniLearnParams>) -> String {
-        let text = params.0.text;
-        let apply = params.0.apply;
-        // 1. Run real pattern detection
-        let candidates = detect_patterns(&text);
-
-        if candidates.is_empty() {
-            return "No significant noise patterns detected. \
-                    Input has high signal diversity, no filter needed."
-                .to_string();
-        }
-
-        // 2. Format report with real candidates
-        let mut report = format!("Detected {} noise patterns:\n\n", candidates.len());
-        for (i, c) in candidates.iter().enumerate() {
-            report.push_str(&format!(
-                "  [{}] \"{}\", {} occurrences (confidence: {:.0}%)\n      Action: {:?}\n      Sample: {}\n\n",
-                i + 1,
-                c.trigger_prefix,
-                c.count,
-                c.confidence * 100.0,
-                c.suggested_action,
-                &c.sample_line[..c.sample_line.len().min(80)]
-            ));
-        }
-
-        // #449 removed every filter tier outside the binary, so `apply` has
-        // nowhere to write. Reporting a successful install to a file nothing
-        // reads is the fabrication class this project files issues about, so it
-        // says what is true instead.
-        if apply {
-            report.push_str(
-                "\n! Not applied: OMNI's filters are compiled into the binary, so there is no file to write.\n  The patterns above are the finding; open an issue if a tool needs its own signal.",
-            );
-        } else {
-            report.push_str(&format!(
-                "Run omni_learn with apply=true to save {} filters automatically.",
-                candidates.len()
-            ));
-        }
-
-        report
     }
 
     #[tool(
@@ -1033,7 +978,6 @@ impl OmniServer {
                 traces.len()
             );
         }
-        let toml_snippet = crate::session::learn::generate_toml(&patterns, "omni_auto_noise", None);
         let mut out = format!(
             "OMNI Noise Analysis (from {} recent traces):\n\n",
             traces.len()
@@ -1041,16 +985,19 @@ impl OmniServer {
         out.push_str("Identified repetitive patterns:\n");
         for (i, p) in patterns.iter().take(5).enumerate() {
             out.push_str(&format!(
-                "{}. Prefix: '{}' (count: {}, conf: {:.2})\n",
+                "{}. Prefix: '{}' (count: {}, conf: {:.2})\n   e.g. {}\n",
                 i + 1,
                 p.trigger_prefix,
                 p.count,
-                p.confidence
+                p.confidence,
+                crate::util::text::safe_slice(&p.sample_line, 100)
             ));
         }
-        out.push_str("\nSuggested TOML Signal (add to ~/.omni/signals/user.toml):\n\n```toml\n");
-        out.push_str(&toml_snippet);
-        out.push_str("\n```");
+        out.push_str(
+            "\nThese are a finding, not a filter. OMNI's TOML filter layer was retired in #505 \
+             after measuring at 2,018 bytes over 6,656 commands against 5 to 7 ms per hook, \
+             so a recurring pattern here is the case for a distiller, not a config file.",
+        );
         out
     }
 
@@ -1111,7 +1058,7 @@ impl OmniServer {
              \n  Hot files tracked:  {}\
              \n\
              \nTip: Call omni_history() for per-command breakdown.\
-             \n     Call omni_learn(noisy_output) to improve future compression.",
+             ",
             method,
             tilde,
             tilde,
@@ -1590,79 +1537,6 @@ mod tests {
             .await;
         assert!(density.contains("Signal analysis:"));
         assert!(density.contains("Critical:"));
-    }
-
-    #[tokio::test]
-    async fn test_omni_learn_detects_patterns() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let session = Arc::new(Mutex::new(SessionState::new()));
-
-        let server = OmniServer { store, session };
-        // 5+ repetitive lines should produce real candidate output
-        let repetitive = "Compiling foo v1.0\n".repeat(6);
-        let out = server
-            .omni_learn(Parameters(OmniLearnParams {
-                text: repetitive,
-                apply: false,
-            }))
-            .await;
-        assert!(
-            out.contains("noise patterns"),
-            "expected pattern report, got: {out}"
-        );
-        assert!(
-            out.contains("occurrences"),
-            "expected occurrence count, got: {out}"
-        );
-        assert!(
-            out.contains("confidence"),
-            "expected confidence score, got: {out}"
-        );
-        assert!(
-            out.contains("apply=true"),
-            "expected apply hint, got: {out}"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_omni_learn_no_patterns_on_diverse_input() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let session = Arc::new(Mutex::new(SessionState::new()));
-
-        let server = OmniServer { store, session };
-        let diverse = "alpha bravo charlie\ndelta echo foxtrot\ngolf hotel india\n";
-        let out = server
-            .omni_learn(Parameters(OmniLearnParams {
-                text: diverse.to_string(),
-                apply: false,
-            }))
-            .await;
-        assert!(
-            out.contains("No significant noise patterns"),
-            "expected no-patterns message, got: {out}"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_omni_learn_reports_what_it_would_apply() {
-        let dir = tempdir().unwrap();
-        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let session = Arc::new(Mutex::new(SessionState::new()));
-
-        let server = OmniServer { store, session };
-        let repetitive = "Downloading dep v1.0\n".repeat(6);
-        let out = server
-            .omni_learn(Parameters(OmniLearnParams {
-                text: repetitive,
-                apply: false,
-            }))
-            .await;
-        assert!(
-            out.contains("filters"),
-            "expected a report of the detected patterns, got: {out}"
-        );
     }
 
     // ── Phase 2 MCP Tests ──

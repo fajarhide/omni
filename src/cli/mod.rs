@@ -5,7 +5,6 @@ pub mod engram;
 pub mod exec;
 pub mod goal;
 pub mod init;
-pub mod learn;
 
 pub mod patterns;
 pub mod query;

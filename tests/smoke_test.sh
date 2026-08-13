@@ -82,7 +82,6 @@ HELP_OUT=$("$OMNI" help 2>&1)
 check "help shows init" "$HELP_OUT" "init"
 check "help shows stats" "$HELP_OUT" "stats"
 check "help shows session" "$HELP_OUT" "session"
-check "help shows learn" "$HELP_OUT" "learn"
 check "help shows doctor" "$HELP_OUT" "doctor"
 check "help shows reset" "$HELP_OUT" "reset"
 check "help shows diff" "$HELP_OUT" "diff"
@@ -179,12 +178,6 @@ if echo "$SHARE_OUT" | grep -q "OMNI saved me"; then
 else
     check "share card says so when there is no data" "$SHARE_OUT" "No data yet"
 fi
-
-# ─── 8. Learn ────────────────────────────────────────────
-echo "▸ Scenario 8: Learn"
-LEARN_OUT=$(cat tests/fixtures/cargo_build_errors.txt | "$OMNI" learn 2>&1 || true)
-LEARN_EXIT=$?
-check_exit "learn exits cleanly" "$LEARN_EXIT" "0"
 
 # ─── 9. MCP Server ───────────────────────────────────────
 echo "▸ Scenario 9: MCP Server"
@@ -287,7 +280,7 @@ check "session json has context_pressure" "$SESSION_JSON" "context_pressure"
 #
 # This lives in the smoke test because it is a property of the shipped binary's
 # surface, and `cargo test` never runs this file.
-for SUB in diff doctor engram goal init learn patterns query remember reset session stats update version; do
+for SUB in diff doctor engram goal init patterns query remember reset session stats update version; do
     # `&& RC=0 || RC=$?` rather than `$?` on the next line: this script runs
     # under `set -e`, and a bare non-zero command would end the run here, which
     # is the outcome the check is looking for.

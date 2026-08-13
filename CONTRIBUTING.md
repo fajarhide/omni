@@ -68,9 +68,9 @@ It runs **before** Distill, so distillers are fed collapse markers rather than r
 output. Collapse mode is picked by specificity: a `kubectl … | grep` payload takes the
 Infra path, not the Log path.
 
-**Distill** picks a filter via `registry::resolve_profile(command)` and runs it. A
-matching TOML signal in `signals/` short-circuits this stage entirely, so check there
-before concluding anything about the Rust code.
+**Distill** picks a distiller via `registry::resolve_profile(command)` and runs it. The
+TOML layer that used to short-circuit this stage was retired in 0.7.4, so the Rust code
+is now the only thing that can claim a command.
 
 **Persist** archives the raw input by SHA-256, then writes the marker. That order is
 not negotiable: a failed archive must leave the run verbatim, or you get a marker
@@ -96,11 +96,10 @@ src/
 ├── hooks/           entry points and the dispatcher
 ├── ledger/          cross-turn line dedup
 ├── mcp/             MCP server, 26 tools
-├── pipeline/        scorer, collapse, registry, format gate, toml filters
-├── session/         tracking, learning, correction
+├── pipeline/        scorer, collapse, registry, format gate
+├── session/         tracking, noise detection
 ├── store/           SQLite and transcripts
 └── util/            command families, token estimation
-signals/             45 TOML signals, compiled into the binary
 ```
 
 **Library first.** `main.rs` is thin. Logic lives in `lib.rs` and its submodules.
@@ -143,47 +142,18 @@ rather than in each author remembering, so it holds for all 12 by construction.
 4. Add a snapshot test, run `cargo test`, then `cargo insta review`.
 5. **Break the rule deliberately and watch the test go red before restoring it.**
 
-## Adding a signal
+## There is no signal layer any more
 
-A file in `signals/tools/`, compiled into the binary. There is no filter path on disk.
+The TOML filter layer, `signals/`, `omni learn` and `omni doctor --test-filter` were
+all retired in 0.7.4 (#505). Measured over 6,656 recorded commands the layer moved
+2,018 bytes, 0.031% of the corpus, and infrastructure commands scored better without
+it. It cost 5 to 7 ms of a 10 ms hook budget, about a third of the total, and removing
+it collapsed the p90 from 21.4 ms to 10.5 ms.
 
-```toml
-schema_version = 1
-
-[filters.my_tool]
-description = "Drop my-tool's progress chatter"
-match_command = "^my-tool\\b"
-strip_lines_matching = ["^DEBUG", "^TRACE"]
-max_lines = 50
-on_empty = "my-tool: no issues"
-
-[[tests.my_tool]]
-name = "keeps the diagnostic"
-input = "DEBUG: starting\nsrc/x.ts:3:10  error  'foo' unused"
-expected = "src/x.ts:3:10  error  'foo' unused"
-```
-
-```bash
-omni learn --verify
-```
-
-Match narrowly. A `match_command` slightly too wide fails silently: it claims the
-tool, saves nothing, and stops the correct filter from ever running. That happened
-with `biome` and `eslint`, and the comment recording it is still in the file.
-
-Never strip the error channel (`^\[stderr\]`), structure (`^metadata:`, `^spec:`, code
-fences), or anything stating a failure. `omni learn --discover` will suggest all of
-those, because its learner treats "repeated" as "noise". Read its output line by line
-and never paste it wholesale.
-
-`on_empty` is what the agent reads when everything was stripped. Do not write a
-verdict there; if your patterns were too wide, it is a false one.
-
-> No config from the tree. OMNI reads no filter file from disk, neither a project's
-> `.omni/signals/` nor `~/.omni/signals/`. The project tier existed behind a trust
-> gate that hashed one file and admitted another, and it was deleted rather than
-> repaired. Do not reintroduce a tier that lets a checkout decide what an agent is
-> shown.
+Do not reintroduce a pattern-matching tier, and above all do not reintroduce one that
+reads from disk: a checkout must never decide what an agent is shown. A tool that
+needs handling gets a Rust distiller, which is testable, snapshot-covered, and cannot
+be shadowed by a regex that merely matched first.
 
 ## Measure before you build
 

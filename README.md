@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Your agent reads everything your terminal prints, then reads most of it again next turn.</b> OMNI drops the noise before the model sees it, and hands back a reference for the lines it has already shown. Nothing is deleted, and it never invents a result.</em>
+    <em><b>Stop paying to re-read the same output.</b> OMNI turns repeated bytes into retrievable handles: 97.2% off a file your agent reads twice, 14.9% across 6,656 real commands. Nothing deleted, nothing invented, and every number replays on your own corpus.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -236,13 +236,12 @@ Measurably, yes, and the cost grows with your history rather than with the paylo
 205 MB one. Budget for it. `OMNI_PASSTHROUGH=1` skips the pipeline entirely.
 
 **Can I add my own filters?**
-No, and that is deliberate as of 0.7.0. The filters are compiled into the binary, so the
-set that runs is the set the tests cover and there is no file on disk that changes what your
-agent is shown. Two tiers were removed to get there: a project's own `.omni/signals/`, which
-made a filter a thing a repository could ship to its visitors, and `~/.omni/signals/`. The
-whole filter layer is worth 804 bytes over 6,656 recorded commands, so what it cost in
-surface it was not paying back. If a tool needs a signal, open an issue and it ships in the
-binary for everyone.
+There are no filters to add. The pattern-matching layer was retired in 0.7.4 after it
+measured at 2,018 bytes over 6,656 recorded commands, 0.031% of the corpus, while costing
+5 to 7 ms of the hook's 10 ms budget. On infrastructure commands the corpus was better
+without it. What remains is the Rust distillers and the ledger, both compiled in, so the
+set that runs is the set the tests cover. If a tool needs handling, open an issue and it
+ships in the binary for everyone.
 
 **How do I get back something OMNI folded?**
 `omni retrieve <handle>`, where the handle is the 16 characters inside the marker. It works

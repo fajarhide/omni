@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Agen Anda membaca setiap baris yang dicetak terminal, lalu membaca sebagian besarnya lagi di giliran berikutnya.</b> OMNI membuang noise-nya sebelum model melihat, dan mengembalikan sebuah rujukan untuk baris yang sudah pernah ditunjukkan. Tidak ada yang dihapus, dan ia tidak pernah mengarang hasil.</em>
+    <em><b>Berhenti membayar untuk membaca ulang output yang sama.</b> OMNI mengubah byte berulang menjadi handle yang bisa diambil kembali: 97,2% untuk berkas yang dibaca agen Anda dua kali, 14,9% pada 6.656 perintah nyata. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa Anda putar ulang pada korpus Anda sendiri.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)

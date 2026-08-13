@@ -1,4 +1,3 @@
-use crate::pipeline::toml_filter;
 use crate::pipeline::{DistillResult, Route, SessionState, collapse, format, scorer};
 use crate::store::sqlite::Store;
 use serde::Serialize;
@@ -569,49 +568,13 @@ pub fn process_payload(
 
     // Which single command produced this stdout, if any. `None` means a chain
     // whose output belongs to several programs, and every routing decision below
-    // has to stand down for it: a TOML filter keyed on `^git\b` claims
-    // `git status && find .` exactly as the git distiller did (#264).
+    // has to stand down for it: `git status && find .` was claimed by anything
+    // keyed on `^git\b`, exactly as the git distiller did (#264).
     let output_command = crate::pipeline::registry::sole_output_command(clean_command);
-
-    // TOML-first: try matching command against TOML filters
-    let toml_filters = toml_filter::load_all_filters();
-    let toml_match = match output_command {
-        Some(cmd) if !cmd.is_empty() => toml_filters.iter().find(|f| f.matches(cmd)),
-        _ => None,
-    };
-
-    // A TOML filter only gets to short-circuit the distiller if it actually beat
-    // the guardrail, the same rule `hooks::pipe` already applies. Without it the
-    // broad `signals/domains/*.toml` filters win the alphabetical `find()` race
-    // for cargo, npm, docker, kubectl and terraform while stripping only a few
-    // lines, shadowing the distiller that would have summarised the same input
-    // (#110). Weak filter, fall through; a filter that earns its match still wins.
-    let toml_hit = match toml_match {
-        Some(f) => match f.apply_batch(&content) {
-            toml_filter::BatchFilterOutcome::Passthrough => {
-                // The filter matched but produced no explicit zero-state.
-                // Returning `None` is the hook protocol's fail-open path: the
-                // host keeps its original bytes. Falling through here would
-                // hand the same payload to another distiller, `black` turned
-                // 200 all-stripped rows into the fabricated `Build: ok` (#224).
-                if let Some(ref s) = store {
-                    s.record_passthrough(clean_command, content.len(), "toml zero-state");
-                }
-                return None;
-            }
-            toml_filter::BatchFilterOutcome::Filtered(out) => {
-                crate::guard::limits::beats_guardrail(out.len(), content.len())
-                    .then(|| (out, f.name.clone()))
-            }
-        },
-        None => None,
-    };
 
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
-    let (final_out, filter_name) = if let Some((output, name)) = toml_hit {
-        (output, name)
-    } else {
+    let (final_out, filter_name) = {
         // Pure Command Architecture: Resolve profile once
         let profile = crate::pipeline::registry::resolve_profile_for_chain(clean_command);
 
@@ -744,16 +707,6 @@ pub fn process_payload(
         .filter(|s| s.final_score() < 0.3)
         .count();
 
-    // Auto-learn trigger
-    if !clean_command.is_empty() && content.len() > 100 {
-        let total = check_segments.len();
-        let dropped = noise_count;
-        let poor = total > 5 && (dropped as f32 / total.max(1) as f32) < 0.3;
-        if poor {
-            crate::session::learn::queue_for_learn(&content, clean_command);
-        }
-    }
-
     // Update session state
     if let Some(ref lock) = session
         && let Ok(mut state) = lock.lock()
@@ -812,7 +765,7 @@ pub fn process_payload(
     // on the byte ratio alone, and folding a repeated prefix shrinks bytes
     // without losing a line.
     if route == Route::Soft && distilled_lines <= content.lines().count() {
-        final_out.push_str("\n[Partial signal - omni learn recommended]\n");
+        final_out.push_str("\n[Partial signal]\n");
     }
 
     // A redaction is never undone by the guardrail. `distill_env_output` replaces
@@ -1014,7 +967,12 @@ pub fn process_payload(
 
     // Safety truncation, shared with `hooks::pipe` so the cap and its marker
     // cannot drift apart, this path spelled the limit `50_000` inline (#219).
-    crate::util::text::truncate_with_marker(&mut final_out, crate::guard::limits::MAX_OUTPUT_BYTES);
+    // The elided middle goes to the store so the marker can name a way back.
+    crate::util::text::truncate_with_marker(
+        &mut final_out,
+        crate::guard::limits::MAX_OUTPUT_BYTES,
+        |dropped| store.as_ref().and_then(|s| s.store_rewind(dropped)),
+    );
 
     // A passthrough hands back exactly what the command produced, so there is
     // nothing to replace. Emitting those identical bytes with a marker on top

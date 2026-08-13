@@ -102,33 +102,10 @@ pub fn database_path() -> PathBuf {
     data_home().join("omni.db")
 }
 
-/// Get path to user defined filters directory
-#[inline]
-pub fn filters_directory() -> PathBuf {
-    config_home().join("filters")
-}
-
 /// Get path to the user configuration file.
 #[inline]
 pub fn config_file() -> PathBuf {
     config_home().join("config.toml")
-}
-
-/// Get path to learned filters file.
-///
-/// It stays inside `filters_directory()` rather than following the database
-/// into `data_home()`, even though it is generated rather than authored: the
-/// loader reads that directory as a unit, so splitting one file out of it would
-/// mean two directory walks to answer one question.
-#[inline]
-pub fn learned_filters_path() -> PathBuf {
-    filters_directory().join("learned.toml")
-}
-
-/// Get path to the learn queue.
-#[inline]
-pub fn learn_queue_path() -> PathBuf {
-    data_home().join("learn_queue.jsonl")
 }
 
 /// Get path to the cache directory.
@@ -169,31 +146,25 @@ mod tests {
     }
 
     /// #315: the previous version of the test above asserted only that the
-    /// *accessor* was overridden, and passed while `toml_filter` read the real
-    /// `~/.omni/filters` on every hook. Every path the product actually opens is
-    /// checked here, so a new call site that derives its own is caught by the
-    /// one test rather than by a CI flake months later.
+    /// *accessor* was overridden, and passed while the filter loader read the
+    /// real `~/.omni/filters` on every hook. Every path the product actually
+    /// opens is checked here, so a new call site that derives its own is caught
+    /// by the one test rather than by a CI flake months later. The filter paths
+    /// left this list with the layer they served (#505).
     #[test]
     fn every_resolved_path_stays_inside_a_configured_root() {
         let config = config_home();
         let data = data_home();
 
-        for (name, path) in [
-            ("filters_directory", filters_directory()),
-            ("config_file", config_file()),
-            ("learned_filters_path", learned_filters_path()),
-        ] {
-            assert!(
-                path.starts_with(&config),
-                "{name} resolved to {}, outside the config root {}",
-                path.display(),
-                config.display()
-            );
-        }
+        assert!(
+            config_file().starts_with(&config),
+            "config_file resolved to {}, outside the config root {}",
+            config_file().display(),
+            config.display()
+        );
 
         for (name, path) in [
             ("database_path", database_path()),
-            ("learn_queue_path", learn_queue_path()),
             ("cache_directory", cache_directory()),
             ("exports_directory", exports_directory()),
         ] {

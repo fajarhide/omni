@@ -29,20 +29,17 @@
   - [exec](reference/cmd/exec.md)
   - [retrieve](reference/cmd/retrieve.md)
   - [session](reference/cmd/session.md)
-  - [learn](reference/cmd/learn.md)
   - [Everything else](reference/cmd/rest.md)
 - [Environment variables](reference/environment.md)
 - [MCP tools](reference/mcp-tools.md)
 - [Hooks](reference/hooks.md)
 - [Supported agents](reference/agents.md)
-- [Signals](reference/signals.md)
 
 # Developing it
 
 - [Architecture](develop/architecture.md)
 - [The pipeline, stage by stage](develop/pipeline.md)
 - [Adding a distiller](develop/adding-a-distiller.md)
-- [Adding a signal](develop/adding-a-signal.md)
 - [Testing](develop/testing.md)
 - [Benchmarks](develop/benchmarks.md)
 - [Where OMNI is going](develop/direction.md)
