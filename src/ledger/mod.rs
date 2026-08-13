@@ -119,6 +119,13 @@ pub struct Ledger<'a> {
     /// `None` disables project scope entirely, which is what every caller that
     /// cannot name a project passes.
     project: Option<String>,
+    /// Who is being shown these lines, recorded and read by nothing (#509).
+    ///
+    /// The project scope is keyed on the directory alone, so two agents in one
+    /// repo already share a history and a fold cannot tell whose bytes it is
+    /// replacing. Recording the agent is what makes that measurable; changing
+    /// the key is the decision the measurement is for.
+    agent: String,
 }
 
 /// One stretch of output, and where it was seen before if it was.
@@ -134,12 +141,23 @@ impl<'a> Ledger<'a> {
             store,
             scope: scope.into(),
             project: None,
+            agent: "unknown".to_string(),
         }
     }
 
     /// Adds the project history to what this ledger can draw on.
     pub fn with_project(mut self, project: impl Into<String>) -> Self {
         self.project = Some(project.into());
+        self
+    }
+
+    /// Names the agent these lines are being delivered to.
+    ///
+    /// Resolved by the caller rather than from the environment here: a Codex
+    /// payload arriving while `CLAUDECODE` is set answers `claude_code` to the
+    /// naive check, and this column exists precisely to tell hosts apart.
+    pub fn by(mut self, agent: impl Into<String>) -> Self {
+        self.agent = agent.into();
         self
     }
 
@@ -244,13 +262,14 @@ impl<'a> Ledger<'a> {
                 .collect(),
             None => hashes.clone(),
         };
-        self.store.ledger_record(&self.scope, &delivered);
+        self.store
+            .ledger_record(&self.scope, &delivered, &self.agent);
         // The project history is written too, so a later session can draw on this
         // one. Same rows, a second scope key. A folded line is already in both
         // scopes, since that is what made it foldable, so filtering it out of
         // this write changes nothing and keeps the two calls saying one thing.
         if let Some(p) = &self.project {
-            self.store.ledger_record(p, &delivered);
+            self.store.ledger_record(p, &delivered, &self.agent);
         }
 
         projected.map(|(view, _)| view)
@@ -432,6 +451,61 @@ mod tests {
         Ledger::new(&store, "s1").project(&text);
 
         assert_eq!(Ledger::new(&store, "s2").project(&text), None);
+    }
+
+    /// #509. The project scope is one history per directory, so the column is
+    /// the only thing that can say whose lines it holds. `INSERT OR IGNORE`
+    /// keeps the first writer, which is what makes "a different agent was shown
+    /// this" answerable at all: overwriting on a repeat would report the last
+    /// reader as the one who saw it.
+    #[test]
+    fn records_which_agent_was_shown_each_line() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Store::open_path(&db).expect("store");
+        // Above `MIN_LEDGER_INPUT` and below the project scope's fold bar, so
+        // the second agent is *shown* every line rather than handed a marker.
+        // Sized against the constants because the obvious fixture, the same
+        // 200-line payload the floor test uses, folds the whole run: the second
+        // agent then delivers nothing, writes nothing, and the test passes with
+        // `INSERT OR REPLACE` in place of `INSERT OR IGNORE`.
+        let text: String = (0..6)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        assert!(
+            text.len() > MIN_LEDGER_INPUT && text.len() < MIN_LEDGER_RUN_GAIN * PROJECT_FLOOR_MULT,
+            "fixture sits on the wrong side of a threshold: {} bytes",
+            text.len()
+        );
+
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .by("claude_code")
+            .project(&text);
+        Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .by("codex")
+            .project(&text);
+
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let rows = |agent: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM ledger_lines WHERE scope = '/repo' AND agent_id = ?1",
+                [agent],
+                |r| r.get(0),
+            )
+            .expect("count")
+        };
+
+        assert!(
+            rows("claude_code") > 0,
+            "the agent the lines were delivered to was not recorded"
+        );
+        assert_eq!(
+            rows("codex"),
+            0,
+            "a repeat rewrote the agent that was actually shown the line"
+        );
     }
 
     /// The whole licence for the project scope. A second session may reuse the

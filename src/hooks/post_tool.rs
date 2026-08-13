@@ -392,6 +392,7 @@ fn fold_cross_turn(
         .unwrap_or_else(|_| "unknown".to_string());
     crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
+        .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
         .project(&text)
         .unwrap_or(text)
 }
@@ -672,6 +673,7 @@ pub fn process_payload(
         && crate::pipeline::format::sniff(&final_out).is_none()
         && let Some(view) = crate::ledger::Ledger::new(s, scope)
             .with_project(&project_path)
+            .by(_agent_id)
             .project(&final_out)
     {
         final_out = view;
@@ -1285,6 +1287,52 @@ mod tests {
         );
 
         assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
+    }
+
+    /// #509 at the boundary the unit test cannot see: the hook has three agent
+    /// ids in scope and only one of them is the resolved host. Asserting a
+    /// literal here would read the ambient environment (`CLAUDECODE` is set
+    /// while developing under Claude Code, and unset on CI), so the check is
+    /// that the ledger row and the distillation row for the same call agree.
+    /// They are written from one value, and any rewiring that reaches for
+    /// `normalized.agent_id` or hardcodes a default separates them.
+    #[test]
+    fn files_a_ledger_line_under_the_same_agent_as_its_distillation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+        let repetitive = (0..200)
+            .map(|i| format!("2026-08-11T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect::<String>();
+        let payload = serde_json::json!({
+            "session_id": "s-agent",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat log.txt"},
+            "tool_response": {"stdout": repetitive, "stderr": ""}
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(store.clone()), None);
+
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let ledger: Vec<String> = conn
+            .prepare("SELECT DISTINCT agent_id FROM ledger_lines")
+            .and_then(|mut s| {
+                s.query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()
+            })
+            .expect("ledger agents");
+        let distilled: String = conn
+            .query_row("SELECT agent_id FROM distillations LIMIT 1", [], |r| {
+                r.get(0)
+            })
+            .expect("a distillation row");
+
+        assert_eq!(
+            ledger,
+            vec![distilled.clone()],
+            "the ledger filed lines under a different agent than the call they came from ({distilled})"
+        );
     }
 
     /// #379: a rewritten command was recorded twice. `omni exec` distills the
