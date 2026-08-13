@@ -669,6 +669,18 @@ pub fn process_payload(
     // Scoping the ledger by that would let it tell a session it had already been
     // shown output that went to a different one, which is a false claim, not a
     // missed saving. No host id, no ledger.
+    // What the **distiller** produced, taken before the ledger folds anything.
+    //
+    // These describe the distiller's cut and nothing else, and the rewind marker
+    // below is the distiller's accounting. Reading them after the ledger made the
+    // ledger's own marker count as surviving content, so its fold was reported a
+    // second time by a marker with a second handle: a re-run of a 43 line command
+    // came back as `43 lines already shown` followed by `42 lines omitted`, two
+    // ids, and an arithmetic no reader can reconcile against 43 lines of input
+    // (#519). Same defect as #301, one stage further up.
+    let distilled_lines = final_out.lines().count();
+    let distilled_len = final_out.len();
+
     if let (Some(s), Some(scope)) = (store.as_ref(), normalized.host_session_id.as_deref())
         && crate::pipeline::format::sniff(&final_out).is_none()
         && let Some(view) = crate::ledger::Ledger::new(s, scope)
@@ -751,16 +763,6 @@ pub fn process_payload(
         Route::Passthrough
     };
 
-    // Where the distiller's output ends and OMNI's own commentary begins. The
-    // marker below states how much of the command's output is missing, and
-    // counting a banner OMNI appended as if it were surviving content
-    // understates that by exactly the number of banner lines: a 20 row
-    // `kubectl config get-contexts -o name` kept 10 rows and reported
-    // `9 lines omitted` for the 10 that went (#301). An agent uses that number
-    // to decide whether a rewind is worth fetching.
-    let distilled_lines = final_out.lines().count();
-    let distilled_len = final_out.len();
-
     // Same condition as `rewind_marker`'s: a restructure that emits more lines
     // than it consumed dropped nothing, so the banner saying the signal is
     // partial is a false claim about a complete answer (#335). `Soft` is decided
@@ -814,7 +816,11 @@ pub fn process_payload(
     // raw output back anyway, so every one of those writes stored content the
     // agent had never lost. A passthrough returns `None` below and the host keeps
     // its own bytes; there is nothing to recover and nothing to record.
-    if route != Route::Passthrough && final_out.len() < content.len() {
+    // `distilled_len`, not `final_out.len()`: this block is the distiller's
+    // accounting, and the ledger archives and names its own handle before it
+    // writes a marker. Asking about the delivered length let a pure ledger fold
+    // enter here and describe a cut the distiller never made (#519).
+    if route != Route::Passthrough && distilled_len < content.len() {
         let (marker, hash) =
             rewind_marker(store.as_ref(), &content, distilled_lines, distilled_len);
         rewind_hash = hash;
@@ -1287,6 +1293,49 @@ mod tests {
         );
 
         assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
+    }
+
+    /// #519 at the boundary where it was reported. The ledger folds the whole
+    /// payload, and the rewind marker used to measure "what survived" *after*
+    /// that fold, so it counted the ledger's own marker as surviving content and
+    /// reported the same loss again under a second handle. A 43 line re-run came
+    /// back as `43 lines already shown` plus `42 lines omitted`, two ids, and an
+    /// arithmetic that reconciles with nothing.
+    ///
+    /// Driven through `process_payload` rather than the ledger, because both
+    /// markers are correct in isolation and only the hook sees them together.
+    #[test]
+    fn a_re_run_comes_back_as_one_marker_with_one_handle() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let body = (0..60)
+            .map(|i| format!("  {:3}  /alpha/item-{i:02}\n", 100 - i))
+            .collect::<String>();
+        let payload = serde_json::json!({
+            "session_id": "s-519",
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 rank.py"},
+            "tool_response": {"stdout": body, "stderr": ""}
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(store.clone()), None);
+        let second =
+            process_payload(&payload, Some(store.clone()), None).expect("the repeat is rewritten");
+
+        let markers = second.matches("[OMNI:").count();
+        assert_eq!(markers, 1, "expected one marker, got {markers}: {second}");
+
+        let handles: std::collections::HashSet<&str> = second
+            .split("omni retrieve ")
+            .skip(1)
+            .filter_map(|t| t.split([']', ' ']).next())
+            .collect();
+        assert_eq!(
+            handles.len(),
+            1,
+            "one reply must name one archive: {second}"
+        );
     }
 
     /// #509 at the boundary the unit test cannot see: the hook has three agent
