@@ -81,6 +81,11 @@ because this agent has genuinely never seen those bytes and the wording has to b
 **19.1%** within a session, so this is worth about a fifth of the in-session saving.
 It is real, and it is not the headline.
 
+**The honest caveat.** Two agents in one repository share that history by side effect
+rather than by design, and `from an earlier session` can read as *your* earlier session
+when it was someone else's. [The ledger](the-ledger.md#what-two-agents-in-one-repo-share) is
+straight about what is and is not keyed on the agent today.
+
 ## 6. `kubectl get pods -o json | jq`
 
 **The situation.** You pipe structured output into something that parses it.
