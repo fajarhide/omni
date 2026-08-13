@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A 333-line markdown spec arrived as 18 lines (#523)**: the `readfile` distiller's last arm was `distill_unknown_file`, 15 lines of head and 5 of tail, which parses nothing. Every extension without a structural distiller landed there, so a design document read before implementing from it came back as its title and its closing caveats with the 309 lines that said anything dropped. It is the rule this project holds every other distiller to, broken in place: a distiller that could not parse its input returns the input, and slicing by position is a confident answer about content nothing understood. In a log the first and last lines carry the run and its verdict, which is why `.log` keeps a summariser; in prose they carry neither. Unparsed content now passes through whole.
+
+  **Fixing it exposed a bigger one, in the opposite direction.** The three non-Bash arms chained `fold_cross_turn` onto the distiller's `Option`, so a payload the distiller declined never reached the ledger either. Cross-turn folding is the largest single source of savings and file reads are the class it earns most on, so the first version of this fix silently disabled it for every prose read: `folds_a_repeated_read_across_turns` going red is what caught it. Read, Grep and WebFetch now share one `reply_through_ledger`, and the ledger runs on what the agent is about to receive whether or not a distiller understood it. It returns `None` when neither stage changed anything, so the host is never handed an identical copy and a saving that did not happen.
+
+  **Not measured, because this path records nothing.** `distillations` holds zero readfile rows, so neither the cut being removed nor the folding being gained could be priced from the corpus. That gap is worth its own issue.
+
 ### Added
 - **The manual is checked against the code it describes (#520)**: `tests/docs_match_the_code.rs` asserts that every `omni <cmd>` written inside a shell fence is a subcommand `main.rs` dispatches, and that counts stated in prose match what they count. This class had been fixed by hand four times: #180 named two deleted subcommands, #185 two removed flags, #390 four whole documents, and the #521 sweep found `omni history` and `omni insight` in shell blocks that exit 1, plus a tool count reading 26 against 25. Every round was found by a person happening to open one page.
 

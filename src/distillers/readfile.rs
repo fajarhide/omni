@@ -46,13 +46,30 @@ pub fn distill_readfile_with_context(
         "java" | "kt" => distill_java_file(content),
         "json" => distill_json_file(content),
         "toml" | "yaml" | "yml" => distill_config_file(content, ext),
-        // `.txt` is not a log format. Sending it to a log summariser is the
-        // fingerprint problem from #105 and #112: a shape a sibling format also
-        // has. 12 of the 14 `.txt` files in the measured corpus came back as
-        // `Log: 0 errors, 0 warnings` with every line gone (#246). Head and tail
-        // with a count is what `.md` already gets, and it is true.
+        // `.log` only. `.txt` is not a log format, and sending it to a log
+        // summariser is the fingerprint problem from #105 and #112: a shape a
+        // sibling format also has. 12 of the 14 `.txt` files in the measured
+        // corpus came back as `Log: 0 errors, 0 warnings` with every line gone
+        // (#246). It falls to the arm below and is handed back whole.
         "log" => distill_log_file(content),
-        _ => distill_unknown_file(content),
+        // Everything else passes through (#523). The arm here used to be
+        // `distill_unknown_file`, which keeps 15 lines of head and 5 of tail and
+        // parses nothing: a 333-line markdown spec arrived as 18 lines, with the
+        // whole document in the 309 it dropped.
+        //
+        // That is the rule this project holds every other distiller to, broken
+        // in place. A distiller that could not parse its input returns the input;
+        // slicing by position is a confident answer about content nothing
+        // understood. In a log the first and last lines carry the run and its
+        // verdict, which is why `.log` keeps a summariser. In prose they carry
+        // the title and the closing caveats, and every requirement is in between.
+        //
+        // It also inverts on the surface it fires on. `Read` is what an agent
+        // calls before editing one named file, so the base rate of "those lines
+        // were never wanted" is close to zero, and the recovery is
+        // `omni retrieve`, which re-emits all of it: the turn then pays for the
+        // cut copy, the marker, and the whole file.
+        _ => return None,
     };
 
     // Only return if meaningful compression achieved
@@ -74,6 +91,35 @@ pub fn distill_readfile_with_context(
     } else {
         None
     }
+}
+
+fn distill_unknown_file(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if total <= 30 {
+        return content.trim().to_string();
+    }
+    let head: Vec<String> = lines
+        .iter()
+        .take(15)
+        .enumerate()
+        .map(|(i, l)| format!("{} | {}", i + 1, l))
+        .collect();
+    let tail: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .rev()
+        .take(5)
+        .map(|(i, l)| format!("{} | {}", i + 1, l))
+        .collect();
+    let tail_rev: Vec<String> = tail.into_iter().rev().collect();
+    format!(
+        "--- HEAD ({} total lines) ---\n{}\n... [{} lines omitted] ...\n--- TAIL ---\n{}",
+        total,
+        head.join("\n"),
+        total - 20,
+        tail_rev.join("\n")
+    )
 }
 
 /// What a code distiller must say about the lines it dropped (#176).
@@ -401,35 +447,6 @@ fn distill_log_file(content: &str) -> String {
     crate::distillers::require_parsed(errors + warnings > 0, content, out.trim().to_string())
 }
 
-fn distill_unknown_file(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let total = lines.len();
-    if total <= 30 {
-        return content.trim().to_string();
-    }
-    let head: Vec<String> = lines
-        .iter()
-        .take(15)
-        .enumerate()
-        .map(|(i, l)| format!("{} | {}", i + 1, l))
-        .collect();
-    let tail: Vec<String> = lines
-        .iter()
-        .enumerate()
-        .rev()
-        .take(5)
-        .map(|(i, l)| format!("{} | {}", i + 1, l))
-        .collect();
-    let tail_rev: Vec<String> = tail.into_iter().rev().collect();
-    format!(
-        "--- HEAD ({} total lines) ---\n{}\n... [{} lines omitted] ...\n--- TAIL ---\n{}",
-        total,
-        head.join("\n"),
-        total - 20,
-        tail_rev.join("\n")
-    )
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -567,15 +584,45 @@ mod tests {
     fn never_reports_a_prose_file_as_a_clean_log() {
         let content = bulky("Active account: true, token scopes gist, project, repo\n");
 
-        let out = distill_readfile(&content, "notes.txt").expect("large enough to distill");
+        // #246 asked that prose never be summarised as a clean log, and was
+        // settled by sending it to head-and-tail with an honest count instead.
+        // #523 removed that arm: the count was honest and the cut was still
+        // positional, so a spec arrived as its title and its closing caveats.
+        // Passthrough is the same guarantee in its stronger form, and this
+        // asserts the stronger one rather than the mechanism that used to
+        // deliver it.
+        assert_eq!(
+            distill_readfile(&content, "notes.txt"),
+            None,
+            "prose OMNI cannot parse has to reach the agent whole"
+        );
+    }
 
-        assert!(
-            !out.contains("Log: 0 errors"),
-            "a document that is not a log must not be summarised as one:\n{out}"
+    /// #523, at the size it was reported. A 333-line markdown spec came back as
+    /// 13 head lines and 5 tail lines, and everything it said was in the 309
+    /// between them.
+    ///
+    /// Sized against `MIN_DISTILL_TOKENS` deliberately: the fixture has to clear
+    /// the first gate, or it would return `None` for the old reason and pass
+    /// whatever the last arm does.
+    #[test]
+    fn hands_back_a_whole_markdown_spec() {
+        let content: String = (1..=331)
+            .map(|i| format!("Line {i}: the quick brown fox jumps over the lazy dog.\n"))
+            .collect();
+        let tokens = crate::util::token_estimate::estimate_tokens(
+            content.len(),
+            crate::util::token_estimate::ContentHint::Prose,
         );
         assert!(
-            out.contains("lines omitted"),
-            "and whatever it does drop has to be counted:\n{out}"
+            tokens >= MIN_DISTILL_TOKENS,
+            "fixture is below the first gate at {tokens} tokens, so it proves nothing"
+        );
+
+        assert_eq!(
+            distill_readfile(&content, "/tmp/synthetic.md"),
+            None,
+            "a spec read before editing it must arrive whole, not as its title and its last caveat"
         );
     }
 
