@@ -38,7 +38,7 @@
 //! - **Unknown means untouched.** Structured payloads never reach here; the
 //!   caller gates on `pipeline::format::sniff` exactly as collapse does.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, PROJECT_FLOOR_MULT};
 use crate::store::sqlite::Store;
@@ -219,7 +219,7 @@ impl<'a> Ledger<'a> {
         let in_session = self.store.ledger_seen(&self.scope, &hashes);
         let in_project = match &self.project {
             Some(p) => self.store.ledger_seen(p, &hashes),
-            None => HashSet::new(),
+            None => HashMap::new(),
         };
         // A line that states a failure is never folded, however often it has been
         // shown (#458). The heuristic "you have seen this already" is sound for
@@ -245,9 +245,9 @@ impl<'a> Ledger<'a> {
             if never_fold.contains(h) {
                 return None;
             }
-            if in_session.contains(h) {
+            if in_session.contains_key(h) {
                 Some(Origin::Session)
-            } else if in_project.contains(h) {
+            } else if in_project.contains_key(h) {
                 Some(Origin::Project)
             } else {
                 None
@@ -284,6 +284,47 @@ impl<'a> Ledger<'a> {
                 .collect(),
             None => hashes.clone(),
         };
+        // What the folds drew on, before the write below makes every line look
+        // like this session's (#533). `PROJECT_FLOOR_MULT` prices cross-agent
+        // reuse and was calibrated on the single-agent case, and nothing recorded
+        // enough to tell the two apart after the fact.
+        if let Some((_, folded)) = &projected {
+            let mut tally: HashMap<(&'static str, &str), (usize, usize)> = HashMap::new();
+            for &i in folded {
+                let Some(origin) = origin_of(&hashes[i]) else {
+                    continue;
+                };
+                let (label, source) = match origin {
+                    Origin::Session => ("session", in_session.get(&hashes[i])),
+                    Origin::Project => ("project", in_project.get(&hashes[i])),
+                };
+                // A hit with no agent cannot happen through `ledger_record`, which
+                // always writes one. Counting it as `unknown` beats dropping the
+                // row and quietly understating the total.
+                let entry = tally
+                    .entry((label, source.map_or("unknown", String::as_str)))
+                    .or_default();
+                entry.0 += 1;
+                entry.1 += lines[i].len();
+            }
+            let folds: Vec<crate::store::sqlite::FoldRecord> = tally
+                .into_iter()
+                .map(
+                    |((origin, source_agent), (lines, bytes))| crate::store::sqlite::FoldRecord {
+                        source_agent: source_agent.to_string(),
+                        origin,
+                        lines,
+                        bytes,
+                    },
+                )
+                .collect();
+            // Keyed on the project when there is one: the question is about a
+            // repository two agents share, and a session scope cannot be compared
+            // across agents by definition.
+            let scope = self.project.as_deref().unwrap_or(&self.scope);
+            self.store.ledger_record_folds(scope, &self.agent, &folds);
+        }
+
         self.store
             .ledger_record(&self.scope, &delivered, &self.agent);
         // The project history is written too, so a later session can draw on this
@@ -611,6 +652,57 @@ mod tests {
             0,
             "a repeat rewrote the agent that was actually shown the line"
         );
+    }
+
+    /// #533. Whether the project scope stays shared across agents or becomes
+    /// `(repo, agent)` cannot be argued, only measured, and it could not be
+    /// measured: `ledger_lines` says a line was *seen*, never that a marker was
+    /// issued against it or whose bytes that marker replaced. This is the row
+    /// the corpus query needs, and the cross-agent case is the only one that
+    /// decides anything, so it is the one pinned here.
+    #[test]
+    fn records_the_agent_whose_lines_a_project_fold_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Store::open_path(&db).expect("store");
+        // Six times the session floor, so the project scope's higher bar is
+        // cleared and a fold really happens. Under it the second agent is simply
+        // shown the lines, and a test asserting on an absent fold passes for the
+        // wrong reason.
+        let text: String = (0..200)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .by("claude_code")
+            .project(&text);
+        let view = Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .by("codex")
+            .project(&text)
+            .expect("no fold on the second agent, so there is nothing to record");
+        assert!(
+            view.contains("from an earlier session"),
+            "this has to be a project fold to be the case under test: {view}"
+        );
+
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let (agent, source, lines, bytes): (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT agent_id, source_agent, lines, bytes
+                 FROM ledger_folds WHERE origin = 'project'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("a project fold left no row, so cross-agent reuse stays unpriceable");
+
+        assert_eq!(agent, "codex", "the agent the marker was delivered to");
+        assert_eq!(
+            source, "claude_code",
+            "the agent whose lines were replaced, which is the whole measurement"
+        );
+        assert!(lines > 0 && bytes > 0, "{lines} lines, {bytes} bytes");
     }
 
     /// The whole licence for the project scope. A second session may reuse the
