@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The manual has a share card (#527, partly)**: every one of its 35 pages carried 0 `og:*` tags, so a link to the ledger page or the benchmark method shared as a bare URL. `theme/head.hbs` now emits 11 tags per page, with `og:title` taken from the page's own chapter title rather than the book title repeated 35 times, and `og:image` pointing at the `media/og.png` that already existed. The shared description was also the positioning from before the manual was rewritten to lead with the ledger; it now matches what the README says.
+
+  **`og:url` and `<link rel=canonical>` are deliberately still missing.** Both need the absolute URL a reader lands on, and mdBook offers only `{{ path }}`, the *source* path (`concepts/the-ledger.md`). The site serves these extensionless and redirects `.html` to bare, so a tag built from `{{ path }}` would name a URL that redirects, and a canonical pointing at a redirect splits the signal rather than joining it. Handlebars here has no string helpers, so doing it right means rewriting the built HTML after mdBook runs. Left out rather than shipped wrong, and the reason is written into `head.hbs` next to the tags that are there. A per-page description needs the same post-build step or first-paragraph extraction, and the sitemap half belongs to the repo that builds the site.
+
 ### Fixed
 - **Two ledger markers the manual never mentioned (#526)**: #522 added a second pair of forms, for a fold that covers the whole reply, and `use/markers.md` kept listing two of the four the code can print. A reader met `[OMNI: identical to …]` in their own output with nowhere to look it up. Both forms are documented now, with the distinction that decides which appears: `identical to` is a reply repeated in full, the plain wording is a gap inside one.
 

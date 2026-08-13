@@ -1,0 +1,26 @@
+<!--
+  Share card for the manual (#527). mdBook injects this into every page's <head>.
+
+  What is here is what mdBook can state correctly without inventing anything.
+  `{{ title }}` is the page's own chapter title, so og:title is per page rather
+  than the one book title repeated 35 times.
+
+  What is deliberately NOT here: `og:url` and `<link rel=canonical>`. Both need
+  the absolute URL a reader actually lands on, and mdBook offers only
+  `{{ path }}`, which is the *source* path (`concepts/the-ledger.md`). The site
+  serves these extensionless and redirects `.html` to bare, so a tag built from
+  `{{ path }}` would name a URL that redirects, and a canonical pointing at a
+  redirect is worse than no canonical: it splits the signal instead of joining
+  it. Handlebars here has no string helpers to strip the extension, so doing
+  this right means rewriting the built HTML after mdBook runs. Left out on
+  purpose rather than shipped wrong.
+-->
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="OMNI" />
+<meta property="og:title" content="{{ title }}" />
+<meta property="og:image" content="https://omni.weekndlabs.com/media/og.png" />
+<meta property="og:image:width" content="2400" />
+<meta property="og:image:height" content="1260" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{{ title }}" />
+<meta name="twitter:image" content="https://omni.weekndlabs.com/media/og.png" />

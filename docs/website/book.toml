@@ -1,6 +1,6 @@
 [book]
 title = "OMNI"
-description = "Semantic Signal Engine for AI agents. What it is, how it decides, and every command it has."
+description = "Stop paying to re-read the same output. OMNI turns repeated bytes into retrievable handles, deletes nothing, and every number in this manual replays on your own corpus."
 authors = ["fajarhide"]
 language = "en"
 src = "src"
