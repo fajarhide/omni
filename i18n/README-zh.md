@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>你的智能体会读终端打印的每一行，然后在下一轮把其中大部分再读一遍。</b>OMNI 在模型看到之前把噪音丢掉，对已经展示过的行只回一个引用。什么都不删除，也绝不编造结果。</em>
+    <em><b>别再为重读同一份输出付费。</b>OMNI 把重复的字节换成可取回的句柄：智能体读两遍的文件省 97.2%，6,656 条真实命令上省 14.9%。什么都不删除，什么都不编造，每个数字都能在你自己的语料上重放。</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)

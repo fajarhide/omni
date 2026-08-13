@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Agent của bạn đọc mọi dòng terminal in ra, rồi đọc lại phần lớn trong số đó ở lượt sau.</b> OMNI bỏ phần nhiễu trước khi mô hình nhìn thấy, và trả về một tham chiếu cho những dòng đã từng cho xem. Không xóa gì cả, và không bao giờ bịa ra kết quả.</em>
+    <em><b>Đừng trả tiền để đọc lại cùng một output.</b> OMNI biến những byte lặp lại thành handle lấy lại được: 97,2% với một tệp agent của bạn đọc hai lần, 14,9% trên 6.656 lệnh thật. Không xóa gì, không bịa gì, và mọi con số đều chạy lại được trên corpus của chính bạn.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)

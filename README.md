@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Your agent reads everything your terminal prints, then reads most of it again next turn.</b> OMNI drops the noise before the model sees it, and hands back a reference for the lines it has already shown. Nothing is deleted, and it never invents a result.</em>
+    <em><b>Stop paying to re-read the same output.</b> OMNI turns repeated bytes into retrievable handles: 97.2% off a file your agent reads twice, 14.9% across 6,656 real commands. Nothing deleted, nothing invented, and every number replays on your own corpus.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
