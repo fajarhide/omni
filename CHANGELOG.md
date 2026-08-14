@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The reporter's `git --version` case is not explained by any of these: it writes about 25 bytes to stdout and nothing to stderr. That half of the report is still open.
 
+- **The MCP tool count read 26 in six places and the guard could not see one of them (#541)**: `tools/list` answers 25 on 0.7.4. `CONTRIBUTING.md` said `26 tools`, and both books repeated it in the one paragraph whose whole point is to count rather than trust a written number.
+
+  `every_documented_count_matches_the_code` was already checking counts and passed on all six, for two reasons that are about reach and not about the number. `doc_files()` walks the two books and `README.md`, so `CONTRIBUTING.md` was the only prose file with a count in it that nothing read. And the claim pattern matches the English noun, so every count in the Indonesian manual went unchecked, including the two that were right.
+
+  The self-contradicting sentences now name the command instead of a number, in both languages, so there is nothing left there to drift. The counts a reader wants up front stay, and all of them are inside the guard now: `CONTRIBUTING.md` is scanned, and the pattern reads `perkakas` as well as `tools`.
+
 ## [0.7.4] - 2026-08-13
 
 A release about claims that were not true: a documented escape hatch that did

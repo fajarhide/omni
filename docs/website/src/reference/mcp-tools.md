@@ -89,4 +89,4 @@ See [Loop engineering](../integrations/loops.md).
 a filter name passed to the TOML generator. Calling it returns `-32602 tool not found`.
 
 It has been miscounted before: a source grep for `"omni_*"` returns 27, and 27 is
-therefore wrong wherever it appears. The server's own `tools/list` says 26.
+therefore wrong wherever it appears. Run the `tools/list` call above for the count.

@@ -5,7 +5,7 @@ OMNI plugs into Hermes twice: a plugin on the hook path, and the MCP server.
 | layer | mechanism | what changes |
 |---|---|---|
 | hooks | `~/.hermes/plugins/omni-signal-engine/__init__.py` calling `omni --pre-hook`, `--post-hook`, `--session-start` | terminal tool output is distilled before it enters Hermes' context |
-| MCP | `mcp_servers.omni` running `omni --mcp` | the 26 OMNI tools become first-class Hermes tools |
+| MCP | `mcp_servers.omni` running `omni --mcp` | OMNI's MCP tools become first-class Hermes tools |
 
 ## Prerequisites
 
@@ -89,7 +89,7 @@ npm output. Confirm with `omni stats`.
 
 > Count the tools rather than trusting a number written down. Earlier versions of this
 > guide said 27, which came from grepping the server source; one of those strings is a
-> filter name, not a tool. The server's own `tools/list` answers 26.
+> filter name, not a tool. The `hermes tools list` above is the count.
 
 ## Where OMNI helps and where it does not
 

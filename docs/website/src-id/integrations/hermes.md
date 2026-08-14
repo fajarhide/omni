@@ -5,7 +5,7 @@ OMNI menancap ke Hermes dua kali: sebuah plugin di jalur hook, dan server MCP.
 | lapisan | mekanisme | apa yang berubah |
 |---|---|---|
 | hook | `~/.hermes/plugins/omni-signal-engine/__init__.py` yang memanggil `omni --pre-hook`, `--post-hook`, `--session-start` | keluaran tool terminal disuling sebelum masuk ke konteks Hermes |
-| MCP | `mcp_servers.omni` yang menjalankan `omni --mcp` | 26 perkakas OMNI menjadi perkakas kelas satu di Hermes |
+| MCP | `mcp_servers.omni` yang menjalankan `omni --mcp` | perkakas MCP OMNI menjadi perkakas kelas satu di Hermes |
 
 ## Prasyarat
 
@@ -92,8 +92,8 @@ tool-nya dengan keluaran npm mentah. Pastikan dengan `omni stats`.
 
 > Hitung perkakasnya, jangan percaya angka yang tertulis. Versi sebelumnya dari
 > panduan ini menyebut 27, yang datang dari mem-`grep` kode sumber server; salah
-> satu string itu nama penyaring, bukan perkakas. `tools/list` milik server
-> sendiri menjawab 26.
+> satu string itu nama penyaring, bukan perkakas. `hermes tools list` di atas
+> yang menjadi hitungannya.
 
 ## Di mana OMNI membantu dan di mana tidak
 
