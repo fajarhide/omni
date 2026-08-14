@@ -31,9 +31,13 @@ if [ -d "$here/src/wl" ]; then
 fi
 
 "$MDBOOK" build "$here"
+# site-url is overridden too, and it is not cosmetic: it is what the 404 page and
+# the search index use to build absolute URLs, so leaving it at /docs/ would send
+# a reader who mistypes an Indonesian path into the English book.
 env MDBOOK_book__src=src-id \
     MDBOOK_book__language=id \
     MDBOOK_build__build_dir=book-id \
+    MDBOOK_output__html__site_url=/docs/id/ \
     "$MDBOOK" build "$here"
 
 # The Indonesian book is served from inside the English one, at /docs/id/, so it
