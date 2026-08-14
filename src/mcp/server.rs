@@ -1576,12 +1576,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
 
-        let out = run_with_timeout(
-            "sleep 30",
-            store,
-            None,
-            std::time::Duration::from_secs(1),
-        );
+        let out = run_with_timeout("sleep 30", store, None, std::time::Duration::from_secs(1));
 
         assert!(
             out.contains("did not finish within 1s") && out.contains("sleep 30"),
