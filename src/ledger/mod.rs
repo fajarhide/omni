@@ -40,7 +40,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::guard::limits::{MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, PROJECT_FLOOR_MULT};
+use crate::guard::limits::{
+    MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, MIN_WHOLE_OUTPUT_FOLD, PROJECT_FLOOR_MULT,
+};
 use crate::store::sqlite::Store;
 
 /// Which history a run was found in, because the two cannot make the same claim.
@@ -379,9 +381,19 @@ impl<'a> Ledger<'a> {
                 }
             };
 
+            // Two questions, not one. The first is whether the run outgrows the
+            // marker replacing it, which is what every floor here has ever asked.
+            // The second only applies when the fold leaves nothing behind: a
+            // partial fold hands the agent context it can work from and a handle
+            // it may decline, while a whole-output fold hands it a handle and
+            // nothing, so needing any part of the payload costs a round trip it
+            // has no say in. Four of four recorded under 1 KB were retrieved
+            // within nine seconds (#543), so below that floor the trade is
+            // negative and the run stays verbatim.
             let long_enough = run.seen.is_some_and(|o| {
                 let marker = render(o, &"0".repeat(HANDLE_LEN)).len();
                 body.len() >= marker + o.min_gain()
+                    && (!covers_everything || body.len() >= MIN_WHOLE_OUTPUT_FOLD)
             });
 
             // A handle is only offered for content that is provably retrievable.
@@ -549,6 +561,55 @@ mod tests {
         assert!(
             second.contains("never seen before"),
             "the new line has to survive: {second:?}"
+        );
+    }
+
+    /// Six lines, 341 bytes. Above `MIN_LEDGER_INPUT` and above a whole-output
+    /// marker plus the session gain, so without the #543 floor this folds
+    /// entirely; below `MIN_WHOLE_OUTPUT_FOLD`, so with it the run stays verbatim.
+    /// Sized against all three constants because a fixture that clears only one of
+    /// them tests a different branch than the one named here.
+    fn under_the_whole_output_floor() -> String {
+        (0..6)
+            .map(|i| format!("2026-08-10T00:00:{i:02}Z  handler finished request {i} in 12ms"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// #543. A whole-output fold leaves the agent a handle and no content, so any
+    /// part of the payload it still needs costs a retrieval round trip. Four of
+    /// the four recorded under 1 KB were retrieved within nine seconds, against a
+    /// 0.85% retrieve rate across the store, so the fold spent four extra tool
+    /// calls to save 2,680 bytes it then handed back.
+    ///
+    /// The partial arm is asserted in the same test on purpose: the floor must not
+    /// become "no small payload ever folds", which would cost the runs that are
+    /// still profitable because the agent keeps context beside them.
+    #[test]
+    fn never_folds_a_whole_output_that_cannot_pay_for_the_round_trip() {
+        let (store, _d) = temp_store();
+        let text = under_the_whole_output_floor();
+        assert!(
+            text.len() > MIN_LEDGER_INPUT && text.len() < MIN_WHOLE_OUTPUT_FOLD,
+            "fixture must sit between the two floors, got {} bytes",
+            text.len()
+        );
+        let ledger = Ledger::new(&store, "s1");
+
+        ledger.project(&text);
+        assert_eq!(
+            ledger.project(&text),
+            None,
+            "a sub-1 KB repeat must stay verbatim rather than become a bare handle"
+        );
+
+        let extended = format!("{text}\nsomething this session has never seen before\n");
+        let partial = ledger
+            .project(&extended)
+            .expect("the repeated head still folds beside content the agent can use");
+        assert!(
+            partial.contains("lines already shown") && partial.contains("never seen before"),
+            "the floor must not reach partial folds: {partial:?}"
         );
     }
 
@@ -805,13 +866,20 @@ mod tests {
             .with_project("/repo")
             .project(&text);
 
+        // One line neither history has seen, so both folds below are runs rather
+        // than whole outputs. Without it the #543 floor decides these cases before
+        // either bar is consulted, and the test stops being about the two bars.
+        // It also makes the bars above exact: a run marker is what gets rendered
+        // here, where a whole-output fold would have rendered the longer wording.
+        let probe = format!("{text}a line neither history has ever seen\n");
+
         // Same session: over the session floor, so it projects.
-        assert!(Ledger::new(&store, "s1").project(&text).is_some());
+        assert!(Ledger::new(&store, "s1").project(&probe).is_some());
         // New session: only the project history has it, and it is too small.
         assert_eq!(
             Ledger::new(&store, "s2")
                 .with_project("/repo")
-                .project(&text),
+                .project(&probe),
             None
         );
     }

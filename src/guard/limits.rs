@@ -114,6 +114,34 @@ pub const MIN_LEDGER_RUN_GAIN: usize = 150;
 /// (#472).
 pub const PROJECT_FLOOR_MULT: usize = 3;
 
+/// A fold that covers the whole output has to clear this on its own.
+///
+/// Every other bound here asks whether a fold pays for its marker. This one asks
+/// the question #543 exposed, which is different: when the fold covers
+/// everything, the agent holds a handle and no content, so if it needs anything
+/// at all it spends a round trip getting it back. That is not a re-read it can
+/// decline.
+///
+/// Measured on every whole-output fold this machine recorded after 0.7.4 went in,
+/// all of them under 1 KB:
+///
+/// | payload | delivered | retrieved after |
+/// |---|---|---|
+/// | 696 B | 78 B | 4 s |
+/// | 712 B | 79 B | 3 s |
+/// | 757 B | 84 B | 3 s |
+/// | 834 B | 78 B | 9 s |
+///
+/// Four of four, against a 0.85% retrieve rate across all 5,178 distillations in
+/// the same store. Those folds saved 2,680 bytes, then spent 319 bytes of marker
+/// plus four extra tool calls returning the same 2,999 bytes. Strictly negative,
+/// not marginal.
+///
+/// 1 KB is the top of the measured range rather than a knee. Nothing above it was
+/// observed either way, so this floors what is known to lose and leaves the rest
+/// folding. n=4, one machine, window bounded by the 2026-08-11 store reset.
+pub const MIN_WHOLE_OUTPUT_FOLD: usize = 1024;
+
 /// Output must be under this percentage of the input to count as a real
 /// reduction. Anything above it is not compression worth taking, e.g. a TOML
 /// filter that strips a few lines does not get to short-circuit a distiller that
