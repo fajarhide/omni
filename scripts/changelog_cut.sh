@@ -54,6 +54,22 @@ for section in Added Changed Fixed Removed; do
     echo >> "$BLOCK"
 done
 
+# Refuse to cut over a fragment this script cannot place. `build.rs` counts every
+# `.md` here, so a mistyped section (`544.fixd.md`, or no section at all) is a file
+# `omni doctor` reports as unreleased and this loop would neither fold nor delete:
+# the release would ship, the entry would be missing from the notes, and the fresh
+# binary would still print `[1 UNRELEASED] ... cut a tag` at users. Fail before
+# touching CHANGELOG.md, loudly, with the fix in the message.
+STRAY=$(comm -23 \
+    <(ls changelog.d/*.md 2>/dev/null | grep -v '/README\.md$' | sort) \
+    <(sort "$FOLDED"))
+if [ -n "$STRAY" ]; then
+    echo "Error: fragment(s) with no recognised section, nothing would fold them:"
+    echo "$STRAY" | sed 's/^/  /'
+    echo "Rename each to <issue-or-slug>.<added|changed|fixed|removed>.md and re-run."
+    exit 1
+fi
+
 # `$(cat)` drops trailing newlines, so the carried-over section below does not
 # arrive after a double blank line.
 printf '%s\n' "$(cat "$BLOCK")" > "$BLOCK.trim"
