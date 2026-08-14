@@ -148,15 +148,28 @@ mod tests {
         );
     }
 
-    /// The number `omni doctor` prints is the sum, so during the transition a
-    /// tree with entries in both places reports both. Reporting only one would
-    /// let a tag be cut on work the binary then denies having (#137).
+    /// The number `omni doctor` prints is what `build.rs` stamped into
+    /// `OMNI_UNRELEASED_ENTRIES`, so that is the level this has to be checked at.
+    /// A test that adds the two counts itself asserts on its own arithmetic and
+    /// stays green when the build script drops a term, which is #158's defect
+    /// wearing a different file's name.
+    ///
+    /// Goes red in both directions: drop `count_fragments` from `build.rs` and
+    /// the stamped number falls short of the recount; count only fragments and
+    /// it falls short by the bullets still in the section.
     #[test]
-    fn the_reported_total_covers_both_places() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("544.fixed.md"), "- **a**: b\n").unwrap();
-        let c = "## [Unreleased]\n\n### Added\n- **one**: x\n\n## [0.7.4] - 2026-08-13\n";
-        assert_eq!(count_unreleased_entries(c) + count_fragments(dir.path()), 2);
+    fn the_compiled_total_matches_a_recount_of_this_repo() {
+        let compiled: usize = env!("OMNI_UNRELEASED_ENTRIES")
+            .parse()
+            .expect("build.rs must stamp a number");
+        // `cargo test` runs with the crate root as the working directory, which
+        // is the directory `build.rs` read.
+        let recount = count_unreleased_entries(include_str!("../../CHANGELOG.md"))
+            + count_fragments(std::path::Path::new("changelog.d"));
+        assert_eq!(
+            compiled, recount,
+            "omni doctor would report {compiled} unreleased entries against {recount} in the tree"
+        );
     }
 
     /// The real file, so the shipped number is exercised by the suite rather
