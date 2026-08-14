@@ -95,7 +95,7 @@ src/
 ├── guard/           safety, limits, trust bounds, env hygiene
 ├── hooks/           entry points and the dispatcher
 ├── ledger/          cross-turn line dedup
-├── mcp/             MCP server, 26 tools
+├── mcp/             MCP server, 25 tools
 ├── pipeline/        scorer, collapse, registry, format gate
 ├── session/         tracking, noise detection
 ├── store/           SQLite and transcripts

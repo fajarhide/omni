@@ -1,7 +1,7 @@
 # Perkakas MCP
 
-`omni init` mendaftarkan OMNI sebagai server MCP, yang memberi agent **25
-perkakas** yang bisa ia panggil sendiri tanpa lewat Anda.
+`omni init` mendaftarkan OMNI sebagai server MCP, yang memberi agent
+**25 perkakas** yang bisa ia panggil sendiri tanpa lewat Anda.
 
 Pastikan daftarnya terhadap binary Anda sendiri, bukan terhadap halaman ini:
 
@@ -91,5 +91,5 @@ Lihat [Loop engineering](../integrations/loops.md).
 Memanggilnya mengembalikan `-32602 tool not found`.
 
 Ia pernah salah hitung: `grep` atas kode sumber untuk `"omni_*"` mengembalikan
-27, jadi 27 salah di mana pun ia muncul. `tools/list` milik server sendiri
-menyebut 26.
+27, jadi 27 salah di mana pun ia muncul. Jalankan panggilan `tools/list` di atas
+untuk hitungannya.

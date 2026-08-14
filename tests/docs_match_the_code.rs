@@ -23,7 +23,7 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Every markdown file the manual and the README are made of.
+/// Every markdown file the manual, the README and CONTRIBUTING are made of.
 fn doc_files() -> Vec<PathBuf> {
     let root = repo_root();
     // Both books (#539). The prose is translated and the commands are not, so a
@@ -37,6 +37,10 @@ fn doc_files() -> Vec<PathBuf> {
         .map(|e| e.path().to_path_buf())
         .collect();
     out.push(root.join("README.md"));
+    // CONTRIBUTING.md was the one prose file with a count in it that nothing
+    // read, and it held `26 tools` for two releases after the number became 25
+    // (#541). It is not part of either book, so the walk above never sees it.
+    out.push(root.join("CONTRIBUTING.md"));
     out.sort();
     out
 }
@@ -151,7 +155,13 @@ fn every_documented_count_matches_the_code() {
 
     // (regex, what the number has to equal, what it is counting)
     let claims = [
-        (r"(\d+)\s+(?:MCP\s+)?tools", tools.len(), "MCP tools"),
+        // `perkakas` because the Indonesian book states the same counts and the
+        // English noun never appears in it, so every count in it was unchecked.
+        (
+            r"(\d+)\s+(?:MCP\s+)?(?:tools|perkakas)",
+            tools.len(),
+            "MCP tools",
+        ),
         (r"(\d+)\s+content filters", distillers, "distillers"),
     ];
 
@@ -240,6 +250,10 @@ fn the_scan_reaches_the_manual_and_the_readme() {
     assert!(
         files.iter().any(|p| p.ends_with("README.md")),
         "the README is not being scanned"
+    );
+    assert!(
+        files.iter().any(|p| p.ends_with("CONTRIBUTING.md")),
+        "CONTRIBUTING is not being scanned"
     );
     assert!(
         commands_in_shell_blocks().len() > 10,
