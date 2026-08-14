@@ -34,6 +34,17 @@ scorer, and a shared warm database serialises writes, which is the usual reason
 `omni exec` looks like it has hung. It is also required when running the test suite
 against a live installation.
 
+## Commands run through the MCP server
+
+| variable | effect |
+|---|---|
+| `OMNI_RUN_TIMEOUT_SECS` | How long `omni_run` waits for a command. Default 60. |
+
+The default sits below every host MCP timeout we know of, so a stalled command comes
+back as a sentence naming itself rather than the host's idle-timeout error. Raise it
+when a build legitimately takes longer, and remember the host has a deadline of its own:
+Cursor's is 120 seconds, and nothing OMNI does can extend it.
+
 ## Retention
 
 | variable | effect |
