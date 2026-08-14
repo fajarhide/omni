@@ -7,8 +7,21 @@
 
     The case is bubo.weekndlabs.com's, sampled off its icon rather than guessed:
     a flat vertical navy from #252A41 to #121522, no radial glow, because Bubo
-    has none. The ink is #FFB000, OMNI's own amber phosphor, so the two products
-    read as siblings without OMNI borrowing Bubo's gold as well as its case.
+    has none.
+
+    The ink was OMNI's amber phosphor until the terminal on omni.weekndlabs.com
+    stopped reading in amber. The mark is the last place it lived, and a product
+    whose only orange is its own icon looks like it forgot to update the icon.
+
+    The three stops are #FFD37A / #FFB000 / #D98A00 converted, not re-picked. The
+    middle one is the design system's wl-terminal-blue exactly, which is
+    oklch(0.6854 0.1699 252.99), and the outer two keep the amber gradient's
+    lightness offsets and chroma ratio at that hue, so the modelling in the
+    artwork survives the swap. All three are in gamut, nothing clamped. Do not
+    eyeball a replacement: run the same conversion.
+
+    No double hyphen anywhere in here. XML forbids one inside a comment, and the
+    token name written in full is what an SVG rasteriser rejects the file over.
 
     The artwork sits in a nested <svg> with its own viewBox, so it is centred and
     scaled by the renderer and the path itself is untouched. Editing the mark
@@ -20,9 +33,9 @@
       <stop offset="1" stop-color="#121522"/>
     </linearGradient>
     <linearGradient id="omni-ink" x1="250" y1="119" x2="250" y2="350" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFD37A"/>
-      <stop offset="0.45" stop-color="#FFB000"/>
-      <stop offset="1" stop-color="#D98A00"/>
+      <stop offset="0" stop-color="#79B5FA"/>
+      <stop offset="0.45" stop-color="#409CFF"/>
+      <stop offset="1" stop-color="#2879CE"/>
     </linearGradient>
   </defs>
 
