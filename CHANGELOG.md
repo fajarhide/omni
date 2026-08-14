@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-08-14
+
 ### Added
 - **The manual reads in Indonesian (#539)**: #513 shipped a language switcher whose every entry left the manual for a README on GitHub, because the manual itself was English only. It advertised seven languages and delivered one page in each. 27 pages plus a `SUMMARY` are now translated (`index`, `concepts`, `use`, `integrations`, `reference`), served at `/docs/id/`, and the `ID` entry in the switcher points at the manual instead of the README.
 
@@ -26,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **The decision the rows are for is deliberately not taken here.** Whether the project scope stays shared or becomes `(repo, agent)` is a choice between two unmeasured options until the corpus has run, and choosing early is what this project keeps refusing to do. Deletion ships in the same commit as the schema, pruned in the same window as the lines it describes, because `passthrough_events` shipped with no cleanup and grew unbounded.
 
 ### Changed
+- **Changelog entries moved to `changelog.d/` fragments**: every branch used to edit `## [Unreleased]` in `CHANGELOG.md`, so N parallel branches cost N-1 identical "keep both sides" resolutions and N full CI re-runs. The repo has its own evidence: five branches opened in one sitting on 2026-08-02 produced four of them, and the workaround written down at the time, batch a lane into one branch, stops being available the moment two agent sessions work in parallel, which is now routine here.
+
+  One file per entry, `changelog.d/<issue>.<section>.md`, holding the bullet and no heading. Two branches never write the same path, so git has nothing to conflict on. `scripts/changelog_cut.sh` folds them into a version section at release time and deletes them, which also automates the manual "move the entries under `## [x.y.z]`" step that #137 exists because someone forgot.
+
+  **Additive on purpose.** `build.rs` counts the fragments *plus* the bullets still under `## [Unreleased]`, so `omni doctor` stays true while both shapes coexist and no in-flight branch had to be rebased to land this. The first cut after it may need one manual tidy where a carried bullet lands beside a heading the fragments just wrote; the script says so when it happens.
+
 - **The skill's install line names `fajarhide/skills` (#547)**: one skill answered to two URLs. `npx skills add fajarhide/omni` is what the README and both manuals printed, `npx skills add fajarhide/skills --skill omni` is what the directory page prints. Both pull the same file, since `fajarhide/skills/skills/omni/SKILL.md` is synced daily from `plugins/claude-code/skills/omni/SKILL.md`, so the two could only ever disagree on which URL a reader learned.
 
   The one now documented is the one with a page behind it. `https://www.skills.sh/fajarhide/omni` answers 200 and renders a 404 body with no `<title>`; `https://www.skills.sh/fajarhide/skills/omni` is a real listing, and the four files now link it. `fajarhide/omni` still installs and is simply no longer advertised. The short form was run into an empty directory before it was published: `rc=0`, `Installed 1 skill`.
@@ -33,6 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Six of the seven READMEs documented neither install path.** `ja`, `zh`, `ko`, `vi` and `ar` carried no plugin and no skills block, and `id` carried the skills block without the plugin one, so the block English readers have had since #546 reached nobody else. All six now carry both, in their own language.
 
 ### Fixed
+- **The shipped skill told agents to install Claude Code's hooks whatever host they were in (#545)**: `plugins/claude-code/skills/omni/SKILL.md` is the skill `npx skills add` installs, and it instructed the agent to run `omni init --claude` unconditionally, while describing OMNI as "a Claude Code hook" that writes "into `~/.claude/settings.json`". Followed inside Cursor or Codex, that configures a host nobody asked about. It now says to run bare `omni init`, which configures the host it is running inside and prints which one it picked, and it states the rule in as many words: do not name a host you have not established you are running in. The prose generalised with it, from "a Claude Code hook" to "a hook the agent host calls".
+
+  **The binary did not change, the instructions did.** This shipped in the same commit as #545's documentation change and was described by neither the issue nor the pull request, which is why it took a changelog audit to find. The install URL that commit added is the one #547 superseded the same day, so both entries touch the same file for different reasons.
+
+- **A changelog fragment with the wrong extension vanished silently**: `changelog.d/544.fixed.txt` was counted by nothing and folded by nothing. `count_fragments` required `.md` and so did the glob in `scripts/changelog_cut.sh`, so both sides agreed to ignore it: `omni doctor` reported no outstanding entry, the release cut printed `No fragments in changelog.d/` and exited 0, and the entry never reached the release notes. That is the outcome the directory was built to prevent, one dimension further out than the mistyped section the guard already caught.
+
+  Fixed by removing the dimension rather than by patching the instance. **Anything in `changelog.d/` that is not `README.md` and is not hidden is an entry**, on both sides, so there is no extension for the two predicates to disagree about. A mistyped *section* still cannot be placed and still refuses the cut, loudly, before `CHANGELOG.md` is touched. Hidden files stay excluded because macOS writes `.DS_Store` into any directory it opens and counting it would have `omni doctor` report unreleased work that does not exist.
+
+  `tests/changelog_cut.rs` drives the real script in a temporary directory: the fold, the two refusals, the post-release state where only `README.md` remains, the dotfile, and a re-run against a version already cut. Five deliberate breaks were each proved to turn it red, including reverting each predicate separately, and one arm that first appeared green turned out to be a patch that had not applied rather than a weak test.
+
+  A follow-on from review on the same change: a fragment named with a space or a newline made the fold loop word-split and `cat` open a path that did not exist. That already failed safely, non-zero with `CHANGELOG.md` untouched, but it failed as `cat: changelog.d/545: No such file or directory`, naming neither the file nor the reason. Names are now checked against `[A-Za-z0-9._-]` before anything is read, and the refusal says which name and why. A space is the realistic version of this; the newline is what review raised.
+
 - **`omni_run` could hang until the host gave up (#544)**: reported on Windows in Cursor, where some Git commands returned `MCP error -32001: Request timed out` after 120 seconds while the same command took 397 ms in PowerShell. Three separate defects in one spawn, none of them Windows-only.
 
   **stdout was drained to EOF and only then stderr.** A child that fills the stderr pipe buffer before closing stdout blocks forever, and the reader blocks with it. Reproduced on macOS with 200 KB of stderr; the buffer is 64 KB there and around 4 KB on Windows, which is why it was reported there first. `wait_with_output` drains both at once, which also deletes the hand-rolled read. `omni exec` never had this because it inherits stderr rather than piping it.
@@ -42,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Nothing bounded the child, and the blocking call ran on a runtime worker.** One hung command took the thread that was serving everything else, which is the shape of a report where three calls succeed and everything after them times out. There is a 60 s deadline now, `OMNI_RUN_TIMEOUT_SECS` raises it for a build that legitimately outlasts it, and the work moved to `spawn_blocking`. A timeout returns a sentence naming the command that stalled rather than the host's opaque error code.
 
   The reporter's `git --version` case is not explained by any of these: it writes about 25 bytes to stdout and nothing to stderr. That half of the report is still open.
+
 - **A whole-output fold under 1 KB now stays verbatim (#543)**: every floor in the ledger asked one question, whether a run outgrows the marker replacing it. That is the right question for a partial fold, where the agent keeps context beside the handle and can decline to spend it. It is the wrong question when the fold covers the entire output, because then the agent holds a handle and nothing else, so needing any part of the payload costs a retrieval round trip it has no say in.
 
   Every whole-output fold this machine recorded after 0.7.4 went in was under 1 KB, and **four of the four were retrieved within nine seconds**, against a 0.85% retrieve rate across all 5,178 distillations in the same store. Those folds saved 2,680 bytes, then spent 319 bytes of marker plus four extra tool calls handing the same 2,999 bytes back. `MIN_WHOLE_OUTPUT_FOLD` is 1024 because that is the top of the measured range, not a knee: nothing above it was observed either way, so the floor covers what is known to lose and leaves the rest folding. n=4, one machine, window bounded by the 2026-08-11 store reset.
