@@ -523,10 +523,16 @@ fn replay_execution_traces_net_savings() {
     // than as a competitor that never ran. Verified before this line existed, on
     // `heavy_noise.txt`: 9,207 bytes back under an empty HOME against 5,524 with
     // `CAVEMAN_HOME` set.
-    let caveman_home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-        .join(".caveman")
-        .to_string_lossy()
-        .into_owned();
+    //
+    // An operator who already set `CAVEMAN_HOME` has a non-default install, so that
+    // value wins and only the fallback is derived from HOME. Deriving it either way
+    // would break exactly the case this line exists to protect.
+    let caveman_home = std::env::var("CAVEMAN_HOME").unwrap_or_else(|_| {
+        std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".caveman")
+            .to_string_lossy()
+            .into_owned()
+    });
 
     // Match the method: no user config, no passthrough shortcut.
     let tmp_home = tempfile::tempdir().expect("temp home");
