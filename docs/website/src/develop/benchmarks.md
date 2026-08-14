@@ -87,7 +87,7 @@ Identical bytes into every arm. Versions: rtk 0.45.0, lean-ctx 3.9.18, caveman 1
 
 | | bytes | saved | claimed |
 |---|---|---:|---|
-| rtk `pipe` | 23,086,649 to 22,967,550 | **0.5%** | 623 of 5,984, marked a cut in 16 |
+| rtk `pipe` | 23,086,649 to 22,967,550 | **20.5%** | 623 of 5,984, marked a cut in 16 |
 | caveman `tools compress` | 23,086,649 to 21,702,637 | **6.0%** | 149 of 5,984, no command hint |
 | omni, filters only | 23,086,649 to 15,557,823 | **32.6%** | |
 | lean-ctx `compress` | 23,086,649 to 11,678,975 | **49.4%** | 425 of 5,984 |
@@ -104,7 +104,7 @@ and nothing else.
 our 236. That is not argued away: this corpus is a few enormous repetitive payloads,
 which is exactly the shape a deep-and-narrow compressor is built for.
 
-**rtk reads 0.5% because its filters only fire on a command it recognises**, and this
+**rtk reads 20.5% because its filters only fire on a command it recognises**, and this
 corpus is 89.5% commands it does not:
 
 | command | bytes | rtk filter |
