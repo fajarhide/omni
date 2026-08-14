@@ -42,7 +42,7 @@ A healthy install names the binary, the config directory, the database, and one
 line per host:
 
 ```
-  Binary:         omni v0.7.3 [LATEST]
+  Binary:         omni v0.7.5 [LATEST]
   Config dir:     ~/.omni/ [OK]
   Database:       ~/.omni/omni.db (0 distillations, 0 sessions) [OK]
 

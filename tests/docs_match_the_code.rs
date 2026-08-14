@@ -153,7 +153,14 @@ fn every_documented_count_matches_the_code() {
         })
         .count();
 
-    // (regex, what the number has to equal, what it is counting)
+    // (regex, what the number has to equal, what it is counting, stated in both books)
+    //
+    // The last field is coverage, not scanning: every claim is looked for
+    // everywhere, and a `true` also requires each book to state it. One shared
+    // counter would let the English page keep a claim alive while the Indonesian
+    // one quietly stopped stating it, which is #541's reach problem again.
+    // `false` is for a count with no Indonesian counterpart by design, since
+    // `develop/` is deliberately untranslated.
     let claims = [
         // `perkakas` because the Indonesian book states the same counts and the
         // English noun never appears in it, so every count in it was unchecked.
@@ -161,11 +168,40 @@ fn every_documented_count_matches_the_code() {
             r"(\d+)\s+(?:MCP\s+)?(?:tools|perkakas)",
             tools.len(),
             "MCP tools",
+            true,
         ),
-        (r"(\d+)\s+content filters", distillers, "distillers"),
+        (r"(\d+)\s+content filters", distillers, "distillers", false),
+        // The ledger page states three floors, in both languages. A constant
+        // moving without the prose is #541 one file over: a number in text that
+        // nothing reads. Each pattern carries enough of the sentence around the
+        // number to belong to one floor and nothing else, since `under N bytes`
+        // on its own is ordinary prose that any page may write for other reasons.
+        (
+            r"(?:save|menghemat) (\d+) (?:bytes over its marker|byte di atas penandanya)",
+            omni::guard::limits::MIN_LEDGER_RUN_GAIN,
+            "bytes a session-origin run must save",
+            true,
+        ),
+        (
+            r"(?:under|di bawah) (\d+) (?:bytes never reaches|byte tidak pernah)",
+            omni::guard::limits::MIN_LEDGER_INPUT,
+            "bytes below which the ledger is skipped",
+            true,
+        ),
+        (
+            r"(?:entire output needs|seluruh keluaran butuh) (\d+) (?:bytes|byte)",
+            omni::guard::limits::MIN_WHOLE_OUTPUT_FOLD,
+            "bytes a whole-output fold needs",
+            true,
+        ),
     ];
 
     let mut wrong = Vec::new();
+    // A pattern that matches nothing is a check that quietly stopped checking,
+    // which is the failure #541 was. Rewording a sentence past its pattern has to
+    // be as loud as getting the number wrong, and per book, or one language keeps
+    // the other's counter warm. Buckets: English book, Indonesian book, the rest.
+    let mut seen = vec![[0usize; 3]; claims.len()];
     for path in doc_files() {
         let text = std::fs::read_to_string(&path).expect("read doc");
         let shown = path
@@ -173,10 +209,19 @@ fn every_documented_count_matches_the_code() {
             .unwrap_or(&path)
             .display()
             .to_string();
-        for (pattern, actual, what) in &claims {
+        // By component, not by substring: the display path uses `\` on Windows.
+        let book = if path.components().any(|c| c.as_os_str() == "src-id") {
+            1
+        } else if path.components().any(|c| c.as_os_str() == "src") {
+            0
+        } else {
+            2
+        };
+        for (n, (pattern, actual, what, _)) in claims.iter().enumerate() {
             let re = regex::Regex::new(pattern).expect("valid regex");
             for (i, line) in text.lines().enumerate() {
                 for c in re.captures_iter(line) {
+                    seen[n][book] += 1;
                     let claimed: usize = c[1].parse().expect("digits");
                     if claimed != *actual {
                         wrong.push(format!(
@@ -193,6 +238,27 @@ fn every_documented_count_matches_the_code() {
         wrong.is_empty(),
         "the manual states counts the code disagrees with.\n{}",
         wrong.join("\n")
+    );
+
+    let mut uncovered = Vec::new();
+    for ((_, _, what, both_books), hits) in claims.iter().zip(&seen) {
+        if *both_books {
+            if hits[0] == 0 {
+                uncovered.push(format!("  {what}: the English manual no longer states it"));
+            }
+            if hits[1] == 0 {
+                uncovered.push(format!(
+                    "  {what}: the Indonesian manual no longer states it"
+                ));
+            }
+        } else if hits.iter().sum::<usize>() == 0 {
+            uncovered.push(format!("  {what}: no document states it"));
+        }
+    }
+    assert!(
+        uncovered.is_empty(),
+        "a claim nobody states is a check that stopped checking.\n{}",
+        uncovered.join("\n")
     );
 }
 

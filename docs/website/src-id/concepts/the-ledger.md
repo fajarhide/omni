@@ -49,6 +49,29 @@ yang berasal dari sesi harus menghemat 150 byte di atas penandanya; deretan yang
 berasal dari proyek harus menghemat tiga kali lipatnya, sebab agent tidak punya
 pilihan selain membayar satu pengambilan kalau ia butuh isinya.
 
+## Dua lantai yang memutuskan tidak ada yang dilipat sama sekali
+
+Kedua ambang di atas menanyakan apakah sebuah deretan lebih besar daripada penanda
+yang menggantikannya. Ada dua lantai yang diperiksa sebelum keduanya, dan berdua
+mereka menjelaskan sebagian besar kasus di mana keluaran kembali utuh dan terlihat
+seolah ledger-nya mati.
+
+**Keluaran di bawah 264 byte tidak pernah sampai ke ledger.** Di bawah itu tidak ada
+deretan yang cukup panjang untuk pantas dapat handle, jadi tahap ini dilewati.
+
+**Lipatan yang menutupi seluruh keluaran butuh 1024 byte.** Kedua ambang tadi
+mengandaikan agent masih memegang sisa keluaran di samping penandanya dan bisa
+memutuskan apakah handle itu layak dibelanjakan. Kalau lipatannya menutupi semuanya,
+tidak ada apa pun di sampingnya, jadi membutuhkan sepotong saja dari isinya berarti
+satu pengambilan yang agent tidak punya suara di dalamnya. Setiap lipatan
+seluruh-keluaran yang tercatat di mesin ini ada di bawah 1 KB, dan empat dari empat
+diambil kembali dalam sembilan detik, melawan angka pengambilan 0,85% atas seluruh
+5.178 distilasi di penyimpanan yang sama. Semuanya menghemat 2.680 byte, lalu
+membelanjakan 319 byte penanda ditambah empat panggilan tool tambahan untuk
+menyerahkan 2.999 byte yang sama. Lantainya adalah puncak rentang yang terukur itu,
+bukan sebuah titik belok, sebab di atasnya tidak ada yang teramati ke arah mana pun.
+n=4, satu mesin.
+
 ## Premis yang mendasari semua sisanya
 
 > Agent masih memegang byte ini.

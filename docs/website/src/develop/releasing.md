@@ -27,6 +27,15 @@ make bump VERSION=x.y.z
 A correctly cut build prints `omni vx.y.z [AHEAD/RC]` with no `UNRELEASED` line. Verify
 that before pushing the tag.
 
+**The half of that line to trust afterwards is the missing `UNRELEASED`, not the
+label.** `guard::update::get_status` caches the newest known release in
+`~/.omni/update_cache.json` for 14400 seconds, so for four hours after a tag a machine
+that ran `omni doctor` beforehand still holds the previous version and reports `Ahead`
+whatever it is running. Observed on 0.7.5, where the freshly installed release printed
+`[AHEAD/RC]`. `build.rs` computes the unreleased count from the tree with no cache, so
+that half is always current; delete the cache file if you want the label to mean
+something.
+
 Day to day, the entry goes in `changelog.d/<issue>.<section>.md` as the work merges, not
 into `CHANGELOG.md` and not at tag time. One file per entry means two branches never
 write the same path, which is what stopped every parallel branch conflicting on
@@ -35,10 +44,12 @@ unusually detailed on purpose: each states the measured evidence, the wrong numb
 was published, and the mechanism. A one-line entry is a regression in that file's
 quality.
 
-The first cut after this changed may need one manual tidy. Bullets written directly into
-`## [Unreleased]` before the convention existed are carried under the version heading
-with their own `### Added` or `### Fixed`, which can land beside one the fragments just
-wrote. The script says so when it happens.
+The first cut needed one manual tidy and it is done. 0.7.5 folded three fragments beside
+seven bullets written into `## [Unreleased]` before the convention existed, and arrived
+with two `### Changed` and two `### Fixed` under one version heading. Merging those four
+into two was the only hand edit. **Check a cut by word count rather than by eye**: 2,252
+words across the old section plus the fragments, 2,252 in the folded section. A
+reordering that drops a bullet body looks correct in a heading-level diff.
 
 ## CI green does not mean the release will build
 
