@@ -291,6 +291,15 @@ impl<'a> Ledger<'a> {
         // reuse and was calibrated on the single-agent case, and nothing recorded
         // enough to tell the two apart after the fact.
         if let Some((_, folded)) = &projected {
+            // Every line folded means the agent holds markers and nothing else,
+            // which is the case `MIN_WHOLE_OUTPUT_FOLD` refuses below 1 KB. Read
+            // here rather than threaded out of `substitute`, because that flag is
+            // per run while this table is already one row per (origin, source
+            // agent) per call. The two differ only when adjacent runs of
+            // different origins tile the payload, and for the question this
+            // column answers, whether the agent kept any content at all, the
+            // call-level reading is the right one.
+            let whole_output = folded.len() == lines.len();
             let mut tally: HashMap<(&'static str, &str), (usize, usize)> = HashMap::new();
             for &i in folded {
                 let Some(origin) = origin_of(&hashes[i]) else {
@@ -317,6 +326,8 @@ impl<'a> Ledger<'a> {
                         origin,
                         lines,
                         bytes,
+                        whole_output,
+                        payload_bytes: text.len(),
                     },
                 )
                 .collect();
@@ -561,6 +572,66 @@ mod tests {
         assert!(
             second.contains("never seen before"),
             "the new line has to survive: {second:?}"
+        );
+    }
+
+    /// #543 priced whole-output folds and `MIN_WHOLE_OUTPUT_FOLD` refuses them
+    /// under 1 KB, but nothing recorded which folds were whole-output, so the
+    /// floor could not be checked against the corpus that calibrated it. Both
+    /// shapes are asserted in one test because the column is only useful if it
+    /// separates them: a flag that is always 1 answers the query the same way as
+    /// no flag at all.
+    #[test]
+    fn records_whether_a_fold_covered_the_whole_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Store::open_path(&db).expect("store");
+        let text = payload();
+        let ledger = Ledger::new(&store, "s1");
+
+        ledger.project(&text);
+        let whole = ledger.project(&text).expect("a repeat is projectable");
+        assert!(
+            whole.contains("identical to"),
+            "this arm has to be a whole-output fold: {whole:?}"
+        );
+
+        // One line this session has never seen, so the head folds and the tail
+        // stays. Same ledger, so the only difference is the shape of the fold.
+        let extended = format!("{text}\nsomething this session has never seen before\n");
+        let partial = ledger.project(&extended).expect("the repeated head folds");
+        assert!(
+            !partial.contains("identical to"),
+            "this arm has to be a partial fold: {partial:?}"
+        );
+
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let rows: Vec<(i64, i64)> = conn
+            .prepare("SELECT whole_output, payload_bytes FROM ledger_folds ORDER BY id")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows");
+
+        assert_eq!(
+            rows.iter().map(|r| r.0).collect::<Vec<_>>(),
+            vec![1, 0],
+            "a whole-output fold then a partial one; \
+             without the split the floor stays unverifiable"
+        );
+        // Both calls land in the same second, so a `GROUP BY ts` audit would add
+        // these two payloads together and compare the total with the floor. The
+        // size has to be readable per row for the audit to mean anything.
+        assert_eq!(
+            rows[0].1,
+            text.len() as i64,
+            "the whole-output row must carry its own payload size"
+        );
+        assert_eq!(
+            rows[1].1,
+            extended.len() as i64,
+            "each call carries its own size, not the pair's total"
         );
     }
 
