@@ -327,6 +327,7 @@ impl<'a> Ledger<'a> {
                         lines,
                         bytes,
                         whole_output,
+                        payload_bytes: text.len(),
                     },
                 )
                 .collect();
@@ -605,19 +606,32 @@ mod tests {
         );
 
         let conn = rusqlite::Connection::open(&db).expect("open");
-        let flags: Vec<i64> = conn
-            .prepare("SELECT whole_output FROM ledger_folds ORDER BY id")
+        let rows: Vec<(i64, i64)> = conn
+            .prepare("SELECT whole_output, payload_bytes FROM ledger_folds ORDER BY id")
             .expect("prepare")
-            .query_map([], |r| r.get(0))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .expect("query")
             .collect::<Result<_, _>>()
             .expect("rows");
 
         assert_eq!(
-            flags,
+            rows.iter().map(|r| r.0).collect::<Vec<_>>(),
             vec![1, 0],
             "a whole-output fold then a partial one; \
              without the split the floor stays unverifiable"
+        );
+        // Both calls land in the same second, so a `GROUP BY ts` audit would add
+        // these two payloads together and compare the total with the floor. The
+        // size has to be readable per row for the audit to mean anything.
+        assert_eq!(
+            rows[0].1,
+            text.len() as i64,
+            "the whole-output row must carry its own payload size"
+        );
+        assert_eq!(
+            rows[1].1,
+            extended.len() as i64,
+            "each call carries its own size, not the pair's total"
         );
     }
 

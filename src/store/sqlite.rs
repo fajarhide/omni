@@ -501,8 +501,15 @@ impl SqliteBackend {
             -- `MIN_WHOLE_OUTPUT_FOLD` refuses below 1 KB (#543), and until this
             -- column nothing recorded it, so the floor could not be checked
             -- against the corpus it was calibrated on:
-            --   SELECT SUM(bytes) p FROM ledger_folds WHERE whole_output = 1
-            --   GROUP BY ts, scope, agent_id HAVING p < 1024;
+            --   SELECT * FROM ledger_folds
+            --   WHERE whole_output = 1 AND payload_bytes < 1024;
+            --
+            -- `payload_bytes` is the whole payload, carried on every row of the
+            -- call, so the audit is a row predicate. Summing `bytes` would need
+            -- a GROUP BY on a per-call key, and `ts` is not one: it is whole
+            -- seconds, so two folds by the same agent in the same second merge
+            -- and their combined size can clear a floor that neither of them
+            -- cleared alone, hiding exactly the violation being looked for.
             CREATE TABLE IF NOT EXISTS ledger_folds (
                 id           INTEGER PRIMARY KEY,
                 ts           INTEGER NOT NULL,
@@ -512,7 +519,8 @@ impl SqliteBackend {
                 origin       TEXT NOT NULL,
                 lines        INTEGER NOT NULL,
                 bytes        INTEGER NOT NULL,
-                whole_output INTEGER NOT NULL DEFAULT 0
+                whole_output INTEGER NOT NULL DEFAULT 0,
+                payload_bytes INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_ledger_folds_ts ON ledger_folds(ts);
 
@@ -773,6 +781,10 @@ impl SqliteBackend {
         // have to bound themselves by ts for that reason.
         let _ = conn.execute(
             "ALTER TABLE ledger_folds ADD COLUMN whole_output INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE ledger_folds ADD COLUMN payload_bytes INTEGER NOT NULL DEFAULT 0",
             [],
         );
         let _ = conn.execute(
@@ -1802,8 +1814,9 @@ impl SqliteBackend {
         {
             let Ok(mut stmt) = tx.prepare_cached(
                 "INSERT INTO ledger_folds
-                     (ts, scope, agent_id, source_agent, origin, lines, bytes, whole_output)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                     (ts, scope, agent_id, source_agent, origin, lines, bytes, whole_output,
+                      payload_bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             ) else {
                 return;
             };
@@ -1816,7 +1829,8 @@ impl SqliteBackend {
                     f.origin,
                     f.lines as i64,
                     f.bytes as i64,
-                    i64::from(f.whole_output)
+                    i64::from(f.whole_output),
+                    f.payload_bytes as i64
                 ]);
             }
         }
@@ -2527,6 +2541,12 @@ pub struct FoldRecord {
     /// carries the same value, because the table already aggregates by
     /// (origin, source agent) and a per-run flag has nowhere to live here.
     pub whole_output: bool,
+    /// The whole payload this fold came out of, repeated on every row of the
+    /// call so the floor audit is a row predicate rather than a GROUP BY. `ts`
+    /// is whole seconds and so cannot key a call: two folds by one agent inside
+    /// one second would merge, and their combined size can clear a floor
+    /// neither cleared alone.
+    pub payload_bytes: usize,
 }
 
 #[derive(Debug, Clone)]

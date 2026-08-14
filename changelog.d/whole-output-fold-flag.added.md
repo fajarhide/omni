@@ -3,8 +3,9 @@
   `ledger_folds.whole_output` is set when every line of the payload folded, which is the call-level reading of the same condition the floor tests per run. The two differ only when adjacent runs of different origins tile the payload, and the question the column answers is whether the agent kept any content at all, so the call-level reading is the right one for a table that already aggregates by (origin, source agent) per call.
 
   ```sql
-  SELECT SUM(bytes) p FROM ledger_folds WHERE whole_output = 1
-  GROUP BY ts, scope, agent_id HAVING p < 1024;
+  SELECT * FROM ledger_folds WHERE whole_output = 1 AND payload_bytes < 1024;
   ```
 
-  Zero rows is the floor holding. Rows written before the column carry 0 meaning "not recorded" rather than "was partial", so a query has to bound itself by `ts`; the migration was run against a copy of a real 89 MB store and left its 55 existing rows intact.
+  Zero rows is the floor holding. `payload_bytes` rides along on every row of the call for that query to be a row predicate: summing `bytes` would need a GROUP BY on a per-call key, and `ts` is whole seconds, so two folds by one agent inside one second merge and their combined size can clear a floor that neither cleared alone. That is the audit silently hiding the one thing it exists to find, so the size is recorded per row instead.
+
+  Rows written before the columns carry 0 meaning "not recorded" rather than "was partial", so a query has to bound itself by `ts`. The migration was run against a copy of a real 89 MB store and left its 55 existing rows intact.
