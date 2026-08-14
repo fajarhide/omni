@@ -11,6 +11,13 @@ is `changelog.d/544.fixed.md`, and a branch closing two issues writes two files.
 Use the issue number when there is one. Work that shipped without a ticket takes
 a short slug instead, never a number that belongs to something else.
 
+**Anything here that is not `README.md` and is not hidden counts as an entry**,
+whatever it is named. Get the section wrong and `scripts/changelog_cut.sh` refuses
+to cut a release until you rename it. That is deliberate: the rule is one sentence
+so the shell script and `count_fragments` in `src/util/changelog.rs` cannot drift
+apart, and an entry cannot go missing by being spelled unusually. Do not leave
+scratch files in this directory.
+
 The file holds the bullet and nothing else. No `##` heading, no `### Fixed`
 heading, no blank line at the top. `scripts/changelog_cut.sh` supplies the
 headings at release time and groups every fragment under the right one.
