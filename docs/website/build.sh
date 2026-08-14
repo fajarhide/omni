@@ -25,8 +25,10 @@ cp -R "$here/src/media" "$here/src-id/media"
 
 # The design-system overlay omni-pages drops into src/wl, when there is one. The
 # head.hbs it writes references it from every page of both books.
+# The removal is outside the guard on purpose: a tree that had an overlay once
+# and does not now must not keep rendering the old one.
+rm -rf "$here/src-id/wl"
 if [ -d "$here/src/wl" ]; then
-  rm -rf "$here/src-id/wl"
   cp -R "$here/src/wl" "$here/src-id/wl"
 fi
 
