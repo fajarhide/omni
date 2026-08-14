@@ -38,3 +38,9 @@ target/
 
 # mdBook build output for docs/website. The source is tracked, the render is not.
 docs/website/book/
+
+# The Indonesian book renders alongside the English one; same rule as above.
+docs/website/book-id/
+# Shared diagrams, copied into the Indonesian book at build time by
+# docs/website/build.sh so both books read one set of SVGs.
+docs/website/src-id/media/
