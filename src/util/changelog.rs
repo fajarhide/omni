@@ -37,6 +37,33 @@ pub fn count_unreleased_entries(changelog: &str) -> usize {
     n
 }
 
+/// Count the entry fragments in `changelog.d/`.
+///
+/// One file is one entry. New work writes `changelog.d/<issue>.<section>.md`
+/// instead of editing `## [Unreleased]`, so two branches never write the same
+/// path and there is nothing for git to conflict on. `README.md` is the
+/// directory's own documentation and is not an entry.
+///
+/// A missing or unreadable directory counts zero rather than failing the build:
+/// this runs in `build.rs`, and a changelog convention must never be the reason
+/// the binary cannot be compiled.
+// Dead in the `omni` binary for the same reason as the function above: the
+// binary reads the total through `OMNI_UNRELEASED_ENTRIES`.
+#[allow(dead_code)]
+pub fn count_fragments(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".md") && name != "README.md"
+        })
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +127,49 @@ mod tests {
     #[test]
     fn handles_an_empty_document_without_panicking() {
         assert_eq!(count_unreleased_entries(""), 0);
+    }
+
+    #[test]
+    fn counts_one_fragment_per_file_and_skips_the_readme() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["544.fixed.md", "541.added.md", "README.md", "notes.txt"] {
+            std::fs::write(dir.path().join(name), "- **thing**: detail\n").unwrap();
+        }
+        assert_eq!(count_fragments(dir.path()), 2);
+    }
+
+    /// The directory does not exist until someone writes the first fragment, and
+    /// a missing convention must not fail the build.
+    #[test]
+    fn counts_zero_when_the_directory_is_absent() {
+        assert_eq!(
+            count_fragments(std::path::Path::new("no/such/changelog.d")),
+            0
+        );
+    }
+
+    /// The number `omni doctor` prints is what `build.rs` stamped into
+    /// `OMNI_UNRELEASED_ENTRIES`, so that is the level this has to be checked at.
+    /// A test that adds the two counts itself asserts on its own arithmetic and
+    /// stays green when the build script drops a term, which is #158's defect
+    /// wearing a different file's name.
+    ///
+    /// Goes red in both directions: drop `count_fragments` from `build.rs` and
+    /// the stamped number falls short of the recount; count only fragments and
+    /// it falls short by the bullets still in the section.
+    #[test]
+    fn the_compiled_total_matches_a_recount_of_this_repo() {
+        let compiled: usize = env!("OMNI_UNRELEASED_ENTRIES")
+            .parse()
+            .expect("build.rs must stamp a number");
+        // `cargo test` runs with the crate root as the working directory, which
+        // is the directory `build.rs` read.
+        let recount = count_unreleased_entries(include_str!("../../CHANGELOG.md"))
+            + count_fragments(std::path::Path::new("changelog.d"));
+        assert_eq!(
+            compiled, recount,
+            "omni doctor would report {compiled} unreleased entries against {recount} in the tree"
+        );
     }
 
     /// The real file, so the shipped number is exercised by the suite rather

@@ -288,15 +288,19 @@ time only; adding it afterwards does nothing, silently.
 **The body says what, why, and how it was verified.** For a distiller change,
 "verified" means the before and after output, not "tests pass".
 
-**One branch per batch, not per issue.** Every change touches `CHANGELOG.md`, so N
-parallel branches cost N-1 merge conflicts and N full CI runs. Batch related work into
-one branch, one commit per issue, one pull request with several `Closes` lines. The
-conflict is always `CHANGELOG.md` and the resolution is always "keep both sides".
+**Write the changelog entry in `changelog.d/`, not in `CHANGELOG.md`.** One file per
+entry, named `<issue>.<section>.md`, holding the bullet and no heading. Two branches
+never write the same path, so there is nothing to conflict on and nothing to rebase.
+`changelog.d/README.md` has the format; `scripts/changelog_cut.sh` folds them in at
+release time.
 
-**Update `CHANGELOG.md` as work merges**, not at tag time. Keep a Changelog and
-SemVer. Entries here are unusually detailed on purpose: each states the measured
-evidence, the wrong number that was published, and the mechanism. A one-line entry is
-a regression in that file's quality.
+Entries are unusually detailed on purpose: each states the measured evidence, the wrong
+number that was published, and the mechanism. A one-line entry is a regression in that
+file's quality, whichever file it lives in.
+
+**Batch related work into one branch anyway.** Fragments removed the changelog
+conflict, not the cost of N full CI runs, so one branch with a commit per issue and one
+pull request with several `Closes` lines is still the cheaper shape.
 
 **CI green is not review-clean.** Read the review comments, automated and human,
 validate each against the code rather than assuming the reviewer is right or wrong,
