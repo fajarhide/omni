@@ -40,6 +40,32 @@ trap 'rm -f "$BLOCK" "$FOLDED"' EXIT
     echo
 } > "$BLOCK"
 
+# Refuse a filename the rest of this script cannot handle, before anything reads
+# one. The fold loop below word-splits `ls` output, so a space or a newline in a
+# name makes `cat` open the wrong path. That already failed safely, non-zero and
+# with `CHANGELOG.md` untouched, but it failed as
+# `cat: changelog.d/545: No such file or directory`, which names neither the real
+# file nor the reason. A space is the realistic version of this, not a newline.
+#
+# The glob is the safe way to enumerate: each match is one word however it is
+# spelled. Do not replace it with `ls`.
+BADNAME=""
+for f in changelog.d/*; do
+    [ -e "$f" ] || continue
+    base=${f#changelog.d/}
+    [ "$base" = "README.md" ] && continue
+    case "$base" in
+        *[!A-Za-z0-9._-]*) BADNAME="$BADNAME  $(printf '%q' "$base")
+" ;;
+    esac
+done
+if [ -n "$BADNAME" ]; then
+    echo "Error: fragment name(s) outside [A-Za-z0-9._-], which this script cannot place:"
+    printf '%s' "$BADNAME"
+    echo "Rename each to <issue-or-slug>.<added|changed|fixed|removed>.md and re-run."
+    exit 1
+fi
+
 # Keep a Changelog's order, not alphabetical. A section with no fragments emits
 # no heading, so an empty `### Removed` never appears.
 for section in Added Changed Fixed Removed; do
@@ -54,14 +80,21 @@ for section in Added Changed Fixed Removed; do
     echo >> "$BLOCK"
 done
 
-# Refuse to cut over a fragment this script cannot place. `build.rs` counts every
-# `.md` here, so a mistyped section (`544.fixd.md`, or no section at all) is a file
-# `omni doctor` reports as unreleased and this loop would neither fold nor delete:
-# the release would ship, the entry would be missing from the notes, and the fresh
-# binary would still print `[1 UNRELEASED] ... cut a tag` at users. Fail before
-# touching CHANGELOG.md, loudly, with the fix in the message.
+# Refuse to cut over a fragment this script cannot place.
+#
+# The predicate is the twin of `count_fragments` in `src/util/changelog.rs` and
+# has to stay identical: anything here that is not `README.md` and is not hidden
+# is an entry. Plain `ls` omits dotfiles, which is the hidden half, and matches
+# the Rust side skipping names starting with `.` so a macOS `.DS_Store` is not
+# reported as unreleased work.
+#
+# Do not narrow this back to `*.md`. That gave the two sides a second dimension to
+# disagree on and `544.fixed.txt` fell through both: counted by neither, folded by
+# neither, gone from the release notes with nothing said. The mistyped *section*
+# case survives and is what this guard is for, so fail before `CHANGELOG.md` is
+# touched, loudly, with the fix in the message.
 STRAY=$(comm -23 \
-    <(ls changelog.d/*.md 2>/dev/null | grep -v '/README\.md$' | sort) \
+    <(ls changelog.d 2>/dev/null | grep -v '^README\.md$' | sed 's|^|changelog.d/|' | sort) \
     <(sort "$FOLDED"))
 if [ -n "$STRAY" ]; then
     echo "Error: fragment(s) with no recognised section, nothing would fold them:"

@@ -39,10 +39,19 @@ pub fn count_unreleased_entries(changelog: &str) -> usize {
 
 /// Count the entry fragments in `changelog.d/`.
 ///
-/// One file is one entry. New work writes `changelog.d/<issue>.<section>.md`
-/// instead of editing `## [Unreleased]`, so two branches never write the same
-/// path and there is nothing for git to conflict on. `README.md` is the
-/// directory's own documentation and is not an entry.
+/// **Anything in the directory that is not `README.md` and is not hidden is an
+/// entry.** One rule, no extension test, because this predicate has a twin in
+/// `scripts/changelog_cut.sh` and every dimension the two can disagree on is a
+/// way for an entry to vanish: counted here and folded by nothing, or folded
+/// there and never reported as outstanding. Requiring `.md` gave them a second
+/// dimension and `544.fixed.txt` fell through both, silently, which is the
+/// #546 outcome this directory exists to prevent. A mistyped *section* is still
+/// possible and is caught loudly by the cut script, which refuses to run.
+///
+/// Hidden files are excluded because macOS writes `.DS_Store` into every
+/// directory it opens, and counting it would have `omni doctor` report an
+/// unreleased entry that does not exist. That is the false-claim class, which
+/// outranks tidiness.
 ///
 /// A missing or unreadable directory counts zero rather than failing the build:
 /// this runs in `build.rs`, and a changelog convention must never be the reason
@@ -59,7 +68,7 @@ pub fn count_fragments(dir: &std::path::Path) -> usize {
         .filter(|e| {
             let name = e.file_name();
             let name = name.to_string_lossy();
-            name.ends_with(".md") && name != "README.md"
+            !name.starts_with('.') && name != "README.md"
         })
         .count()
 }
@@ -132,10 +141,35 @@ mod tests {
     #[test]
     fn counts_one_fragment_per_file_and_skips_the_readme() {
         let dir = tempfile::tempdir().unwrap();
-        for name in ["544.fixed.md", "541.added.md", "README.md", "notes.txt"] {
+        for name in ["544.fixed.md", "541.added.md", "README.md"] {
             std::fs::write(dir.path().join(name), "- **thing**: detail\n").unwrap();
         }
         assert_eq!(count_fragments(dir.path()), 2);
+    }
+
+    /// A wrong extension must still count. When it did not, `544.fixed.txt` was
+    /// invisible to this function *and* to the glob in `scripts/changelog_cut.sh`,
+    /// so the entry was never reported and never folded: the release shipped
+    /// without it and nothing said so.
+    #[test]
+    fn a_wrong_extension_is_still_an_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["544.fixed.txt", "545.fixed", "546.fixed.md"] {
+            std::fs::write(dir.path().join(name), "- **thing**: detail\n").unwrap();
+        }
+        assert_eq!(count_fragments(dir.path()), 3);
+    }
+
+    /// macOS writes `.DS_Store` into every directory it opens. Counting it would
+    /// make `omni doctor` report an unreleased entry that does not exist, which
+    /// is the false-claim class this project exists to fight.
+    #[test]
+    fn hidden_files_are_not_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [".DS_Store", ".gitkeep", "544.fixed.md"] {
+            std::fs::write(dir.path().join(name), "x").unwrap();
+        }
+        assert_eq!(count_fragments(dir.path()), 1);
     }
 
     /// The directory does not exist until someone writes the first fragment, and
