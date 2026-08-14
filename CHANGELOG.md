@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The manual reads in Indonesian (#539)**: #513 shipped a language switcher whose every entry left the manual for a README on GitHub, because the manual itself was English only. It advertised seven languages and delivered one page in each. 27 pages plus a `SUMMARY` are now translated (`index`, `concepts`, `use`, `integrations`, `reference`), served at `/docs/id/`, and the `ID` entry in the switcher points at the manual instead of the README.
+
+  `develop/` is deliberately not translated. Those seven pages change fastest and are read by people about to send a patch, so an Indonesian copy of them would be wrong more often than it was useful; one Indonesian page says that and links the seven originals.
+
+  **No second `book.toml` and no new dependency.** mdBook reads configuration from the environment, so `docs/website/build.sh` renders the same book twice with a different `src`, `language` and `build-dir`, then copies the second into `book/id` so the site still copies one tree. The diagrams are copied into `src-id` at build time rather than forked: their labels are English either way, and a copy made at build time cannot fall behind the original.
+
+  **A stale translation is worse than none, so two things carry the drift.** Every Indonesian page gets a banner naming itself a translation and linking its English original, injected in `theme/siteframe.js` rather than pasted into 28 files that would then fall out of step with each other. And `scripts/check_translations.sh` fails CI when an English page changes without its counterpart being touched, skipping pages that have no counterpart so `develop/` does not go permanently red. `tests/docs_match_the_code.rs` now scans both books: the prose is translated and the commands are not, so an Indonesian shell fence can name a deleted subcommand exactly as easily as an English one.
+
+- **The manual header carries the mark (#540)**: `theme/siteframe.js` turned `.menu-title` into a link home whose content was the plain string `OMNI`, while the README, the site and the favicon all carried the logo. The mark is read from the `<link rel=icon>` mdBook already emits rather than from a hardcoded filename, because mdBook 0.5 fingerprints theme assets and the hash changes whenever the mark does.
+
 - **A fold now records what it drew on (#533, first step)**: `ledger_lines` says a line was *seen*. It cannot say a marker was ever issued against it, under which scope, or whose bytes it replaced, so the value of cross-agent reuse was unrecoverable from the corpus after the fact. `PROJECT_FLOOR_MULT = 3` prices exactly that case and was calibrated in #448 on cross-session repetition within a single agent, which is to say it has never been checked against the thing it charges for.
 
   `ledger_folds` takes one row per (origin, source agent) per call, so the query that settles the open decision is a `GROUP BY` rather than a replay. `ledger_seen` returns the agent alongside the hash to make the source answerable at all, and `INSERT OR IGNORE` on the line table means that names the agent actually shown the line rather than the last one to repeat it.
