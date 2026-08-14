@@ -183,9 +183,10 @@ irm omni.weekndlabs.com/install.ps1 | iex
 /plugin install omni@omni
 ```
 
-**Any agent that reads skills:**
+**Any agent that reads skills**, listed at
+[skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni):
 ```bash
-npx skills add fajarhide/omni
+npx skills add fajarhide/skills --skill omni
 ```
 
 Both install a skill, not the binary. The skill is what tells the agent how to get

@@ -185,9 +185,16 @@ omni init --status
 curl -fsSL omni.weekndlabs.com/install | bash
 ```
 
-**Di agent mana pun yang membaca skill:**
+**Claude Code, dari dalam sesi:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+**Di agent mana pun yang membaca skill**, terdaftar di
+[skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni):
 ```bash
-npx skills add fajarhide/omni
+npx skills add fajarhide/skills --skill omni
 ```
 Yang terpasang skill-nya, bukan binary-nya. Skill itu yang memberi tahu agent cara
 mengambil binary-nya, memverifikasinya, dan membaca penanda yang ditinggalkan OMNI
