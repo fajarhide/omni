@@ -23,18 +23,6 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// One `pub const NAME: usize = N;` out of `src/guard/limits.rs`.
-fn limit(name: &str) -> usize {
-    let src =
-        std::fs::read_to_string(repo_root().join("src/guard/limits.rs")).expect("read limits.rs");
-    regex::Regex::new(&format!(r"pub const {name}: usize = (\d+);"))
-        .expect("valid regex")
-        .captures(&src)
-        .unwrap_or_else(|| panic!("{name} is not in guard/limits.rs"))[1]
-        .parse()
-        .expect("digits")
-}
-
 /// Every markdown file the manual, the README and CONTRIBUTING are made of.
 fn doc_files() -> Vec<PathBuf> {
     let root = repo_root();
@@ -177,25 +165,31 @@ fn every_documented_count_matches_the_code() {
         (r"(\d+)\s+content filters", distillers, "distillers"),
         // The ledger page states three floors, in both languages. A constant
         // moving without the prose is #541 one file over: a number in text that
-        // nothing reads. Each pattern is the wording both books already use.
+        // nothing reads. Each pattern carries enough of the sentence around the
+        // number to belong to one floor and nothing else, since `under N bytes`
+        // on its own is ordinary prose that any page may write for other reasons.
         (
-            r"(?:save|menghemat) (\d+) (?:bytes|byte)",
-            limit("MIN_LEDGER_RUN_GAIN"),
+            r"(?:save|menghemat) (\d+) (?:bytes over its marker|byte di atas penandanya)",
+            omni::guard::limits::MIN_LEDGER_RUN_GAIN,
             "bytes a session-origin run must save",
         ),
         (
-            r"(?:under|di bawah) (\d+) (?:bytes|byte)",
-            limit("MIN_LEDGER_INPUT"),
+            r"(?:under|di bawah) (\d+) (?:bytes never reaches|byte tidak pernah)",
+            omni::guard::limits::MIN_LEDGER_INPUT,
             "bytes below which the ledger is skipped",
         ),
         (
-            r"(?:needs|butuh) (\d+) (?:bytes|byte)",
-            limit("MIN_WHOLE_OUTPUT_FOLD"),
+            r"(?:entire output needs|seluruh keluaran butuh) (\d+) (?:bytes|byte)",
+            omni::guard::limits::MIN_WHOLE_OUTPUT_FOLD,
             "bytes a whole-output fold needs",
         ),
     ];
 
     let mut wrong = Vec::new();
+    // A pattern that matches nothing is a check that quietly stopped checking,
+    // which is the failure #541 was. Rewording a sentence past its pattern has to
+    // be as loud as getting the number wrong.
+    let mut seen = vec![0usize; claims.len()];
     for path in doc_files() {
         let text = std::fs::read_to_string(&path).expect("read doc");
         let shown = path
@@ -203,10 +197,11 @@ fn every_documented_count_matches_the_code() {
             .unwrap_or(&path)
             .display()
             .to_string();
-        for (pattern, actual, what) in &claims {
+        for (n, (pattern, actual, what)) in claims.iter().enumerate() {
             let re = regex::Regex::new(pattern).expect("valid regex");
             for (i, line) in text.lines().enumerate() {
                 for c in re.captures_iter(line) {
+                    seen[n] += 1;
                     let claimed: usize = c[1].parse().expect("digits");
                     if claimed != *actual {
                         wrong.push(format!(
@@ -223,6 +218,18 @@ fn every_documented_count_matches_the_code() {
         wrong.is_empty(),
         "the manual states counts the code disagrees with.\n{}",
         wrong.join("\n")
+    );
+
+    let unmatched: Vec<&str> = claims
+        .iter()
+        .zip(&seen)
+        .filter(|(_, hits)| **hits == 0)
+        .map(|((_, _, what), _)| *what)
+        .collect();
+    assert!(
+        unmatched.is_empty(),
+        "no document states these any more, so nothing is being checked: {}",
+        unmatched.join(", ")
     );
 }
 
