@@ -3334,31 +3334,40 @@ INFO:jean.server:startup complete in 4.2s
     }
 
     #[test]
-    fn kubectl_table_distills_from_raw_not_collapse_markers() {
-        // #116: `collapse` runs before `distill`, so a distiller that parses columns
+    fn kubectl_table_reaches_the_agent_whole_not_as_collapse_markers() {
+        // #116: `collapse` runs before `distill`, so a distiller that parsed columns
         // used to read `[30 similar lines collapsed]` markers as pod rows and report
-        // `k8s: 2 pods | [5 (lines)`. #110: the kubectl TOML filter used to shadow the
-        // distiller unconditionally; the guardrail now lets it fall through. Together
-        // the distiller must see the real 35-row table.
+        // `k8s: 2 pods | [5 (lines)`. #110: the kubectl TOML filter shadowed the
+        // distiller unconditionally. #562: with that filter retired the summariser
+        // ran for real and deleted 7 pod names from a 10 row table, so it is gone.
+        //
+        // What survives all three is one invariant, and it is checked here at the
+        // hook boundary rather than at the distiller, because collapse sits between
+        // them and can eat the rows on its own.
         let input = serde_json::json!({
             "tool_name": "Bash",
             "tool_input": {"command": "kubectl get pods"},
             "tool_response": {"content": pod_table_35()},
         });
-        let out = process_payload(&input.to_string(), None, None)
-            .expect("a 35-pod table must be distilled, not dropped");
+        // `None` is the hook saying "no rewrite", so the agent receives the raw bytes.
+        let delivered =
+            process_payload(&input.to_string(), None, None).unwrap_or_else(pod_table_35);
 
         assert!(
-            out.contains("35 pods"),
-            "must count all 35 real pods, got: {out}"
+            delivered.contains("api-gateway-7fb9c8b6d-0029"),
+            "the last healthy pod must still be nameable, got: {delivered}"
         );
         assert!(
-            out.contains("30 running") && out.contains("5 error"),
-            "must read real statuses, got: {out}"
+            delivered.contains("api-gateway-7fb9c8b6d-c004"),
+            "the last failing pod must still be nameable, got: {delivered}"
         );
         assert!(
-            !out.contains("collapsed") && !out.contains("(lines)"),
-            "must not be built from collapse markers, got: {out}"
+            !delivered.contains("collapsed") && !delivered.contains("(lines)"),
+            "rows must not be replaced by collapse markers, got: {delivered}"
+        );
+        assert!(
+            !delivered.contains("35 pods"),
+            "a count is not an answer here, got: {delivered}"
         );
     }
 }

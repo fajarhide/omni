@@ -45,13 +45,22 @@ impl Distiller for CloudDistiller<'_> {
                 }
             }
             "kubectl" => {
-                if is_kubectl_table(input) {
-                    Some(distill_kubectl(input))
-                } else if is_resource_table(input) {
-                    // A columnar listing we have no distiller for (`kubectl get
-                    // pvc|pv|ns|certificates …`). The fallback would keep 20
-                    // lines and drop the rest with no marker, so hand back the
-                    // payload untouched.
+                if is_resource_table(input) {
+                    // Any columnar listing, pod tables included. Every row is a
+                    // datum: which pods exist is the answer, not preamble to it,
+                    // and no count of them can be turned back into a name.
+                    //
+                    // A pod summariser used to sit in front of this arm and was
+                    // unreachable through the hook, because `signals/tools/kubectl.toml`
+                    // matched first (#110). #510 retired the TOML layer, the
+                    // summariser became live for the first time, and a 10 row table
+                    // started arriving as 3 lines with 7 pod names deleted (#562).
+                    // Deleted rather than guarded: the arm below already states the
+                    // rule for every other resource, and a pod table is one.
+                    //
+                    // Repeated tables are still cheap. The ledger folds a listing
+                    // the agent has already been shown, which is the honest saving
+                    // here, and it needs the rows intact to do it.
                     None
                 } else {
                     Some(distill_kubectl_generic(segments, input))
@@ -70,22 +79,6 @@ impl Distiller for CloudDistiller<'_> {
 // ---------------------------------------------------------------------------
 // Detection helpers
 // ---------------------------------------------------------------------------
-
-/// A pod table is fingerprinted by `READY` + `RESTARTS`, which no other
-/// `kubectl get` resource prints. `NAMESPACE NAME STATUS` is *not* a
-/// fingerprint, it is the common prefix of nearly every `-A` listing (pvc, pv,
-/// namespaces, certificates, …), and matching on it routed those into the pod
-/// distiller, which then reported healthy objects as errors.
-fn is_kubectl_table(input: &str) -> bool {
-    input.lines().any(is_pod_header)
-}
-
-fn is_pod_header(line: &str) -> bool {
-    line.contains("NAME")
-        && line.contains("READY")
-        && line.contains("STATUS")
-        && line.contains("RESTARTS")
-}
 
 /// Any tabular listing with a `NAME` column and an otherwise all-caps header.
 /// Used only to refuse: we can recognise the shape without knowing the schema.
@@ -170,113 +163,6 @@ fn is_critical(line: &str) -> bool {
 
 fn is_noise(line: &str) -> bool {
     NOISE_PATTERNS.iter().any(|p| line.contains(p))
-}
-
-// ---------------------------------------------------------------------------
-// kubectl table (NAME READY STATUS RESTARTS AGE)
-// ---------------------------------------------------------------------------
-
-/// Pod phases/reasons that mean "not healthy yet, but not broken".
-const POD_PENDING: &[&str] = &[
-    "Pending",
-    "ContainerCreating",
-    "PodInitializing",
-    "Terminating",
-];
-
-/// Pod phases/reasons that mean "broken". Anything outside these three lists is
-/// counted as `unknown`, never as an error, a status this distiller has never
-/// heard of is not evidence of a failure.
-const POD_FAILED: &[&str] = &[
-    "CrashLoopBackOff",
-    "Error",
-    "Failed",
-    "ImagePullBackOff",
-    "ErrImagePull",
-    "OOMKilled",
-    "Evicted",
-    "CreateContainerConfigError",
-    "CreateContainerError",
-    "InvalidImageName",
-    "RunContainerError",
-    "NodeAffinity",
-    "Unknown",
-];
-
-fn distill_kubectl(input: &str) -> String {
-    // Resolve NAME/STATUS from the header instead of assuming column 0 and 2:
-    // `kubectl get pods -A` prefixes a NAMESPACE column, which shifted every
-    // lookup by one and made READY ("1/1") read as the status.
-    let Some((header_idx, header)) = input.lines().enumerate().find(|(_, l)| is_pod_header(l))
-    else {
-        return input.to_string();
-    };
-    let cols: Vec<&str> = header.split_whitespace().collect();
-    let (Some(name_idx), Some(status_idx)) = (
-        cols.iter().position(|c| *c == "NAME"),
-        cols.iter().position(|c| *c == "STATUS"),
-    ) else {
-        return input.to_string();
-    };
-
-    let mut running = 0u32;
-    let mut pending = 0u32;
-    let mut failed = 0u32;
-    let mut unknown = 0u32;
-    let mut total = 0u32;
-    let mut problems: Vec<String> = Vec::new();
-
-    for line in input.lines().skip(header_idx + 1) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        // A row that does not reach the STATUS column is not a row we can read.
-        if parts.len() <= status_idx {
-            continue;
-        }
-        total += 1;
-        let name = parts[name_idx];
-        let status = parts[status_idx];
-        if matches!(status, "Running" | "Completed" | "Succeeded") {
-            running += 1;
-        } else if POD_PENDING.contains(&status) || status.starts_with("Init:") {
-            pending += 1;
-            problems.push(format!("{} ({})", name, status));
-        } else if POD_FAILED.contains(&status) {
-            failed += 1;
-            problems.push(format!("{} ({})", name, status));
-        } else {
-            unknown += 1;
-            problems.push(format!("{} ({})", name, status));
-        }
-    }
-
-    // Nothing parsed means the fingerprint matched something that only looks
-    // like a pod table. Hand back the payload rather than summarise a guess.
-    if total == 0 {
-        return input.to_string();
-    }
-
-    let mut out = format!(
-        "k8s: {} pods | {} running, {} pending, {} error",
-        total, running, pending, failed
-    );
-    if unknown > 0 {
-        out.push_str(&format!(", {} unknown", unknown));
-    }
-
-    if !problems.is_empty() {
-        out.push_str("\nProblems: ");
-        let shown: Vec<&str> = problems.iter().take(5).map(|s| s.as_str()).collect();
-        out.push_str(&shown.join(", "));
-        if problems.len() > 5 {
-            out.push_str(&format!(" +{} more", problems.len() - 5));
-        }
-    }
-
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -828,32 +714,12 @@ kube-系统   auth-5d4f6c8b99-abc12    0/1     CrashLoopBackOff   15         2h"
     }
 
     #[test]
-    fn does_not_fingerprint_namespace_name_status_as_pods() {
-        assert!(!is_kubectl_table(PVC_TABLE));
-    }
-
-    #[test]
-    fn resolves_columns_from_header_when_namespace_is_present() {
-        let out = distill(PODS_ALL_NAMESPACES);
-        assert!(
-            out.starts_with("k8s: 2 pods | 1 running, 0 pending, 1 error"),
-            "{out}"
-        );
-        // The name column, not the namespace column.
-        assert!(
-            out.contains("auth-5d4f6c8b99-abc12 (CrashLoopBackOff)"),
-            "{out}"
-        );
-    }
-
-    #[test]
-    fn counts_unrecognised_status_as_unknown_not_error() {
-        let input = "\
-NAME    READY   STATUS        RESTARTS   AGE
-web-0   1/1     SomeNewPhase  0          5d";
-        let out = distill(input);
-        assert!(out.contains("0 error"), "{out}");
-        assert!(out.contains("1 unknown"), "{out}");
+    fn keeps_every_row_of_a_pod_table() {
+        // #562. The summariser that used to run here was live for one release,
+        // after #510 removed the TOML filter that had been shadowing it since
+        // #110, and it turned a 10 row table into 3 lines. A count of pods cannot
+        // be turned back into a pod name, so the rows are the answer.
+        assert_eq!(distill(PODS_ALL_NAMESPACES), PODS_ALL_NAMESPACES);
     }
 
     #[test]
