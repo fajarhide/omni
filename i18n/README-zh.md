@@ -177,6 +177,20 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
+**在 Claude Code 会话内:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+**任何会读取 skill 的 agent**，已收录于 [skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni)：
+```bash
+npx skills add fajarhide/skills --skill omni
+```
+
+两种方式装的都是 skill，不是二进制文件。skill 负责告诉 agent 怎么获取二进制文件、怎么
+验证它，以及怎么读 OMNI 缩短输出时留下的标记。
+
 ---
 
 ---

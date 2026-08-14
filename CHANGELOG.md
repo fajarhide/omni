@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **The decision the rows are for is deliberately not taken here.** Whether the project scope stays shared or becomes `(repo, agent)` is a choice between two unmeasured options until the corpus has run, and choosing early is what this project keeps refusing to do. Deletion ships in the same commit as the schema, pruned in the same window as the lines it describes, because `passthrough_events` shipped with no cleanup and grew unbounded.
 
+### Changed
+- **The skill's install line names `fajarhide/skills` (#547)**: one skill answered to two URLs. `npx skills add fajarhide/omni` is what the README and both manuals printed, `npx skills add fajarhide/skills --skill omni` is what the directory page prints. Both pull the same file, since `fajarhide/skills/skills/omni/SKILL.md` is synced daily from `plugins/claude-code/skills/omni/SKILL.md`, so the two could only ever disagree on which URL a reader learned.
+
+  The one now documented is the one with a page behind it. `https://www.skills.sh/fajarhide/omni` answers 200 and renders a 404 body with no `<title>`; `https://www.skills.sh/fajarhide/skills/omni` is a real listing, and the four files now link it. `fajarhide/omni` still installs and is simply no longer advertised. The short form was run into an empty directory before it was published: `rc=0`, `Installed 1 skill`.
+
+  **Six of the seven READMEs documented neither install path.** `ja`, `zh`, `ko`, `vi` and `ar` carried no plugin and no skills block, and `id` carried the skills block without the plugin one, so the block English readers have had since #546 reached nobody else. All six now carry both, in their own language.
+
 ### Fixed
 - **`omni_run` could hang until the host gave up (#544)**: reported on Windows in Cursor, where some Git commands returned `MCP error -32001: Request timed out` after 120 seconds while the same command took 397 ms in PowerShell. Three separate defects in one spawn, none of them Windows-only.
 

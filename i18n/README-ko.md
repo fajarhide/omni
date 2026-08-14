@@ -187,6 +187,21 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
+**Claude Code 세션 안에서:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+**스킬을 읽는 모든 에이전트**, [skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni) 에 등록되어 있습니다:
+```bash
+npx skills add fajarhide/skills --skill omni
+```
+
+둘 다 설치되는 것은 바이너리가 아니라 스킬입니다. 그 스킬이 바이너리를 받는 방법,
+검증하는 방법, 그리고 OMNI가 출력을 줄일 때 남기는 표시를 읽는 방법을 에이전트에게
+알려 줍니다.
+
 ---
 
 ---

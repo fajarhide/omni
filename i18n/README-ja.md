@@ -187,6 +187,21 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
+**Claude Code のセッション内から:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+**スキルを読むエージェントなら何でも** ([skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni) に掲載):
+```bash
+npx skills add fajarhide/skills --skill omni
+```
+
+どちらもインストールされるのはスキルであってバイナリではありません。スキルは、バイナリの
+入手方法、その検証方法、そして OMNI が出力を短くしたときに残すマーカーの読み方を
+エージェントに伝えます。
+
 ---
 
 ---

@@ -214,6 +214,25 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
+**Claude Code، من داخل الجلسة:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+**أي وكيل يقرأ المهارات**، ومُدرَجة على
+[skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni):
+```bash
+npx skills add fajarhide/skills --skill omni
+```
+
+<div dir="rtl">
+
+كلتا الطريقتين تثبّت مهارة، لا الملف التنفيذي. المهارة هي ما يخبر الوكيل بكيفية جلب
+الملف التنفيذي، والتحقق منه، وقراءة العلامات التي يتركها OMNI عندما يختصر المخرجات.
+
+</div>
+
 ---
 
 ---

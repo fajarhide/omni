@@ -190,6 +190,21 @@ curl -fsSL omni.weekndlabs.com/install | bash
 irm omni.weekndlabs.com/install.ps1 | iex
 ```
 
+**Từ trong phiên Claude Code:**
+```
+/plugin marketplace add fajarhide/omni
+/plugin install omni@omni
+```
+
+**Trên bất kỳ agent nào đọc được skill**, đã có trên
+[skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni):
+```bash
+npx skills add fajarhide/skills --skill omni
+```
+
+Cả hai cách đều cài một skill, không phải binary. Skill đó là thứ cho agent biết cách
+lấy binary, cách kiểm chứng nó, và cách đọc các dấu OMNI để lại khi nó rút gọn đầu ra.
+
 ---
 
 ---

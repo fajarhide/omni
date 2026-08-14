@@ -36,10 +36,11 @@ cargo build --release
 ```
 
 **Di agent mana pun yang membaca skill**, skill yang sama bisa dipasang lewat CLI
-direktori skill:
+direktori skill, dan terdaftar di
+[skills.sh/fajarhide/skills/omni](https://www.skills.sh/fajarhide/skills/omni):
 
 ```sh
-npx skills add fajarhide/omni
+npx skills add fajarhide/skills --skill omni
 ```
 
 Lewat jalur mana pun, yang terpasang adalah sebuah skill, bukan binary-nya. Skill
