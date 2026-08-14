@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **The decision the rows are for is deliberately not taken here.** Whether the project scope stays shared or becomes `(repo, agent)` is a choice between two unmeasured options until the corpus has run, and choosing early is what this project keeps refusing to do. Deletion ships in the same commit as the schema, pruned in the same window as the lines it describes, because `passthrough_events` shipped with no cleanup and grew unbounded.
 
+### Fixed
+- **`omni_run` could hang until the host gave up (#544)**: reported on Windows in Cursor, where some Git commands returned `MCP error -32001: Request timed out` after 120 seconds while the same command took 397 ms in PowerShell. Three separate defects in one spawn, none of them Windows-only.
+
+  **stdout was drained to EOF and only then stderr.** A child that fills the stderr pipe buffer before closing stdout blocks forever, and the reader blocks with it. Reproduced on macOS with 200 KB of stderr; the buffer is 64 KB there and around 4 KB on Windows, which is why it was reported there first. `wait_with_output` drains both at once, which also deletes the hand-rolled read. `omni exec` never had this because it inherits stderr rather than piping it.
+
+  **The child inherited the server's stdin, which is the JSON-RPC pipe to the host.** One byte read from it breaks the framing for the rest of the session, so every later call fails no matter what it asks for. The child gets `Stdio::null()`.
+
+  **Nothing bounded the child, and the blocking call ran on a runtime worker.** One hung command took the thread that was serving everything else, which is the shape of a report where three calls succeed and everything after them times out. There is a 60 s deadline now, `OMNI_RUN_TIMEOUT_SECS` raises it for a build that legitimately outlasts it, and the work moved to `spawn_blocking`. A timeout returns a sentence naming the command that stalled rather than the host's opaque error code.
+
+  The reporter's `git --version` case is not explained by any of these: it writes about 25 bytes to stdout and nothing to stderr. That half of the report is still open.
+
 ## [0.7.4] - 2026-08-13
 
 A release about claims that were not true: a documented escape hatch that did

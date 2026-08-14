@@ -37,6 +37,18 @@ penulisan berbaris antre, yang biasanya jadi alasan `omni exec` tampak
 menggantung. Ia juga wajib ketika menjalankan test suite terhadap pemasangan yang
 hidup.
 
+## Perintah yang dijalankan lewat server MCP
+
+| variabel | efeknya |
+|---|---|
+| `OMNI_RUN_TIMEOUT_SECS` | Berapa lama `omni_run` menunggu sebuah perintah. Bawaannya 60. |
+
+Bawaannya ada di bawah semua batas waktu MCP host yang kami tahu, jadi perintah yang
+macet kembali sebagai satu kalimat yang menyebut dirinya sendiri, bukan galat idle
+timeout milik host. Naikkan kalau sebuah build memang butuh lebih lama, dan ingat host
+punya batasnya sendiri: milik Cursor 120 detik, dan tidak ada yang bisa OMNI lakukan
+untuk memperpanjangnya.
+
 ## Retensi
 
 | variabel | efeknya |
