@@ -1,38 +1,32 @@
 # Benchmarks
 
-What OMNI saves on one developer's real command history, including the parts that
-do not flatter us.
+One developer's real command history, replayed. Including the runs that did not
+flatter us.
 
 ## The headline
 
-**14.9% fewer bytes** across the mix, 6.47 MB down to 5.50 MB. The filters are 2.7
-points of that and the ledger is the rest.
+**14.9% fewer bytes. 6,469,047 to 5,506,627.**
 
-Measured on 0.7.3, replayed 2026-08-12 over **6,656 traces covering 2026-08-04 02:56
-to 08-11 03:34 UTC**, every one `agent_id='claude_code'`.
+0.7.3, replayed 2026-08-12 over 6,656 traces, 2026-08-04 02:56 to 08-11 03:34 UTC,
+all `agent_id='claude_code'`.
 
-Three more numbers from the same run:
+| | |
+|---|---|
+| filters | 2.7% (176,191 B) |
+| ledger, on top | 12.2 points (786,229 B) |
+| tokens, filters only | 2.8%, `cl100k_base` |
+| bytes per token | 3.592 raw (the shipped 3.6 estimate is calibrated to this) |
+| calls that saved nothing | 97.3%, so all of it comes from 181 calls |
+| calls that grew | 0 of 6,656 |
+| raw bytes already shown once | 22.9% before filters, 22.4% after |
+| that repetition, by scope | 19.0% same session, 3.9% earlier session, same project |
 
-- **2.8% fewer tokens** from the filters alone, by `cl100k_base`. This corpus
-  measures **3.592 bytes per token**, which is what the shipped 3.6 estimate was
-  calibrated against.
-- **97.3% of calls saved nothing at all.** Every byte of the saving comes from the
-  other 2.7%, which is 181 calls.
-- **Not one call of 6,656 came back larger.** Two did until a stream-writer
-  line-ending bug was fixed, and the count was published while it stood.
+Filtering and repetition are orthogonal. That is the argument for the ledger.
 
-Two things a byte figure cannot express:
-
-- **22.9% of raw bytes are lines the agent had already been shown**, and **22.4%
-  still are after every distiller has run.** Filtering and repetition are
-  orthogonal, which is the entire argument for the ledger.
-- Of that repetition, 19.0% is within one session and 3.9% is from an earlier
-  session of the same project.
-
-## Which commands actually benefit
+## Which commands benefit
 
 | class | calls | input | filters | + ledger |
-|---|---|---|---|---|
+|---|---:|---:|---:|---:|
 | other | 4,145 | 2.95 MB | 0.6% | **6.9%** |
 | file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.0%** |
 | search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.3%** |
@@ -41,85 +35,104 @@ Two things a byte figure cannot express:
 | infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
 | **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |
 
-**The filters are excellent where there is noise and irrelevant where there is
-not.** File reads are 1.60 MB and the filters take 0.0% of them, which is correct:
-you cannot strip lines from a file the agent asked to see without guessing which
-parts it meant.
+Filters take 0.0% of file reads, and that is correct: you cannot strip lines from a
+file the agent asked to see.
 
-**The mix moves.** `cargo` is 94.7% in this window across 16 calls and 267 KB, where
-an earlier window had 124 calls and 1.5 MB. A per-command figure describes the week
-it was measured in as much as it describes the distiller.
+`cargo` reads 94.7% here over 16 calls and 267 KB. An earlier window had 124 calls
+and 1.5 MB. The mix moves as much as the distiller does.
 
-The byte-sink ranking and the token-sink ranking **disagree**: `grep` and `ls` move
-up when counted in tokens, `sed` and `cargo` move down.
+Byte-sink and token-sink rankings disagree: `grep` and `ls` rise in tokens, `sed` and
+`cargo` fall.
 
 ## Head to head, one corpus
 
-The bar was set before the measurement: if OMNI does not win, the claim does not
-ship. It wins, and the half it loses is published with it.
+Competitor versions: rtk 0.45.0, lean-ctx 3.9.18, caveman 1.1.0 (binaries
+`bin-v1.0.0`), headroom at `cross_turn_dedup.py`.
 
-| | bytes | saved | |
-|---|---|---|---|
+| | bytes | saved | claimed |
+|---|---|---:|---|
 | omni, filters only | 6,469,047 to 6,292,856 | **2.7%** | |
-| rtk `pipe` | 6,469,047 to 6,067,012 | **6.2%** | 872 of 6,656 claimed by a filter |
-| lean-ctx `compress` | 6,469,047 to 6,073,757 | **6.1%** | 134 of 6,656 shortened |
+| rtk `pipe` | 6,469,047 to 6,067,012 | **6.2%** | 872 of 6,656, 461 B each |
+| lean-ctx `compress` | 6,469,047 to 6,073,757 | **6.1%** | 134 of 6,656, 2,950 B each |
 | omni, with the ledger | 6,469,047 to 5,506,627 | **14.9%** | |
 | rtk `pipe` + omni's ledger | 6,469,047 to 5,333,483 | **17.6%** | |
 
-**rtk's filters are better than ours**, by 3.5 points on the same bytes, over 872 of
-6,656 traces. That is not a rounding difference and it is not argued away here. It
-is also not bought by truncation, which was the first explanation tried and dropped:
-rtk marked a cut in only 33 of the 872 outputs it claimed, so its patterns are simply
-better.
+**rtk's filters beat ours by 3.5 points**, and not by truncating: it marked a cut in
+33 of the 872 it claimed. Broad and shallow against lean-ctx's narrow and deep, a
+tenth of a point apart, which the aggregate hides completely.
 
-**rtk and lean-ctx land a tenth of a point apart, from opposite shapes.** rtk claims
-872 commands and averages 461 bytes off each. lean-ctx shortens 134 and averages
-2,950, six times more per command it touches. One is broad and shallow, the other
-narrow and deep, and the aggregate hides that completely, which is why the counts are
-in the table beside the percentages.
+The two counts are not like for like. rtk's is a mapped filter, saving or not,
+because it is handed the name. lean-ctx reports no name, so its count is an actual
+reduction.
 
-Those two counts are not like for like, and the harness reports them differently for
-that reason. rtk's counts a **mapped filter**, whether or not it saved a byte,
-because it is handed the filter name. lean-ctx reports no filter name, so its count
-is an **actual reduction**.
+Tilts **towards rtk**, stated because a benchmark listing only its own handicaps is
+an advertisement: it is handed the exact filter name its own hook must infer, and
+anything it has no filter for counts as passthrough rather than a miss.
 
-**The ledger is the difference**, and the last row is the honest way to say why. It
-adds 12.2 points on top of our filters and 11.4 on top of theirs, so it is orthogonal
-to whose patterns run. That row also says plainly that a reader who wants the largest
-number would run their filters with our ledger.
+No `lean-ctx + our ledger` row: its preview reports `compressed_bytes` and never
+emits the text, so that row could only be estimated.
 
-Two things that tilt this comparison **towards rtk**, stated because a benchmark that
-lists only its own handicaps is an advertisement: rtk is handed the exact filter name
-for every command, which its own hook has to infer, and anything it has no filter for
-is counted as a passthrough rather than a miss.
+### The two arms missing above
 
-**lean-ctx has no ledger row**, and that is a limit of the measurement rather than of
-the tool. Its preview path reports `compressed_bytes` and never emits the compressed
-text, so stacking our ledger on it could only be estimated, and an estimate beside
-four measurements is the blend this page exists to avoid.
+Neither ran in the 0.7.3 replay, and the one-run rule forbids borrowing a figure.
+Both are in the harness now, each off unless its variable names a binary.
 
-### Arms the harness supports but this table does not carry
-
-Each is off unless its environment variable names a binary, so CI never needs a
-competitor installed.
-
-| arm | variable | why it is not in the table above |
+| arm | variable | shape |
 |---|---|---|
-| headroom | `OMNI_BENCH_HEADROOM` | its `cross_turn_dedup.py` is a whole-conversation deduplicator, so it belongs against the ledger rather than against the filters. A prior run put the two at parity to one decimal place; re-deriving that is tracked in [#468](https://github.com/fajarhide/omni/issues/468) |
-| caveman | `OMNI_BENCH_CAVEMAN` | added after this table was measured, so it has no figure from the same run, and the one run rule below forbids borrowing one from another |
+| headroom | `OMNI_BENCH_HEADROOM` | `cross_turn_dedup.py`, whole-conversation dedup, so it sits against the ledger and not the filters |
+| caveman | `OMNI_BENCH_CAVEMAN` | filters **and** byte-exact recovery, the first competitor with both halves, and the only arm given no command hint |
 
-caveman is the first competitor that ships **both** halves of OMNI's shape:
-`tools compress` is the filter tier and `tools retrieve` recovers byte-exact
-content, so it gets the same ledger-stacked row rtk gets when it is next measured.
-It is also handed less than the other arms: rtk gets the filter name and lean-ctx
-gets `--shell <cmd>`, while caveman accepts no command hint at all.
+### What a bad corpus does to a ranking
+
+All six ran together once, on the corpus rejected below. The levels are not
+publishable. The ranking is, on the same grounds as the version A/B: identical bytes
+into every arm.
+
+| | published corpus | rejected corpus |
+|---|---:|---:|
+| omni, filters only | 2.7% | 32.7% |
+| rtk `pipe` | **6.2%** | **0.6%** |
+| lean-ctx `compress` | **6.1%** | **49.6%** |
+| caveman `tools compress` | not run | 6.0% |
+| omni, with the ledger | 14.9% | 69.8% |
+| rtk + our ledger | 17.6% | 61.7% |
+| caveman + our ledger | not run | 61.9% |
+| headroom dedup, our filters | not run | 66.0% |
+
+rtk beats our filters by 3.5 points on one corpus and loses by 32.1 on the other.
+
+**Why rtk fell, in one table.** Its filters only fire on a command it recognises, and
+the rejected corpus is 89.5% commands it does not:
+
+| command | bytes | rtk filter |
+|---|---:|---|
+| `tail` | 9,558,272 | none |
+| `zsh` | 8,391,102 | none |
+| `cd` | 1,454,396 | none |
+| `cat` | 770,972 | none |
+| `export` | 429,265 | none |
+| `grep` | 403,917 | `grep` |
+| `sed` | 381,331 | none |
+| `git` | 259,762 | 3 subcommands of it |
+
+Not a stale binary and not a broken arm: rtk 0.45.0 is current, it claimed 605 of
+5,914 calls, and our filter names are checked against its own `resolve_filter`. Of
+its 25 filters we map 18; six of the rest have zero traces here, and `log` stays
+unmapped because rtk's own hook maps no command to it either.
+
+Be most suspicious of our own row. A corpus handing OMNI a 32 point lead is evidence
+about the corpus, not about OMNI. The ledger reads any payload; rtk's filters need a
+name they know. On this corpus that difference is the entire result.
+
+Holding across both: the ledger is orthogonal to whose filters run, and is the
+largest single contributor either way.
 
 ## Single fixtures
 
-From `tests/fixtures/`, reproducible by hand:
+From `tests/fixtures/`, reproducible by hand. "Delivered" includes the marker.
 
 | command | input | delivered | saved |
-|---|---|---|---|
+|---|---:|---:|---:|
 | `cargo build` (large, successful) | 3,220 B | 87 B | **97.3%** |
 | `cargo test` (490 passed, 10 failed) | 16,515 B | 1,178 B | **92.9%** |
 | `git status` (dirty) | 496 B | 190 B | **61.7%** |
@@ -127,132 +140,89 @@ From `tests/fixtures/`, reproducible by hand:
 | `git diff` (multi-file) | 397 B | 297 B | **25.2%** |
 | `kubectl get pods` (mixed) | 840 B | 840 B | **0%** |
 
-"Delivered" is what the agent receives, marker included.
-
-`kubectl get pods` used to report 9.3%. It reports nothing now, because a pod table
-is an enumeration where every row is a datum. Losing that 9.3% was the fix.
+`kubectl get pods` used to report 9.3%. Losing that was the fix: a pod table is an
+enumeration where every row is a datum.
 
 ## Latency
 
-Median of 12 runs each, release binary, end to end through the post-hook:
+Median of 12 runs, release binary, end to end through the post-hook.
 
 | | fresh database | 205 MB database |
-|---|---|---|
+|---|---:|---:|
 | `git status` (496 B) | **21.1 ms** | **60.7 ms** |
 | `cargo test` (16.5 KB) | **24.5 ms** | **64.5 ms** |
 
-Payload size barely matters; database size does.
+Payload size barely matters. Database size does.
 
-> Measure latency by removal, not with a microbenchmark. A unit-test timer said 66 ms
-> for work that an A/B on the release binary put at 34.3 ms. Only the second is
-> quotable.
+Measure latency by removal. A unit-test timer said 66 ms for work an A/B on the
+release binary put at 34.3 ms.
 
-## How this is measured
+## Method
 
 ```sh
 OMNI_BENCH_DB=~/.omni/omni.db \
   cargo test --release --test bench_replay -- --ignored --nocapture
 ```
 
-- **Corpus**: `execution_traces.raw_input` from one developer's real usage, replayed
-  through the current pipeline. Not synthetic.
-- **Population**: calls whose result reached a model. `OMNI_BENCH_ALL=1` replays the
-  wider set including terminal output, and the harness prints which one it used.
-- **State**: `session: None`, `store: None`, `HOME` pointed at an empty temp
-  directory, so the scorer sees no history and only the embedded signals load. A warm
-  database makes the result non-deterministic.
-- **Path**: `run_inner`, the same full pipeline the hook and `omni exec` run, marker
-  bytes included.
-- **Binary**: release build.
+| | |
+|---|---|
+| corpus | `execution_traces.raw_input`, real usage, replayed. Not synthetic |
+| population | calls whose result reached a model. `OMNI_BENCH_ALL=1` widens it |
+| state | `session: None`, `store: None`, `HOME` at an empty temp dir |
+| path | `run_inner`, the same pipeline the hook and `omni exec` run, markers included |
+| binary | release build |
 
-### Terminal output is excluded, and it is the difference between two headlines
+**Terminal output is excluded, and it is worth two different headlines.** On an
+installation carrying it, it was 68% of raw bytes: **79.1%** including it against
+**43.3%** model-facing. The harness and `omni stats` both counted it until that was
+fixed, and both now print which population they used.
 
-The corpus counts only calls whose result reached a model. On an installation that
-carried terminal output, it was 68% of raw bytes, and including it printed **79.1%**
-where the model-facing population printed **43.3%**.
+**Every figure comes from one run.** This file once published 15.7% and 16.1% from
+two replays a day apart without saying so.
 
-This was a real defect, not a hypothetical. The replay harness counted terminal bytes
-until it was fixed, and `omni stats` had the same bug. Both now print which
-population they used.
+**Every window closes.** `execution_traces` prunes at 7 days, so a corpus is gone a
+week after it is measured. An earlier 9,965-trace run cannot be re-derived by anyone.
+Hold it open with `OMNI_TRACE_RETENTION_DAYS`.
 
-### Every figure comes from one run
+**Old figures are deleted, not kept.** Two releases changed the rule deciding whether
+the ledger folds a run, so an older number describes a pipeline that no longer
+exists.
 
-The 6,656-trace replay dated above, all of it. That is stricter than it sounds and it
-was not always true: the head to head and the headline once came from two replays a
-day apart, and this file published 15.7% and 16.1% without saying they were different
-measurements.
+The one movement worth stating: **15.4% to 14.9% between 0.7.0 and 0.7.2 is a fix.**
+0.7.2 stopped folding any line stating a failure, so a repeated `TypeError` survives
+a re-run. Half a point for the error channel. The rtk arm reproduced its earlier
+figure to the byte, ruling out a corpus change.
 
-### Every figure names its window, and the window closes
+The filter column is also lower than older releases because 0.7.0 deleted the user
+and project filter tiers. What runs here is the embedded set, which is what every
+installation now gets.
 
-`execution_traces` is pruned to seven days, so a corpus is gone a week after it is
-measured. An earlier 9,965-trace run cannot be re-derived by anyone, us included.
-Hold the window open with `OMNI_TRACE_RETENTION_DAYS` while a measurement is in
-flight.
+## What no figure here can tell you
 
-### Old figures are deleted, not kept for comparison
-
-These were re-derived on 0.7.3 and the previous ones are gone. Two releases have
-changed the rule deciding whether the ledger folds a run, so a number measured before
-either describes a pipeline that no longer exists. Quoting both would invite a reader
-to treat the difference as a trend when it is two programs.
-
-The one movement worth stating: **the aggregate went from 15.4% to 14.9% between
-0.7.0 and 0.7.2, and that is a fix rather than a regression.** 0.7.2 stopped folding
-any line that states a failure, so a repeated `TypeError` survives a re-run instead of
-being replaced by a pointer. Refusing to fold the error channel costs half a point of
-ratio, and it is the trade this project says it makes whenever the two conflict. The
-rtk arm reproduced its earlier figure to the byte, which is what rules out a different
-corpus as the explanation.
-
-The filter column is also lower than earlier releases published, for a separate
-reason: 0.7.0 deleted the user and project filter tiers, so what runs here is the
-embedded set alone, which is also the set every installation now gets. The old figure
-included whatever filters the measuring machine happened to carry.
-
-## What these numbers cannot tell you
-
-Whether the removed lines were signal. Byte counts cannot answer that, and no
-arrangement of them will.
+Whether the removed lines were signal.
 
 ## Why 0.7.5 has no figures of its own
 
-A full four-arm replay was run on 2026-08-15 against the then-current corpus and
-**the result was rejected rather than published.** It is recorded here because a page
-that only shows the runs that worked is the advertisement this one is trying not to
-be.
-
-The run reported 32.7% for the filters and 69.8% with the ledger, against the 2.7%
-and 14.9% above. Both are correct arithmetic over the corpus they were given, and the
-corpus is the problem:
+A four-arm replay ran 2026-08-15 and **was rejected, not published**. It read 32.7%
+and 69.8% against 2.7% and 14.9%. Correct arithmetic, unusable corpus:
 
 | | |
 |---|---|
-| traces | 5,971, covering 2026-08-11 11:03 to 08-14 18:05 UTC |
-| bytes | 23.0 MB, against 6.47 MB for the same number of calls in the published run |
-| concentration | **148 calls, 2.5% of them, carry 14.89 MB, which is 64.7% of every byte** |
-| duplication | **286 groups of byte-identical payloads account for 18.53 MB, 80.6% of the total** |
-| largest single contributor | five traces of exactly 820,000 bytes, whose content is the sentence `The exact build tag is BUILD_TAG_9f3a1c.` repeated to fill |
+| traces | 5,971, 2026-08-11 11:03 to 08-14 18:05 UTC |
+| bytes | 23.0 MB, against 6.47 MB for a similar call count |
+| concentration | 148 calls, 2.5% of them, carry **64.7% of every byte** |
+| duplication | 286 groups of byte-identical payloads are **80.6% of the total** |
+| largest contributor | 5 traces of exactly 820,000 B, content is `The exact build tag is BUILD_TAG_9f3a1c.` repeated to fill |
 
-That last row is a synthetic fixture from testing OMNI's own recall behaviour, not
-output any tool produced. The window is the week this machine did nothing but develop
-and benchmark OMNI, so the corpus is largely the tool measuring itself measuring
-itself, and a ledger scores extremely well against a payload that is one sentence
-repeated 20,000 times.
+That last row is a synthetic recall fixture, not tool output. The window is the week
+this machine did nothing but develop and benchmark OMNI.
 
-Publishing 69.8% would have replaced an honest number with a flattering one on the
-strength of a corpus nobody would accept if it were described first. The rule that
-follows from it, and it now governs every future run: **describe the corpus before
-reading the result, and reject the run rather than the description.**
+**Rule that follows: describe the corpus before reading the result, then reject the
+run rather than the description.**
 
-The published figures therefore stay at 0.7.3 until a window of ordinary work is
-available to replay. What is not affected: the fixture table, the latency table, and
-the head to head, none of which depend on that corpus.
+### How much was the code, how much was the corpus
 
-### How much of that jump was the code, and how much was the corpus
-
-The rejected run does answer one question, as long as it is asked as a difference
-rather than as a level. Same frozen corpus, 5,984 traces and 23,086,649 bytes on both
-sides, two binaries:
+Same frozen corpus, 5,984 traces and 23,086,649 bytes, two binaries.
 
 | | 0.7.3 | 0.7.5 + | change |
 |---|---:|---:|---:|
@@ -262,21 +232,17 @@ sides, two binaries:
 | **folds taken** | **976** | **882** | **-94** |
 | session markers | 3,316 | 3,231 | -85 |
 
-**So the code accounts for -0.2 points of the move from 14.9%, and the corpus accounts
-for the other 55.** That is the cleanest available proof that the run had to be
-rejected, and it is a measurement rather than a judgement.
+**The code is worth -0.2 points of the move from 14.9%. The corpus is worth the other
+55.**
 
-The 0.2 points are the price of
-[#543](https://github.com/fajarhide/omni/issues/543), which gave whole-output folds a
-size floor, and the fold count is the mechanism: 94 runs that used to be replaced by
-a marker are now delivered whole. They averaged about 637 bytes, so each was saving
-roughly 550 bytes net once its own marker was paid for. What that buys is an agent
-that no longer receives a marker and no content for a payload barely larger than the
-marker. Same shape as 15.4% to 14.9% in 0.7.2: the ratio drops because the behaviour
-improved.
+The 0.2 points buy [#543](https://github.com/fajarhide/omni/issues/543)'s floor on
+whole-output folds: 94 runs averaging 637 B are now delivered whole instead of
+replaced by a marker they barely outgrew. Same shape as 15.4% to 14.9%.
 
-The direction is settled. The size is not: 0.2 points is itself a property of this
-corpus, and on a mix with more small payloads the floor would cost more.
+Direction settled, size not: 0.2 points is a property of this corpus too.
+
+Published figures stay at 0.7.3 until a window of ordinary work is available. The
+fixture table, the latency table and the head to head do not depend on that corpus.
 
 ## Measure your own
 

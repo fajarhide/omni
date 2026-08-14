@@ -295,6 +295,13 @@ fn rtk_filter(cmd: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+// Checked against rtk 0.45.0's own `resolve_filter` (`src/cmds/system/pipe_cmd.rs:12`).
+// Seven of its 25 names are not mapped above: `log`, `ruff-check`, `ruff-format`,
+// `pest`, `paratest`, `php-test`, `ecs`. Six have zero traces in this corpus, so
+// adding them would be dead arms. `log` is the one that could matter, since the
+// heaviest commands here are `tail` on log files, and it stays out on purpose:
+// rtk's own hook (`src/hooks/rewrite_cmd.rs`) maps no command to it either, so
+// routing `tail` there would be inventing a claim rtk does not make for itself.
 
 /// Runs one payload through rtk, or hands it back when nothing claims it.
 /// What rtk hands back, so the ledger can be measured on top of it.
@@ -316,8 +323,15 @@ fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
         let _ = si.write_all(raw.as_bytes());
     }
     match child.wait_with_output() {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
-        Err(_) => raw.to_string(),
+        // Empty stdout is a failure, not a payload that compressed to nothing, and
+        // rtk exits that way on a filter name it does not know:
+        //   $ rtk pipe --filter zzznotreal < cargo_test_500.txt | wc -c
+        //   0
+        //   rtk: Unknown filter 'zzznotreal'. Available: cargo-test, pytest, ...
+        // Counted as delivered bytes that would score the payload at 100% saved and
+        // silently inflate the competitor. One typo in the map below is all it takes.
+        Ok(o) if !o.stdout.is_empty() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => raw.to_string(),
     }
 }
 
