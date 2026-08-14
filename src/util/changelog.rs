@@ -37,6 +37,33 @@ pub fn count_unreleased_entries(changelog: &str) -> usize {
     n
 }
 
+/// Count the entry fragments in `changelog.d/`.
+///
+/// One file is one entry. New work writes `changelog.d/<issue>.<section>.md`
+/// instead of editing `## [Unreleased]`, so two branches never write the same
+/// path and there is nothing for git to conflict on. `README.md` is the
+/// directory's own documentation and is not an entry.
+///
+/// A missing or unreadable directory counts zero rather than failing the build:
+/// this runs in `build.rs`, and a changelog convention must never be the reason
+/// the binary cannot be compiled.
+// Dead in the `omni` binary for the same reason as the function above: the
+// binary reads the total through `OMNI_UNRELEASED_ENTRIES`.
+#[allow(dead_code)]
+pub fn count_fragments(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".md") && name != "README.md"
+        })
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +127,36 @@ mod tests {
     #[test]
     fn handles_an_empty_document_without_panicking() {
         assert_eq!(count_unreleased_entries(""), 0);
+    }
+
+    #[test]
+    fn counts_one_fragment_per_file_and_skips_the_readme() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["544.fixed.md", "541.added.md", "README.md", "notes.txt"] {
+            std::fs::write(dir.path().join(name), "- **thing**: detail\n").unwrap();
+        }
+        assert_eq!(count_fragments(dir.path()), 2);
+    }
+
+    /// The directory does not exist until someone writes the first fragment, and
+    /// a missing convention must not fail the build.
+    #[test]
+    fn counts_zero_when_the_directory_is_absent() {
+        assert_eq!(
+            count_fragments(std::path::Path::new("no/such/changelog.d")),
+            0
+        );
+    }
+
+    /// The number `omni doctor` prints is the sum, so during the transition a
+    /// tree with entries in both places reports both. Reporting only one would
+    /// let a tag be cut on work the binary then denies having (#137).
+    #[test]
+    fn the_reported_total_covers_both_places() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("544.fixed.md"), "- **a**: b\n").unwrap();
+        let c = "## [Unreleased]\n\n### Added\n- **one**: x\n\n## [0.7.4] - 2026-08-13\n";
+        assert_eq!(count_unreleased_entries(c) + count_fragments(dir.path()), 2);
     }
 
     /// The real file, so the shipped number is exercised by the suite rather

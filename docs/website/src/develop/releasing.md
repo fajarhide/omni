@@ -9,21 +9,36 @@ make release-sha VERSION=x.y.z   # after the tag has actually built
 
 ## The order, and why it is not negotiable
 
-**Move the changelog entries first, then bump.**
+**Cut the changelog first, then bump.**
 
-`bump_version.sh` does not touch `CHANGELOG.md`, and `build.rs` counts the entries
-under `## [Unreleased]` in the tree it compiles. Tag without moving them and the
-released binary tells every user `[N UNRELEASED] … cut a tag`. It accuses itself.
+`bump_version.sh` does not touch `CHANGELOG.md`, and `build.rs` counts what is still
+uncut in the tree it compiles: the bullets under `## [Unreleased]` plus the fragments in
+`changelog.d/`. Tag without folding them and the released binary tells every user
+`[N UNRELEASED] … cut a tag`. It accuses itself.
 
-So: move the entries under `## [x.y.z] - <date>`, leave `## [Unreleased]` as an empty
-heading, commit, then `make bump`. A correctly cut build prints
-`omni vx.y.z [AHEAD/RC]` with no `UNRELEASED` line. Verify that before pushing the
-tag.
+So:
 
-Update `CHANGELOG.md` as work merges, not at tag time. The format is Keep a Changelog
-and SemVer, and the entries here are unusually detailed on purpose: each states the
-measured evidence, the wrong number that was published, and the mechanism. A one-line
-entry is a regression in that file's quality.
+```sh
+make changelog-cut VERSION=x.y.z   # folds changelog.d/ into ## [x.y.z] - <date>
+git commit -am "docs(changelog): cut x.y.z"
+make bump VERSION=x.y.z
+```
+
+A correctly cut build prints `omni vx.y.z [AHEAD/RC]` with no `UNRELEASED` line. Verify
+that before pushing the tag.
+
+Day to day, the entry goes in `changelog.d/<issue>.<section>.md` as the work merges, not
+into `CHANGELOG.md` and not at tag time. One file per entry means two branches never
+write the same path, which is what stopped every parallel branch conflicting on
+`## [Unreleased]`. The format is Keep a Changelog and SemVer, and the entries here are
+unusually detailed on purpose: each states the measured evidence, the wrong number that
+was published, and the mechanism. A one-line entry is a regression in that file's
+quality.
+
+The first cut after this changed may need one manual tidy. Bullets written directly into
+`## [Unreleased]` before the convention existed are carried under the version heading
+with their own `### Added` or `### Fixed`, which can land beside one the fragments just
+wrote. The script says so when it happens.
 
 ## CI green does not mean the release will build
 
@@ -69,17 +84,16 @@ bug a reviewer flagged.
 
 ## Branch shape
 
-One branch per batch, not per issue. Every change touches `CHANGELOG.md`, so N
-parallel branches cost N-1 merge conflicts and N full CI runs of about eleven minutes
-each, serialised. Batch a lane into one branch, one commit per issue, one pull request
-with several `Closes #N` lines.
+One branch per batch, not per issue. N parallel branches cost N full CI runs of about
+eleven minutes each, serialised. Batch a lane into one branch, one commit per issue, one
+pull request with several `Closes #N` lines.
 
 Split only when a reviewer would genuinely need them apart, or when one is risky
 enough to be reverted alone.
 
-The conflict is always `CHANGELOG.md` and the resolution is always "keep both sides":
-concatenate the bullets and deduplicate by line. Never hand-merge prose that both
-sides only appended to.
+That conflict used to be `CHANGELOG.md`, every time. It is gone: entries are files in
+`changelog.d/` now, and two branches never write the same path. What remains is the CI
+cost, which is why batching still pays.
 
 `Closes #N` must be in the pull request body **before** the merge. GitHub evaluates
 the keyword at merge time only; adding it afterwards does nothing, silently.

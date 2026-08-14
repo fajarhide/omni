@@ -86,6 +86,10 @@ ci: fmt clippy test security binary-check
 clean:
 	cargo clean
 
+changelog-cut:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make changelog-cut VERSION=0.5.1"; exit 1; fi
+	./scripts/changelog_cut.sh $(VERSION)
+
 bump:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make bump VERSION=0.5.1"; exit 1; fi
 	./scripts/bump_version.sh $(VERSION)
