@@ -17,6 +17,22 @@ use std::sync::{Arc, Mutex};
 /// emits; anything below this is that command's content (#266).
 const MIN_COMMANDS_FOR_NOISE: usize = 2;
 
+/// How long `omni_run` waits for a command before abandoning it.
+///
+/// Below every host MCP timeout we know of (Cursor's is 120s) so the model reads
+/// which command stalled instead of an opaque `-32001` (#544). Overridable
+/// because a real build can outlast it and there is no other escape hatch.
+const RUN_TIMEOUT_SECS: u64 = 60;
+
+fn run_timeout() -> std::time::Duration {
+    let secs = std::env::var("OMNI_RUN_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(RUN_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
 /// Runs `command` and returns what the model should read: the distilled output
 /// on success, the raw output on failure.
 ///
@@ -33,7 +49,19 @@ pub(crate) fn run_and_distill(
     store: Arc<Store>,
     session: Option<Arc<Mutex<SessionState>>>,
 ) -> String {
-    use std::io::Read;
+    run_with_timeout(command, store, session, run_timeout())
+}
+
+/// The body of `run_and_distill`, with the deadline passed in so a test can
+/// drive it without setting `OMNI_RUN_TIMEOUT_SECS` on the whole process. Cargo
+/// runs tests in parallel, and an env var one test writes is an env var every
+/// other test reads.
+fn run_with_timeout(
+    command: &str,
+    store: Arc<Store>,
+    session: Option<Arc<Mutex<SessionState>>>,
+    timeout: std::time::Duration,
+) -> String {
     use std::process::{Command, Stdio};
 
     #[cfg(target_family = "windows")]
@@ -46,31 +74,49 @@ pub(crate) fn run_and_distill(
         .arg(command)
         .env_clear()
         .envs(crate::guard::env::sanitize_env())
+        // The server's stdin is the JSON-RPC pipe to the host. A child that reads
+        // a byte of it breaks the framing for the rest of the session, so it gets
+        // EOF instead of the transport.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
 
-    let mut child = match spawned {
+    let child = match spawned {
         Ok(c) => c,
         Err(e) => return format!("omni_run: failed to start `{command}`: {e}"),
     };
 
-    let mut raw = Vec::new();
-    if let Some(mut out) = child.stdout.take() {
-        let _ = out.read_to_end(&mut raw);
-    }
-    let mut errbuf = Vec::new();
-    if let Some(mut err) = child.stderr.take() {
-        let _ = err.read_to_end(&mut errbuf);
-    }
-    let status = child.wait();
+    // `wait_with_output` drains both pipes at once. Draining stdout to EOF and
+    // only then stderr deadlocks on any child that fills the stderr pipe buffer
+    // before closing stdout: 64 KB on macOS, around 4 KB on Windows (#544).
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
 
+    let output = match rx.recv_timeout(timeout) {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => return format!("omni_run: `{command}` could not be waited on: {e}"),
+        // ponytail: the reader thread owns the child, so a timed-out command is
+        // abandoned rather than killed. The case that gets us here is a
+        // grandchild holding the pipe open, which killing the shell would not
+        // reach anyway. Revisit if orphaned shells show up in the wild.
+        Err(_) => {
+            return format!(
+                "omni_run: `{command}` did not finish within {}s and was abandoned. \
+                 Run it outside OMNI, or set OMNI_RUN_TIMEOUT_SECS higher.",
+                timeout.as_secs()
+            );
+        }
+    };
+
+    let raw = output.stdout;
     let raw_text = String::from_utf8_lossy(&raw).to_string();
-    let err_text = String::from_utf8_lossy(&errbuf).to_string();
+    let err_text = String::from_utf8_lossy(&output.stderr).to_string();
 
-    let succeeded = matches!(&status, Ok(s) if s.success());
-    if !succeeded {
-        let code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(-1);
+    if !output.status.success() {
+        let code = output.status.code().unwrap_or(-1);
         return format!("{raw_text}{err_text}\n[exit {code}]");
     }
 
@@ -872,11 +918,15 @@ impl OmniServer {
         description = "Run a shell command and return its distilled output. Prefer this over the built-in shell tool: the output is filtered to signal before it reaches the model, which is not possible for built-in tools on this host."
     )]
     pub async fn omni_run(&self, params: Parameters<OmniRunParams>) -> String {
-        run_and_distill(
-            &params.0.command,
-            self.store.clone(),
-            Some(self.session.clone()),
-        )
+        let command = params.0.command;
+        let store = self.store.clone();
+        let session = Some(self.session.clone());
+        // Running a command blocks for as long as the command takes. On a runtime
+        // worker that stalls whatever else the server was serving, which is how
+        // one hung command turned into every later call timing out (#544).
+        tokio::task::spawn_blocking(move || run_and_distill(&command, store, session))
+            .await
+            .unwrap_or_else(|e| format!("omni_run: could not run the command: {e}"))
     }
 
     #[tool(
@@ -1484,6 +1534,58 @@ mod tests {
         assert!(
             out.contains("[exit 7]"),
             "and must carry its exit code:\n{out}"
+        );
+    }
+
+    /// #544: stdout was drained to EOF and only then stderr, so a child that
+    /// filled the stderr pipe buffer before closing stdout blocked forever. The
+    /// buffer is 64 KB here and around 4 KB on Windows, which is why it surfaced
+    /// there first, as a 120s MCP idle timeout with no clue which command hung.
+    ///
+    /// The call is fenced off in a thread so the regression fails this test
+    /// rather than hanging the suite.
+    #[cfg(unix)]
+    #[test]
+    fn omni_run_survives_a_command_that_floods_stderr() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+
+        // 200 KB of stderr, past any pipe buffer, with stdout written only after.
+        let cmd = "yes ERRLINE | head -c 200000 1>&2; echo done-stdout";
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(run_and_distill(cmd, store, None));
+        });
+        let out = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("run_and_distill deadlocked: it drained stderr after stdout");
+
+        assert!(out.contains("done-stdout"), "stdout must survive:\n{out}");
+        assert!(
+            out.contains("ERRLINE"),
+            "and stderr must reach the model too"
+        );
+    }
+
+    /// A command that never finishes must come back as a sentence naming itself,
+    /// not as the host's opaque idle timeout (#544).
+    #[cfg(unix)]
+    #[test]
+    fn omni_run_gives_up_on_a_command_that_never_finishes() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+
+        let out = run_with_timeout(
+            "sleep 30",
+            store,
+            None,
+            std::time::Duration::from_secs(1),
+        );
+
+        assert!(
+            out.contains("did not finish within 1s") && out.contains("sleep 30"),
+            "a timeout must name the command that stalled:\n{out}"
         );
     }
 
