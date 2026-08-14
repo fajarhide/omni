@@ -38,3 +38,15 @@ target/
 
 # mdBook build output for docs/website. The source is tracked, the render is not.
 docs/website/book/
+
+# The Indonesian book renders alongside the English one; same rule as above.
+docs/website/book-id/
+# Shared diagrams, copied into the Indonesian book at build time by
+# docs/website/build.sh so both books read one set of SVGs.
+docs/website/src-id/media/
+# The design-system overlay. omni-pages writes src/wl into its own clone during
+# the site build and docs/website/build.sh mirrors it into src-id/wl, so neither
+# is ever source. Untracked and unignored, they are one `git add -A` away from
+# being committed by anyone who renders the book locally.
+docs/website/src/wl/
+docs/website/src-id/wl/

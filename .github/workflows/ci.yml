@@ -92,3 +92,20 @@ jobs:
       - name: Typecheck
         working-directory: plugins/pi
         run: npm run typecheck
+
+  manual-translations:
+    name: manual translations in step
+    # Seconds of git, so it runs on its own rather than behind thirteen minutes
+    # of Rust. Pull requests only: the check compares a branch against its merge
+    # base, and on a push to main there is no branch to compare.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The merge base is not in a shallow clone, and without it the script
+          # would see the whole manual as changed on every run.
+          fetch-depth: 0
+
+      - name: English pages changed without their translation
+        run: scripts/check_translations.sh "origin/${{ github.base_ref }}"

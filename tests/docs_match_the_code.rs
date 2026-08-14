@@ -26,8 +26,12 @@ fn repo_root() -> PathBuf {
 /// Every markdown file the manual and the README are made of.
 fn doc_files() -> Vec<PathBuf> {
     let root = repo_root();
-    let mut out: Vec<PathBuf> = walkdir::WalkDir::new(root.join("docs/website/src"))
-        .into_iter()
+    // Both books (#539). The prose is translated and the commands are not, so a
+    // shell fence in the Indonesian manual can name a deleted subcommand exactly
+    // as easily as the English one, and nothing else looks at those files.
+    let mut out: Vec<PathBuf> = ["docs/website/src", "docs/website/src-id"]
+        .iter()
+        .flat_map(|dir| walkdir::WalkDir::new(root.join(dir)).into_iter())
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
         .map(|e| e.path().to_path_buf())

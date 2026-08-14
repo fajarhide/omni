@@ -473,9 +473,34 @@ blockquote p:last-child { margin-bottom: 0; }
   color: inherit;
   text-decoration: none;
   border-bottom: 1px solid transparent;
+  /* inline-flex, not inline: the mark and the wordmark share one baseline-free
+     row so the underline on hover runs under both rather than stepping. */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
 }
 #mdbook-menu-bar .menu-title .site-home:hover {
   border-bottom-color: currentColor;
+}
+
+/* Sized in em so it tracks the wordmark through the menu bar's own font-size
+   changes at narrow widths, rather than needing a second media query. */
+#mdbook-menu-bar .site-mark {
+  display: block;
+  height: 1.4em;
+  width: 1.4em;
+}
+
+/* The translation notice on every Indonesian page (#539), injected by
+   theme/siteframe.js. Quiet on purpose: it is a provenance note, not a warning,
+   and a reader who wanted the English page would have opened it. */
+.translation-note {
+  font-size: 0.85em;
+  line-height: 1.5;
+  color: var(--wl-muted-foreground, #6b7280);
+  border-left: 2px solid var(--wl-border, #d8dbe0);
+  padding: 0 0 0 0.85rem;
+  margin: 0 0 2rem;
 }
 
 .site-links {
