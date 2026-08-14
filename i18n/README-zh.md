@@ -135,9 +135,6 @@ UTC**，每一次都是抵达模型的输出。时间窗口是这个数字的一
 * **97.3% 的调用一点没省**，我们照样公布，因为这个数字才说明剩下的值多少。**本次测量中没有一次调用让输出变大。**
   此前有 2 次，已由 ([#398](https://github.com/fajarhide/omni/issues/398)) 修复；它们存在时我们也照实公布过。
 * **每条命令 21 ms**，随你的历史增长而不是随载荷大小增长；对着 205 MB 的数据库是 61 ms。
-<div align="center">
-<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
-</div>
 
 这些数字可以在你自己的机器上复现：
 
