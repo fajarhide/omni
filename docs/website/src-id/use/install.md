@@ -35,10 +35,17 @@ cargo build --release
 /plugin install omni@omni
 ```
 
-Itu memasang sebuah skill, bukan binary-nya. Skill tersebut membawa perintah
-pemasangan di bawah, langkah verifikasinya, dan cara membaca penanda, supaya
-agent berhenti menebak-nebak ketiganya. Semua di halaman ini tetap berlaku;
-plugin hanya berarti ada orang lain yang mengetiknya.
+**Di agent mana pun yang membaca skill**, skill yang sama bisa dipasang lewat CLI
+direktori skill:
+
+```sh
+npx skills add fajarhide/omni
+```
+
+Lewat jalur mana pun, yang terpasang adalah sebuah skill, bukan binary-nya. Skill
+tersebut membawa perintah pemasangan di bawah, langkah verifikasinya, dan cara
+membaca penanda, supaya agent berhenti menebak-nebak ketiganya. Semua di halaman
+ini tetap berlaku; plugin hanya berarti ada orang lain yang mengetiknya.
 
 ## Sambungkan ke agent Anda
 
