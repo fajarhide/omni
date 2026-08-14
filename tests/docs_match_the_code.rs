@@ -23,6 +23,18 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// One `pub const NAME: usize = N;` out of `src/guard/limits.rs`.
+fn limit(name: &str) -> usize {
+    let src =
+        std::fs::read_to_string(repo_root().join("src/guard/limits.rs")).expect("read limits.rs");
+    regex::Regex::new(&format!(r"pub const {name}: usize = (\d+);"))
+        .expect("valid regex")
+        .captures(&src)
+        .unwrap_or_else(|| panic!("{name} is not in guard/limits.rs"))[1]
+        .parse()
+        .expect("digits")
+}
+
 /// Every markdown file the manual, the README and CONTRIBUTING are made of.
 fn doc_files() -> Vec<PathBuf> {
     let root = repo_root();
@@ -163,6 +175,24 @@ fn every_documented_count_matches_the_code() {
             "MCP tools",
         ),
         (r"(\d+)\s+content filters", distillers, "distillers"),
+        // The ledger page states three floors, in both languages. A constant
+        // moving without the prose is #541 one file over: a number in text that
+        // nothing reads. Each pattern is the wording both books already use.
+        (
+            r"(?:save|menghemat) (\d+) (?:bytes|byte)",
+            limit("MIN_LEDGER_RUN_GAIN"),
+            "bytes a session-origin run must save",
+        ),
+        (
+            r"(?:under|di bawah) (\d+) (?:bytes|byte)",
+            limit("MIN_LEDGER_INPUT"),
+            "bytes below which the ledger is skipped",
+        ),
+        (
+            r"(?:needs|butuh) (\d+) (?:bytes|byte)",
+            limit("MIN_WHOLE_OUTPUT_FOLD"),
+            "bytes a whole-output fold needs",
+        ),
     ];
 
     let mut wrong = Vec::new();

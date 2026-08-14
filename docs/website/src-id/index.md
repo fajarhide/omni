@@ -24,7 +24,7 @@ Agent Anda menjalankan test. Empat ratus baris kembali, yang penting satu.
 
 ```
 $ cargo test
-    Compiling omni v0.7.4
+    Compiling omni v0.7.5
      Running unittests src/lib.rs
 running 412 tests
 test pipeline::scorer::tests::scores_errors_critical ... ok

@@ -45,6 +45,25 @@ Because the project claim is not free, it carries a higher bar. A session-origin
 must save 150 bytes over its marker; a project-origin run must save three times that,
 since the agent has no choice about paying a retrieval if it needs the content.
 
+## The two floors that decide nothing folds at all
+
+Both bars above ask whether a run outgrows the marker replacing it. Two floors are
+checked before either of them, and between them they explain most of the cases where
+output comes back untouched and looks like the ledger is off.
+
+**Output under 264 bytes never reaches the ledger.** Below that there is no run long
+enough to be worth a handle, so the whole stage is skipped.
+
+**A fold that covers the entire output needs 1024 bytes.** The bars assume the agent
+still holds the rest of the output beside the marker and can decide whether the handle
+is worth spending. Cover everything and there is nothing beside it, so needing any part
+of the payload costs a retrieval the agent had no say in. Every whole-output fold this
+machine recorded was under 1 KB, and four of the four were retrieved within nine
+seconds, against a 0.85% retrieve rate across all 5,178 distillations in the same
+store. They saved 2,680 bytes, then spent 319 bytes of marker plus four extra tool
+calls handing back the same 2,999. The floor is the top of that measured range rather
+than a knee, because nothing above it was observed either way. n=4, one machine.
+
 ## The premise everything else follows from
 
 > The agent is still holding these bytes.
