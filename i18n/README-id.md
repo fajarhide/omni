@@ -148,10 +148,6 @@ hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.
 
-<div align="center">
-<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
-</div>
-
 Angka-angka itu bisa Anda reproduksi sendiri, di mesin Anda:
 
 ```bash

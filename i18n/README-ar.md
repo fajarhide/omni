@@ -166,9 +166,6 @@ brew install fajarhide/tap/omni && omni init
   وقد أعلنّاهما ما داما قائمين.
 * **‏21 مللي ثانية لكل أمر**، تنمو مع تاريخك لا مع حجم الحمولة، وتصير 61 مللي ثانية مع
   قاعدة بحجم 205 ميغابايت.
-<div align="center">
-<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
-</div>
 
 <div dir="rtl">
 

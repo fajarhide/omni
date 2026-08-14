@@ -148,9 +148,6 @@ một tập dữ liệu biến mất một tuần sau khi được đo.
   thời gian đó.
 * **21 ms mỗi lệnh**, lớn dần theo lịch sử của bạn chứ không theo kích thước payload. Với
   cơ sở dữ liệu 205 MB con số là 61 ms.
-<div align="center">
-<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
-</div>
 
 Bạn có thể tự tái lập những con số này trên máy mình:
 

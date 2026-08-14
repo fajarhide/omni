@@ -145,9 +145,6 @@ OMNI는 둘 다 고치고, 그 밖에서는 비켜섭니다.
   이전에 2건이 있었고 ([#398](https://github.com/fajarhide/omni/issues/398))에서 고쳤으며, 있는 동안에는 그 숫자도 공개했습니다.
 * **명령당 21 ms**, 페이로드 크기가 아니라 기록과 함께 커지며 205 MB 데이터베이스에서는
   61 ms입니다.
-<div align="center">
-<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
-</div>
 
 이 수치는 직접 재현할 수 있습니다:
 

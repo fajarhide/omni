@@ -145,9 +145,6 @@ OMNI は両方を直し、それ以外では退きます。
   以前は 2 件あり、([#398](https://github.com/fajarhide/omni/issues/398)) で修正しました。あった間はその数字も公開していました。
 * **1コマンドあたり 21 ms**。ペイロードの大きさではなく履歴とともに増え、205 MB の
   データベースでは 61 ms です。
-<div align="center">
-<img src="https://omni.weekndlabs.com/media/performance.png" alt="OMNI" width="600" />
-</div>
 
 これらの数値は自分の環境で再現できます:
 
