@@ -185,6 +185,14 @@ omni init --status
 curl -fsSL omni.weekndlabs.com/install | bash
 ```
 
+**Di agent mana pun yang membaca skill:**
+```bash
+npx skills add fajarhide/omni
+```
+Yang terpasang skill-nya, bukan binary-nya. Skill itu yang memberi tahu agent cara
+mengambil binary-nya, memverifikasinya, dan membaca penanda yang ditinggalkan OMNI
+saat ia memendekkan keluaran.
+
 **Windows (PowerShell):**
 ```powershell
 irm omni.weekndlabs.com/install.ps1 | iex

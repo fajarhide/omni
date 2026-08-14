@@ -5,33 +5,32 @@ description: "Use when installing, verifying or configuring OMNI, when command o
 
 # OMNI
 
-OMNI runs on the machine, as a Claude Code hook. It rewrites the output of a Bash
-tool call before the model reads it, and every cut it makes leaves a marker and a
-handle to fetch the bytes back. No account, no telemetry, nothing about the machine
-leaves it.
+OMNI runs on the machine, as a hook the agent host calls. It rewrites the output
+of a shell tool call before the model reads it, and every cut it makes leaves a
+marker and a handle to fetch the bytes back. No account, no telemetry, nothing
+about the machine leaves it.
 
 ## Install
 
-`omni init` with no flags opens a menu and needs a terminal, so name the host.
-
 ```
 brew install fajarhide/tap/omni
-omni init --claude
+omni init
 ```
 
-Without Homebrew:
+Without Homebrew, put `curl -fsSL omni.weekndlabs.com/install | bash` in place of
+the first line.
 
-```
-curl -fsSL omni.weekndlabs.com/install | bash
-omni init --claude
-```
+**Do not name a host you have not established you are running in.** With no
+terminal to draw its menu on, which is the case when an agent runs it, `omni init`
+configures the host it is running inside and prints which one it picked. If it
+cannot name the host, a plain shell for instance, it stops and lists the flags
+rather than installing somewhere nobody asked for. Only then pick one:
+`--claude`, `--cursor`, `--codex`, `--gemini` and the rest under
+`omni init --help`. `omni init --all` takes every supported host and also writes
+a `.vscode/mcp.json` in the working directory.
 
-That writes the hooks into `~/.claude/settings.json` and registers the MCP server
-in `~/.claude.json`. **Claude Code has to restart before the hooks run**, so say
-that rather than reporting the install as active.
-
-`omni init --all` takes every supported host and also writes a `.vscode/mcp.json`
-in the working directory. `omni init --help` lists the rest.
+The hooks land in that host's own configuration, and **the host has to restart
+before they run**, so say that rather than reporting the install as active.
 
 ## Verify
 

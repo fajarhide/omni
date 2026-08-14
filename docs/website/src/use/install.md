@@ -35,10 +35,17 @@ cargo build --release
 /plugin install omni@omni
 ```
 
-That installs a skill, not the binary. The skill carries the install commands below,
-the verification step, and how to read the markers, so the agent stops guessing at
-any of the three. Everything on this page still applies; the plugin only means
-someone else types it.
+**On any agent that reads skills**, the same skill installs through the skills
+directory CLI:
+
+```sh
+npx skills add fajarhide/omni
+```
+
+Either way that installs a skill, not the binary. The skill carries the install
+commands below, the verification step, and how to read the markers, so the agent
+stops guessing at any of the three. Everything on this page still applies; the
+plugin only means someone else types it.
 
 ## Wire it into your agent
 
