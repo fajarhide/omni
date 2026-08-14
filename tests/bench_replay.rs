@@ -21,6 +21,11 @@
 //!   OMNI_BENCH_ALL=1            replay terminal traces too (not the figure to publish)
 //!   OMNI_BENCH_SINCE=YYYY-MM-DD restrict to traces at or after that UTC date
 //!   OMNI_BENCH_NO_TOKENS=1      skip tokenization (it is the slow half)
+//!   OMNI_BENCH_RTK / _LEANCTX / _CAVEMAN / _HEADROOM
+//!                               each names a competitor binary and adds one arm to
+//!                               the head to head. Unset means the arm is absent from
+//!                               the table rather than printed as a zero, so CI never
+//!                               needs a competitor installed.
 //!
 //! Faithfulness to docs/BENCHMARKS.md's method:
 //! - `session: None` + `store: None` → the scorer sees no history, i.e. the
@@ -316,6 +321,43 @@ fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
     }
 }
 
+/// What caveman delivers for one payload.
+///
+/// `caveman tools compress` takes the payload on stdin and writes the compressed
+/// text on **stdout**; its metrics JSON goes to stderr, so unlike the lean-ctx arm
+/// nothing has to be parsed out of the bytes being counted, and our ledger can be
+/// stacked on top the way it is on rtk.
+///
+/// **It is handed less than the other two arms.** rtk gets the filter name and
+/// lean-ctx gets `--shell <cmd>`; caveman accepts no command hint (verified: the
+/// output is byte-identical with and without `--shell`, `--command` and `--cmd`),
+/// so it infers the shape from content alone. That handicap runs against it, which
+/// is worth saying out loud in the direction that does not flatter us.
+fn caveman_out(bin: &str, home: &str, raw: &str) -> String {
+    use std::io::Write;
+    let Ok(mut child) = std::process::Command::new(bin)
+        .args(["tools", "compress"])
+        // The harness repoints HOME, which would leave caveman unable to find its
+        // own binaries and silently passing everything through. See the call site.
+        .env("CAVEMAN_HOME", home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return raw.to_string();
+    };
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(raw.as_bytes());
+    }
+    match child.wait_with_output() {
+        // An empty stdout means the process failed rather than that the payload
+        // compressed to nothing, so it is a passthrough and not a free win.
+        Ok(o) if !o.stdout.is_empty() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => raw.to_string(),
+    }
+}
+
 /// What lean-ctx would deliver for one payload, in bytes.
 ///
 /// `compress diff - --shell "<cmd>" --json` is its own preview path: the payload
@@ -460,6 +502,17 @@ fn replay_execution_traces_net_savings() {
             .into_owned()
     });
     let since = since_ts();
+    // Also from the real home, and for the same reason. caveman resolves its own
+    // Go binaries under `$HOME/.caveman/bin`, so with HOME repointed below it
+    // finds nothing and hands every payload back unchanged. That failure is
+    // silent: the arm would print a clean 0.0% and read as a measurement rather
+    // than as a competitor that never ran. Verified before this line existed, on
+    // `heavy_noise.txt`: 9,207 bytes back under an empty HOME against 5,524 with
+    // `CAVEMAN_HOME` set.
+    let caveman_home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".caveman")
+        .to_string_lossy()
+        .into_owned();
 
     // Match the method: no user config, no passthrough shortcut.
     let tmp_home = tempfile::tempdir().expect("temp home");
@@ -576,6 +629,16 @@ fn replay_execution_traces_net_savings() {
     // Second competitor arm, same rule: off unless the binary is named.
     let lean_ctx = std::env::var("OMNI_BENCH_LEANCTX").ok();
     let (mut lc_total, mut lc_claimed) = (0u64, 0u64);
+    // Fourth arm. `OMNI_BENCH_CAVEMAN` names the `caveman` CLI. It is the first
+    // competitor that ships both halves of OMNI's shape: `tools compress` is the
+    // filter tier and `tools retrieve` recovers byte-exact content, so it earns
+    // the same ledger-stacked row rtk gets rather than a filters-only row.
+    let caveman = std::env::var("OMNI_BENCH_CAVEMAN").ok();
+    let (mut cm_total, mut cm_claimed) = (0u64, 0u64);
+    let cm_ledger_dir = tempfile::tempdir().expect("caveman ledger home");
+    let cm_ledger_store =
+        omni::store::sqlite::Store::open_path(&cm_ledger_dir.path().join("ledger.db")).ok();
+    let mut cm_ledger_total = 0u64;
     // Third arm, and the only one that is not a filter. `OMNI_BENCH_HEADROOM`
     // names headroom's `transforms/cross_turn_dedup.py`, which is the same idea
     // as our ledger rather than the same idea as rtk: whole-conversation verbatim
@@ -777,6 +840,26 @@ fn replay_execution_traces_net_savings() {
             rtk_ledger_total += after.map_or(rtk_text.len() as u64, |v| v.len() as u64);
         }
 
+        if let Some(bin) = &caveman {
+            let cm_text = caveman_out(bin, &caveman_home, &t.raw);
+            cm_total += cm_text.len() as u64;
+            // No filter name to key on, so this counts an actual reduction, the
+            // stricter of the two counts already in this table. Same rule as the
+            // lean-ctx arm, and not comparable to rtk's mapped-filter count.
+            if cm_text.len() < t.raw.len() {
+                cm_claimed += 1;
+            }
+            let after = cm_ledger_store
+                .as_ref()
+                .filter(|_| omni::pipeline::format::sniff(&cm_text).is_none())
+                .and_then(|s| {
+                    omni::ledger::Ledger::new(s, &t.session)
+                        .with_project(&t.project)
+                        .project(&cm_text)
+                });
+            cm_ledger_total += after.map_or(cm_text.len() as u64, |v| v.len() as u64);
+        }
+
         if let Some(bin) = &lean_ctx {
             let got = lean_ctx_bytes(bin, &t.command, &t.raw);
             lc_total += got as u64;
@@ -973,7 +1056,7 @@ fn replay_execution_traces_net_savings() {
     // Each arm is off unless its binary is named, so CI never needs a competitor
     // installed. A missing arm prints nothing rather than a zero, because a zero
     // in this table reads as a measurement.
-    if rtk.is_some() || lean_ctx.is_some() || headroom.is_some() {
+    if rtk.is_some() || lean_ctx.is_some() || headroom.is_some() || caveman.is_some() {
         println!("\n--- head to head, same corpus (each tool given its command) ---");
         println!(
             "{:<22} {:>12} -> {:>12}  {:>7}",
@@ -1005,6 +1088,30 @@ fn replay_execution_traces_net_savings() {
                 format!("{:.1}%", saved(raw_total, rtk_ledger_total))
             );
             println!("rtk marked a cut in {rtk_marked} of the {rtk_claimed} it claimed");
+        }
+        if caveman.is_some() {
+            println!(
+                "{:<22} {:>12} -> {:>12}  {:>7}   ({cm_claimed} of {n} shortened, no command hint)",
+                "caveman compress",
+                raw_total,
+                cm_total,
+                format!("{:.1}%", saved(raw_total, cm_total))
+            );
+            println!(
+                "{:<22} {:>12} -> {:>12}  {:>7}",
+                "caveman + our ledger",
+                raw_total,
+                cm_ledger_total,
+                format!("{:.1}%", saved(raw_total, cm_ledger_total))
+            );
+            // A caveman that cannot find its Go binaries returns every payload
+            // unchanged, which is indistinguishable from a competitor that simply
+            // did not win. Say so rather than publishing the zero.
+            if cm_claimed == 0 {
+                println!(
+                    "caveman shortened nothing: check CAVEMAN_HOME resolves, this is not a result"
+                );
+            }
         }
         if let Some(module) = &headroom {
             match headroom_total(module, &hr_blocks) {
