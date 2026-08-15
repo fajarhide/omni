@@ -45,6 +45,11 @@ const SENSITIVE_PATTERNS: &[&str] = &[
     "TOKEN",
     "KEY",
     "PASSWORD",
+    // Segment matching means `PASSWD` was never reached by either of its
+    // neighbours: it is not equal to `PASS` and does not end with it, and
+    // `PASSWORD` is a different word. `passwd=hunter2` was delivered in full
+    // until #559 went looking (added there, not reported there).
+    "PASSWD",
     "PASS",
     "AUTH",
     // `CRED` was a stem, and a stem only works under substring matching. Segment
@@ -600,6 +605,33 @@ fn looks_like_plain_identifier(value: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
+/// A count is a score, not a secret: `3` or `3/10` and nothing else.
+///
+/// Deliberately narrower than `looks_like_plain_identifier`. That rule accepts
+/// any short lowercase word, which is right for `key` and wrong for `pass`,
+/// where `hunter2` is exactly what a password looks like. Review caught the
+/// first version reusing it (#559), and the direction of doubt this file already
+/// states settles it: hiding a value that did not need hiding is recoverable,
+/// printing a secret is not. So `pass=hello` stays redacted.
+fn looks_like_count(value: &str) -> bool {
+    let v = value.trim().trim_matches(['"', '\'']).trim();
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+    match v.split_once('/') {
+        Some((done, total)) => digits(done) && digits(total),
+        None => digits(v),
+    }
+}
+
+/// `pass` on its own, which is a counter far more often than a credential.
+///
+/// A real one is written `password`, `passwd`, or with a qualifier in front, and
+/// a suffixed `pass` is named after what it opens, so `DB_PASS` keeps its
+/// strength unconditionally.
+fn is_bare_pass(key: &str) -> bool {
+    let k = key.trim().trim_start_matches("export ").trim();
+    k.eq_ignore_ascii_case("pass")
+}
+
 /// A brace expression is code, not a value.
 ///
 /// #486 gave the value a say and taught it one shape, a lowercase identifier, so
@@ -654,6 +686,12 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     if only_the_key_pattern_matched(key)
         && (looks_like_plain_identifier(value) || looks_like_code_expression(value))
     {
+        return None;
+    }
+    // #559. `echo "pass=$P/10"` after a test loop came back as `[REDACTED]`, so
+    // ten runs' result was gone with nothing saying the token had been a count.
+    // Only a count is waved through, and only for the bare key.
+    if is_bare_pass(key) && looks_like_count(value) {
         return None;
     }
     // The surrounding syntax survives, so a redacted assignment still parses.
@@ -1112,6 +1150,49 @@ mod tests {
         let env = "GOOGLE_CREDENTIALS={\"type\":\"service_account\",\"private_key\":\"abc\"}\n";
         let out = redact_sensitive_assignments(env).expect("a JSON credential is still a secret");
         assert!(!out.contains("service_account"), "secret delivered:\n{out}");
+    }
+
+    /// #559. `echo "pass=$P/10"` after a ten-run test loop came back as
+    /// `pass=[REDACTED]`, so the result was gone and nothing in the output said
+    /// the token had been a count rather than a secret.
+    ///
+    /// The second half of the table is the point. A rule that only proves the
+    /// counters survive is indistinguishable from deleting the pattern, and
+    /// `passwd` is in there because it turned out never to have been redacted
+    /// at all: segment matching means it is neither equal to `PASS` nor a word
+    /// ending in it, and `PASSWORD` is a different word.
+    #[test]
+    fn a_bare_pass_is_a_counter_and_a_qualified_one_is_still_a_secret() {
+        for (key, value) in [
+            ("pass", "3/3"),
+            ("pass", "10"),
+            ("fail", "3/3"),
+            ("passed", "3/3"),
+            ("PASS", "$((PASS + 1))"),
+        ] {
+            assert_eq!(
+                redact_assignment(key, value),
+                None,
+                "{key}={value} carries no credential and was destroyed"
+            );
+        }
+
+        for (key, value) in [
+            ("password", "hunter2"),
+            ("passwd", "hunter2"),
+            ("db_pass", "hunter2"),
+            ("PGPASSWORD", "hunter2"),
+            // Review's case, and the reason the `KEY` value rule is not reused
+            // here: it accepts any short lowercase word, and this one is a
+            // password. The issue asked for it to be delivered; the direction of
+            // doubt in this file outranks that, and the deviation is on the PR.
+            ("pass", "hunter2"),
+        ] {
+            assert!(
+                redact_assignment(key, value).is_some(),
+                "{key}={value} is a credential and was delivered in full"
+            );
+        }
     }
 
     /// #532, found in `tests/smoke_test.sh`: a counter in this repository's own
