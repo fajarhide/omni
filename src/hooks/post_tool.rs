@@ -396,11 +396,43 @@ fn fold_cross_turn(
     let project = std::env::current_dir()
         .map(|p| crate::paths::project_key(&p))
         .unwrap_or_else(|_| "unknown".to_string());
-    crate::ledger::Ledger::new(s, scope)
+    let folded = crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
         .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
-        .project(&text)
-        .unwrap_or(text)
+        .project(&text);
+
+    // #557. A `Read` payload is handed back as `file.content` and the host
+    // renders it with `cat -n` numbering counted from `startLine`, so it numbers
+    // whatever lines we return. Replacing a run in the middle with a one-line
+    // marker removes lines the count was walking over, and every surviving line
+    // below it is then labelled short by the size of the fold. Nothing in the
+    // payload says so, and those numbers are a contract: the agent writes them
+    // into issues and commit messages and decides which line to edit from them.
+    //
+    // A fold with nothing after it shifts nothing, so the whole-output fold and
+    // any fold reaching the end of the payload are kept. Only `Read` is affected;
+    // `Grep` carries its positions inside the text, where a fold cannot move
+    // them, and `Bash` output is not numbered at all.
+    match folded {
+        Some(f) if normalized.tool_name != "Read" || !fold_shifts_a_later_line(&f) => f,
+        _ => text,
+    }
+}
+
+/// Whether any line survives below a marker, and is therefore renumbered.
+///
+/// Consecutive markers are still one shift, so the question is only whether real
+/// content follows the last of them.
+fn fold_shifts_a_later_line(folded: &str) -> bool {
+    let mut seen_marker = false;
+    for line in folded.lines() {
+        let is_marker = line.trim_start().starts_with("[OMNI:");
+        if seen_marker && !is_marker {
+            return true;
+        }
+        seen_marker |= is_marker;
+    }
+    false
 }
 
 /// A tool reply on its way to the agent, distilled or not, through the ledger.
@@ -2976,6 +3008,56 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(
             out.contains("lines already shown") || out.contains("from an earlier session"),
             "a repeated Read never reached the ledger: {out}"
+        );
+    }
+
+    /// #557. A `Read` payload goes back as `file.content` and the host renders it
+    /// with `cat -n` numbering counted from `startLine`, so it numbers whatever
+    /// lines we return. A fold in the middle removes lines the count was walking
+    /// over, and every surviving line below the marker is labelled short by the
+    /// size of the fold, with nothing in the payload saying so. Those numbers are
+    /// a contract: the agent writes them into issues and decides what to edit
+    /// from them.
+    ///
+    /// Both halves are load bearing. Refusing every fold passes the first
+    /// assertion on its own and silently costs the whole-output fold, which
+    /// shifts nothing because nothing survives under it.
+    #[test]
+    fn refuses_a_read_fold_that_would_renumber_the_lines_below_it() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |body: &str| {
+            json!({
+                "session_id": "host-557",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"content": body},
+            })
+            .to_string()
+        };
+
+        // The repeat lands at the top of the second payload with fresh lines
+        // under it, which is the shape that renumbers.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
+        let overlapping =
+            process_payload(&payload(&range(100, 200)), Some(store.clone()), None).unwrap_or_default();
+        assert!(
+            !overlapping.contains("[OMNI:"),
+            "a fold with 70 lines under it renumbered every one of them: {overlapping}"
+        );
+
+        // A fresh store, so the only difference is where the repeat sits: at the
+        // end, where no number can move.
+        let dir2 = tempfile::tempdir().expect("tempdir");
+        let store2 = Arc::new(Store::open_path(&dir2.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&range(170, 200)), Some(store2.clone()), None);
+        let trailing =
+            process_payload(&payload(&range(100, 200)), Some(store2.clone()), None).unwrap_or_default();
+        assert!(
+            trailing.contains("[OMNI:"),
+            "a fold at the end shifts nothing and has to still happen: {trailing}"
         );
     }
 
