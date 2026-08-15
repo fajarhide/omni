@@ -3095,14 +3095,15 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
-    /// #572, review, twice. Folds at the head and at the end leave the survivors
-    /// as one block, and one starting number could in principle put all of them
-    /// back. It is refused anyway, because knowing how many marker lines stand
-    /// above them means either searching the view for their text, which review
-    /// showed can match inside a marker, or a marker count nothing reports. A
-    /// refused fold costs bytes; a wrong number costs an edit in the wrong place.
+    /// #573. Folds at the head and at the end leave the survivors as one block,
+    /// still `first` lines into the file and `markers_above` lines into the view,
+    /// so one starting number closes that gap whatever follows them. #572 refused
+    /// this for want of a marker count; `substitute` reports one now.
+    ///
+    /// Worth 129 of 1,868 repeated reads in the local corpus and 257 KB against
+    /// the 3.29 MB reachable before it.
     #[test]
-    fn refuses_folds_at_both_ends_rather_than_guess_the_offset() {
+    fn folds_at_both_ends_and_still_numbers_the_middle_right() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let payload = |from: usize, to: usize| {
@@ -3126,12 +3127,25 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         // Two earlier reads, one at each end of the window that follows.
         let _ = process_payload(&payload(100, 130), Some(store.clone()), None);
         let _ = process_payload(&payload(170, 200), Some(store.clone()), None);
-        let out =
-            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
-        assert!(
-            !out.contains("[OMNI:"),
-            "a fold with content standing below it went through, so the number of \
-             lines above the survivors was guessed: {out}"
+        let out = process_payload(&payload(100, 200), Some(store.clone()), None)
+            .expect("both ends repeat, so this folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let content = file["content"].as_str().expect("content");
+        assert!(content.contains("[OMNI:"), "neither end was folded: {out}");
+
+        // Thirty lines stood above the survivors and the markers that replaced
+        // them stand there now, so the host starts counting that much later. The
+        // tail fold below them moves nothing.
+        let above = content
+            .lines()
+            .take_while(|l| l.starts_with("[OMNI:"))
+            .count() as u64;
+        assert_eq!(
+            file["startLine"],
+            100 + 30 - above,
+            "the middle block keeps numbers it is no longer at: {out}"
         );
     }
 
