@@ -1,7 +1,32 @@
 # Perkakas MCP
 
-`omni init` mendaftarkan OMNI sebagai server MCP, yang memberi agent
-**25 perkakas** yang bisa ia panggil sendiri tanpa lewat Anda.
+`omni init` mendaftarkan OMNI sebagai server MCP, yang memberi agent perkakas yang bisa
+ia panggil sendiri tanpa lewat Anda. Halaman ini menjelaskan seluruh **25** perkakas.
+Host Anda hanya diberi tahu sebagiannya.
+
+## Yang diberitahukan ke host Anda
+
+Definisi perkakas berada di awal setiap request, jadi perkakas yang tidak pernah dipanggil
+akan dibaca ulang pada setiap request di setiap sesi, bukan dibayar sekali saja. Karena
+itu OMNI hanya mengiklankan set yang bisa dipakai oleh tier host Anda:
+
+| tier | yang diiklankan |
+|---|---|
+| Full, dan host apa pun yang tidak dikenali OMNI | sembilan di bawah ini |
+| Handoff-first | sembilan yang sama, `omni_run` selalu termasuk |
+| MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge` |
+
+Yang sembilan itu adalah `omni_retrieve`, `omni_explain_savings`, `omni_remember`,
+`omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history`
+dan `omni_context`. Itulah yang benar-benar pernah dipanggil di korpus yang terekam.
+
+Perkakas lain di halaman ini tetap ada di dalam binary dan hanya berjarak satu setelan.
+`OMNI_MCP_TOOLS=all` mengiklankan seluruh 25 perkakas, dan `omni doctor` menyebutkan set
+mana yang sedang berlaku serta host mana yang terdeteksi:
+
+```
+  MCP tools:      9 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
+```
 
 Pastikan daftarnya terhadap binary Anda sendiri, bukan terhadap halaman ini:
 

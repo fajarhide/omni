@@ -44,6 +44,11 @@ preserves test detail, "debug" keeps error context, "refactor" compresses harder
 
 ## Tools an orchestrator calls
 
+None of these are advertised by default. OMNI tells a host about the tools its tier
+actually uses, and the loop tools are outside that set, so an orchestrator that calls them
+needs `OMNI_MCP_TOOLS=all` in its environment. `omni doctor` prints which set is in force.
+The MCP tools reference has the per-tier lists.
+
 | tool | when |
 |---|---|
 | `omni_loop_status` | once before each iteration, the cheapest full picture |
