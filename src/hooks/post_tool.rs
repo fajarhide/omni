@@ -878,17 +878,25 @@ pub fn process_payload(
         }
     }
 
-    // The reply is dropped at the end of this function whenever the route is a
-    // passthrough and nothing was redacted, so the host keeps the bytes it
-    // already had. Every column below is computed from `final_out`, so leaving a
-    // shrunken string here books a saving nobody received. Reconciled against the
-    // host's own transcripts, that was 67 rows and 16.4% of the bytes booked as
-    // saved on this machine, and `applied_only()` cannot separate them afterwards
-    // because `delivered_bytes` is copied from the same string (#566). This is the
-    // restore the guardrail above already performs, for the same reason.
-    if route == Route::Passthrough && !redacted_here {
-        final_out = content.to_string();
-    }
+    // What the model is actually handed, which is not what the distiller
+    // produced. The reply is dropped at the end of this function whenever the
+    // route is a passthrough and nothing was redacted, so the host keeps the
+    // bytes it already had. Every accounting column used to be computed from
+    // `final_out` regardless, which booked a saving nobody received: reconciled
+    // against the host's own transcripts that was 67 rows and 16.4% of the bytes
+    // booked as saved on this machine, and `applied_only()` cannot separate them
+    // afterwards because `delivered_bytes` is copied from the same string (#566).
+    //
+    // A separate binding rather than overwriting `final_out`, so `record_trace`
+    // below still stores what the distiller produced. Overwriting made
+    // `execution_traces` report raw and distilled as identical strings, which
+    // silently removes the one corpus that can measure distiller behaviour
+    // without going through these books. Caught in review on the first version.
+    let delivered: &str = if route == Route::Passthrough && !redacted_here {
+        &content
+    } else {
+        &final_out
+    };
 
     let latency_ms = start.elapsed().as_millis() as u32;
 
@@ -898,16 +906,16 @@ pub fn process_payload(
     // against GPT's vocabulary rather than Claude's (#283).
     use crate::util::token_estimate::{ContentHint, estimate_tokens};
     let raw_tokens = estimate_tokens(content.len(), ContentHint::Mixed);
-    let filtered_tokens = estimate_tokens(final_out.len(), ContentHint::Mixed);
+    let filtered_tokens = estimate_tokens(delivered.len(), ContentHint::Mixed);
 
     let result = DistillResult {
-        output: final_out.clone(),
+        output: delivered.to_string(),
         route: route.clone(),
         filter_name: filter_name.clone(),
         score: 0.0,
         context_score: 0.0,
         input_bytes: content.len(),
-        output_bytes: final_out.len(),
+        output_bytes: delivered.len(),
         latency_ms: latency_ms as u64,
         rewind_hash: if rewind_hash.is_empty() {
             None
@@ -924,7 +932,7 @@ pub fn process_payload(
         // output above the host's own cap, where the raw output is persisted and
         // the hook's reply dropped, now returns before reaching here, so this
         // is what the model receives (#212).
-        delivered_bytes: final_out.len(),
+        delivered_bytes: delivered.len(),
     };
 
     if let Some(ref s) = store {
@@ -2411,6 +2419,20 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             assert_eq!(
                 delivered, 0,
                 "the hook sent nothing and the row still reports {delivered} bytes delivered"
+            );
+            // The books say nothing was saved, and the trace still has to say
+            // what the distiller produced. The first version of this fix
+            // overwrote `final_out` before `record_trace` and made the two
+            // columns identical, which silently removes the only corpus that
+            // measures distiller behaviour without going through these books.
+            assert_eq!(
+                count(
+                    &db,
+                    "SELECT COUNT(*) FROM execution_traces \
+                     WHERE LENGTH(distilled_output) < LENGTH(raw_input)",
+                ),
+                1,
+                "the trace lost what the distiller produced"
             );
         } else {
             // The fixture stopped exercising the window. Say so rather than
