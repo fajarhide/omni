@@ -36,7 +36,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
 # MCP Server  
-rmcp = { version = "1.4", features = ["server", "transport-io"] }
+rmcp = { version = "1.7", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 
 # Database (SQLite bundled — no system dep)

@@ -1510,8 +1510,7 @@ impl OmniServer {
 
     /// The router the served handler uses.
     fn active_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Self> {
-        let agent_id = std::env::var("OMNI_AGENT_ID")
-            .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
+        let agent_id = crate::agents::multiagent::detect_agent_id();
         Self::router_for(&agent_id)
     }
 }
@@ -1775,7 +1774,7 @@ mod tests {
     /// is the half that had never been called.
     #[test]
     fn the_advertised_surface_is_smaller_than_it_was() {
-        let router = OmniServer::router_for("claude_code");
+        let router = OmniServer::router_from("claude_code", false);
         let listed = router.list_all();
         let bytes: usize = listed
             .iter()
@@ -1799,7 +1798,7 @@ mod tests {
     /// section 5).
     #[test]
     fn a_handoff_first_host_is_still_told_about_omni_run() {
-        let names: Vec<String> = OmniServer::router_for("cursor")
+        let names: Vec<String> = OmniServer::router_from("cursor", false)
             .list_all()
             .into_iter()
             .map(|t| t.name.to_string())
