@@ -266,7 +266,7 @@ pub struct OmniSignalExtractParams {
 }
 
 // Automatically bind tool signatures
-#[tool_router(server_handler)]
+#[tool_router]
 impl OmniServer {
     #[tool(
         name = "omni_retrieve",
@@ -1470,7 +1470,54 @@ impl OmniServer {
         })
         .to_string()
     }
+
+    /// The routes this host is told about.
+    ///
+    /// Built by removing from the generated router rather than by listing what
+    /// to keep, so a tool added later is inactive until it is put in
+    /// `policy::FULL`. That default is deliberate: the cost of a tool is paid
+    /// by every user on every request, and the benefit is paid by whoever calls
+    /// it (#577).
+    fn router_from(
+        agent_id: &str,
+        keep_everything: bool,
+    ) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        let mut router = Self::tool_router();
+        if keep_everything {
+            return router;
+        }
+        let active = crate::mcp::policy::active_tools(agent_id);
+        let advertised: Vec<String> = router
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        for name in advertised {
+            if !active.iter().any(|a| *a == name) {
+                router.remove_route(&name);
+            }
+        }
+        router
+    }
+
+    /// As `router_from`, reading the override from the environment.
+    fn router_for(agent_id: &str) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        let keep_everything = std::env::var("OMNI_MCP_TOOLS")
+            .map(|v| v.eq_ignore_ascii_case("all"))
+            .unwrap_or(false);
+        Self::router_from(agent_id, keep_everything)
+    }
+
+    /// The router the served handler uses.
+    fn active_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        let agent_id = std::env::var("OMNI_AGENT_ID")
+            .unwrap_or_else(|_| crate::agents::multiagent::detect_agent_id());
+        Self::router_for(&agent_id)
+    }
 }
+
+#[rmcp::tool_handler(router = Self::active_tool_router())]
+impl rmcp::ServerHandler for OmniServer {}
 
 fn compute_project_hash_str(project_path: &str) -> String {
     crate::agents::multiagent::project_hash(project_path)
@@ -1721,5 +1768,56 @@ mod tests {
             out.contains("No tool calls recorded"),
             "expected empty message, got: {out}"
         );
+    }
+
+    /// The gate from the design: the advertised surface on a Full-tier host is
+    /// under 3,000 bytes. It was 7,912 before this, and the 4,940 that came off
+    /// is the half that had never been called.
+    #[test]
+    fn the_advertised_surface_is_smaller_than_it_was() {
+        let router = OmniServer::router_for("claude_code");
+        let listed = router.list_all();
+        let bytes: usize = listed
+            .iter()
+            .map(|t| serde_json::to_string(t).expect("tool serialises").len())
+            .sum();
+
+        assert_eq!(
+            listed.len(),
+            9,
+            "advertised {} tools, expected the nine",
+            listed.len()
+        );
+        assert!(
+            bytes < 3_000,
+            "advertised surface is {bytes} B, gate is 3000"
+        );
+    }
+
+    /// A host that cannot rewrite built-in tool output has one path left, and
+    /// removing it would leave the install with nothing to do (`strategy.md`
+    /// section 5).
+    #[test]
+    fn a_handoff_first_host_is_still_told_about_omni_run() {
+        let names: Vec<String> = OmniServer::router_for("cursor")
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "omni_run"),
+            "advertised: {names:?}"
+        );
+    }
+
+    /// The escape hatch, because a cut nobody can undo is a cut that gets
+    /// reported as a missing feature.
+    #[test]
+    fn the_override_restores_every_tool() {
+        let all = OmniServer::tool_router().list_all().len();
+        let restored = OmniServer::router_from("claude_code", true)
+            .list_all()
+            .len();
+        assert_eq!(restored, all);
     }
 }
