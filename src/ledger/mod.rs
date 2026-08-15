@@ -130,6 +130,44 @@ impl Origin {
 /// silently folding runs that do not pay.
 const HANDLE_LEN: usize = 16;
 
+/// What a fold did to the numbers of the lines still under it.
+///
+/// Only a caller that controls where its host starts counting can act on this,
+/// which today is the `Read` path: the host renders `file.content` with `cat -n`
+/// numbering counted from `startLine`, so it numbers whatever it is handed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldShift {
+    /// Nothing survives below the fold, so no number moves. A whole-output fold
+    /// and any fold reaching the end of the payload are this.
+    None,
+    /// The fold starts at the first line and covers `lines` of them, replacing
+    /// them with one marker. Everything below is short by `lines - 1`, and a
+    /// caller that can move its starting number corrects all of it at once.
+    Leading { lines: usize },
+    /// Content above the fold and content below it. Nothing can correct that,
+    /// because one starting number cannot describe two different offsets.
+    Interior,
+}
+
+impl FoldShift {
+    fn of(folded: &HashSet<usize>, total: usize) -> Self {
+        let Some(&first) = folded.iter().min() else {
+            return Self::None;
+        };
+        if !(first..total).any(|i| !folded.contains(&i)) {
+            return Self::None;
+        }
+        // Contiguous from the top: the run is exactly 0..len, so one marker sits
+        // where `len` lines were and the rest of the payload follows it intact.
+        if first == 0 && (0..folded.len()).all(|i| folded.contains(&i)) {
+            return Self::Leading {
+                lines: folded.len(),
+            };
+        }
+        Self::Interior
+    }
+}
+
 /// Addresses the ledger for one session, and optionally for its project.
 ///
 /// Cross-session repetition measures 3.7% of post-filter bytes against 19.1%
@@ -198,15 +236,15 @@ impl<'a> Ledger<'a> {
         self.project_reporting_shift(text).map(|(view, _)| view)
     }
 
-    /// The view, and whether any line survives below the first fold.
+    /// The view, and what the fold did to the numbering of the lines under it.
     ///
     /// A caller whose host numbers the lines it is handed needs the second half:
     /// a marker with content under it moves every one of those numbers, and the
     /// payload says nothing about it (#557). The question is answered from the
     /// folded indices rather than by recognising markers in the output, because
     /// a file whose own lines begin with the marker prefix would defeat that.
-    pub fn project_reporting_shift(&self, text: &str) -> Option<(String, bool)> {
-        let shift = std::cell::Cell::new(false);
+    pub fn project_reporting_shift(&self, text: &str) -> Option<(String, FoldShift)> {
+        let shift = std::cell::Cell::new(FoldShift::None);
         // The gain gate wraps the projection rather than being re-derived inside
         // it (spec 5.4). `MIN_LEDGER_INPUT` is this projection's own floor and is
         // higher than the gate's, so both apply and the stricter one decides.
@@ -219,7 +257,7 @@ impl<'a> Ledger<'a> {
         Some((view, shift.get()))
     }
 
-    fn project_inner(&self, text: &str) -> Option<(String, bool)> {
+    fn project_inner(&self, text: &str) -> Option<(String, FoldShift)> {
         if text.len() < MIN_LEDGER_INPUT {
             return None;
         }
@@ -366,15 +404,12 @@ impl<'a> Ledger<'a> {
             self.store.ledger_record(p, &delivered, &self.agent);
         }
 
-        // True when an unfolded line sits below the first folded one, so the
-        // surviving content has moved up relative to where the caller's host
-        // will count it from (#557).
-        let shifts = projected.as_ref().is_some_and(|(_, folded)| {
-            folded
-                .iter()
-                .min()
-                .is_some_and(|first| (*first..lines.len()).any(|i| !folded.contains(&i)))
-        });
+        // What the fold did to the numbering below it (#557). Read from the
+        // folded indices, where the answer is known.
+        let shifts = projected
+            .as_ref()
+            .map(|(_, folded)| FoldShift::of(folded, lines.len()))
+            .unwrap_or(FoldShift::None);
         projected.map(|(view, _)| (view, shifts))
     }
 
