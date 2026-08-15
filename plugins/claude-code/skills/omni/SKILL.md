@@ -24,12 +24,14 @@ published beside it, then put the binary on the path:
 V=0.7.5; T=x86_64-unknown-linux-musl   # or aarch64-unknown-linux-musl, *-apple-darwin
 B=https://github.com/fajarhide/omni/releases/download/v$V
 curl -fsSLO $B/omni-v$V-$T.tar.gz -O $B/SHA256SUMS
-grep " omni-v$V-$T.tar.gz\$" SHA256SUMS | sha256sum -c -
-tar xzf omni-v$V-$T.tar.gz && install -m755 omni ~/.local/bin/omni
+grep " omni-v$V-$T.tar.gz\$" SHA256SUMS | sha256sum -c - &&
+  tar xzf omni-v$V-$T.tar.gz &&
+  install -m755 omni ~/.local/bin/omni
 ```
 
-`sha256sum -c` exits non-zero on a mismatch, so chaining the untar behind it is
-what makes the check load bearing rather than decorative. On macOS the command is
+`sha256sum -c` exits non-zero on a mismatch, and the `&&` is what carries that
+into the next command. On its own line the untar would run anyway, since a shell
+pasting these does not stop on a failure unless it was told to. On macOS the command is
 `shasum -a 256 -c -`. There is a `curl … | bash` installer at
 `omni.weekndlabs.com/install` and it is deliberately not the instruction here:
 nothing about it is verifiable before it runs.
@@ -80,7 +82,8 @@ one.
 | `[OMNI: 40 lines omitted, omni retrieve <handle> for full output]` | the distiller kept the signal and archived the rest |
 | `[OMNI: 40 lines already shown, omni retrieve <handle>]` | those lines are in this session's context already |
 | `[OMNI: identical to the 40 lines already shown, omni retrieve <handle>]` | the whole re-run matched an earlier one |
-| `[OMNI: 40 lines from an earlier session, omni retrieve <handle>]` | another session in this project saw them |
+| `[OMNI: 40 lines not shown here, omni retrieve <handle>]` | another session in this project saw them and **this one never did**, so retrieve before relying on them |
+| `[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve <handle>]` | the whole reply matched an earlier session's, and none of it arrived here |
 | `[OMNI: 2 sensitive value(s) redacted]` | values under a key that names a credential |
 
 Pull the full bytes with the command the marker prints:

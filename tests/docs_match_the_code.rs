@@ -270,12 +270,17 @@ fn every_documented_count_matches_the_code() {
 /// the cheapest of the three to guard, because the templates are string
 /// literals in one file.
 ///
-/// Matched on **every** literal fragment of each template, not just the part
-/// before the first `{`. That earlier version compared `[OMNI: ` and
-/// `[OMNI: identical to ` and nothing else, so any page holding any marker
-/// satisfied it: the wording after the count, which is the whole of what a
-/// reader looks up, was never checked. Proved by putting a retired marker back
-/// into the page and watching this pass (#567).
+/// Each template is matched **whole**, with its placeholders turned into the
+/// shape they hold at runtime: `{lines}` is a number and `{handle}` is a hex
+/// digest. Two weaker versions were caught before this one. Comparing the text
+/// before the first `{` checked `[OMNI: ` and `[OMNI: identical to ` and nothing
+/// else, so any page holding any marker satisfied it. Comparing literal
+/// fragments independently let one template borrow another's: the whole-output
+/// session example contains `lines already shown, omni retrieve`, so deleting
+/// the ordinary session marker from the page left the guard green (#567).
+///
+/// Typed placeholders are what stop the same borrowing here: `\d+` after
+/// `[OMNI: ` cannot match `identical to the 40`.
 #[test]
 fn every_marker_the_ledger_can_print_is_documented() {
     let root = repo_root();
@@ -295,24 +300,30 @@ fn every_marker_the_ledger_can_print_is_documented() {
         templates.len()
     );
 
-    // A template is `[OMNI: {lines} lines not shown here, omni retrieve {handle}]`.
-    // Split on the placeholders and every remaining fragment is fixed text the
-    // page has to carry. The one-character tail is dropped as noise.
-    let missing: Vec<(&String, String)> = templates
+    let placeholder = regex::Regex::new(r"\{[a-z_]+\}").expect("valid regex");
+    let missing: Vec<&String> = templates
         .iter()
-        .flat_map(|t| {
-            regex::Regex::new(r"\{[a-z_]+\}")
-                .expect("valid regex")
-                .split(t)
-                .filter(|f| f.len() > 3)
-                .filter(|f| !page.contains(*f))
-                .map(move |f| (t, f.to_string()))
-                .collect::<Vec<_>>()
+        .filter(|t| {
+            let mut pattern = String::new();
+            let mut last = 0;
+            for m in placeholder.find_iter(t) {
+                pattern.push_str(&regex::escape(&t[last..m.start()]));
+                pattern.push_str(match m.as_str() {
+                    "{lines}" => r"\d+",
+                    "{handle}" => "[0-9a-f]+",
+                    _ => ".+",
+                });
+                last = m.end();
+            }
+            pattern.push_str(&regex::escape(&t[last..]));
+            !regex::Regex::new(&pattern)
+                .expect("template makes a valid regex")
+                .is_match(&page)
         })
         .collect();
     assert!(
         missing.is_empty(),
-        "`use/markers.md` is missing wording the ledger prints: {missing:?}\n\
+        "the ledger can print markers `use/markers.md` never shows: {missing:?}\n\
          A reader meets these in their own output and has nowhere to look them up."
     );
 }
