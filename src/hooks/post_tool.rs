@@ -3055,7 +3055,10 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
     /// spoofed by content.
     #[test]
     fn content_that_looks_like_a_marker_does_not_defeat_the_guard() {
-        let line = |i: usize| format!("[OMNI: {i} lines already shown, omni retrieve deadbeefdeadbee{i}]\n");
+        // Same shape as the test above, so it is known to reach a fold, with
+        // every line wearing the marker prefix.
+        let line =
+            |i: usize| format!("[OMNI: unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\"]\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let payload = |body: &str| {
             json!({
@@ -3069,16 +3072,16 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
 
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
-        let _ = process_payload(&payload(&range(0, 30)), Some(store.clone()), None);
-        let second =
-            process_payload(&payload(&range(0, 100)), Some(store.clone()), None).unwrap_or_default();
+        let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
+        let second = process_payload(&payload(&range(100, 200)), Some(store.clone()), None)
+            .unwrap_or_default();
 
-        // Nothing folded means either no reply at all or a reply that still
-        // opens on the file's own first line. A fold would have eaten it.
+        // The head of the file has to survive: a fold would have replaced those
+        // thirty lines and moved the seventy below them.
         assert!(
-            second.is_empty() || second.contains("deadbeefdeadbee0]"),
-            "the head of the file was folded away and the 70 lines below it \
-             renumbered, because the surviving content was read as markers: {second}"
+            second.is_empty() || second.contains("unique_marker_100"),
+            "the head was folded away and the lines below it renumbered, because \
+             the surviving content was read as markers: {second}"
         );
     }
 
