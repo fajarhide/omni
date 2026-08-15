@@ -566,14 +566,6 @@ fn only_the_key_pattern_matched(key: &str) -> bool {
         if *p == "KEY" {
             return false;
         }
-        // #559. A bare `pass` is a test counter far more often than a
-        // credential, and a real one is written `password`, `passwd` or with a
-        // qualifier in front. Only the single-segment form gives the value a
-        // say: `DB_PASS` keeps its strength, because a suffixed `pass` is
-        // named after what it opens.
-        if *p == "PASS" && segments.len() == 1 {
-            return false;
-        }
         match p.strip_suffix('_') {
             Some(prefix) => *first == prefix,
             None if p.contains('_') => {
@@ -613,22 +605,31 @@ fn looks_like_plain_identifier(value: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
-/// A tally is a score, not a secret.
+/// A count is a score, not a secret: `3` or `3/10` and nothing else.
 ///
-/// `pass=3/3` is the shape the identifier rule cannot reach, because the slash
-/// is not an identifier character, and it is exactly what a test loop prints
-/// (#559). Both sides have to be digits: `pass=admin/hunter2` is not a tally.
-fn looks_like_tally(value: &str) -> bool {
+/// Deliberately narrower than `looks_like_plain_identifier`. That rule accepts
+/// any short lowercase word, which is right for `key` and wrong for `pass`,
+/// where `hunter2` is exactly what a password looks like. Review caught the
+/// first version reusing it (#559), and the direction of doubt this file already
+/// states settles it: hiding a value that did not need hiding is recoverable,
+/// printing a secret is not. So `pass=hello` stays redacted.
+fn looks_like_count(value: &str) -> bool {
     let v = value.trim().trim_matches(['"', '\'']).trim();
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
     match v.split_once('/') {
-        Some((done, total)) => {
-            !done.is_empty()
-                && !total.is_empty()
-                && done.chars().all(|c| c.is_ascii_digit())
-                && total.chars().all(|c| c.is_ascii_digit())
-        }
-        None => false,
+        Some((done, total)) => digits(done) && digits(total),
+        None => digits(v),
     }
+}
+
+/// `pass` on its own, which is a counter far more often than a credential.
+///
+/// A real one is written `password`, `passwd`, or with a qualifier in front, and
+/// a suffixed `pass` is named after what it opens, so `DB_PASS` keeps its
+/// strength unconditionally.
+fn is_bare_pass(key: &str) -> bool {
+    let k = key.trim().trim_start_matches("export ").trim();
+    k.eq_ignore_ascii_case("pass")
 }
 
 /// A brace expression is code, not a value.
@@ -683,10 +684,14 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     // Letting it speak for every pattern would wave through `sk-ant-abc123`,
     // which is lowercase, short and a credential.
     if only_the_key_pattern_matched(key)
-        && (looks_like_plain_identifier(value)
-            || looks_like_code_expression(value)
-            || looks_like_tally(value))
+        && (looks_like_plain_identifier(value) || looks_like_code_expression(value))
     {
+        return None;
+    }
+    // #559. `echo "pass=$P/10"` after a test loop came back as `[REDACTED]`, so
+    // ten runs' result was gone with nothing saying the token had been a count.
+    // Only a count is waved through, and only for the bare key.
+    if is_bare_pass(key) && looks_like_count(value) {
         return None;
     }
     // The surrounding syntax survives, so a redacted assignment still parses.
@@ -1161,7 +1166,6 @@ mod tests {
         for (key, value) in [
             ("pass", "3/3"),
             ("pass", "10"),
-            ("pass", "hello"),
             ("fail", "3/3"),
             ("passed", "3/3"),
             ("PASS", "$((PASS + 1))"),
@@ -1178,6 +1182,11 @@ mod tests {
             ("passwd", "hunter2"),
             ("db_pass", "hunter2"),
             ("PGPASSWORD", "hunter2"),
+            // Review's case, and the reason the `KEY` value rule is not reused
+            // here: it accepts any short lowercase word, and this one is a
+            // password. The issue asked for it to be delivered; the direction of
+            // doubt in this file outranks that, and the deviation is on the PR.
+            ("pass", "hunter2"),
         ] {
             assert!(
                 redact_assignment(key, value).is_some(),
