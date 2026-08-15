@@ -24,15 +24,20 @@ published beside it, then put the binary on the path:
 V=0.7.5; T=x86_64-unknown-linux-musl   # or aarch64-unknown-linux-musl, *-apple-darwin
 B=https://github.com/fajarhide/omni/releases/download/v$V
 curl -fsSLO $B/omni-v$V-$T.tar.gz -O $B/SHA256SUMS
-grep " omni-v$V-$T.tar.gz\$" SHA256SUMS | sha256sum -c - &&
+grep " omni-v$V-$T.tar.gz\$" SHA256SUMS > omni.sha256 &&
+  sha256sum -c omni.sha256 &&
   tar xzf omni-v$V-$T.tar.gz &&
   install -m755 omni ~/.local/bin/omni
 ```
 
-`sha256sum -c` exits non-zero on a mismatch, and the `&&` is what carries that
-into the next command. On its own line the untar would run anyway, since a shell
-pasting these does not stop on a failure unless it was told to. On macOS the command is
-`shasum -a 256 -c -`. There is a `curl … | bash` installer at
+`sha256sum -c` exits non-zero on a mismatch and the `&&` carries that into the
+next command; on its own line the untar would run anyway, since a shell pasting
+these does not stop on a failure unless it was told to. The checksum goes through
+a file rather than a pipe for the same reason: piped into `sha256sum -c -`, a
+`grep` that matches nothing sends an empty stream, and Darwin's `sha256sum` reads
+that as success, so a mistyped target would install unverified. Through a file it
+is `grep`'s own exit code that gates the chain. On macOS the command is
+`shasum -a 256 -c omni.sha256`. There is a `curl … | bash` installer at
 `omni.weekndlabs.com/install` and it is deliberately not the instruction here:
 nothing about it is verifiable before it runs.
 
