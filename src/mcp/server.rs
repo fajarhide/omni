@@ -1500,12 +1500,11 @@ impl OmniServer {
         router
     }
 
-    /// As `router_from`, reading the override from the environment.
+    /// As `router_from`, reading the override from the environment. `doctor`
+    /// reads it through the same function, so its line cannot claim a cut that
+    /// is not in force.
     fn router_for(agent_id: &str) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
-        let keep_everything = std::env::var("OMNI_MCP_TOOLS")
-            .map(|v| v.eq_ignore_ascii_case("all"))
-            .unwrap_or(false);
-        Self::router_from(agent_id, keep_everything)
+        Self::router_from(agent_id, crate::mcp::policy::override_is_on())
     }
 
     /// The router the served handler uses.
@@ -1818,6 +1817,31 @@ mod tests {
             .list_all()
             .len();
         assert_eq!(restored, all);
+    }
+
+    /// Design gate 2: every tool in the active set is callable, per tier. The
+    /// policy lists are string literals and the router builds its routes from a
+    /// macro, so a typo in a list deletes a tool from that tier with nothing
+    /// failing: `doctor` then prints a count the router cannot serve.
+    #[test]
+    fn every_policy_name_resolves_to_a_route() {
+        let routes: Vec<String> = OmniServer::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        for (tier, names) in [
+            ("FULL", crate::mcp::policy::FULL),
+            ("HANDOFF", crate::mcp::policy::HANDOFF),
+            ("MEMORY", crate::mcp::policy::MEMORY),
+        ] {
+            for name in names {
+                assert!(
+                    routes.iter().any(|r| r == name),
+                    "{tier} lists {name}, which the router does not serve; routes: {routes:?}"
+                );
+            }
+        }
     }
 
     /// `doctor` prints `ALL_TOOL_COUNT` without building a router, so nothing
