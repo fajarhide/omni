@@ -878,6 +878,18 @@ pub fn process_payload(
         }
     }
 
+    // The reply is dropped at the end of this function whenever the route is a
+    // passthrough and nothing was redacted, so the host keeps the bytes it
+    // already had. Every column below is computed from `final_out`, so leaving a
+    // shrunken string here books a saving nobody received. Reconciled against the
+    // host's own transcripts, that was 67 rows and 16.4% of the bytes booked as
+    // saved on this machine, and `applied_only()` cannot separate them afterwards
+    // because `delivered_bytes` is copied from the same string (#566). This is the
+    // restore the guardrail above already performs, for the same reason.
+    if route == Route::Passthrough && !redacted_here {
+        final_out = content.to_string();
+    }
+
     let latency_ms = start.elapsed().as_millis() as u32;
 
     let kept = check_segments.len() - noise_count;
@@ -2337,6 +2349,74 @@ INFO:jean.server:startup complete in 4.2s
             .expect("open recorded db")
             .query_row(sql, [], |r| r.get(0))
             .expect("count")
+    }
+
+    /// #566. `process_payload` returns `None` whenever the route is a passthrough
+    /// and nothing was redacted, so the host keeps the bytes it already had. Every
+    /// column of the row is computed from `final_out`, which meant a distiller that
+    /// cut more than the guardrail's tenth and less than the soft threshold booked
+    /// a saving the model never received. Reconciled against the host's own
+    /// transcripts, that was 67 rows and 16.4% of every byte booked as saved on
+    /// this machine, and `applied_only()` cannot separate them afterwards because
+    /// `delivered_bytes` is copied from the same string.
+    ///
+    /// The assertion is stated over the return value rather than over a route name,
+    /// because the return value is what decides whether the model saw anything:
+    /// if the hook sent nothing, the row says nothing was saved.
+    #[test]
+    fn a_dropped_reply_books_no_saving() {
+        // Sized to land between the two gates. Under a tenth cut the guardrail at
+        // `post_tool.rs:815` already restores the raw bytes, and at or above the
+        // soft threshold the reply is really sent, so neither side can catch this.
+        let mut content = String::new();
+        for i in 0..40 {
+            content.push_str(&format!("src/module_{i}.rs: ok\n"));
+        }
+        for i in 0..6 {
+            content.push_str(&format!(
+                "[=================>      ] {i}0% building module_{i}\n"
+            ));
+        }
+
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "make build"},
+            "tool_response": bash_response(&content),
+        })
+        .to_string();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+
+        let reply = process_payload(&payload, Some(store), None);
+
+        let booked = count(
+            &db,
+            "SELECT COALESCE(SUM(input_bytes - output_bytes), 0) FROM distillations",
+        );
+        let delivered = count(
+            &db,
+            "SELECT COALESCE(SUM(input_bytes - delivered_bytes), 0) FROM distillations",
+        );
+
+        if reply.is_none() {
+            assert_eq!(
+                booked, 0,
+                "the hook sent nothing and the row still books {booked} bytes saved"
+            );
+            assert_eq!(
+                delivered, 0,
+                "the hook sent nothing and the row still reports {delivered} bytes delivered"
+            );
+        } else {
+            // The fixture stopped exercising the window. Say so rather than
+            // passing: a green run here would mean the guard is untested.
+            panic!(
+                "fixture no longer reaches the dropped-reply path, so this test \
+                 proves nothing; retune it against the 0.10 and soft thresholds"
+            );
+        }
     }
 
     /// #271. `README.md:81` promises "everything cut is archived". The gate meant
