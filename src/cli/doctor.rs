@@ -97,13 +97,23 @@ fn unreleased_entries() -> usize {
 
 /// One line for the MCP section, phrased so a missing tool is a setting rather
 /// than a mystery.
-pub(crate) fn mcp_tool_line(agent_id: &str) -> String {
-    let active = crate::mcp::policy::active_tools(agent_id).len();
+///
+/// It names the id it resolved because the caller passes whatever
+/// `detect_agent_id` returned, which in a plain terminal is `terminal` and not
+/// the host the reader is thinking of. `keep_everything` comes from
+/// `policy::override_is_on`, the same read the served router makes, so the line
+/// cannot offer the override as a remedy while the override is already on.
+pub(crate) fn mcp_tool_line(agent_id: &str, keep_everything: bool) -> String {
     let total = crate::mcp::policy::ALL_TOOL_COUNT;
-    format!(
-        "  MCP tools:      {active} of {total} advertised for this host \
-         (OMNI_MCP_TOOLS=all restores the rest)"
-    )
+    let (active, note) = if keep_everything {
+        (total, "OMNI_MCP_TOOLS=all is set")
+    } else {
+        (
+            crate::mcp::policy::active_tools(agent_id).len(),
+            "OMNI_MCP_TOOLS=all restores the rest",
+        )
+    };
+    format!("  MCP tools:      {active} of {total} advertised to {agent_id} ({note})")
 }
 
 fn run_json(args: &[String]) -> anyhow::Result<()> {
@@ -597,7 +607,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     // machine, so the line has to name the setting that undoes it.
     println!(
         "{}",
-        mcp_tool_line(&crate::agents::multiagent::detect_agent_id())
+        mcp_tool_line(
+            &crate::agents::multiagent::detect_agent_id(),
+            crate::mcp::policy::override_is_on(),
+        )
     );
 
     if !any_agent_ok {
@@ -683,8 +696,23 @@ mod tests {
     /// missing with nothing telling them why.
     #[test]
     fn doctor_says_how_many_tools_are_advertised_and_how_to_restore_them() {
-        let line = super::mcp_tool_line("claude_code");
-        assert!(line.contains("9 of 25"), "{line}");
-        assert!(line.contains("OMNI_MCP_TOOLS=all"), "{line}");
+        let line = super::mcp_tool_line("claude_code", false);
+        assert_eq!(
+            line,
+            "  MCP tools:      9 of 25 advertised to claude_code \
+             (OMNI_MCP_TOOLS=all restores the rest)"
+        );
+    }
+
+    /// With the override in force nothing is cut, so naming it as a remedy is a
+    /// false claim about the process the reader is looking at.
+    #[test]
+    fn doctor_reports_the_override_instead_of_offering_it() {
+        let line = super::mcp_tool_line("claude_code", true);
+        assert_eq!(
+            line,
+            "  MCP tools:      25 of 25 advertised to claude_code \
+             (OMNI_MCP_TOOLS=all is set)"
+        );
     }
 }
