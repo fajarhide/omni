@@ -3025,8 +3025,8 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
         let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
-        let overlapping =
-            process_payload(&payload(&range(100, 200)), Some(store.clone()), None).unwrap_or_default();
+        let overlapping = process_payload(&payload(&range(100, 200)), Some(store.clone()), None)
+            .unwrap_or_default();
         assert!(
             !overlapping.contains("[OMNI:"),
             "a fold with 70 lines under it renumbered every one of them: {overlapping}"
@@ -3037,8 +3037,8 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         let dir2 = tempfile::tempdir().expect("tempdir");
         let store2 = Arc::new(Store::open_path(&dir2.path().join("omni.db")).expect("store"));
         let _ = process_payload(&payload(&range(170, 200)), Some(store2.clone()), None);
-        let trailing =
-            process_payload(&payload(&range(100, 200)), Some(store2.clone()), None).unwrap_or_default();
+        let trailing = process_payload(&payload(&range(100, 200)), Some(store2.clone()), None)
+            .unwrap_or_default();
         assert!(
             trailing.contains("[OMNI:"),
             "a fold at the end shifts nothing and has to still happen: {trailing}"
@@ -3057,8 +3057,7 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
     fn content_that_looks_like_a_marker_does_not_defeat_the_guard() {
         // Same shape as the test above, so it is known to reach a fold, with
         // every line wearing the marker prefix.
-        let line =
-            |i: usize| format!("[OMNI: unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\"]\n");
+        let line = |i: usize| format!("[OMNI: unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\"]\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let payload = |body: &str| {
             json!({
