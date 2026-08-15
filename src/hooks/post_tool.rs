@@ -878,6 +878,26 @@ pub fn process_payload(
         }
     }
 
+    // What the model is actually handed, which is not what the distiller
+    // produced. The reply is dropped at the end of this function whenever the
+    // route is a passthrough and nothing was redacted, so the host keeps the
+    // bytes it already had. Every accounting column used to be computed from
+    // `final_out` regardless, which booked a saving nobody received: reconciled
+    // against the host's own transcripts that was 67 rows and 16.4% of the bytes
+    // booked as saved on this machine, and `applied_only()` cannot separate them
+    // afterwards because `delivered_bytes` is copied from the same string (#566).
+    //
+    // A separate binding rather than overwriting `final_out`, so `record_trace`
+    // below still stores what the distiller produced. Overwriting made
+    // `execution_traces` report raw and distilled as identical strings, which
+    // silently removes the one corpus that can measure distiller behaviour
+    // without going through these books. Caught in review on the first version.
+    let delivered: &str = if route == Route::Passthrough && !redacted_here {
+        &content
+    } else {
+        &final_out
+    };
+
     let latency_ms = start.elapsed().as_millis() as u32;
 
     let kept = check_segments.len() - noise_count;
@@ -886,16 +906,16 @@ pub fn process_payload(
     // against GPT's vocabulary rather than Claude's (#283).
     use crate::util::token_estimate::{ContentHint, estimate_tokens};
     let raw_tokens = estimate_tokens(content.len(), ContentHint::Mixed);
-    let filtered_tokens = estimate_tokens(final_out.len(), ContentHint::Mixed);
+    let filtered_tokens = estimate_tokens(delivered.len(), ContentHint::Mixed);
 
     let result = DistillResult {
-        output: final_out.clone(),
+        output: delivered.to_string(),
         route: route.clone(),
         filter_name: filter_name.clone(),
         score: 0.0,
         context_score: 0.0,
         input_bytes: content.len(),
-        output_bytes: final_out.len(),
+        output_bytes: delivered.len(),
         latency_ms: latency_ms as u64,
         rewind_hash: if rewind_hash.is_empty() {
             None
@@ -912,7 +932,7 @@ pub fn process_payload(
         // output above the host's own cap, where the raw output is persisted and
         // the hook's reply dropped, now returns before reaching here, so this
         // is what the model receives (#212).
-        delivered_bytes: final_out.len(),
+        delivered_bytes: delivered.len(),
     };
 
     if let Some(ref s) = store {
@@ -2337,6 +2357,91 @@ INFO:jean.server:startup complete in 4.2s
             .expect("open recorded db")
             .query_row(sql, [], |r| r.get(0))
             .expect("count")
+    }
+
+    /// #566. `process_payload` returns `None` whenever the route is a passthrough
+    /// and nothing was redacted, so the host keeps the bytes it already had. Every
+    /// column of the row is computed from `final_out`, which meant a distiller that
+    /// cut more than the guardrail's tenth and less than the soft threshold booked
+    /// a saving the model never received. Reconciled against the host's own
+    /// transcripts, that was 67 rows and 16.4% of every byte booked as saved on
+    /// this machine, and `applied_only()` cannot separate them afterwards because
+    /// `delivered_bytes` is copied from the same string.
+    ///
+    /// The assertion is stated over the return value rather than over a route name,
+    /// because the return value is what decides whether the model saw anything:
+    /// if the hook sent nothing, the row says nothing was saved.
+    #[test]
+    fn a_dropped_reply_books_no_saving() {
+        // Taken from a real recorded trace rather than invented, because the
+        // window is narrow and every synthetic fixture tried first missed it: a
+        // cut under a tenth is restored by the guardrail at `post_tool.rs:815`,
+        // and at or above the soft threshold the reply is really sent. This one
+        // measured 424 B in, 346 B out, a ratio of 0.184, sitting between them.
+        // The grep distiller hoists the repeated filename into a header, so the
+        // cut is lossless and genuinely worth having, which is what makes booking
+        // it and then discarding it the wrong pair of decisions.
+        let content = "\
+src/distillers/system_ops.rs:614:    if !is_sensitive_key(key) || value.trim().is_empty() {
+src/distillers/system_ops.rs:688:fn is_sensitive_key(key: &str) -> bool {
+src/distillers/system_ops.rs:728:        // match, so fixing only `is_sensitive_key` would have left `env` output
+src/distillers/system_ops.rs:822:                !is_sensitive_key(key),
+src/distillers/system_ops.rs:849:                is_sensitive_key(key),
+";
+
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -rn \"is_sensitive_key\" src/ --include=\"*.rs\" | head -20"},
+            "tool_response": bash_response(content),
+        })
+        .to_string();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Arc::new(Store::open_path(&db).expect("store"));
+
+        let reply = process_payload(&payload, Some(store), None);
+
+        let booked = count(
+            &db,
+            "SELECT COALESCE(SUM(input_bytes - output_bytes), 0) FROM distillations",
+        );
+        let delivered = count(
+            &db,
+            "SELECT COALESCE(SUM(input_bytes - delivered_bytes), 0) FROM distillations",
+        );
+
+        if reply.is_none() {
+            assert_eq!(
+                booked, 0,
+                "the hook sent nothing and the row still books {booked} bytes saved"
+            );
+            assert_eq!(
+                delivered, 0,
+                "the hook sent nothing and the row still reports {delivered} bytes delivered"
+            );
+            // The books say nothing was saved, and the trace still has to say
+            // what the distiller produced. The first version of this fix
+            // overwrote `final_out` before `record_trace` and made the two
+            // columns identical, which silently removes the only corpus that
+            // measures distiller behaviour without going through these books.
+            assert_eq!(
+                count(
+                    &db,
+                    "SELECT COUNT(*) FROM execution_traces \
+                     WHERE LENGTH(distilled_output) < LENGTH(raw_input)",
+                ),
+                1,
+                "the trace lost what the distiller produced"
+            );
+        } else {
+            // The fixture stopped exercising the window. Say so rather than
+            // passing: a green run here would mean the guard is untested.
+            panic!(
+                "fixture no longer reaches the dropped-reply path, so this test \
+                 proves nothing; retune it against the 0.10 and soft thresholds"
+            );
+        }
     }
 
     /// #271. `README.md:81` promises "everything cut is archived". The gate meant

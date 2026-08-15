@@ -890,6 +890,50 @@ impl SqliteBackend {
             tx.commit()?;
         }
 
+        // #566. The hook sends no reply on the `Passthrough` route, so the host
+        // keeps the bytes it already had, but every byte and token column on the
+        // row was computed from the distiller's output. The row therefore booked a
+        // saving nobody received. Reconciled against the host's own transcripts
+        // that was 16.4% of the bytes booked as saved over the sessions a
+        // transcript exists for; across the whole table these rows are 93.0% of
+        // them, and they are the difference between the 37.1% `omni stats`
+        // published and the 8.3% that is true.
+        //
+        // Corrected in the column rather than in the queries. Six call sites sum
+        // these columns, and a `CASE` in each is one rule in six copies waiting to
+        // drift, which this repo has already paid for once. Nothing is lost:
+        // `execution_traces` still carries `raw_input` and `distilled_output` for
+        // these rows, so what the distiller produced is still readable.
+        //
+        // A redaction is the one passthrough that does send a reply, and no column
+        // records that it happened, so those rows are zeroed here too. That
+        // undercounts a rare case by the few bytes `[REDACTED]` saves, which is the
+        // safe direction to be wrong in.
+        let migration_passthrough = "2026_08_passthrough_rows_book_no_saving";
+        let passthrough_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_passthrough],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if passthrough_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "UPDATE distillations \
+                 SET output_bytes = input_bytes, \
+                     delivered_bytes = input_bytes, \
+                     filtered_tokens = raw_tokens \
+                 WHERE route = 'Passthrough' AND output_bytes < input_bytes",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_passthrough, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         // `context_turns` was written on every hooked command, carried an index,
         // and had no `SELECT` anywhere in the tree: 5,532 rows paying write
         // latency and disk for a reader that never existed (#270). The in-memory
@@ -3315,6 +3359,68 @@ mod tests {
             store.distillation_count(),
             sessions,
             "the two numbers must not be interchangeable"
+        );
+    }
+
+    /// #566. A `Passthrough` row books a saving the model never received: the
+    /// hook sends no reply on that route, so the host keeps its own bytes, while
+    /// every byte and token column was computed from the distiller's output.
+    /// Across the reporting installation these rows carried 93.0% of every byte
+    /// booked as saved, and correcting them moves `omni stats` all-time from a
+    /// published 37.1% to 8.3%.
+    ///
+    /// A `Keep` row in the same table is the control: it really was delivered, so
+    /// the migration must not touch it. Without that half the test would pass
+    /// against an `UPDATE` with no `WHERE` clause.
+    #[test]
+    fn passthrough_rows_stop_booking_a_saving() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        drop(Store::open_path(&db).expect("first open builds the schema"));
+
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open seed db");
+            conn.execute(
+                "DELETE FROM schema_migrations WHERE id = '2026_08_passthrough_rows_book_no_saving'",
+                [],
+            )
+            .expect("re-arm migration");
+            for (route, out, delivered, filtered) in
+                [("Passthrough", 346, 346, 90), ("Keep", 200, 200, 50)]
+            {
+                conn.execute(
+                    "INSERT INTO distillations
+                       (session_id, ts, filter_name, input_bytes, output_bytes, route,
+                        latency_ms, command, delivered_bytes, raw_tokens, filtered_tokens)
+                     VALUES ('s1', 1700000000, 'grep', 424, ?1, ?2, 1, 'grep -rn x', ?3, 110, ?4)",
+                    params![out, route, delivered, filtered],
+                )
+                .expect("seed row");
+            }
+        }
+
+        drop(Store::open_path(&db).expect("second open runs the migration"));
+
+        let conn = rusqlite::Connection::open(&db).expect("open assert db");
+        let read = |route: &str| -> (i64, i64, i64) {
+            conn.query_row(
+                "SELECT output_bytes, delivered_bytes, filtered_tokens
+                 FROM distillations WHERE route = ?1",
+                params![route],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("row")
+        };
+
+        assert_eq!(
+            read("Passthrough"),
+            (424, 424, 110),
+            "a passthrough row still books bytes the hook never sent"
+        );
+        assert_eq!(
+            read("Keep"),
+            (200, 200, 50),
+            "the migration rewrote a row that really was delivered"
         );
     }
 
