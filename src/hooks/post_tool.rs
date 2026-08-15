@@ -396,11 +396,27 @@ fn fold_cross_turn(
     let project = std::env::current_dir()
         .map(|p| crate::paths::project_key(&p))
         .unwrap_or_else(|_| "unknown".to_string());
-    crate::ledger::Ledger::new(s, scope)
+    let folded = crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
         .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
-        .project(&text)
-        .unwrap_or(text)
+        .project_reporting_shift(&text);
+
+    // #557. A `Read` payload is handed back as `file.content` and the host
+    // renders it with `cat -n` numbering counted from `startLine`, so it numbers
+    // whatever lines we return. Replacing a run in the middle with a one-line
+    // marker removes lines the count was walking over, and every surviving line
+    // below it is then labelled short by the size of the fold. Nothing in the
+    // payload says so, and those numbers are a contract: the agent writes them
+    // into issues and commit messages and decides which line to edit from them.
+    //
+    // A fold with nothing after it shifts nothing, so the whole-output fold and
+    // any fold reaching the end of the payload are kept. Only `Read` is affected;
+    // `Grep` carries its positions inside the text, where a fold cannot move
+    // them, and `Bash` output is not numbered at all.
+    match folded {
+        Some((view, shifted)) if normalized.tool_name != "Read" || !shifted => view,
+        _ => text,
+    }
 }
 
 /// A tool reply on its way to the agent, distilled or not, through the ledger.
@@ -2976,6 +2992,95 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(
             out.contains("lines already shown") || out.contains("from an earlier session"),
             "a repeated Read never reached the ledger: {out}"
+        );
+    }
+
+    /// #557. A `Read` payload goes back as `file.content` and the host renders it
+    /// with `cat -n` numbering counted from `startLine`, so it numbers whatever
+    /// lines we return. A fold in the middle removes lines the count was walking
+    /// over, and every surviving line below the marker is labelled short by the
+    /// size of the fold, with nothing in the payload saying so. Those numbers are
+    /// a contract: the agent writes them into issues and decides what to edit
+    /// from them.
+    ///
+    /// Both halves are load bearing. Refusing every fold passes the first
+    /// assertion on its own and silently costs the whole-output fold, which
+    /// shifts nothing because nothing survives under it.
+    #[test]
+    fn refuses_a_read_fold_that_would_renumber_the_lines_below_it() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |body: &str| {
+            json!({
+                "session_id": "host-557",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"content": body},
+            })
+            .to_string()
+        };
+
+        // The repeat lands at the top of the second payload with fresh lines
+        // under it, which is the shape that renumbers.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
+        let overlapping = process_payload(&payload(&range(100, 200)), Some(store.clone()), None)
+            .unwrap_or_default();
+        assert!(
+            !overlapping.contains("[OMNI:"),
+            "a fold with 70 lines under it renumbered every one of them: {overlapping}"
+        );
+
+        // A fresh store, so the only difference is where the repeat sits: at the
+        // end, where no number can move.
+        let dir2 = tempfile::tempdir().expect("tempdir");
+        let store2 = Arc::new(Store::open_path(&dir2.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&range(170, 200)), Some(store2.clone()), None);
+        let trailing = process_payload(&payload(&range(100, 200)), Some(store2.clone()), None)
+            .unwrap_or_default();
+        assert!(
+            trailing.contains("[OMNI:"),
+            "a fold at the end shifts nothing and has to still happen: {trailing}"
+        );
+    }
+
+    /// #557, review. The first version of the guard read the output back and
+    /// called any line starting with `[OMNI:` a marker, so a file whose own
+    /// lines start that way defeated it and the fold went through with every
+    /// number below it wrong. This repository writes those strings into its
+    /// changelog and its docs, so it is not a hypothetical file.
+    ///
+    /// The guard now asks the ledger which indices it folded, which cannot be
+    /// spoofed by content.
+    #[test]
+    fn content_that_looks_like_a_marker_does_not_defeat_the_guard() {
+        // Same shape as the test above, so it is known to reach a fold, with
+        // every line wearing the marker prefix.
+        let line = |i: usize| format!("[OMNI: unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\"]\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |body: &str| {
+            json!({
+                "session_id": "host-557-lookalike",
+                "tool_name": "Read",
+                "tool_input": {"path": "changelog.md"},
+                "tool_response": {"content": body},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
+        let second = process_payload(&payload(&range(100, 200)), Some(store.clone()), None)
+            .unwrap_or_default();
+
+        // The head of the file has to survive: a fold would have replaced those
+        // thirty lines and moved the seventy below them.
+        assert!(
+            second.is_empty() || second.contains("unique_marker_100"),
+            "the head was folded away and the lines below it renumbered, because \
+             the surviving content was read as markers: {second}"
         );
     }
 
