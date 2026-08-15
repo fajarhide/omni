@@ -8,8 +8,12 @@
   size of the run minus the marker's own line and every survivor lands back where
   the file has it. Verified on live host transcripts before being relied on
   rather than assumed, which is the #158 lesson: a `Read` requested at offset 215
-  comes back with `215` on its first line. A run with content above **and** below
-  it still refuses, because one starting number cannot describe two offsets, and
+  comes back with `215` on its first line. The rule is about what survives rather
+  than where the folds are: contiguous survivors all sit the same distance from
+  where they started, so one number puts every one of them back, which covers a
+  fold at the head and one reaching the end of the same payload. Survivors split
+  into two blocks still refuse, because one starting number cannot describe two
+  offsets, and
   the shape is read from the ledger's own folded indices so content that looks
   like a marker cannot change the answer. Measured on four overlapping windows of
   a markdown file under the host's output cap: **0.0% saved before, 4.7% after**,
