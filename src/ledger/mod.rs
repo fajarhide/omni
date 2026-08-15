@@ -164,7 +164,7 @@ impl FoldShift {
     /// That covers a fold at the head **and** one reaching the end in the same
     /// payload, which an earlier version of this classified as uncorrectable.
     /// Review caught it.
-    fn of(folded: &HashSet<usize>, total: usize, lines: &[&str], view: &str) -> Self {
+    fn of(folded: &HashSet<usize>, total: usize, view: &str) -> Self {
         let survivors: Vec<usize> = (0..total).filter(|i| !folded.contains(i)).collect();
         let (Some(&first), Some(&last)) = (survivors.first(), survivors.last()) else {
             // Nothing survived, so nothing can be misnumbered.
@@ -178,25 +178,26 @@ impl FoldShift {
             // the host will give them are already right.
             return Self::None;
         }
-        // How many lines the view puts above the survivors. Found by locating the
-        // surviving block, which the view carries verbatim, rather than by
-        // assuming one marker per fold: adjacent runs of different origin emit
-        // one marker each.
-        let block: String = lines[first..=last].concat();
-        let Some(at) = view.find(&block) else {
-            // The block is always present, but a projection that ever stopped
-            // being verbatim must not silently produce a wrong number.
+        // The survivors have to run to the end of the payload, so nothing stands
+        // below them and the arithmetic is exact: every view line that is not one
+        // of them is a marker above them.
+        //
+        // The first version searched the view for the surviving block and counted
+        // the newlines before it. Review found the hole: a block whose text also
+        // occurs inside a marker, which `already shown` is, matches there instead
+        // and the count comes out short. There is no way to search content for a
+        // position and be sure, so this does not search.
+        //
+        // The price is a fold at the head *and* one reaching the end in the same
+        // payload, which is correctable in principle and is refused here rather
+        // than computed from a marker count nothing reports.
+        if last + 1 != total {
+            return Self::Interior;
+        }
+        let view_lines = view.lines().count();
+        let Some(markers_above) = view_lines.checked_sub(survivors.len()) else {
             return Self::Interior;
         };
-        // Counted in bytes rather than by slicing the string: `find` returns a
-        // char boundary, but the count does not need the slice and clippy is
-        // right that a slice invites the next edit to use an index that is not.
-        // The block always starts after a newline, so newlines above it is the
-        // line count above it.
-        let markers_above = view.as_bytes()[..at]
-            .iter()
-            .filter(|b| **b == b'\n')
-            .count();
         Self::Leading {
             bump: first.saturating_sub(markers_above),
         }
@@ -443,7 +444,7 @@ impl<'a> Ledger<'a> {
         // folded indices, where the answer is known.
         let shifts = projected
             .as_ref()
-            .map(|(view, folded)| FoldShift::of(folded, lines.len(), &lines, view))
+            .map(|(view, folded)| FoldShift::of(folded, lines.len(), view))
             .unwrap_or(FoldShift::None);
         projected.map(|(view, _)| (view, shifts))
     }

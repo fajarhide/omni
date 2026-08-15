@@ -3095,12 +3095,14 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
-    /// #572, review. Two folds in one payload, at the head and at the end, leave
-    /// the survivors as one block in the middle, all at the same distance from
-    /// where they started. One starting number still puts every one of them
-    /// back, and an earlier version of the rule threw the projection away.
+    /// #572, review, twice. Folds at the head and at the end leave the survivors
+    /// as one block, and one starting number could in principle put all of them
+    /// back. It is refused anyway, because knowing how many marker lines stand
+    /// above them means either searching the view for their text, which review
+    /// showed can match inside a marker, or a marker count nothing reports. A
+    /// refused fold costs bytes; a wrong number costs an edit in the wrong place.
     #[test]
-    fn folds_at_both_ends_still_correct_with_one_start_line() {
+    fn refuses_folds_at_both_ends_rather_than_guess_the_offset() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let payload = |from: usize, to: usize| {
@@ -3124,21 +3126,12 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         // Two earlier reads, one at each end of the window that follows.
         let _ = process_payload(&payload(100, 130), Some(store.clone()), None);
         let _ = process_payload(&payload(170, 200), Some(store.clone()), None);
-        let out = process_payload(&payload(100, 200), Some(store.clone()), None)
-            .expect("both ends repeat, so this folds");
-
-        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
-        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let out =
+            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
         assert!(
-            file["content"]
-                .as_str()
-                .expect("content")
-                .contains("[OMNI:"),
-            "neither repeated end was folded: {out}"
-        );
-        assert_eq!(
-            file["startLine"], 129,
-            "the middle block keeps numbers it is no longer at: {out}"
+            !out.contains("[OMNI:"),
+            "a fold with content standing below it went through, so the number of \
+             lines above the survivors was guessed: {out}"
         );
     }
 
