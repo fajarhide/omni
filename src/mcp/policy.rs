@@ -40,6 +40,11 @@ pub const MEMORY: &[&str] = &[
     "omni_knowledge",
 ];
 
+/// Every tool the binary can serve. Kept here so `doctor` does not have to
+/// build a router to count them, and asserted against the router in
+/// `server.rs` so the two cannot drift.
+pub const ALL_TOOL_COUNT: usize = 25;
+
 /// `detect_agent_id` and `AgentIntegration::id` disagree for exactly the two
 /// Full-tier hosts, which is the whole reason this function is not a one-liner.
 fn integration_id(detected: &str) -> &str {

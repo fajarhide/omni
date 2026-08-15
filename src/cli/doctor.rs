@@ -95,6 +95,17 @@ fn unreleased_entries() -> usize {
         .unwrap_or(0)
 }
 
+/// One line for the MCP section, phrased so a missing tool is a setting rather
+/// than a mystery.
+pub(crate) fn mcp_tool_line(agent_id: &str) -> String {
+    let active = crate::mcp::policy::active_tools(agent_id).len();
+    let total = crate::mcp::policy::ALL_TOOL_COUNT;
+    format!(
+        "  MCP tools:      {active} of {total} advertised for this host \
+         (OMNI_MCP_TOOLS=all restores the rest)"
+    )
+}
+
 fn run_json(args: &[String]) -> anyhow::Result<()> {
     let fix_mode = args.iter().any(|a| a == "--fix");
     let mut checks = Vec::new();
@@ -581,6 +592,14 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         println!("   {}", tier.bright_black());
     }
 
+    // The tools this host is told about, not the host's own agent list above:
+    // #577 cut the advertised surface from 25 to 9 on the evidence of one
+    // machine, so the line has to name the setting that undoes it.
+    println!(
+        "{}",
+        mcp_tool_line(&crate::agents::multiagent::detect_agent_id())
+    );
+
     if !any_agent_ok {
         warnings.push(
             "No agent integrations are configured. Run `omni init` to set up hooks + MCP for your agent."
@@ -657,5 +676,15 @@ mod tests {
         assert!(out.contains("PreToolUse"), "{out}");
         assert!(out.contains("MCP Server:"), "{out}");
         assert!(out.contains("Distill tier:"), "{out}");
+    }
+
+    /// The cut has to be visible and reversible from the same line, because the
+    /// evidence behind it is n=1 and the failure mode is a user finding a tool
+    /// missing with nothing telling them why.
+    #[test]
+    fn doctor_says_how_many_tools_are_advertised_and_how_to_restore_them() {
+        let line = super::mcp_tool_line("claude_code");
+        assert!(line.contains("9 of 25"), "{line}");
+        assert!(line.contains("OMNI_MCP_TOOLS=all"), "{line}");
     }
 }

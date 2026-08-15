@@ -1819,4 +1819,14 @@ mod tests {
             .len();
         assert_eq!(restored, all);
     }
+
+    /// `doctor` prints `ALL_TOOL_COUNT` without building a router, so nothing
+    /// catches the two drifting apart except this.
+    #[test]
+    fn the_declared_tool_count_matches_the_router() {
+        assert_eq!(
+            OmniServer::tool_router().list_all().len(),
+            crate::mcp::policy::ALL_TOOL_COUNT
+        );
+    }
 }
