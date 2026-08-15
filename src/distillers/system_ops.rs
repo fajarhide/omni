@@ -45,6 +45,11 @@ const SENSITIVE_PATTERNS: &[&str] = &[
     "TOKEN",
     "KEY",
     "PASSWORD",
+    // Segment matching means `PASSWD` was never reached by either of its
+    // neighbours: it is not equal to `PASS` and does not end with it, and
+    // `PASSWORD` is a different word. `passwd=hunter2` was delivered in full
+    // until #559 went looking (added there, not reported there).
+    "PASSWD",
     "PASS",
     "AUTH",
     // `CRED` was a stem, and a stem only works under substring matching. Segment
@@ -561,6 +566,14 @@ fn only_the_key_pattern_matched(key: &str) -> bool {
         if *p == "KEY" {
             return false;
         }
+        // #559. A bare `pass` is a test counter far more often than a
+        // credential, and a real one is written `password`, `passwd` or with a
+        // qualifier in front. Only the single-segment form gives the value a
+        // say: `DB_PASS` keeps its strength, because a suffixed `pass` is
+        // named after what it opens.
+        if *p == "PASS" && segments.len() == 1 {
+            return false;
+        }
         match p.strip_suffix('_') {
             Some(prefix) => *first == prefix,
             None if p.contains('_') => {
@@ -598,6 +611,24 @@ fn looks_like_plain_identifier(value: &str) -> bool {
     }
     v.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+}
+
+/// A tally is a score, not a secret.
+///
+/// `pass=3/3` is the shape the identifier rule cannot reach, because the slash
+/// is not an identifier character, and it is exactly what a test loop prints
+/// (#559). Both sides have to be digits: `pass=admin/hunter2` is not a tally.
+fn looks_like_tally(value: &str) -> bool {
+    let v = value.trim().trim_matches(['"', '\'']).trim();
+    match v.split_once('/') {
+        Some((done, total)) => {
+            !done.is_empty()
+                && !total.is_empty()
+                && done.chars().all(|c| c.is_ascii_digit())
+                && total.chars().all(|c| c.is_ascii_digit())
+        }
+        None => false,
+    }
 }
 
 /// A brace expression is code, not a value.
@@ -652,7 +683,9 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     // Letting it speak for every pattern would wave through `sk-ant-abc123`,
     // which is lowercase, short and a credential.
     if only_the_key_pattern_matched(key)
-        && (looks_like_plain_identifier(value) || looks_like_code_expression(value))
+        && (looks_like_plain_identifier(value)
+            || looks_like_code_expression(value)
+            || looks_like_tally(value))
     {
         return None;
     }
@@ -1112,6 +1145,45 @@ mod tests {
         let env = "GOOGLE_CREDENTIALS={\"type\":\"service_account\",\"private_key\":\"abc\"}\n";
         let out = redact_sensitive_assignments(env).expect("a JSON credential is still a secret");
         assert!(!out.contains("service_account"), "secret delivered:\n{out}");
+    }
+
+    /// #559. `echo "pass=$P/10"` after a ten-run test loop came back as
+    /// `pass=[REDACTED]`, so the result was gone and nothing in the output said
+    /// the token had been a count rather than a secret.
+    ///
+    /// The second half of the table is the point. A rule that only proves the
+    /// counters survive is indistinguishable from deleting the pattern, and
+    /// `passwd` is in there because it turned out never to have been redacted
+    /// at all: segment matching means it is neither equal to `PASS` nor a word
+    /// ending in it, and `PASSWORD` is a different word.
+    #[test]
+    fn a_bare_pass_is_a_counter_and_a_qualified_one_is_still_a_secret() {
+        for (key, value) in [
+            ("pass", "3/3"),
+            ("pass", "10"),
+            ("pass", "hello"),
+            ("fail", "3/3"),
+            ("passed", "3/3"),
+            ("PASS", "$((PASS + 1))"),
+        ] {
+            assert_eq!(
+                redact_assignment(key, value),
+                None,
+                "{key}={value} carries no credential and was destroyed"
+            );
+        }
+
+        for (key, value) in [
+            ("password", "hunter2"),
+            ("passwd", "hunter2"),
+            ("db_pass", "hunter2"),
+            ("PGPASSWORD", "hunter2"),
+        ] {
+            assert!(
+                redact_assignment(key, value).is_some(),
+                "{key}={value} is a credential and was delivered in full"
+            );
+        }
     }
 
     /// #532, found in `tests/smoke_test.sh`: a counter in this repository's own
