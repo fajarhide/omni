@@ -161,10 +161,15 @@ impl FoldShift {
     /// back; split survivors sit at two different distances and no single number
     /// describes both.
     ///
-    /// That covers a fold at the head **and** one reaching the end in the same
-    /// payload, which an earlier version of this classified as uncorrectable.
-    /// Review caught it.
-    fn of(folded: &HashSet<usize>, total: usize, view: &str) -> Self {
+    /// `markers_above` comes from `substitute`, which is the only place that
+    /// knows: a run becomes one marker or stays verbatim. Three attempts to infer
+    /// it from the output were wrong before it was simply reported (#573), and
+    /// each is worth not repeating. `folded.len() - 1` assumes one marker per
+    /// fold and adjacent runs of different origin emit one each. Searching the
+    /// view for the surviving block matches inside a marker when the block's text
+    /// is something a marker also says. Recognising markers by their prefix is
+    /// defeated by a file whose own lines start with it.
+    fn of(folded: &HashSet<usize>, total: usize, markers_above: usize) -> Self {
         let survivors: Vec<usize> = (0..total).filter(|i| !folded.contains(i)).collect();
         let (Some(&first), Some(&last)) = (survivors.first(), survivors.last()) else {
             // Nothing survived, so nothing can be misnumbered.
@@ -178,26 +183,9 @@ impl FoldShift {
             // the host will give them are already right.
             return Self::None;
         }
-        // The survivors have to run to the end of the payload, so nothing stands
-        // below them and the arithmetic is exact: every view line that is not one
-        // of them is a marker above them.
-        //
-        // The first version searched the view for the surviving block and counted
-        // the newlines before it. Review found the hole: a block whose text also
-        // occurs inside a marker, which `already shown` is, matches there instead
-        // and the count comes out short. There is no way to search content for a
-        // position and be sure, so this does not search.
-        //
-        // The price is a fold at the head *and* one reaching the end in the same
-        // payload, which is correctable in principle and is refused here rather
-        // than computed from a marker count nothing reports.
-        if last + 1 != total {
-            return Self::Interior;
-        }
-        let view_lines = view.lines().count();
-        let Some(markers_above) = view_lines.checked_sub(survivors.len()) else {
-            return Self::Interior;
-        };
+        // A fold below the survivors changes nothing about the survivors: they are
+        // still `first` lines into the file and `markers_above` lines into the
+        // view, so one number closes that gap whatever follows them.
         Self::Leading {
             bump: first.saturating_sub(markers_above),
         }
@@ -356,7 +344,7 @@ impl<'a> Ledger<'a> {
         // deterministic for a caller replaying the same session.
         let projected = self
             .substitute(&lines, &hashes, &origin_of)
-            .filter(|(view, _)| view.len() < text.len());
+            .filter(|(view, _, _)| view.len() < text.len());
 
         // Record what the agent was handed, which is not always what it was
         // given (#465). A run replaced by a marker never reached the context, so
@@ -370,7 +358,7 @@ impl<'a> Ledger<'a> {
         // the gain filter above, the caller emits `text` verbatim and every line
         // was delivered. That is the empty-set case and needs no special arm.
         let delivered: Vec<String> = match &projected {
-            Some((_, folded)) => hashes
+            Some((_, folded, _)) => hashes
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !folded.contains(i))
@@ -382,7 +370,7 @@ impl<'a> Ledger<'a> {
         // like this session's (#533). `PROJECT_FLOOR_MULT` prices cross-agent
         // reuse and was calibrated on the single-agent case, and nothing recorded
         // enough to tell the two apart after the fact.
-        if let Some((_, folded)) = &projected {
+        if let Some((_, folded, _)) = &projected {
             // Every line folded means the agent holds markers and nothing else,
             // which is the case `MIN_WHOLE_OUTPUT_FOLD` refuses below 1 KB. Read
             // here rather than threaded out of `substitute`, because that flag is
@@ -444,9 +432,9 @@ impl<'a> Ledger<'a> {
         // folded indices, where the answer is known.
         let shifts = projected
             .as_ref()
-            .map(|(view, folded)| FoldShift::of(folded, lines.len(), view))
+            .map(|(_, folded, above)| FoldShift::of(folded, lines.len(), *above))
             .unwrap_or(FoldShift::None);
-        projected.map(|(view, _)| (view, shifts))
+        projected.map(|(view, _, _)| (view, shifts))
     }
 
     /// The view, and the indices of the lines it replaced with a marker.
@@ -459,7 +447,7 @@ impl<'a> Ledger<'a> {
         lines: &[&str],
         hashes: &[String],
         origin_of: &dyn Fn(&String) -> Option<Origin>,
-    ) -> Option<(String, HashSet<usize>)> {
+    ) -> Option<(String, HashSet<usize>, usize)> {
         let runs = group_runs(hashes, origin_of);
         if !runs.iter().any(|r| r.seen.is_some()) {
             return None;
@@ -468,6 +456,12 @@ impl<'a> Ledger<'a> {
         let mut out = String::with_capacity(lines.iter().map(|l| l.len()).sum());
         let mut folded: HashSet<usize> = HashSet::new();
         let mut replaced_any = false;
+        // How many marker lines stand above the first line that survives. Counted
+        // here because this is the only place that knows: a run becomes one marker
+        // or stays verbatim, and adjacent runs of different origin are separate
+        // runs. Every attempt to infer it downstream was wrong (#573).
+        let mut markers_above = 0usize;
+        let mut still_above = true;
         for run in runs {
             let body = lines[run.start..run.end].concat();
             // The only question that decides a fold: does this run save more
@@ -524,11 +518,17 @@ impl<'a> Ledger<'a> {
                     }
                     folded.extend(run.start..run.end);
                     replaced_any = true;
+                    if still_above {
+                        markers_above += 1;
+                    }
                 }
-                None => out.push_str(&body),
+                None => {
+                    out.push_str(&body);
+                    still_above = false;
+                }
             }
         }
-        replaced_any.then_some((out, folded))
+        replaced_any.then_some((out, folded, markers_above))
     }
 }
 
