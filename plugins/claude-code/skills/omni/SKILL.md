@@ -17,8 +17,22 @@ brew install fajarhide/tap/omni
 omni init
 ```
 
-Without Homebrew, put `curl -fsSL omni.weekndlabs.com/install | bash` in place of
-the first line.
+Without Homebrew, take the release archive and check it against the `SHA256SUMS`
+published beside it, then put the binary on the path:
+
+```
+V=0.7.5; T=x86_64-unknown-linux-musl   # or aarch64-unknown-linux-musl, *-apple-darwin
+B=https://github.com/fajarhide/omni/releases/download/v$V
+curl -fsSLO $B/omni-v$V-$T.tar.gz -O $B/SHA256SUMS
+grep " omni-v$V-$T.tar.gz\$" SHA256SUMS | sha256sum -c -
+tar xzf omni-v$V-$T.tar.gz && install -m755 omni ~/.local/bin/omni
+```
+
+`sha256sum -c` exits non-zero on a mismatch, so chaining the untar behind it is
+what makes the check load bearing rather than decorative. On macOS the command is
+`shasum -a 256 -c -`. There is a `curl … | bash` installer at
+`omni.weekndlabs.com/install` and it is deliberately not the instruction here:
+nothing about it is verifiable before it runs.
 
 **Do not name a host you have not established you are running in.** With no
 terminal to draw its menu on, which is the case when an agent runs it, `omni init`
