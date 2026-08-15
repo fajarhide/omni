@@ -2365,23 +2365,26 @@ INFO:jean.server:startup complete in 4.2s
     /// if the hook sent nothing, the row says nothing was saved.
     #[test]
     fn a_dropped_reply_books_no_saving() {
-        // Sized to land between the two gates. Under a tenth cut the guardrail at
-        // `post_tool.rs:815` already restores the raw bytes, and at or above the
-        // soft threshold the reply is really sent, so neither side can catch this.
-        let mut content = String::new();
-        for i in 0..40 {
-            content.push_str(&format!("src/module_{i}.rs: ok\n"));
-        }
-        for i in 0..6 {
-            content.push_str(&format!(
-                "[=================>      ] {i}0% building module_{i}\n"
-            ));
-        }
+        // Taken from a real recorded trace rather than invented, because the
+        // window is narrow and every synthetic fixture tried first missed it: a
+        // cut under a tenth is restored by the guardrail at `post_tool.rs:815`,
+        // and at or above the soft threshold the reply is really sent. This one
+        // measured 424 B in, 346 B out, a ratio of 0.184, sitting between them.
+        // The grep distiller hoists the repeated filename into a header, so the
+        // cut is lossless and genuinely worth having, which is what makes booking
+        // it and then discarding it the wrong pair of decisions.
+        let content = "\
+src/distillers/system_ops.rs:614:    if !is_sensitive_key(key) || value.trim().is_empty() {
+src/distillers/system_ops.rs:688:fn is_sensitive_key(key: &str) -> bool {
+src/distillers/system_ops.rs:728:        // match, so fixing only `is_sensitive_key` would have left `env` output
+src/distillers/system_ops.rs:822:                !is_sensitive_key(key),
+src/distillers/system_ops.rs:849:                is_sensitive_key(key),
+";
 
         let payload = json!({
             "tool_name": "Bash",
-            "tool_input": {"command": "make build"},
-            "tool_response": bash_response(&content),
+            "tool_input": {"command": "grep -rn \"is_sensitive_key\" src/ --include=\"*.rs\" | head -20"},
+            "tool_response": bash_response(content),
         })
         .to_string();
 
