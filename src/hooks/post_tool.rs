@@ -3095,6 +3095,53 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
+    /// #572, review. Two folds in one payload, at the head and at the end, leave
+    /// the survivors as one block in the middle, all at the same distance from
+    /// where they started. One starting number still puts every one of them
+    /// back, and an earlier version of the rule threw the projection away.
+    #[test]
+    fn folds_at_both_ends_still_correct_with_one_start_line() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |from: usize, to: usize| {
+            json!({
+                "session_id": "host-572-ends",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // Two earlier reads, one at each end of the window that follows.
+        let _ = process_payload(&payload(100, 130), Some(store.clone()), None);
+        let _ = process_payload(&payload(170, 200), Some(store.clone()), None);
+        let out = process_payload(&payload(100, 200), Some(store.clone()), None)
+            .expect("both ends repeat, so this folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        assert!(
+            file["content"]
+                .as_str()
+                .expect("content")
+                .contains("[OMNI:"),
+            "neither repeated end was folded: {out}"
+        );
+        assert_eq!(
+            file["startLine"], 129,
+            "the middle block keeps numbers it is no longer at: {out}"
+        );
+    }
+
     /// The other half. A run with content above **and** below it cannot be
     /// corrected by a starting number, because one number cannot describe two
     /// offsets, so the fold is refused and the payload goes back whole.

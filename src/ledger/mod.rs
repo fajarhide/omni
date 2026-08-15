@@ -150,21 +150,31 @@ pub enum FoldShift {
 }
 
 impl FoldShift {
+    /// The question is not where the folds are, it is whether what survives them
+    /// is one block. Contiguous survivors all sit at the same distance from
+    /// where they started, so a single starting number puts every one of them
+    /// back; split survivors sit at two different distances and no single number
+    /// describes both.
+    ///
+    /// That covers a fold at the head **and** one reaching the end in the same
+    /// payload, which an earlier version of this classified as uncorrectable.
+    /// Review caught it.
     fn of(folded: &HashSet<usize>, total: usize) -> Self {
-        let Some(&first) = folded.iter().min() else {
+        let survivors: Vec<usize> = (0..total).filter(|i| !folded.contains(i)).collect();
+        let (Some(&first), Some(&last)) = (survivors.first(), survivors.last()) else {
+            // Nothing survived, so nothing can be misnumbered.
             return Self::None;
         };
-        if !(first..total).any(|i| !folded.contains(&i)) {
-            return Self::None;
+        if last - first + 1 != survivors.len() {
+            return Self::Interior;
         }
-        // Contiguous from the top: the run is exactly 0..len, so one marker sits
-        // where `len` lines were and the rest of the payload follows it intact.
-        if first == 0 && (0..folded.len()).all(|i| folded.contains(&i)) {
-            return Self::Leading {
-                lines: folded.len(),
-            };
+        if first == 0 {
+            // The survivors still start where the payload does, so the numbers
+            // the host will give them are already right.
+            Self::None
+        } else {
+            Self::Leading { lines: first }
         }
-        Self::Interior
     }
 }
 
