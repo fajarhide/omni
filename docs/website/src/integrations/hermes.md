@@ -103,7 +103,8 @@ npm output. Confirm with `omni stats`.
 
 Use the MCP tools as Hermes' controls over all of it: `omni_explain_savings` to see
 what a recent command actually cost, `omni_retrieve` to get folded content back, and
-`omni_budget` to see where the session's tokens went.
+`omni_budget` to see where the session's tokens went. That tool is outside the set
+advertised by default, so it needs `OMNI_MCP_TOOLS=all`.
 
 ## After a Hermes upgrade
 

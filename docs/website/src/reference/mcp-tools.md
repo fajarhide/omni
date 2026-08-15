@@ -1,7 +1,32 @@
 # MCP tools
 
-`omni init` registers OMNI as an MCP server, which gives the agent **25 tools** it can
-call itself without going through you.
+`omni init` registers OMNI as an MCP server, which gives the agent tools it can call
+itself without going through you. This page describes all **25**. Your host is told about
+a subset.
+
+## What your host is told about
+
+Tool definitions sit in the prefix of every request, so a tool nobody calls is re-read on
+every request of every session rather than paid for once. OMNI advertises the set your
+host's tier can use:
+
+| tier | advertised |
+|---|---|
+| Full, and any host OMNI does not recognise | the nine below |
+| Handoff-first | the same nine, with `omni_run` always among them |
+| MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge` |
+
+The nine are `omni_retrieve`, `omni_explain_savings`, `omni_remember`, `omni_recall`,
+`omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` and
+`omni_context`. They are the ones that were actually called across the recorded corpus.
+
+Every other tool on this page is still in the binary and one setting away.
+`OMNI_MCP_TOOLS=all` advertises all 25, and `omni doctor` says which set is in force and
+which host it resolved:
+
+```
+  MCP tools:      9 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
+```
 
 Confirm the list against your own binary rather than this page:
 

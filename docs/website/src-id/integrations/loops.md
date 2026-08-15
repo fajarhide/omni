@@ -48,6 +48,12 @@ memuat "test" mempertahankan detail test, "debug" menyimpan konteks galat,
 
 ## Perkakas yang dipanggil orkestrator
 
+Tidak satu pun dari perkakas ini diiklankan secara bawaan. OMNI hanya memberi tahu host
+tentang perkakas yang memang dipakai tier-nya, dan perkakas loop berada di luar set itu,
+jadi orkestrator yang memanggilnya membutuhkan `OMNI_MCP_TOOLS=all` di environment-nya.
+`omni doctor` menyebutkan set mana yang sedang berlaku. Daftar per tier ada di rujukan
+perkakas MCP.
+
 | perkakas | kapan |
 |---|---|
 | `omni_loop_status` | sekali sebelum tiap iterasi, gambaran lengkap termurah |
@@ -62,6 +68,9 @@ Dua agent, satu lapisan konteks bersama.
 
 ```sh
 LOOP_ID=$(uuidgen)
+
+# perkakas loop berada di luar set bawaan yang diiklankan
+export OMNI_MCP_TOOLS=all
 
 # pembuat
 export OMNI_AGENT_ID=maker OMNI_LOOP_ID=$LOOP_ID

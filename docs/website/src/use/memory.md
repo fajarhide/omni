@@ -63,7 +63,8 @@ omni session --health
 
 For moving to a machine or a host that shares no database, `omni_handoff` exports the
 current session state as portable markdown you can paste into a new session. It is an
-MCP tool only; the CLI subcommand was removed.
+MCP tool only; the CLI subcommand was removed. It is outside the set advertised by
+default, so set `OMNI_MCP_TOOLS=all` before reaching for it.
 
 ## Engrams
 
@@ -83,7 +84,8 @@ omni patterns                # errors that keep coming back across sessions
 ```
 
 `omni_insight` ranks the same recurring issues project-wide, and is an MCP tool with no
-CLI equivalent. It was listed in the block above as though you could run it.
+CLI equivalent, and it is outside the default advertised set, so it needs
+`OMNI_MCP_TOOLS=all`. It was listed in the block above as though you could run it.
 
 ## What it cannot do
 
