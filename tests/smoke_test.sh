@@ -190,7 +190,7 @@ fi
 
 # ─── 9. MCP Server ───────────────────────────────────────
 echo "▸ Scenario 9: MCP Server"
-# MCP server reads stdin — give it empty stdin with timeout
+# MCP server reads stdin, so give it empty stdin with a timeout
 # macOS doesn't have `timeout`, use perl-based alternative
 MCP_EXIT=0
 if command -v timeout &>/dev/null; then
