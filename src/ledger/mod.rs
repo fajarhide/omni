@@ -188,7 +188,15 @@ impl FoldShift {
             // being verbatim must not silently produce a wrong number.
             return Self::Interior;
         };
-        let markers_above = view[..at].lines().count();
+        // Counted in bytes rather than by slicing the string: `find` returns a
+        // char boundary, but the count does not need the slice and clippy is
+        // right that a slice invites the next edit to use an index that is not.
+        // The block always starts after a newline, so newlines above it is the
+        // line count above it.
+        let markers_above = view.as_bytes()[..at]
+            .iter()
+            .filter(|b| **b == b'\n')
+            .count();
         Self::Leading {
             bump: first.saturating_sub(markers_above),
         }
