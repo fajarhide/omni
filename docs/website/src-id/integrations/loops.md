@@ -69,6 +69,9 @@ Dua agent, satu lapisan konteks bersama.
 ```sh
 LOOP_ID=$(uuidgen)
 
+# perkakas loop berada di luar set bawaan yang diiklankan
+export OMNI_MCP_TOOLS=all
+
 # pembuat
 export OMNI_AGENT_ID=maker OMNI_LOOP_ID=$LOOP_ID
 claude "Implement: $GOAL"

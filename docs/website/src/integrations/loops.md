@@ -64,6 +64,9 @@ Two agents, one shared context layer.
 ```sh
 LOOP_ID=$(uuidgen)
 
+# the loop tools are outside the default advertised set
+export OMNI_MCP_TOOLS=all
+
 # maker
 export OMNI_AGENT_ID=maker OMNI_LOOP_ID=$LOOP_ID
 claude "Implement: $GOAL"
