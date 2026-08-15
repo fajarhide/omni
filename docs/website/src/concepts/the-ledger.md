@@ -34,7 +34,7 @@ They are not the same statement and the marker says which one it is making.
 | origin | marker | what it means |
 |---|---|---|
 | session | `N lines already shown` | the agent is still holding these bytes, so the handle is free unless it chooses to re-read |
-| project | `N lines from an earlier session` | these went to a different session of this project and this agent has **never seen them** |
+| project | `N lines not shown here` | these went to a different session of this project and this agent has **never seen them** |
 
 The distinction is the whole reason the project scope exists. An earlier design
 cancelled it on the grounds that a handle for another session's content is a lie,
@@ -165,10 +165,14 @@ running in the same repository write into one history and read from it.
 
 That is sharing by side effect rather than by design. Nothing in the ledger knows
 which agent it is talking to, so a project-origin marker can hand agent B a handle for
-lines only agent A was ever shown. The wording is still true, those lines did come
-from an earlier session, and the higher bar means the trade is priced as a retrieval
-either way. But `from an earlier session` reads as *your* earlier session, and it
-might not be.
+lines only agent A was ever shown. The higher bar means the trade is priced as a
+retrieval either way.
+
+The wording used to make that worse. `from an earlier session` states where the lines
+came from, and a reader took it as *your* earlier session, which it need not be, and
+then as a claim they had already seen the content. A run marker now says
+`not shown here` and states the only thing the reader has to act on, which is that
+these bytes never arrived ([#567](https://github.com/fajarhide/omni/issues/567)).
 
 As of [#509](https://github.com/fajarhide/omni/issues/509) the agent is recorded on
 every line, and nothing keys on it yet. The measurement decides that: keying the scope

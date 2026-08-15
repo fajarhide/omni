@@ -41,7 +41,7 @@ Keduanya yang dipakai pre-hook ketika ia menulis ulang sebuah perintah menjadi
 
 `--session` layak diketahui ketika Anda sedang menyelidiki perilaku ledger: ia
 satu-satunya cara menjalankan dua sesi berbeda dengan tangan lalu melihat beda
-antara pelipatan `already shown` dan pelipatan `from an earlier session`.
+antara pelipatan `already shown` dan pelipatan `not shown here`.
 
 ## Isolasi basis datanya saat menyelidik
 

@@ -805,7 +805,12 @@ fn replay_execution_traces_net_savings() {
             Some(view) => {
                 ledger_calls += 1;
                 mark_session += view.matches("lines already shown").count() as u64;
-                mark_project += view.matches("from an earlier session").count() as u64;
+                // `shown here` and not the whole phrase: a project run says
+                // `not shown here` and a project whole-output fold says
+                // `none shown here`, while neither session form contains it
+                // (#567). Counting the old phrase would silently drop every run
+                // marker from the tally.
+                mark_project += view.matches("shown here").count() as u64;
                 view.len() as u64
             }
             None => o,

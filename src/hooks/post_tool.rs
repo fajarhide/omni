@@ -3037,7 +3037,7 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
 
         let out = second.unwrap_or_default();
         assert!(
-            out.contains("lines already shown") || out.contains("from an earlier session"),
+            out.contains("lines already shown") || out.contains("shown here"),
             "a repeated Read never reached the ledger: {out}"
         );
     }

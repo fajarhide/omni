@@ -74,7 +74,7 @@ of them start from nothing.
 **What OMNI does.** The store is one SQLite file keyed by project path, not by agent.
 A second agent working in the same directory reads the same project knowledge, and the
 ledger's project scope will hand it a handle for output an earlier session already
-produced. That marker says `from an earlier session` rather than `already shown`,
+produced. That marker says `not shown here` rather than `already shown`,
 because this agent has genuinely never seen those bytes and the wording has to be true.
 
 **The honest number.** Cross-session repetition is **3.7%** of post-filter bytes against
@@ -82,8 +82,9 @@ because this agent has genuinely never seen those bytes and the wording has to b
 It is real, and it is not the headline.
 
 **The honest caveat.** Two agents in one repository share that history by side effect
-rather than by design, and `from an earlier session` can read as *your* earlier session
-when it was someone else's. [The ledger](the-ledger.md#what-two-agents-in-one-repo-share) is
+rather than by design. The marker used to say `from an earlier session`, which reads as
+*your* earlier session when it was someone else's, and worse, as a claim the content had
+already arrived; it now says `not shown here`. [The ledger](the-ledger.md#what-two-agents-in-one-repo-share) is
 straight about what is and is not keyed on the agent today.
 
 ## 6. `kubectl get pods -o json | jq`

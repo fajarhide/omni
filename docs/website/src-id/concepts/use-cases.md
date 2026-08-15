@@ -81,7 +81,7 @@ perubahan, dan keduanya mulai dari nol.
 proyek, bukan pada agent. Agent kedua yang bekerja di direktori yang sama membaca
 pengetahuan proyek yang sama, dan cakupan proyek pada ledger akan memberinya
 handle untuk keluaran yang sudah dihasilkan sesi sebelumnya. Penanda itu berbunyi
-`from an earlier session`, bukan `already shown`, karena agent ini memang belum
+`not shown here`, bukan `already shown`, karena agent ini memang belum
 pernah melihat byte tersebut dan kalimatnya harus benar.
 
 **Angka jujurnya.** Pengulangan lintas sesi adalah **3,7%** dari byte setelah
@@ -89,9 +89,10 @@ penyaringan, berbanding **19,1%** di dalam satu sesi, jadi nilainya sekitar
 seperlima penghematan dalam sesi. Ia nyata, dan ia bukan judulnya.
 
 **Peringatan jujurnya.** Dua agent dalam satu repositori berbagi riwayat itu
-sebagai efek samping, bukan karena dirancang begitu, dan
-`from an earlier session` bisa terbaca sebagai sesi *Anda* padahal itu sesi orang
-lain. [Ledger](the-ledger.md#apa-yang-dibagi-dua-agent-dalam-satu-repo) berterus
+sebagai efek samping, bukan karena dirancang begitu. Penandanya dulu berbunyi
+`from an earlier session`, yang terbaca sebagai sesi *Anda* padahal itu sesi orang
+lain, dan lebih buruk lagi sebagai klaim bahwa isinya sudah sampai; sekarang ia
+berbunyi `not shown here`. [Ledger](the-ledger.md#apa-yang-dibagi-dua-agent-dalam-satu-repo) berterus
 terang soal apa yang hari ini dikunci pada agent dan apa yang tidak.
 
 ## 6. `kubectl get pods -o json | jq`

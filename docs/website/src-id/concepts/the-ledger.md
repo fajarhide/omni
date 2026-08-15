@@ -37,7 +37,7 @@ sedang dibuat.
 | asal | penanda | artinya |
 |---|---|---|
 | sesi | `N lines already shown` | agent masih memegang byte ini, jadi handle-nya gratis kecuali ia memilih membaca ulang |
-| proyek | `N lines from an earlier session` | ini pergi ke sesi lain dari proyek ini dan agent ini **belum pernah melihatnya** |
+| proyek | `N lines not shown here` | ini pergi ke sesi lain dari proyek ini dan agent ini **belum pernah melihatnya** |
 
 Perbedaan itu keseluruhan alasan cakupan proyek ada. Rancangan sebelumnya
 membatalkannya dengan alasan bahwa handle untuk isi sesi lain adalah kebohongan,
@@ -182,10 +182,15 @@ riwayat dan membaca darinya.
 Itu berbagi sebagai efek samping, bukan karena dirancang. Tidak ada bagian ledger
 yang tahu ia sedang bicara dengan agent yang mana, jadi penanda berasal proyek
 bisa menyerahkan ke agent B sebuah handle untuk baris yang cuma pernah
-ditunjukkan ke agent A. Kalimatnya tetap benar, baris-baris itu memang datang
-dari sesi sebelumnya, dan ambang yang lebih tinggi berarti pertukarannya sudah
-dihargai sebagai satu pengambilan. Tapi `from an earlier session` terbaca sebagai
-sesi *Anda* padahal bisa jadi bukan.
+ditunjukkan ke agent A. Ambang yang lebih tinggi berarti pertukarannya sudah
+dihargai sebagai satu pengambilan.
+
+Dulu kalimatnya memperburuk hal itu. `from an earlier session` menyatakan asal
+baris, dan pembaca membacanya sebagai sesi *Anda*, padahal belum tentu, lalu
+sebagai klaim bahwa isinya sudah pernah diterima. Penanda run sekarang berbunyi
+`not shown here` dan menyatakan satu-satunya hal yang perlu ditindaklanjuti
+pembaca, yaitu bahwa byte itu tidak pernah sampai
+([#567](https://github.com/fajarhide/omni/issues/567)).
 
 Sejak [#509](https://github.com/fajarhide/omni/issues/509) agent dicatat di setiap
 baris, dan belum ada yang dikunci padanya. Pengukuran yang memutuskan itu:

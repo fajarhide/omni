@@ -39,7 +39,7 @@ Both are what the pre-hook uses when it rewrites a command into `omni exec`.
 
 `--session` is worth knowing when you are investigating ledger behaviour: it is the
 only way to drive two distinct sessions by hand and see the difference between an
-`already shown` fold and a `from an earlier session` fold.
+`already shown` fold and a `not shown here` fold.
 
 ## Isolate the database while probing
 

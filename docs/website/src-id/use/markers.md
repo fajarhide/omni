@@ -23,7 +23,7 @@ klaimnya adalah agent masih memegangnya dan handle-nya tidak berongkos kecuali i
 memang mau membaca ulang.
 
 ```
-[OMNI: 40 lines from an earlier session, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines not shown here, omni retrieve bc7e821a4340073e]
 ```
 
 Ledger juga, klaim berbeda. Baris-baris ini pergi ke **sesi lain** dari proyek
@@ -37,7 +37,7 @@ direktorinya, jadi apa pun yang berjalan di repositori ini ikut menyumbang. Liha
 
 ```
 [OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
-[OMNI: identical to 40 lines from an earlier session, omni retrieve bc7e821a4340073e]
+[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve bc7e821a4340073e]
 ```
 
 Dua klaim yang sama, untuk jawaban yang terulang **seluruhnya**. Ketika

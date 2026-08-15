@@ -78,8 +78,19 @@ impl Origin {
             Self::Session => {
                 format!("[OMNI: {lines} lines already shown, omni retrieve {handle}]")
             }
+            // #567. `from an earlier session` states provenance and reads as
+            // "you have seen this", which is the opposite of what it means: the
+            // project scope only answers for lines the session scope did not, so
+            // these lines were never delivered here. A reader acted on that,
+            // took a help page missing its `Commands:` block as complete, and
+            // concluded the CLI had no uninstall.
+            //
+            // The actionable half goes first and the provenance is dropped, which
+            // is also nine bytes shorter. Marker length gates folding, and the
+            // session form's trim was worth 0.3 points on its own (#450), so the
+            // honest wording is the cheaper one here rather than a trade.
             Self::Project => {
-                format!("[OMNI: {lines} lines from an earlier session, omni retrieve {handle}]")
+                format!("[OMNI: {lines} lines not shown here, omni retrieve {handle}]")
             }
         }
     }
@@ -100,8 +111,11 @@ impl Origin {
             Self::Session => format!(
                 "[OMNI: identical to the {lines} lines already shown, omni retrieve {handle}]"
             ),
+            // The whole payload, and none of it delivered here, so the agent
+            // holds nothing at all. Worth the extra bytes to say both: this
+            // marker is already gated at `MIN_WHOLE_OUTPUT_FOLD` (#567).
             Self::Project => format!(
-                "[OMNI: identical to {lines} lines from an earlier session, omni retrieve {handle}]"
+                "[OMNI: identical to {lines} lines from an earlier session, none shown here, omni retrieve {handle}]"
             ),
         }
     }
@@ -962,6 +976,52 @@ mod tests {
         assert!(
             !view.contains("already shown"),
             "a project repeat was reported as a session repeat: {view}"
+        );
+    }
+
+    /// #567. The run marker said `from an earlier session`, which states where the
+    /// lines came from and reads as "you have seen this". It means the opposite:
+    /// the project scope only answers for lines the session scope did not, so
+    /// those lines were never delivered here.
+    ///
+    /// A reader acted on it, took a help page missing its `Commands:` block as a
+    /// complete one, and concluded the CLI had no uninstall. The run form had no
+    /// test of its wording at all: every existing assertion on the phrase is
+    /// satisfied by the whole-output marker, so the string could be changed with
+    /// the suite green.
+    #[test]
+    fn a_project_run_marker_says_the_lines_were_not_shown_here() {
+        let (store, _d) = temp_store();
+        // Repeated lines first, then lines nobody has seen, so the fold is a run
+        // inside a payload rather than the whole of it. That is the shape the
+        // report hit and the one the whole-output marker never covers.
+        let repeated: String = (0..60)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        let fresh: String = (0..60)
+            .map(|i| format!("2026-08-10T00:00:00Z  cache probe {i} missed and refilled\n"))
+            .collect();
+
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .project(&repeated);
+
+        let view = Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .project(&format!("{repeated}{fresh}"))
+            .expect("a project repeat above the floor is projectable");
+
+        assert!(
+            view.contains("not shown here"),
+            "the marker did not say the lines were never delivered here: {view}"
+        );
+        assert!(
+            !view.contains("already shown"),
+            "a project run claimed a sighting this session never had: {view}"
+        );
+        assert!(
+            view.contains(&fresh),
+            "this has to be a run inside a payload, not a whole-output fold: {view}"
         );
     }
 
