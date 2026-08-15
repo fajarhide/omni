@@ -66,7 +66,8 @@ omni session --health
 
 Untuk pindah ke mesin atau host yang tidak berbagi basis data, `omni_handoff`
 mengekspor keadaan sesi saat ini sebagai markdown yang bisa dibawa dan ditempel
-ke sesi baru. Ia hanya perkakas MCP; subperintah CLI-nya sudah dihapus.
+ke sesi baru. Ia hanya perkakas MCP; subperintah CLI-nya sudah dihapus. Ia berada di luar set yang
+diiklankan secara bawaan, jadi setel `OMNI_MCP_TOOLS=all` sebelum memakainya.
 
 ## Engram
 
@@ -86,7 +87,8 @@ omni patterns                # galat yang terus kembali lintas sesi
 ```
 
 `omni_insight` memeringkat persoalan berulang yang sama untuk seluruh proyek, dan
-ia perkakas MCP tanpa padanan CLI. Ia sempat dicantumkan di blok di atas seolah
+ia perkakas MCP tanpa padanan CLI, dan berada di luar set bawaan yang diiklankan,
+jadi ia butuh `OMNI_MCP_TOOLS=all`. Ia sempat dicantumkan di blok di atas seolah
 Anda bisa menjalankannya.
 
 ## Yang tidak bisa ia lakukan

@@ -108,7 +108,8 @@ tool-nya dengan keluaran npm mentah. Pastikan dengan `omni stats`.
 Pakai perkakas MCP-nya sebagai kendali Hermes atas semua itu:
 `omni_explain_savings` untuk melihat berapa sebenarnya ongkos sebuah perintah
 terkini, `omni_retrieve` untuk mengambil kembali isi yang terlipat, dan
-`omni_budget` untuk melihat token sesinya pergi ke mana.
+`omni_budget` untuk melihat token sesinya pergi ke mana. Perkakas itu berada di luar
+set yang diiklankan secara bawaan, jadi ia butuh `OMNI_MCP_TOOLS=all`.
 
 ## Setelah Hermes di-upgrade
 
