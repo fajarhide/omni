@@ -270,8 +270,12 @@ fn every_documented_count_matches_the_code() {
 /// the cheapest of the three to guard, because the templates are string
 /// literals in one file.
 ///
-/// Matched on the stable half of each template, before the first `{`, since the
-/// rest is a runtime count and a handle.
+/// Matched on **every** literal fragment of each template, not just the part
+/// before the first `{`. That earlier version compared `[OMNI: ` and
+/// `[OMNI: identical to ` and nothing else, so any page holding any marker
+/// satisfied it: the wording after the count, which is the whole of what a
+/// reader looks up, was never checked. Proved by putting a retired marker back
+/// into the page and watching this pass (#567).
 #[test]
 fn every_marker_the_ledger_can_print_is_documented() {
     let root = repo_root();
@@ -282,12 +286,7 @@ fn every_marker_the_ledger_can_print_is_documented() {
     let templates: BTreeSet<String> = regex::Regex::new(r#""(\[OMNI: [^"]*)""#)
         .expect("valid regex")
         .captures_iter(&ledger)
-        .map(|c| {
-            let t = c.get(1).expect("group 1").as_str();
-            // "[OMNI: {lines} lines already shown, …" → "[OMNI: "
-            // "[OMNI: identical to {lines} …"         → "[OMNI: identical to "
-            t.split('{').next().unwrap_or(t).to_string()
-        })
+        .map(|c| c.get(1).expect("group 1").as_str().to_string())
         .collect();
 
     assert!(
@@ -296,10 +295,24 @@ fn every_marker_the_ledger_can_print_is_documented() {
         templates.len()
     );
 
-    let missing: Vec<&String> = templates.iter().filter(|t| !page.contains(*t)).collect();
+    // A template is `[OMNI: {lines} lines not shown here, omni retrieve {handle}]`.
+    // Split on the placeholders and every remaining fragment is fixed text the
+    // page has to carry. The one-character tail is dropped as noise.
+    let missing: Vec<(&String, String)> = templates
+        .iter()
+        .flat_map(|t| {
+            regex::Regex::new(r"\{[a-z_]+\}")
+                .expect("valid regex")
+                .split(t)
+                .filter(|f| f.len() > 3)
+                .filter(|f| !page.contains(*f))
+                .map(move |f| (t, f.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
     assert!(
         missing.is_empty(),
-        "the ledger can print markers `use/markers.md` never shows: {missing:?}\n\
+        "`use/markers.md` is missing wording the ledger prints: {missing:?}\n\
          A reader meets these in their own output and has nowhere to look them up."
     );
 }

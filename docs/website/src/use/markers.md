@@ -22,7 +22,7 @@ the agent is still holding them and the handle costs nothing unless it wants to
 re-read.
 
 ```
-[OMNI: 40 lines from an earlier session, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines not shown here, omni retrieve bc7e821a4340073e]
 ```
 
 Also the ledger, different claim. These lines went to a **different session** of this
@@ -36,7 +36,7 @@ on the directory, so anything running in this repository contributes to it. See
 
 ```
 [OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
-[OMNI: identical to 40 lines from an earlier session, omni retrieve bc7e821a4340073e]
+[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve bc7e821a4340073e]
 ```
 
 The same two claims, for a reply that is repeated **in full**. When the fold covers
