@@ -444,6 +444,15 @@ impl SqliteBackend {
             CREATE INDEX IF NOT EXISTS idx_dist_session ON distillations(session_id);
             CREATE INDEX IF NOT EXISTS idx_dist_filter ON distillations(filter_name);
 
+            -- Every hook run opens with `find_latest_session`, which is
+            -- `ORDER BY last_active DESC LIMIT 1`. Without this the plan is
+            -- `SCAN sessions` plus a temp B-tree, so it drags every row's
+            -- `state_json` through a sort to return one of them: 24 rows and
+            -- 312 KB on the reporting installation. Measured by ablation, that
+            -- lookup was 16.8 ms of the hook's 28.8 ms (#569).
+            CREATE INDEX IF NOT EXISTS idx_sessions_last_active
+                ON sessions(last_active DESC);
+
             -- 3. File access
             CREATE TABLE IF NOT EXISTS file_access (
                 session_id   TEXT NOT NULL,
