@@ -399,7 +399,7 @@ fn fold_cross_turn(
     let folded = crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
         .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
-        .project(&text);
+        .project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host
     // renders it with `cat -n` numbering counted from `startLine`, so it numbers
@@ -414,25 +414,9 @@ fn fold_cross_turn(
     // `Grep` carries its positions inside the text, where a fold cannot move
     // them, and `Bash` output is not numbered at all.
     match folded {
-        Some(f) if normalized.tool_name != "Read" || !fold_shifts_a_later_line(&f) => f,
+        Some((view, shifted)) if normalized.tool_name != "Read" || !shifted => view,
         _ => text,
     }
-}
-
-/// Whether any line survives below a marker, and is therefore renumbered.
-///
-/// Consecutive markers are still one shift, so the question is only whether real
-/// content follows the last of them.
-fn fold_shifts_a_later_line(folded: &str) -> bool {
-    let mut seen_marker = false;
-    for line in folded.lines() {
-        let is_marker = line.trim_start().starts_with("[OMNI:");
-        if seen_marker && !is_marker {
-            return true;
-        }
-        seen_marker |= is_marker;
-    }
-    false
 }
 
 /// A tool reply on its way to the agent, distilled or not, through the ledger.
@@ -3058,6 +3042,43 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(
             trailing.contains("[OMNI:"),
             "a fold at the end shifts nothing and has to still happen: {trailing}"
+        );
+    }
+
+    /// #557, review. The first version of the guard read the output back and
+    /// called any line starting with `[OMNI:` a marker, so a file whose own
+    /// lines start that way defeated it and the fold went through with every
+    /// number below it wrong. This repository writes those strings into its
+    /// changelog and its docs, so it is not a hypothetical file.
+    ///
+    /// The guard now asks the ledger which indices it folded, which cannot be
+    /// spoofed by content.
+    #[test]
+    fn content_that_looks_like_a_marker_does_not_defeat_the_guard() {
+        let line = |i: usize| format!("[OMNI: {i} lines already shown, omni retrieve deadbeefdeadbee{i}]\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |body: &str| {
+            json!({
+                "session_id": "host-557-lookalike",
+                "tool_name": "Read",
+                "tool_input": {"path": "changelog.md"},
+                "tool_response": {"content": body},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&range(0, 30)), Some(store.clone()), None);
+        let second =
+            process_payload(&payload(&range(0, 100)), Some(store.clone()), None).unwrap_or_default();
+
+        // Nothing folded means either no reply at all or a reply that still
+        // opens on the file's own first line. A fold would have eaten it.
+        assert!(
+            second.is_empty() || second.contains("deadbeefdeadbee0]"),
+            "the head of the file was folded away and the 70 lines below it \
+             renumbered, because the surviving content was read as markers: {second}"
         );
     }
 

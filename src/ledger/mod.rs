@@ -195,13 +195,31 @@ impl<'a> Ledger<'a> {
     /// asks for, and it is why the recording is unconditional while the
     /// substitution is not.
     pub fn project(&self, text: &str) -> Option<String> {
+        self.project_reporting_shift(text).map(|(view, _)| view)
+    }
+
+    /// The view, and whether any line survives below the first fold.
+    ///
+    /// A caller whose host numbers the lines it is handed needs the second half:
+    /// a marker with content under it moves every one of those numbers, and the
+    /// payload says nothing about it (#557). The question is answered from the
+    /// folded indices rather than by recognising markers in the output, because
+    /// a file whose own lines begin with the marker prefix would defeat that.
+    pub fn project_reporting_shift(&self, text: &str) -> Option<(String, bool)> {
+        let shift = std::cell::Cell::new(false);
         // The gain gate wraps the projection rather than being re-derived inside
         // it (spec 5.4). `MIN_LEDGER_INPUT` is this projection's own floor and is
         // higher than the gate's, so both apply and the stricter one decides.
-        crate::pipeline::gate::gain(text, |text| self.project_inner(text))
+        let view = crate::pipeline::gate::gain(text, |text| {
+            self.project_inner(text).map(|(view, shifted)| {
+                shift.set(shifted);
+                view
+            })
+        })?;
+        Some((view, shift.get()))
     }
 
-    fn project_inner(&self, text: &str) -> Option<String> {
+    fn project_inner(&self, text: &str) -> Option<(String, bool)> {
         if text.len() < MIN_LEDGER_INPUT {
             return None;
         }
@@ -348,7 +366,16 @@ impl<'a> Ledger<'a> {
             self.store.ledger_record(p, &delivered, &self.agent);
         }
 
-        projected.map(|(view, _)| view)
+        // True when an unfolded line sits below the first folded one, so the
+        // surviving content has moved up relative to where the caller's host
+        // will count it from (#557).
+        let shifts = projected.as_ref().is_some_and(|(_, folded)| {
+            folded
+                .iter()
+                .min()
+                .is_some_and(|first| (*first..lines.len()).any(|i| !folded.contains(&i)))
+        });
+        projected.map(|(view, _)| (view, shifts))
     }
 
     /// The view, and the indices of the lines it replaced with a marker.
