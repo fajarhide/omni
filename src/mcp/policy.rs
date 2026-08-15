@@ -3,7 +3,8 @@
 //! Measured 2026-08-15 across 228 Claude Code transcripts: 25 tools are
 //! advertised in the prefix of every request, 16 of them have never been
 //! called, and those 16 are 4,940 bytes. That is the same size as the 4,942
-//! bytes OMNI removes from tool output in a median session, and it sits at
+//! bytes OMNI removes from tool output in the median of the 35 sessions that
+//! pushed more than 50 KB through the hook, and it sits at
 //! position 0 where it is re-read on every request rather than from the middle
 //! of the session. Advertising them costs about twice what the distillers earn.
 //!
@@ -57,12 +58,38 @@ fn integration_id(detected: &str) -> &str {
 
 /// The tier the host's own integration declares. `Tier` stays the single source
 /// of truth; this only translates the name.
+///
+/// An id with no registered integration gets `Full`, because being wrong about a
+/// host has to cost a flag rather than a capability. `detect_agent_id` can return
+/// `windsurf`, `vscode_continue`, `aider` and `terminal`, none of which is
+/// registered anywhere; the opposite default also dropped
+/// Codex to four tools whenever `CODEX_SESSION` failed to reach the subprocess,
+/// since its generated config carries no `OMNI_AGENT_ID`. A host that wants the
+/// memory set declares it by registering an integration.
 pub fn tier_for(agent_id: &str) -> Tier {
     let want = integration_id(agent_id);
     crate::agents::all_integrations()
         .iter()
         .find(|a| a.id() == want)
-        .map_or(Tier::McpOnly, |a| a.tier())
+        .map_or(Tier::Full, |a| a.tier())
+}
+
+/// Does `OMNI_MCP_TOOLS` ask for the whole surface?
+///
+/// Split from the environment read so a test can decide this without mutating
+/// process environment. Cargo runs tests in parallel, this crate already has
+/// tests that set variables, and that combination is how a green local suite
+/// went red on CI here. `all` is the only documented spelling; anything else
+/// gets the cut set.
+pub fn value_means_all(value: Option<&str>) -> bool {
+    value.is_some_and(|v| v.eq_ignore_ascii_case("all"))
+}
+
+/// The override as the running process sees it. The only place that reads the
+/// variable, so `doctor` and the served router cannot disagree about whether the
+/// cut is in force.
+pub fn override_is_on() -> bool {
+    value_means_all(std::env::var("OMNI_MCP_TOOLS").ok().as_deref())
 }
 
 /// The tools this host is told about.
@@ -90,9 +117,20 @@ mod tests {
         assert_eq!(tier_for("codex_cli"), Tier::Full);
         assert_eq!(tier_for("cursor"), Tier::HandoffFirst);
         assert_eq!(tier_for("gemini"), Tier::Full);
-        // Anything unrecognised claims nothing, the same default the
-        // `AgentIntegration` trait uses.
-        assert_eq!(tier_for("something-new"), Tier::McpOnly);
+    }
+
+    /// Being wrong about a host must cost a flag, not a capability. `omni_run`
+    /// works on any host and `omni_explain_savings` merely has nothing to report
+    /// where there is no hook, so an unrecognised id keeps the nine rather than
+    /// losing five of them.
+    #[test]
+    fn an_unregistered_host_keeps_the_full_set() {
+        assert_eq!(tier_for("something-new"), Tier::Full);
+        // `vscode`, `zed` and `antigravity` are left out on purpose: they are
+        // registered in `mcp_host::HOSTS` and so are genuinely MCP-only.
+        for id in ["windsurf", "vscode_continue", "aider", "terminal"] {
+            assert_eq!(active_tools(id), FULL, "{id} lost the full set");
+        }
     }
 
     /// `strategy.md` section 5 makes this product law: on a Handoff-first host
@@ -105,10 +143,12 @@ mod tests {
     }
 
     /// An MCP-only host has no shell distillation to report on, so the read
-    /// tools over it are noise there.
+    /// tools over it are noise there. `cline` is registered and takes the
+    /// trait's default tier, which is what makes it MCP-only; an id nobody
+    /// registered gets `Full` instead.
     #[test]
     fn an_mcp_only_host_gets_the_memory_set_and_nothing_else() {
-        let tools = active_tools("windsurf");
+        let tools = active_tools("cline");
         assert!(tools.contains(&"omni_remember"));
         assert!(tools.contains(&"omni_retrieve"));
         assert!(!tools.contains(&"omni_explain_savings"));
@@ -134,5 +174,17 @@ mod tests {
         ];
         want.sort_unstable();
         assert_eq!(got, want);
+    }
+
+    /// The escape hatch, driven through the predicate instead of the process
+    /// environment for the reason in `value_means_all`'s own comment. These are
+    /// the values a user actually types.
+    #[test]
+    fn only_the_documented_spelling_restores_every_tool() {
+        assert!(value_means_all(Some("all")));
+        assert!(value_means_all(Some("ALL")));
+        assert!(!value_means_all(None), "unset must not restore");
+        assert!(!value_means_all(Some("")), "empty must not restore");
+        assert!(!value_means_all(Some("full")), "undocumented spelling");
     }
 }
