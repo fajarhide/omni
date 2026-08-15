@@ -130,6 +130,80 @@ impl Origin {
 /// silently folding runs that do not pay.
 const HANDLE_LEN: usize = 16;
 
+/// What a fold did to the numbers of the lines still under it.
+///
+/// Only a caller that controls where its host starts counting can act on this,
+/// which today is the `Read` path: the host renders `file.content` with `cat -n`
+/// numbering counted from `startLine`, so it numbers whatever it is handed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldShift {
+    /// Nothing survives below the fold, so no number moves. A whole-output fold
+    /// and any fold reaching the end of the payload are this.
+    None,
+    /// The survivors are one block with folded lines above them. `bump` is what
+    /// the caller must add to its host's starting number so the first survivor
+    /// lands on the line the file gives it, and with it every line below.
+    ///
+    /// Not "folded lines minus one": adjacent runs of different origin emit one
+    /// marker each, so the number of lines standing above the survivors is the
+    /// number of markers, which is what this counts. Review found the earlier
+    /// arithmetic putting every survivor `k - 1` lines too high.
+    Leading { bump: usize },
+    /// Content above the fold and content below it. Nothing can correct that,
+    /// because one starting number cannot describe two different offsets.
+    Interior,
+}
+
+impl FoldShift {
+    /// The question is not where the folds are, it is whether what survives them
+    /// is one block. Contiguous survivors all sit at the same distance from
+    /// where they started, so a single starting number puts every one of them
+    /// back; split survivors sit at two different distances and no single number
+    /// describes both.
+    ///
+    /// That covers a fold at the head **and** one reaching the end in the same
+    /// payload, which an earlier version of this classified as uncorrectable.
+    /// Review caught it.
+    fn of(folded: &HashSet<usize>, total: usize, view: &str) -> Self {
+        let survivors: Vec<usize> = (0..total).filter(|i| !folded.contains(i)).collect();
+        let (Some(&first), Some(&last)) = (survivors.first(), survivors.last()) else {
+            // Nothing survived, so nothing can be misnumbered.
+            return Self::None;
+        };
+        if last - first + 1 != survivors.len() {
+            return Self::Interior;
+        }
+        if first == 0 {
+            // The survivors still start where the payload does, so the numbers
+            // the host will give them are already right.
+            return Self::None;
+        }
+        // The survivors have to run to the end of the payload, so nothing stands
+        // below them and the arithmetic is exact: every view line that is not one
+        // of them is a marker above them.
+        //
+        // The first version searched the view for the surviving block and counted
+        // the newlines before it. Review found the hole: a block whose text also
+        // occurs inside a marker, which `already shown` is, matches there instead
+        // and the count comes out short. There is no way to search content for a
+        // position and be sure, so this does not search.
+        //
+        // The price is a fold at the head *and* one reaching the end in the same
+        // payload, which is correctable in principle and is refused here rather
+        // than computed from a marker count nothing reports.
+        if last + 1 != total {
+            return Self::Interior;
+        }
+        let view_lines = view.lines().count();
+        let Some(markers_above) = view_lines.checked_sub(survivors.len()) else {
+            return Self::Interior;
+        };
+        Self::Leading {
+            bump: first.saturating_sub(markers_above),
+        }
+    }
+}
+
 /// Addresses the ledger for one session, and optionally for its project.
 ///
 /// Cross-session repetition measures 3.7% of post-filter bytes against 19.1%
@@ -198,15 +272,15 @@ impl<'a> Ledger<'a> {
         self.project_reporting_shift(text).map(|(view, _)| view)
     }
 
-    /// The view, and whether any line survives below the first fold.
+    /// The view, and what the fold did to the numbering of the lines under it.
     ///
     /// A caller whose host numbers the lines it is handed needs the second half:
     /// a marker with content under it moves every one of those numbers, and the
     /// payload says nothing about it (#557). The question is answered from the
     /// folded indices rather than by recognising markers in the output, because
     /// a file whose own lines begin with the marker prefix would defeat that.
-    pub fn project_reporting_shift(&self, text: &str) -> Option<(String, bool)> {
-        let shift = std::cell::Cell::new(false);
+    pub fn project_reporting_shift(&self, text: &str) -> Option<(String, FoldShift)> {
+        let shift = std::cell::Cell::new(FoldShift::None);
         // The gain gate wraps the projection rather than being re-derived inside
         // it (spec 5.4). `MIN_LEDGER_INPUT` is this projection's own floor and is
         // higher than the gate's, so both apply and the stricter one decides.
@@ -219,7 +293,7 @@ impl<'a> Ledger<'a> {
         Some((view, shift.get()))
     }
 
-    fn project_inner(&self, text: &str) -> Option<(String, bool)> {
+    fn project_inner(&self, text: &str) -> Option<(String, FoldShift)> {
         if text.len() < MIN_LEDGER_INPUT {
             return None;
         }
@@ -366,15 +440,12 @@ impl<'a> Ledger<'a> {
             self.store.ledger_record(p, &delivered, &self.agent);
         }
 
-        // True when an unfolded line sits below the first folded one, so the
-        // surviving content has moved up relative to where the caller's host
-        // will count it from (#557).
-        let shifts = projected.as_ref().is_some_and(|(_, folded)| {
-            folded
-                .iter()
-                .min()
-                .is_some_and(|first| (*first..lines.len()).any(|i| !folded.contains(&i)))
-        });
+        // What the fold did to the numbering below it (#557). Read from the
+        // folded indices, where the answer is known.
+        let shifts = projected
+            .as_ref()
+            .map(|(view, folded)| FoldShift::of(folded, lines.len(), view))
+            .unwrap_or(FoldShift::None);
         projected.map(|(view, _)| (view, shifts))
     }
 

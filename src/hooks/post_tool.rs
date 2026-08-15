@@ -77,6 +77,24 @@ enum ToolOutput {
 /// instead of asserting one. The rule is "reply in the shape you were spoken
 /// to in", and it needs no table of per-tool schemas to stay correct.
 fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -> ToolOutput {
+    shape_for_host_from(raw_response, distilled, 0)
+}
+
+/// As `shape_for_host`, plus how far to move the number the host starts counting
+/// from.
+///
+/// Only a leading fold uses it. The host renders `file.content` with `cat -n`
+/// numbering counted from `startLine`, verified on live transcripts rather than
+/// assumed: a `Read` requested at offset 215 comes back with `215` on its first
+/// line. So a run of `n` lines replaced by one marker leaves everything below
+/// short by `n - 1`, and adding that to `startLine` puts all of it back at once.
+/// The marker itself then carries the number of the last line it replaced, which
+/// is the honest label for a run (#557).
+fn shape_for_host_from(
+    raw_response: Option<&serde_json::Value>,
+    distilled: String,
+    start_line_bump: usize,
+) -> ToolOutput {
     // The `Read` result carries its text at `file.content`, beside numbers that
     // describe it. Captured from a live Claude Code transcript rather than
     // assumed:
@@ -98,6 +116,16 @@ fn shape_for_host(raw_response: Option<&serde_json::Value>, distilled: String) -
         let mut echoed = obj.clone();
         let line_count = distilled.lines().count();
         if let Some(file) = echoed.get_mut("file").and_then(|f| f.as_object_mut()) {
+            if start_line_bump > 0 {
+                let start = file
+                    .get("startLine")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1);
+                file.insert(
+                    "startLine".into(),
+                    serde_json::Value::from(start + start_line_bump as u64),
+                );
+            }
             file.insert("content".into(), serde_json::Value::String(distilled));
             file.insert("numLines".into(), serde_json::Value::from(line_count));
         }
@@ -380,16 +408,18 @@ fn trim_enormous(content: &str) -> std::borrow::Cow<'_, str> {
 /// Same two gates and the same order as the Bash path: structured payloads are
 /// never projected, no host session id means no ledger, and it runs **after**
 /// archiving so a folded run is already recoverable when its marker is written.
+/// The folded text, and how far the caller must move its host's starting line
+/// number so the survivors keep the positions the file gives them (#557).
 fn fold_cross_turn(
     store: Option<&Arc<Store>>,
     normalized: &crate::hooks::normalize::NormalizedInput,
     text: String,
-) -> String {
+) -> (String, usize) {
     let (Some(s), Some(scope)) = (store, normalized.host_session_id.as_deref()) else {
-        return text;
+        return (text, 0);
     };
     if crate::pipeline::format::sniff(&text).is_some() {
-        return text;
+        return (text, 0);
     }
     // The repository, not the directory this ran in: a worktree or a second
     // checkout is the same project and must share its history (#525).
@@ -413,9 +443,18 @@ fn fold_cross_turn(
     // any fold reaching the end of the payload are kept. Only `Read` is affected;
     // `Grep` carries its positions inside the text, where a fold cannot move
     // them, and `Bash` output is not numbered at all.
+    use crate::ledger::FoldShift;
     match folded {
-        Some((view, shifted)) if normalized.tool_name != "Read" || !shifted => view,
-        _ => text,
+        // Not a `Read`: nothing downstream renumbers, so any fold is fine.
+        Some((view, _)) if normalized.tool_name != "Read" => (view, 0),
+        Some((view, FoldShift::None)) => (view, 0),
+        // The host counts from `startLine`, so moving it by the size of the run
+        // minus the marker's own line puts every surviving number back where the
+        // file has it. Verified against live transcripts before relying on it: a
+        // `Read` requested at offset 215 renders its first line as `215`.
+        Some((view, FoldShift::Leading { bump })) => (view, bump),
+        // Content above and below: one starting number cannot describe both.
+        _ => (text, 0),
     }
 }
 
@@ -441,11 +480,15 @@ fn reply_through_ledger(
     let carried = shortened.is_some();
     let text = shortened.unwrap_or_else(|| content.to_string());
 
-    let folded = fold_cross_turn(store, normalized, text);
+    let (folded, start_line_bump) = fold_cross_turn(store, normalized, text);
     if !carried && folded == content {
         return None;
     }
-    Some(wrap_hook_output(normalized.raw_response.as_ref(), folded))
+    Some(wrap_hook_output(
+        normalized.raw_response.as_ref(),
+        folded,
+        start_line_bump,
+    ))
 }
 
 fn distil_tool_reply(
@@ -532,7 +575,7 @@ fn distil_tool_reply(
             if summary.len() < content.len() * 8 / 10 {
                 return Some(
                     archive_tool_reply(store, content, summary)
-                        .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+                        .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d, 0)),
                 );
             }
             return Some(None);
@@ -551,7 +594,7 @@ fn distil_tool_reply(
                 );
                 return Some(
                     archive_tool_reply(store, content, summary)
-                        .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d)),
+                        .map(|d| wrap_hook_output(normalized.raw_response.as_ref(), d, 0)),
                 );
             }
             return Some(None);
@@ -1237,11 +1280,15 @@ fn carries_our_marker(content: &str) -> bool {
     })
 }
 
-fn wrap_hook_output(raw_response: Option<&serde_json::Value>, distilled: String) -> String {
+fn wrap_hook_output(
+    raw_response: Option<&serde_json::Value>,
+    distilled: String,
+    start_line_bump: usize,
+) -> String {
     serde_json::to_string(&HookOutput {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PostToolUse",
-            updated_tool_output: shape_for_host(raw_response, distilled),
+            updated_tool_output: shape_for_host_from(raw_response, distilled, start_line_bump),
             additional_context: None,
         },
     })
@@ -1613,7 +1660,7 @@ mod tests {
     /// the first day of the Rust rewrite until it was found by hand.
     #[test]
     fn serialises_the_key_the_host_actually_reads() {
-        let json = wrap_hook_output(None, "distilled".to_string());
+        let json = wrap_hook_output(None, "distilled".to_string(), 0);
 
         assert!(json.contains(r#""updatedToolOutput""#), "{json}");
         assert!(
@@ -2995,92 +3042,219 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
-    /// #557. A `Read` payload goes back as `file.content` and the host renders it
-    /// with `cat -n` numbering counted from `startLine`, so it numbers whatever
-    /// lines we return. A fold in the middle removes lines the count was walking
-    /// over, and every surviving line below the marker is labelled short by the
-    /// size of the fold, with nothing in the payload saying so. Those numbers are
-    /// a contract: the agent writes them into issues and decides what to edit
-    /// from them.
+    /// A `Read` payload goes back as `file.content` and the host renders it with
+    /// `cat -n` numbering counted from `startLine`, so it numbers whatever lines
+    /// it is handed. Replacing a run with a one-line marker removes lines the
+    /// count was walking over (#557).
     ///
-    /// Both halves are load bearing. Refusing every fold passes the first
-    /// assertion on its own and silently costs the whole-output fold, which
-    /// shifts nothing because nothing survives under it.
+    /// When the run is at the head, one number fixes all of it: move `startLine`
+    /// by the size of the run minus the marker's own line and every survivor is
+    /// back where the file has it. Verified against live transcripts before being
+    /// relied on, rather than assumed: a `Read` requested at offset 215 comes back
+    /// with `215` on its first line.
     #[test]
-    fn refuses_a_read_fold_that_would_renumber_the_lines_below_it() {
+    fn a_leading_fold_moves_the_start_line_so_the_numbers_stay_true() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
-        let payload = |body: &str| {
+        let payload = |from: usize, to: usize| {
             json!({
-                "session_id": "host-557",
+                "session_id": "host-557-lead",
                 "tool_name": "Read",
                 "tool_input": {"path": "probe.rs"},
-                "tool_response": {"content": body},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
             })
             .to_string()
         };
 
-        // The repeat lands at the top of the second payload with fresh lines
-        // under it, which is the shape that renumbers.
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
-        let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
-        let overlapping = process_payload(&payload(&range(100, 200)), Some(store.clone()), None)
-            .unwrap_or_default();
-        assert!(
-            !overlapping.contains("[OMNI:"),
-            "a fold with 70 lines under it renumbered every one of them: {overlapping}"
-        );
+        let _ = process_payload(&payload(100, 130), Some(store.clone()), None);
+        let out = process_payload(&payload(100, 200), Some(store.clone()), None)
+            .expect("the head repeats, so this folds");
 
-        // A fresh store, so the only difference is where the repeat sits: at the
-        // end, where no number can move.
-        let dir2 = tempfile::tempdir().expect("tempdir");
-        let store2 = Arc::new(Store::open_path(&dir2.path().join("omni.db")).expect("store"));
-        let _ = process_payload(&payload(&range(170, 200)), Some(store2.clone()), None);
-        let trailing = process_payload(&payload(&range(100, 200)), Some(store2.clone()), None)
-            .unwrap_or_default();
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
         assert!(
-            trailing.contains("[OMNI:"),
-            "a fold at the end shifts nothing and has to still happen: {trailing}"
+            file["content"]
+                .as_str()
+                .expect("content")
+                .contains("[OMNI:"),
+            "the repeated head was not folded: {out}"
+        );
+        // Thirty lines became one marker, so the survivors moved up by 29 and the
+        // host has to start counting 29 later for them to land where they live.
+        assert_eq!(
+            file["startLine"], 129,
+            "the survivors keep the numbers of a file they are no longer at: {out}"
         );
     }
 
-    /// #557, review. The first version of the guard read the output back and
-    /// called any line starting with `[OMNI:` a marker, so a file whose own
-    /// lines start that way defeated it and the fold went through with every
-    /// number below it wrong. This repository writes those strings into its
-    /// changelog and its docs, so it is not a hypothetical file.
+    /// #572, review, twice. Folds at the head and at the end leave the survivors
+    /// as one block, and one starting number could in principle put all of them
+    /// back. It is refused anyway, because knowing how many marker lines stand
+    /// above them means either searching the view for their text, which review
+    /// showed can match inside a marker, or a marker count nothing reports. A
+    /// refused fold costs bytes; a wrong number costs an edit in the wrong place.
+    #[test]
+    fn refuses_folds_at_both_ends_rather_than_guess_the_offset() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |from: usize, to: usize| {
+            json!({
+                "session_id": "host-572-ends",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // Two earlier reads, one at each end of the window that follows.
+        let _ = process_payload(&payload(100, 130), Some(store.clone()), None);
+        let _ = process_payload(&payload(170, 200), Some(store.clone()), None);
+        let out =
+            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
+        assert!(
+            !out.contains("[OMNI:"),
+            "a fold with content standing below it went through, so the number of \
+             lines above the survivors was guessed: {out}"
+        );
+    }
+
+    /// #572, review. Adjacent runs of different origin emit one marker each, so a
+    /// repeated head can stand as two lines rather than one. The bump is the
+    /// number of lines above the survivors, not the number of lines folded minus
+    /// one, and the earlier arithmetic put every survivor a line too high.
     ///
-    /// The guard now asks the ledger which indices it folded, which cannot be
-    /// spoofed by content.
+    /// Built by giving the project scope one half of the head and this session
+    /// the other, which is what makes the two runs differ in origin.
+    #[test]
+    fn a_head_folded_into_two_markers_bumps_by_two() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |sid: &str, from: usize, to: usize| {
+            json!({
+                "session_id": sid,
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // An earlier session saw the first half of the head, this one saw the
+        // second, so the two runs are adjacent and differently attributed.
+        let _ = process_payload(&payload("earlier", 100, 115), Some(store.clone()), None);
+        let _ = process_payload(&payload("current", 115, 130), Some(store.clone()), None);
+        let out = process_payload(&payload("current", 100, 200), Some(store.clone()), None)
+            .expect("the whole head repeats, so this folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let content = file["content"].as_str().expect("content");
+        let markers = content.matches("[OMNI:").count();
+        assert!(markers >= 1, "the repeated head was not folded: {out}");
+
+        // Thirty lines stood above the survivors and `markers` lines stand there
+        // now, so the host has to start counting that much later.
+        let expected = 100 + 30 - markers as u64;
+        assert_eq!(
+            file["startLine"], expected,
+            "{markers} marker line(s) above the survivors, so startLine should be \
+             {expected}: {out}"
+        );
+    }
+
+    /// The other half. A run with content above **and** below it cannot be
+    /// corrected by a starting number, because one number cannot describe two
+    /// offsets, so the fold is refused and the payload goes back whole.
+    #[test]
+    fn refuses_an_interior_fold_that_would_renumber_the_lines_below_it() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |from: usize, to: usize| {
+            json!({
+                "session_id": "host-557-mid",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(130, 165), Some(store.clone()), None);
+        let out =
+            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
+        assert!(
+            !out.contains("[OMNI:"),
+            "a fold with content on both sides renumbered the lines under it: {out}"
+        );
+    }
+
+    /// #557, review. An earlier guard read the output back and called any line
+    /// starting with `[OMNI:` a marker, so a file whose own lines start that way
+    /// defeated it. This repository writes those strings into its changelog and
+    /// its docs, so it is not a hypothetical file. The shape is asked of the
+    /// ledger's folded indices now, which content cannot spoof.
     #[test]
     fn content_that_looks_like_a_marker_does_not_defeat_the_guard() {
-        // Same shape as the test above, so it is known to reach a fold, with
-        // every line wearing the marker prefix.
         let line = |i: usize| format!("[OMNI: unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\"]\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
-        let payload = |body: &str| {
+        let payload = |from: usize, to: usize| {
             json!({
                 "session_id": "host-557-lookalike",
                 "tool_name": "Read",
                 "tool_input": {"path": "changelog.md"},
-                "tool_response": {"content": body},
+                "tool_response": {"file": {
+                    "filePath": "changelog.md",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
             })
             .to_string()
         };
 
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
-        let _ = process_payload(&payload(&range(100, 130)), Some(store.clone()), None);
-        let second = process_payload(&payload(&range(100, 200)), Some(store.clone()), None)
-            .unwrap_or_default();
-
-        // The head of the file has to survive: a fold would have replaced those
-        // thirty lines and moved the seventy below them.
+        let _ = process_payload(&payload(130, 165), Some(store.clone()), None);
+        let out =
+            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
         assert!(
-            second.is_empty() || second.contains("unique_marker_100"),
-            "the head was folded away and the lines below it renumbered, because \
-             the surviving content was read as markers: {second}"
+            !out.contains("omni retrieve"),
+            "an interior fold went through because the surviving content was read \
+             as markers: {out}"
         );
     }
 
