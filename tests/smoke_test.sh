@@ -95,6 +95,15 @@ DOCTOR_OUT=$("$OMNI" doctor 2>&1 || true)
 check "doctor shows header" "$DOCTOR_OUT" "OMNI Doctor"
 check "doctor shows binary" "$DOCTOR_OUT" "Binary"
 
+# The env read behind OMNI_MCP_TOOLS cannot be covered by a cargo test: this crate
+# already mutates process environment in tests, cargo runs them in parallel, and that
+# combination has reddened CI here before. A subprocess has its own environment, so the
+# escape hatch is verified across the boundary that can actually be wrong.
+LEAN_OUT=$(OMNI_AGENT_ID=claude_code "$OMNI" doctor 2>&1 || true)
+check "doctor reports the lean MCP surface" "$LEAN_OUT" "9 of 25"
+ALL_OUT=$(OMNI_AGENT_ID=claude_code OMNI_MCP_TOOLS=all "$OMNI" doctor 2>&1 || true)
+check "OMNI_MCP_TOOLS=all restores every tool" "$ALL_OUT" "25 of 25"
+
 # ─── 4. PostToolUse Hook E2E ─────────────────────────────
 echo "▸ Scenario 4: PostToolUse Hook E2E"
 FIXTURE_CONTENT=$(cat tests/fixtures/git_diff_multi_file.txt)
