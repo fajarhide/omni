@@ -37,9 +37,7 @@ a file rather than a pipe for the same reason: piped into `sha256sum -c -`, a
 `grep` that matches nothing sends an empty stream, and Darwin's `sha256sum` reads
 that as success, so a mistyped target would install unverified. Through a file it
 is `grep`'s own exit code that gates the chain. On macOS the command is
-`shasum -a 256 -c omni.sha256`. There is a `curl … | bash` installer at
-`omni.weekndlabs.com/install` and it is deliberately not the instruction here:
-nothing about it is verifiable before it runs.
+`shasum -a 256 -c omni.sha256`.
 
 **Do not name a host you have not established you are running in.** With no
 terminal to draw its menu on, which is the case when an agent runs it, `omni init`
