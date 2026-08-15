@@ -140,10 +140,15 @@ pub enum FoldShift {
     /// Nothing survives below the fold, so no number moves. A whole-output fold
     /// and any fold reaching the end of the payload are this.
     None,
-    /// The fold starts at the first line and covers `lines` of them, replacing
-    /// them with one marker. Everything below is short by `lines - 1`, and a
-    /// caller that can move its starting number corrects all of it at once.
-    Leading { lines: usize },
+    /// The survivors are one block with folded lines above them. `bump` is what
+    /// the caller must add to its host's starting number so the first survivor
+    /// lands on the line the file gives it, and with it every line below.
+    ///
+    /// Not "folded lines minus one": adjacent runs of different origin emit one
+    /// marker each, so the number of lines standing above the survivors is the
+    /// number of markers, which is what this counts. Review found the earlier
+    /// arithmetic putting every survivor `k - 1` lines too high.
+    Leading { bump: usize },
     /// Content above the fold and content below it. Nothing can correct that,
     /// because one starting number cannot describe two different offsets.
     Interior,
@@ -159,7 +164,7 @@ impl FoldShift {
     /// That covers a fold at the head **and** one reaching the end in the same
     /// payload, which an earlier version of this classified as uncorrectable.
     /// Review caught it.
-    fn of(folded: &HashSet<usize>, total: usize) -> Self {
+    fn of(folded: &HashSet<usize>, total: usize, lines: &[&str], view: &str) -> Self {
         let survivors: Vec<usize> = (0..total).filter(|i| !folded.contains(i)).collect();
         let (Some(&first), Some(&last)) = (survivors.first(), survivors.last()) else {
             // Nothing survived, so nothing can be misnumbered.
@@ -171,9 +176,21 @@ impl FoldShift {
         if first == 0 {
             // The survivors still start where the payload does, so the numbers
             // the host will give them are already right.
-            Self::None
-        } else {
-            Self::Leading { lines: first }
+            return Self::None;
+        }
+        // How many lines the view puts above the survivors. Found by locating the
+        // surviving block, which the view carries verbatim, rather than by
+        // assuming one marker per fold: adjacent runs of different origin emit
+        // one marker each.
+        let block: String = lines[first..=last].concat();
+        let Some(at) = view.find(&block) else {
+            // The block is always present, but a projection that ever stopped
+            // being verbatim must not silently produce a wrong number.
+            return Self::Interior;
+        };
+        let markers_above = view[..at].lines().count();
+        Self::Leading {
+            bump: first.saturating_sub(markers_above),
         }
     }
 }
@@ -418,7 +435,7 @@ impl<'a> Ledger<'a> {
         // folded indices, where the answer is known.
         let shifts = projected
             .as_ref()
-            .map(|(_, folded)| FoldShift::of(folded, lines.len()))
+            .map(|(view, folded)| FoldShift::of(folded, lines.len(), &lines, view))
             .unwrap_or(FoldShift::None);
         projected.map(|(view, _)| (view, shifts))
     }

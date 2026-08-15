@@ -452,7 +452,7 @@ fn fold_cross_turn(
         // minus the marker's own line puts every surviving number back where the
         // file has it. Verified against live transcripts before relying on it: a
         // `Read` requested at offset 215 renders its first line as `215`.
-        Some((view, FoldShift::Leading { lines })) => (view, lines.saturating_sub(1)),
+        Some((view, FoldShift::Leading { bump })) => (view, bump),
         // Content above and below: one starting number cannot describe both.
         _ => (text, 0),
     }
@@ -3139,6 +3139,58 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert_eq!(
             file["startLine"], 129,
             "the middle block keeps numbers it is no longer at: {out}"
+        );
+    }
+
+    /// #572, review. Adjacent runs of different origin emit one marker each, so a
+    /// repeated head can stand as two lines rather than one. The bump is the
+    /// number of lines above the survivors, not the number of lines folded minus
+    /// one, and the earlier arithmetic put every survivor a line too high.
+    ///
+    /// Built by giving the project scope one half of the head and this session
+    /// the other, which is what makes the two runs differ in origin.
+    #[test]
+    fn a_head_folded_into_two_markers_bumps_by_two() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let payload = |sid: &str, from: usize, to: usize| {
+            json!({
+                "session_id": sid,
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // An earlier session saw the first half of the head, this one saw the
+        // second, so the two runs are adjacent and differently attributed.
+        let _ = process_payload(&payload("earlier", 100, 115), Some(store.clone()), None);
+        let _ = process_payload(&payload("current", 115, 130), Some(store.clone()), None);
+        let out = process_payload(&payload("current", 100, 200), Some(store.clone()), None)
+            .expect("the whole head repeats, so this folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let content = file["content"].as_str().expect("content");
+        let markers = content.matches("[OMNI:").count();
+        assert!(markers >= 1, "the repeated head was not folded: {out}");
+
+        // Thirty lines stood above the survivors and `markers` lines stand there
+        // now, so the host has to start counting that much later.
+        let expected = 100 + 30 - markers as u64;
+        assert_eq!(
+            file["startLine"], expected,
+            "{markers} marker line(s) above the survivors, so startLine should be \
+             {expected}: {out}"
         );
     }
 
