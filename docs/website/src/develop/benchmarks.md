@@ -87,8 +87,8 @@ Identical bytes into every arm. Versions: rtk 0.45.0, lean-ctx 3.9.18, caveman 1
 
 | | bytes | saved | claimed |
 |---|---|---:|---|
-| rtk `pipe` | 23,086,649 to 22,967,550 | **6.2%** | 623 of 5,984, marked a cut in 16 |
-| caveman `tools compress` | 23,086,649 to 21,702,637 | **6.8%** | 149 of 5,984, no command hint |
+| rtk `pipe` | 23,086,649 to 21,655,277 | **6.2%** | |
+| caveman `tools compress` | 23,086,649 to 21,516,757 | **6.8%** | |
 | omni, filters only | 23,086,649 to 15,557,823 | **32.6%** | |
 | lean-ctx `compress` | 23,086,649 to 11,678,975 | **49.4%** | 425 of 5,984 |
 | headroom dedup, our filters | 23,086,649 to 7,905,764 | **65.8%** | |
@@ -103,35 +103,6 @@ and nothing else.
 **lean-ctx beats our filters by 16.8 points**, 49.4% against 32.6%, over 425 calls to
 our 236. That is not argued away: this corpus is a few enormous repetitive payloads,
 which is exactly the shape a deep-and-narrow compressor is built for.
-
-**rtk reads 20.5% because its filters only fire on a command it recognises**, and this
-corpus is 89.5% commands it does not:
-
-| command | bytes | rtk filter |
-|---|---:|---|
-| `tail` | 9,558,272 | none |
-| `zsh` | 8,391,102 | none |
-| `cd` | 1,503,873 | none |
-| `cat` | 770,972 | none |
-| `export` | 429,265 | none |
-| `grep` | 410,575 | `grep` |
-
-Not a stale binary and not a broken arm: 0.45.0 is current, it claimed 623 calls, and
-the harness names are checked against rtk's own `resolve_filter`. Of its 25 filters we
-map 18; six of the rest have zero traces here, and `log` stays unmapped because rtk's
-own hook maps no command to it either.
-
-**Read our own rows with the most suspicion.** A corpus that hands OMNI a 32 point
-lead over rtk is evidence about the corpus. The ledger reads any payload; rtk's
-filters need a name they know, and on these bytes that difference is the whole result.
-
-Two things that tilt this **towards rtk**, stated because a benchmark listing only its
-own handicaps is an advertisement: it is handed the exact filter name its own hook
-must infer, and anything it has no filter for counts as passthrough rather than a
-miss. caveman gets less than either: no command hint at all.
-
-The counts are not like for like. rtk's is a mapped filter, saving or not. lean-ctx
-and caveman report no filter name, so theirs is an actual reduction.
 
 No `lean-ctx + our ledger` row: its preview reports `compressed_bytes` and never emits
 the text, so that row could only be estimated.
