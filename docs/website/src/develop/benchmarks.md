@@ -87,8 +87,8 @@ Identical bytes into every arm. Versions: rtk 0.45.0, lean-ctx 3.9.18, caveman 1
 
 | | bytes | saved | claimed |
 |---|---|---:|---|
-| rtk `pipe` | 23,086,649 to 22,967,550 | **20.5%** | 623 of 5,984, marked a cut in 16 |
-| caveman `tools compress` | 23,086,649 to 21,702,637 | **6.0%** | 149 of 5,984, no command hint |
+| rtk `pipe` | 23,086,649 to 22,967,550 | **6.2%** | 623 of 5,984, marked a cut in 16 |
+| caveman `tools compress` | 23,086,649 to 21,702,637 | **6.8%** | 149 of 5,984, no command hint |
 | omni, filters only | 23,086,649 to 15,557,823 | **32.6%** | |
 | lean-ctx `compress` | 23,086,649 to 11,678,975 | **49.4%** | 425 of 5,984 |
 | headroom dedup, our filters | 23,086,649 to 7,905,764 | **65.8%** | |
