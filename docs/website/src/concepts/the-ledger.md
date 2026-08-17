@@ -18,7 +18,7 @@ A run of consecutive lines that were all emitted earlier becomes one marker nami
 the count and a handle. Everything else passes through byte for byte.
 
 ```
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 It reaches the class nothing else can. File reads are the largest class in the
@@ -119,7 +119,7 @@ entirely new still writes its lines, and pays for itself the next time.
 ### Retrieve
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve <handle>
 ```
 
 An exact lookup on a content address. There is no candidate set, no ranking, no

@@ -350,3 +350,94 @@ fn the_scan_reaches_the_manual_and_the_readme() {
         "no commands found in any shell block, so the fence scan is broken"
     );
 }
+
+/// The handle `src/util/text.rs` reserves for worked examples.
+///
+/// Read out of the source rather than repeated here, for the reason
+/// `real_subcommands` gives: a second copy of a constant is the defect this file
+/// exists to catch, not a convenience.
+fn reserved_example_handle() -> String {
+    let src = std::fs::read_to_string(repo_root().join("src/util/text.rs")).expect("read text.rs");
+    let decl = src
+        .split_once("pub const EXAMPLE_HANDLE: &str = \"")
+        .expect("EXAMPLE_HANDLE was renamed or moved")
+        .1;
+    let handle = decl
+        .split_once('"')
+        .expect("EXAMPLE_HANDLE literal is unterminated")
+        .0
+        .to_string();
+    assert_eq!(handle.len(), 16, "a handle is 16 characters: {handle}");
+    handle
+}
+
+/// #583. A marker OMNI emitted and a marker printed as an example were
+/// byte-identical, and the examples were not even fake: four of the seven
+/// distinct handles in our source and manual still resolved on the maintainer's
+/// machine, the canonical one in 99 places. So neither way of asking whether
+/// OMNI folded anything worked, because grepping for the shape and resolving the
+/// handle both counted our own documentation.
+///
+/// One reserved value in every example is what makes the resolve check sound.
+/// This guard is here because the convention already existed in one file and had
+/// rotted everywhere else.
+#[test]
+fn every_worked_example_uses_the_reserved_handle() {
+    let reserved = reserved_example_handle();
+    let root = repo_root();
+
+    // Wider than `doc_files()` on purpose, and the extra roots are not padding.
+    // `i18n/` is the one that would have bitten: CONTRIBUTING requires a README
+    // change to reach all six translations, so an example added to the guarded
+    // README propagates into six unguarded files by policy. `plugins/` ships a
+    // skill file with `omni retrieve` in it, and `tests/` is where a fixture
+    // would go. None of the three carries a handle today, so this is a fence
+    // rather than a fix, which is the point of a guard (#588 review).
+    let mut files: Vec<PathBuf> = ["src", "tests", "i18n", "plugins"]
+        .iter()
+        .flat_map(|dir| walkdir::WalkDir::new(root.join(dir)).into_iter())
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "rs" || x == "md"))
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    files.extend(doc_files());
+    files.sort();
+    files.dedup();
+
+    let mut offenders = Vec::new();
+    let mut seen = 0usize;
+    for path in &files {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        // Line at a time, so a marker wrapped across two lines is invisible to
+        // this scan. No `omni retrieve` literal in the tree is broken that way
+        // today, and a scan over joined text would match prose that happens to
+        // end in those words. Stated rather than handled (#588 review).
+        for (n, line) in text.lines().enumerate() {
+            for (idx, _) in line.match_indices("omni retrieve ") {
+                let rest = &line[idx + "omni retrieve ".len()..];
+                let handle: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+                if handle.len() != 16 {
+                    continue;
+                }
+                seen += 1;
+                if handle != reserved {
+                    let rel = path.strip_prefix(&root).unwrap_or(path);
+                    offenders.push(format!("{}:{} {handle}", rel.display(), n + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        seen > 10,
+        "found only {seen} worked examples, so this scan is broken rather than clean"
+    );
+    assert!(
+        offenders.is_empty(),
+        "these examples use a handle that may resolve to real archived content, \
+         which is what defeats every check for whether OMNI ran (#583):\n  {}",
+        offenders.join("\n  ")
+    );
+}

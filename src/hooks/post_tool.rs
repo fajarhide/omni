@@ -1355,9 +1355,9 @@ mod tests {
     #[test]
     fn never_distils_the_command_that_undoes_distillation() {
         for cmd in [
-            "omni retrieve eb888d2874dfc9ab",
-            "/opt/homebrew/bin/omni retrieve eb888d2874dfc9ab",
-            "cd /tmp && omni retrieve eb888d2874dfc9ab",
+            "omni retrieve 0000000000000000",
+            "/opt/homebrew/bin/omni retrieve 0000000000000000",
+            "cd /tmp && omni retrieve 0000000000000000",
             "omni diff",
         ] {
             assert!(returns_archived_bytes(cmd), "{cmd} must pass through");
@@ -1407,7 +1407,7 @@ mod tests {
         );
 
         let retrieval = process_payload(
-            &payload("omni retrieve eb888d2874dfc9ab"),
+            &payload("omni retrieve 0000000000000000"),
             Some(store.clone()),
             None,
         );

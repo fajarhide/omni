@@ -5,11 +5,11 @@ SHA-256. The agent gets a marker carrying a 16 character handle, and the handle
 brings the original back byte for byte.
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve <handle>
 ```
 
 That works from any shell, in any session, on any host, and it does not re-run your

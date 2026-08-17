@@ -6,15 +6,15 @@ them is the difference between trusting the tool and suspecting it.
 ## The shapes
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 Content was cut and archived. The 16 characters are a handle:
-`omni retrieve 3f7bfd89bc5d7cee` prints the original back, byte for byte, from any
+`omni retrieve <handle>` prints the original back, byte for byte, from any
 shell in any session.
 
 ```
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 The ledger. These lines were emitted earlier **in this session**, so the claim is that
@@ -22,7 +22,7 @@ the agent is still holding them and the handle costs nothing unless it wants to
 re-read.
 
 ```
-[OMNI: 40 lines not shown here, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines not shown here, omni retrieve 0000000000000000]
 ```
 
 Also the ledger, different claim. These lines went to a **different session** of this
@@ -35,8 +35,8 @@ on the directory, so anything running in this repository contributes to it. See
 [what two agents share](../concepts/the-ledger.md#what-two-agents-in-one-repo-share).
 
 ```
-[OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
-[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve bc7e821a4340073e]
+[OMNI: identical to the 40 lines already shown, omni retrieve 0000000000000000]
+[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve 0000000000000000]
 ```
 
 The same two claims, for a reply that is repeated **in full**. When the fold covers
@@ -91,7 +91,7 @@ That is the pipeline working, not failing. It happens when:
 ## Getting content back
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve <handle>
 ```
 
 Works on every host, with or without MCP. Agents with the MCP server wired can call
@@ -100,3 +100,22 @@ Works on every host, with or without MCP. Agents with the MCP server wired can c
 One boundary a handle cannot promise: the archive is a rolling 30 day window, so
 `omni retrieve` on content older than that will not resolve. Verbatim traces are
 shorter still at seven days.
+
+## Telling a real marker from a printed one
+
+Markers appear in prose too. This page is full of them, so is OMNI's source, and so
+is any bug report that quotes one. That matters if you are measuring whether OMNI
+was active on a run, because searching a transcript for the marker shape will find
+the examples as readily as the folds.
+
+The handle is what separates them. Every worked example in this manual and in OMNI's
+own source uses one reserved value, `0000000000000000`, which no real fold can ever
+be assigned:
+
+```sh
+omni retrieve 0000000000000000   # exit 1, "the documentation example"
+omni retrieve <handle-you-found> # exit 0 if OMNI really folded it
+```
+
+So the exit code answers the question, and a marker copied out of documentation
+cannot be mistaken for evidence that anything was shortened.

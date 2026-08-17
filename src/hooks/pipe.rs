@@ -1008,7 +1008,7 @@ omni";
             &mut err,
             None,
             None,
-            Some("omni retrieve eb888d2874dfc9ab"),
+            Some("omni retrieve 0000000000000000"),
         )
         .expect("must succeed");
 

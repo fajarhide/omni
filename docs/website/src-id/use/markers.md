@@ -7,15 +7,15 @@ mencurigainya.
 ## Bentuk-bentuknya
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 Ada isi yang dipotong dan diarsipkan. Enam belas karakter itu sebuah handle:
-`omni retrieve 3f7bfd89bc5d7cee` mencetak aslinya kembali, persis byte demi byte,
+`omni retrieve <handle>` mencetak aslinya kembali, persis byte demi byte,
 dari shell mana pun di sesi mana pun.
 
 ```
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 Ledger. Baris-baris ini sudah dikeluarkan sebelumnya **di sesi ini**, jadi
@@ -23,7 +23,7 @@ klaimnya adalah agent masih memegangnya dan handle-nya tidak berongkos kecuali i
 memang mau membaca ulang.
 
 ```
-[OMNI: 40 lines not shown here, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines not shown here, omni retrieve 0000000000000000]
 ```
 
 Ledger juga, klaim berbeda. Baris-baris ini pergi ke **sesi lain** dari proyek
@@ -36,8 +36,8 @@ direktorinya, jadi apa pun yang berjalan di repositori ini ikut menyumbang. Liha
 [apa yang dibagi dua agent](../concepts/the-ledger.md#apa-yang-dibagi-dua-agent-dalam-satu-repo).
 
 ```
-[OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
-[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve bc7e821a4340073e]
+[OMNI: identical to the 40 lines already shown, omni retrieve 0000000000000000]
+[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve 0000000000000000]
 ```
 
 Dua klaim yang sama, untuk jawaban yang terulang **seluruhnya**. Ketika
@@ -95,7 +95,7 @@ keluarannya langsung. Itu pipeline yang bekerja, bukan gagal. Itu terjadi ketika
 ## Mengambil isinya kembali
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve <handle>
 ```
 
 Bekerja di semua host, dengan atau tanpa MCP. Agent yang server MCP-nya terpasang
@@ -104,3 +104,22 @@ bisa memanggil `omni_retrieve` sendiri tanpa bertanya ke Anda.
 Satu batas yang tidak bisa dijanjikan sebuah handle: arsipnya jendela bergulir 30
 hari, jadi `omni retrieve` atas isi yang lebih tua dari itu tidak akan ketemu.
 Jejak apa adanya bahkan lebih pendek, tujuh hari.
+
+## Membedakan penanda asli dari penanda yang sekadar dicetak
+
+Penanda juga muncul di dalam prosa. Halaman ini penuh dengannya, begitu pula source
+OMNI sendiri, dan begitu pula laporan bug mana pun yang mengutipnya. Itu penting
+ketika Anda mengukur apakah OMNI aktif pada suatu run, karena mencari bentuk penanda
+di dalam transkrip akan menemukan contohnya semudah menemukan lipatan aslinya.
+
+Handle-nya yang membedakan. Setiap contoh di manual ini dan di source OMNI memakai
+satu nilai cadangan, `0000000000000000`, yang tidak akan pernah diberikan kepada
+lipatan sungguhan:
+
+```sh
+omni retrieve 0000000000000000   # exit 1, "the documentation example"
+omni retrieve <handle-yang-Anda-temukan> # exit 0 jika OMNI benar-benar melipatnya
+```
+
+Jadi exit code-nya yang menjawab pertanyaan itu, dan penanda yang disalin dari
+dokumentasi tidak bisa disalahartikan sebagai bukti bahwa ada yang dipendekkan.

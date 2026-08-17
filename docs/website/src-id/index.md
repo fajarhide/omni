@@ -38,7 +38,7 @@ Yang dibaca agent Anda adalah ini:
 cargo test: 411 passed, 1 failed
   FAILED ledger::tests::renders_identical_bytes_for_identical_state
   assertion `left == right` failed at src/ledger/mod.rs:601
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 Kegagalannya selamat. 406 baris `ok` tidak. Dan handle di baris terakhir itu
@@ -58,7 +58,7 @@ dua-duanya.
 OMNI ingat. Bacaan kedua kembali sebagai satu baris:
 
 ```
-[OMNI: 178 lines already shown, omni retrieve 77a0c474f2e55351]
+[OMNI: 178 lines already shown, omni retrieve 0000000000000000]
 ```
 
 **Berkas 7,6 KB yang dibaca dua kali berharga 7,6 KB lalu 214 byte. Itu 97,2%
