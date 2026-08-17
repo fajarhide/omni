@@ -3,7 +3,7 @@
 Prints the content a marker archived.
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 The handle is the 16 characters inside a marker:

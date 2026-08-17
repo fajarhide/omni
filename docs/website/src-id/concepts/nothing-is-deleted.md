@@ -9,7 +9,7 @@ handle itu mengembalikan aslinya persis byte demi byte.
 ```
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 Itu jalan dari shell mana pun, di sesi mana pun, di host mana pun, dan ia tidak

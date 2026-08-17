@@ -119,7 +119,7 @@ entirely new still writes its lines, and pays for itself the next time.
 ### Retrieve
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 An exact lookup on a content address. There is no candidate set, no ranking, no

@@ -10,7 +10,7 @@ them is the difference between trusting the tool and suspecting it.
 ```
 
 Content was cut and archived. The 16 characters are a handle:
-`omni retrieve 0000000000000000` prints the original back, byte for byte, from any
+`omni retrieve <handle>` prints the original back, byte for byte, from any
 shell in any session.
 
 ```
@@ -91,7 +91,7 @@ That is the pipeline working, not failing. It happens when:
 ## Getting content back
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 Works on every host, with or without MCP. Agents with the MCP server wired can call

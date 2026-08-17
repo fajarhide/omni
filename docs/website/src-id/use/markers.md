@@ -11,7 +11,7 @@ mencurigainya.
 ```
 
 Ada isi yang dipotong dan diarsipkan. Enam belas karakter itu sebuah handle:
-`omni retrieve 0000000000000000` mencetak aslinya kembali, persis byte demi byte,
+`omni retrieve <handle>` mencetak aslinya kembali, persis byte demi byte,
 dari shell mana pun di sesi mana pun.
 
 ```
@@ -95,7 +95,7 @@ keluarannya langsung. Itu pipeline yang bekerja, bukan gagal. Itu terjadi ketika
 ## Mengambil isinya kembali
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 Bekerja di semua host, dengan atau tanpa MCP. Agent yang server MCP-nya terpasang

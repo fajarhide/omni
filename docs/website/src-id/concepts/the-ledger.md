@@ -131,7 +131,7 @@ sendiri di kesempatan berikutnya.
 ### Ambil kembali
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 Pencarian persis pada alamat isi. Tidak ada himpunan kandidat, tidak ada

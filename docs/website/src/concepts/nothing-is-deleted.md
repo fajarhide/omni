@@ -9,7 +9,7 @@ brings the original back byte for byte.
 ```
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 That works from any shell, in any session, on any host, and it does not re-run your

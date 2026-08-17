@@ -3,7 +3,7 @@
 Mencetak isi yang diarsipkan sebuah penanda.
 
 ```sh
-omni retrieve 0000000000000000
+omni retrieve <handle>
 ```
 
 Handle-nya adalah 16 karakter di dalam sebuah penanda:
