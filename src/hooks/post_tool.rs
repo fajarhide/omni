@@ -415,9 +415,10 @@ fn fold_cross_turn(
     normalized: &crate::hooks::normalize::NormalizedInput,
     text: String,
 ) -> (String, usize) {
-    let (Some(s), Some(scope)) = (store, normalized.host_session_id.as_deref()) else {
+    let (Some(s), Some(session)) = (store, normalized.host_session_id.as_deref()) else {
         return (text, 0);
     };
+    let scope = crate::ledger::scope_for(session, normalized.host_agent_id.as_deref());
     if crate::pipeline::format::sniff(&text).is_some() {
         return (text, 0);
     }
@@ -763,6 +764,9 @@ pub fn process_payload(
     // Scoping the ledger by that would let it tell a session it had already been
     // shown output that went to a different one, which is a false claim, not a
     // missed saving. No host id, no ledger.
+    //
+    // The host's subagent id joins it, because the session id alone is not one
+    // reader: Claude Code hands a subagent the parent's session id (#581).
     // What the **distiller** produced, taken before the ledger folds anything.
     //
     // These describe the distiller's cut and nothing else, and the rewind marker
@@ -775,9 +779,10 @@ pub fn process_payload(
     let distilled_lines = final_out.lines().count();
     let distilled_len = final_out.len();
 
-    if let (Some(s), Some(scope)) = (store.as_ref(), normalized.host_session_id.as_deref())
+    if let (Some(s), Some(session)) = (store.as_ref(), normalized.host_session_id.as_deref())
         && crate::pipeline::format::sniff(&final_out).is_none()
-        && let Some(view) = crate::ledger::Ledger::new(s, scope)
+        && let scope = crate::ledger::scope_for(session, normalized.host_agent_id.as_deref())
+        && let Some(view) = crate::ledger::Ledger::new(s, &scope)
             .with_project(crate::paths::project_key(std::path::Path::new(
                 &project_path,
             )))
@@ -3233,6 +3238,77 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             !out.contains("[OMNI:"),
             "a fold with content on both sides renumbered the lines under it: {out}"
         );
+    }
+
+    /// #581. Claude Code hands a subagent **the parent's** `session_id` and
+    /// distinguishes it only by a top-level `agent_id`, which the ledger did not
+    /// read. So a subagent's first read of a file the parent had read came back
+    /// as `identical to the 200 lines already shown`, about bytes that context
+    /// had never received.
+    ///
+    /// The fold itself is not the defect and is kept: the subagent still gets a
+    /// marker and a handle, now through the project scope, whose wording says
+    /// plainly that nothing was shown here (#567, #575). What changes is the
+    /// claim, not the saving.
+    #[test]
+    fn a_subagent_is_not_told_the_parents_bytes_were_already_shown() {
+        let (parent, sub) = two_reads_of_one_file("parent-session-581", Some("aca4e7ff"));
+
+        assert!(
+            !parent.contains("[OMNI:"),
+            "the parent's own first read must be delivered whole: {parent}"
+        );
+        assert!(
+            !sub.contains("already shown"),
+            "a subagent was told bytes it never received were already shown: {sub}"
+        );
+        assert!(
+            sub.contains("none shown here") || sub.contains("not shown here"),
+            "the subagent's fold must say the lines were not delivered here: {sub}"
+        );
+    }
+
+    /// The other half of #581, and the one a scope change would break silently:
+    /// the main agent has no `agent_id`, so its scope is unchanged and a repeat
+    /// inside one session still folds as `already shown`, which is true there.
+    #[test]
+    fn the_main_agent_still_folds_its_own_repeats_as_already_shown() {
+        let (_, second) = two_reads_of_one_file("solo-session-581", None);
+
+        assert!(
+            second.contains("already shown"),
+            "the session scope stopped folding for the reader that does hold the bytes: {second}"
+        );
+    }
+
+    /// Two `Read`s of one file, the second optionally by a subagent carrying the
+    /// same host session id. Returns what the host was handed each time.
+    fn two_reads_of_one_file(session: &str, agent: Option<&str>) -> (String, String) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // 200 distinct lines clears MIN_LEDGER_INPUT and the run gain; a shorter
+        // payload returns cleanly and would prove nothing.
+        let body: String = (0..200)
+            .map(|i| format!("2026-08-12T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+
+        let payload = |agent: Option<&str>| {
+            let mut v = json!({
+                "session_id": session,
+                "tool_name": "Read",
+                "tool_input": {"path": "notes.txt"},
+                "tool_response": {"content": body},
+            });
+            if let Some(a) = agent {
+                v["agent_id"] = json!(a);
+            }
+            v.to_string()
+        };
+
+        let first = process_payload(&payload(None), Some(store.clone()), None).unwrap_or_default();
+        let second =
+            process_payload(&payload(agent), Some(store.clone()), None).unwrap_or_default();
+        (first, second)
     }
 
     /// #557, review. An earlier guard read the output back and called any line

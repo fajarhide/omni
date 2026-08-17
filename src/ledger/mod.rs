@@ -206,6 +206,30 @@ impl FoldShift {
     }
 }
 
+/// The session scope for one reader, which is not the same as one session.
+///
+/// The scope answers "has this reader already been shown these bytes", and
+/// `Origin::Session`'s marker asserts exactly that. A subagent runs in its own
+/// context and carries **the parent's** `session_id`, so keying on the session
+/// alone answered a subagent with the parent's history and told it 200 lines
+/// were "already shown" when that context had received none of them (#581).
+///
+/// The main agent has no `agent_id`, so its scope is unchanged and no history is
+/// orphaned by this. What a subagent loses is only the parent's lines; its own
+/// repeats still fold under its own scope, and genuinely repeated project bytes
+/// still fold through the project scope, whose marker says "not shown here" and
+/// is honest for a reader that never held them (#567, #575).
+///
+/// This does not fix the other reader the premise fails for: after compaction
+/// the session id is unchanged and the context is gone, and nothing in the hook
+/// payload says so.
+pub fn scope_for(session: &str, agent: Option<&str>) -> String {
+    match agent {
+        Some(a) if !a.is_empty() => format!("{session}/{a}"),
+        _ => session.to_string(),
+    }
+}
+
 /// Addresses the ledger for one session, and optionally for its project.
 ///
 /// Cross-session repetition measures 3.7% of post-filter bytes against 19.1%
@@ -581,6 +605,22 @@ pub fn line_key(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #581. The main agent's scope has to stay the bare session id, byte for
+    /// byte. Composing it differently still folds correctly inside one run,
+    /// because both calls agree, so the hook-level tests cannot see a change
+    /// here. What it would break is an upgrade: rows written by the previous
+    /// binary are keyed on the bare id, and a new formula orphans them mid
+    /// session and silently stops folding against them.
+    #[test]
+    fn the_main_agents_scope_is_the_session_id_unchanged() {
+        assert_eq!(super::scope_for("sess-1", None), "sess-1");
+        assert_eq!(super::scope_for("sess-1", Some("")), "sess-1");
+        assert_eq!(
+            super::scope_for("sess-1", Some("agent-9")),
+            "sess-1/agent-9"
+        );
+    }
+
     use super::*;
 
     fn temp_store() -> (Store, tempfile::TempDir) {

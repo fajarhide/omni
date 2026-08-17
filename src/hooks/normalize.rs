@@ -54,6 +54,21 @@ pub struct NormalizedInput {
     /// payload carries no such key (pipe mode, Aider, older hosts), and the
     /// caller falls back to the local id rather than losing the row.
     pub host_session_id: Option<String>,
+    /// The host's subagent identifier, read from the payload's top-level
+    /// `agent_id`, and `None` when the main agent made the call.
+    ///
+    /// Not to be confused with `agent_id` above, which names the host family
+    /// (`claude_code`, `codex_cli`) and is detected rather than parsed.
+    ///
+    /// Claude Code gives a subagent **the parent's `session_id`** and
+    /// distinguishes it only here. Verified two ways on 2026-08-17: a sidechain
+    /// transcript carries the parent's `sessionId`, and the CLI builds every
+    /// hook payload as `{session_id, transcript_path, cwd, prompt_id,
+    /// permission_mode, agent_id, agent_type, effort}` with `agent_id` unset for
+    /// the main agent. Without this the ledger's session scope answers a
+    /// subagent with the parent's history and claims "already shown" about bytes
+    /// that context never received (#581).
+    pub host_agent_id: Option<String>,
 }
 
 /// Detect agent format dari raw JSON string
@@ -139,6 +154,7 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
     // is top-level metadata beside `tool_name`, so it does not vary with the
     // tool-payload shape those functions exist to tell apart.
     normalized.host_session_id = extract_host_session_id(input);
+    normalized.host_agent_id = extract_top_level_str(input, "agent_id", "agentId");
     Some(normalized)
 }
 
@@ -147,10 +163,15 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
 /// Both spellings are accepted for the same reason `hooks::session_start` accepts
 /// both: the hosts disagree, and guessing one costs the grouping silently.
 fn extract_host_session_id(input: &str) -> Option<String> {
+    extract_top_level_str(input, "session_id", "sessionId")
+}
+
+/// One top-level string key, under either spelling the hosts use.
+fn extract_top_level_str(input: &str, snake: &str, camel: &str) -> Option<String> {
     let value: Value = serde_json::from_str(input).ok()?;
     let obj = value.as_object()?;
-    obj.get("session_id")
-        .or_else(|| obj.get("sessionId"))
+    obj.get(snake)
+        .or_else(|| obj.get(camel))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -333,6 +354,7 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         raw_response: parsed.tool_response,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
@@ -432,6 +454,7 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
@@ -494,6 +517,7 @@ fn normalize_opencode(input: &str, agent_id: String) -> Option<NormalizedInput> 
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
@@ -568,6 +592,7 @@ fn normalize_vscode_continue(input: &str, agent_id: String) -> Option<Normalized
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
@@ -612,6 +637,7 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
@@ -634,6 +660,7 @@ fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
@@ -676,6 +703,7 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
+        host_agent_id: None,
     })
 }
 
