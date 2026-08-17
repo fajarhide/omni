@@ -17,27 +17,16 @@ brew install fajarhide/tap/omni
 omni init
 ```
 
-Without Homebrew, take the release archive and check it against the `SHA256SUMS`
-published beside it, then put the binary on the path:
-
-```
-V=0.7.5; T=x86_64-unknown-linux-musl   # or aarch64-unknown-linux-musl, *-apple-darwin
-B=https://github.com/fajarhide/omni/releases/download/v$V
-curl -fsSLO $B/omni-v$V-$T.tar.gz -O $B/SHA256SUMS
-grep " omni-v$V-$T.tar.gz\$" SHA256SUMS > omni.sha256 &&
-  sha256sum -c omni.sha256 &&
-  tar xzf omni-v$V-$T.tar.gz &&
-  install -m755 omni ~/.local/bin/omni
-```
-
-`sha256sum -c` exits non-zero on a mismatch and the `&&` carries that into the
-next command; on its own line the untar would run anyway, since a shell pasting
-these does not stop on a failure unless it was told to. The checksum goes through
-a file rather than a pipe for the same reason: piped into `sha256sum -c -`, a
-`grep` that matches nothing sends an empty stream, and Darwin's `sha256sum` reads
-that as success, so a mistyped target would install unverified. Through a file it
-is `grep`'s own exit code that gates the chain. On macOS the command is
-`shasum -a 256 -c omni.sha256`.
+Without Homebrew, take the release archive for the platform from
+<https://github.com/fajarhide/omni/releases>, pull the line for that archive out
+of the `SHA256SUMS` published beside it into a file of its own, and verify it
+with `sha256sum -c <that file>`, or `shasum -a 256 -c <that file>` on macOS.
+Then untar and put the binary on the path. Two things decide whether the check is
+worth anything. The manifest line has to reach the tool as a file rather than a
+pipe, because a `grep` that matches nothing sends an empty stream and macOS reads
+that as a pass, so a mistyped archive name would install unverified. And the
+verification has to gate the untar with `&&`, because a shell running pasted
+lines carries on past a failed one.
 
 **Do not name a host you have not established you are running in.** With no
 terminal to draw its menu on, which is the case when an agent runs it, `omni init`
