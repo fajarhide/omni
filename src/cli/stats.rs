@@ -403,33 +403,27 @@ fn run_context_stats(store: &Store) -> Result<()> {
             "Commands (Turns):".bright_black(),
             format_number(session.command_count as u64).cyan()
         );
-        // #589. The rest of this report moved to counted bytes. This block
-        // cannot: `pre_tool.rs:188` accumulates `size_bytes / 4` from file
-        // metadata, so there is no measured byte total behind it and a fourth
-        // of a file's size is not a Claude token count. Labelled rather than
-        // converted, and the label is the whole fix here.
+        // #589. This block was labelled a rough estimate because it accumulated
+        // `size_bytes / 4`. It accumulates the sizes themselves now, so the
+        // label goes with the estimator: a file's length and a delivered
+        // payload's length are both counted, and neither needs a caveat.
+        println!("\n  {}", "Context Breakdown:".bold().bright_white());
         println!(
-            "\n  {}",
-            "Token Breakdown (rough estimate, bytes over 4):"
-                .bold()
-                .bright_white()
-        );
-        println!(
-            "    {:<25} ~{} tokens",
+            "    {:<25} {}",
             "File Reads:".bright_black(),
-            format_exact_tokens(turn.file_read_tokens).yellow()
+            format_bytes(turn.file_read_bytes).yellow()
         );
         println!(
-            "    {:<25} ~{} tokens",
+            "    {:<25} {}",
             "Tool Outputs:".bright_black(),
-            format_exact_tokens(turn.tool_output_tokens).green()
+            format_bytes(turn.tool_output_bytes).green()
         );
 
-        let est_total = turn.file_read_tokens + turn.tool_output_tokens;
+        let total = turn.file_read_bytes + turn.tool_output_bytes;
         println!(
-            "\n  {:<27} ~{} tokens",
-            "Estimated Context Total:".bold().bright_white(),
-            format_exact_tokens(est_total).bright_cyan()
+            "\n  {:<27} {}",
+            "Context Total:".bold().bright_white(),
+            format_bytes(total).bright_cyan()
         );
 
         if turn.has_duplicate_file_reads {
@@ -446,10 +440,10 @@ fn run_context_stats(store: &Store) -> Result<()> {
 
         if turn.largest_single_read.1 > 0 {
             println!(
-                "\n  {:<27} {} ({} tokens)",
+                "\n  {:<27} {} ({})",
                 "Largest File Read:".bright_black(),
                 turn.largest_single_read.0.cyan(),
-                format_exact_tokens(turn.largest_single_read.1).yellow()
+                format_bytes(turn.largest_single_read.1).yellow()
             );
         }
     } else {
@@ -489,11 +483,12 @@ fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
         return Ok(None);
     }
 
-    let (saved, total) = if raw_tok > 0 {
-        (raw_tok.saturating_sub(filt_tok), raw_tok)
-    } else {
-        (input.saturating_sub(output), input)
-    };
+    // #589. One arm, and it is the counted one. The `raw_tok` branch reported the
+    // same quantity over 3.6 and made the card's unit depend on whether the rows
+    // happened to carry a token column, so two installs could publish the same
+    // saving under different words.
+    let (saved, total) = (input.saturating_sub(output), input);
+    let _ = (raw_tok, filt_tok);
     Ok(Some(ShareFigures {
         saved,
         pct: if total > 0 {
@@ -501,7 +496,7 @@ fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
         } else {
             0.0
         },
-        unit: if raw_tok > 0 { "tokens" } else { "bytes" },
+        unit: "bytes",
         calls,
         top: get_top_commands(store, 0, 3),
     }))
@@ -1766,6 +1761,30 @@ mod tests {
                 "{w}x{h} overflows: {body}px body over {widest} chars"
             );
         }
+    }
+
+    /// #589, the last of it. The context breakdown accumulated `size_bytes / 4`
+    /// and was labelled a rough estimate because of it. It counts the sizes now,
+    /// so `format_exact_tokens` must not come back to this block: a file length
+    /// is measured, and dividing it by four to call the result tokens is the
+    /// defect this issue is named for.
+    #[test]
+    fn the_context_breakdown_reports_the_sizes_it_counted() {
+        let turn = crate::analytics::context_composition::ContextTurn {
+            file_read_bytes: 137_000,
+            tool_output_bytes: 74_000,
+            ..Default::default()
+        };
+
+        // 137,000 B is 133.8 KB and 74,000 B is 72.3 KB by `format_bytes`,
+        // written out from its rules rather than by calling it.
+        assert_eq!(format_bytes(turn.file_read_bytes), "133.8 KB");
+        assert_eq!(format_bytes(turn.tool_output_bytes), "72.3 KB");
+        assert_ne!(
+            format_bytes(turn.file_read_bytes),
+            format_exact_tokens(turn.file_read_bytes / 4),
+            "the breakdown went back to a quarter of a file's size called tokens"
+        );
     }
 
     /// #589. The alignment test beside this one does not guard the unit: it

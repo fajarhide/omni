@@ -1039,7 +1039,7 @@ pub fn process_payload(
                 state.current_turn.session_id = state.session_id.clone();
                 state.current_turn.turn_number = state.command_count;
                 state.current_turn.timestamp = chrono::Utc::now().timestamp();
-                state.current_turn.tool_output_tokens += result.filtered_tokens as u64;
+                state.current_turn.tool_output_bytes += result.delivered_bytes as u64;
 
                 // L1-02: Increment loop iteration budget
                 state.loop_context.budget_used += result.filtered_tokens as u64;

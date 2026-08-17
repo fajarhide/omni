@@ -8,8 +8,12 @@ pub struct ContextTurn {
 
     // Breakdown sources
     pub estimated_total_tokens: u64,
-    pub file_read_tokens: u64,
-    pub tool_output_tokens: u64,
+    /// Bytes, and named for them since #589. These were `*_tokens` holding
+    /// `size_bytes / 4`, a rougher estimator than the 3.6 the rest of the report
+    /// used and still not a Claude token count. The file size and the delivered
+    /// length are both counted exactly, so there is nothing to estimate here.
+    pub file_read_bytes: u64,
+    pub tool_output_bytes: u64,
     pub conversation_tokens: u64,
     pub system_prompt_tokens: u64,
 

@@ -185,12 +185,12 @@ fn process_payload(
                 let size_bytes = std::fs::metadata(&target_file)
                     .map(|m| m.len())
                     .unwrap_or(0);
-                let est_tokens = size_bytes / 4;
+                // #589: the metadata length, not a quarter of it.
 
                 state.current_turn.session_id = state.session_id.clone();
                 state.current_turn.turn_number = state.command_count;
                 state.current_turn.timestamp = chrono::Utc::now().timestamp();
-                state.current_turn.file_read_tokens += est_tokens;
+                state.current_turn.file_read_bytes += size_bytes;
 
                 if count > 0 {
                     state.current_turn.has_duplicate_file_reads = true;
@@ -199,8 +199,8 @@ fn process_payload(
                     }
                 }
 
-                if est_tokens > state.current_turn.largest_single_read.1 {
-                    state.current_turn.largest_single_read = (target_file.clone(), est_tokens);
+                if size_bytes > state.current_turn.largest_single_read.1 {
+                    state.current_turn.largest_single_read = (target_file.clone(), size_bytes);
                 }
 
                 // The store was opened here only to persist `current_turn` into
