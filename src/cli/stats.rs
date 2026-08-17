@@ -63,8 +63,12 @@ fn format_number(n: u64) -> String {
 struct PeriodRow<'a> {
     label: &'a str,
     count: u64,
-    raw_tokens: u64,
-    filtered_tokens: u64,
+    /// Bytes, which `distillations` counts exactly. This column used to hold a
+    /// token figure that was these same bytes over 3.6, a constant calibrated
+    /// against `cl100k_base` (#589). The percentage beside it is unaffected
+    /// either way, since the divisor cancels in a ratio.
+    raw_bytes: u64,
+    filtered_bytes: u64,
     reduction_pct: f64,
 }
 
@@ -76,13 +80,10 @@ struct PeriodRow<'a> {
 fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
     let labels: Vec<String> = rows.iter().map(|r| format!("{}:", r.label)).collect();
     let counts: Vec<String> = rows.iter().map(|r| format_number(r.count)).collect();
-    let inputs: Vec<String> = rows
-        .iter()
-        .map(|r| format_exact_tokens(r.raw_tokens))
-        .collect();
+    let inputs: Vec<String> = rows.iter().map(|r| format_bytes(r.raw_bytes)).collect();
     let outputs: Vec<String> = rows
         .iter()
-        .map(|r| format_exact_tokens(r.filtered_tokens))
+        .map(|r| format_bytes(r.filtered_bytes))
         .collect();
 
     let w_label = max_width(&labels).max(12);
@@ -102,7 +103,7 @@ fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
                 pct.bright_red()
             };
             format!(
-                "  {:<w_label$} {:>w_count$} commands │ {:>w_in$} → {:<w_out$} tokens │  {}",
+                "  {:<w_label$} {:>w_count$} commands │ {:>w_in$} → {:<w_out$} │  {}",
                 labels[i].as_str().bright_white().bold(),
                 counts[i].as_str().cyan(),
                 inputs[i].as_str().red(),
@@ -162,23 +163,14 @@ pub(crate) fn group_and_calculate_stats(
                 0.0
             };
 
-            let tokens_saved = if raw_tok > 0 {
-                raw_tok.saturating_sub(filt_tok)
-            } else if input > 0 {
-                let r = crate::util::token_estimate::estimate_tokens(
-                    input as usize,
-                    crate::util::token_estimate::ContentHint::Mixed,
-                );
-                let f = crate::util::token_estimate::estimate_tokens(
-                    output as usize,
-                    crate::util::token_estimate::ContentHint::Mixed,
-                );
-                r.saturating_sub(f) as u64
-            } else {
-                0
-            };
+            // #589. Bytes, counted. This was the token columns when they were
+            // present and an `estimate_tokens` call over these same bytes when
+            // they were not, so both arms produced the same quantity over 3.6, a
+            // constant calibrated against `cl100k_base`. The subtraction is the
+            // whole of it now, and the fallback disappears with the estimator.
+            let bytes_saved = input.saturating_sub(output);
 
-            (cmd, calls, pct, tokens_saved)
+            (cmd, calls, pct, bytes_saved)
         })
         .collect();
 
@@ -310,7 +302,7 @@ fn has(args: &[String], names: &[&str]) -> bool {
 
 fn print_help() {
     println!(
-        "\n{} {}: Token savings analytics",
+        "\n{} {}: Savings analytics",
         "omni".bold().cyan(),
         "stats".bold().yellow()
     );
@@ -411,21 +403,31 @@ fn run_context_stats(store: &Store) -> Result<()> {
             "Commands (Turns):".bright_black(),
             format_number(session.command_count as u64).cyan()
         );
-        println!("\n  {}", "Token Breakdown:".bold().bright_white());
+        // #589. The rest of this report moved to counted bytes. This block
+        // cannot: `pre_tool.rs:188` accumulates `size_bytes / 4` from file
+        // metadata, so there is no measured byte total behind it and a fourth
+        // of a file's size is not a Claude token count. Labelled rather than
+        // converted, and the label is the whole fix here.
         println!(
-            "    {:<25} {} tokens",
+            "\n  {}",
+            "Token Breakdown (rough estimate, bytes over 4):"
+                .bold()
+                .bright_white()
+        );
+        println!(
+            "    {:<25} ~{} tokens",
             "File Reads:".bright_black(),
             format_exact_tokens(turn.file_read_tokens).yellow()
         );
         println!(
-            "    {:<25} {} tokens",
+            "    {:<25} ~{} tokens",
             "Tool Outputs:".bright_black(),
             format_exact_tokens(turn.tool_output_tokens).green()
         );
 
         let est_total = turn.file_read_tokens + turn.tool_output_tokens;
         println!(
-            "\n  {:<27} {} tokens",
+            "\n  {:<27} ~{} tokens",
             "Estimated Context Total:".bold().bright_white(),
             format_exact_tokens(est_total).bright_cyan()
         );
@@ -881,15 +883,12 @@ fn run_default(store: &Store) -> Result<()> {
         .iter()
         .filter(|(label, count, ..)| *count > 0 || label == "All Time")
         .map(
-            |(label, count, input, output, raw_tokens, filtered_tokens)| PeriodRow {
+            |(label, count, input, output, _raw_tokens, _filtered_tokens)| PeriodRow {
                 label,
                 count: *count,
-                raw_tokens: *raw_tokens,
-                filtered_tokens: *filtered_tokens,
-                reduction_pct: if *raw_tokens > 0 {
-                    100.0 * (1.0 - *filtered_tokens as f64 / *raw_tokens as f64)
-                } else if *input > 0 {
-                    // Fallback for legacy records that haven't been backfilled properly
+                raw_bytes: *input,
+                filtered_bytes: *output,
+                reduction_pct: if *input > 0 {
                     100.0 * (1.0 - *output as f64 / *input as f64)
                 } else {
                     0.0
@@ -939,7 +938,7 @@ fn run_default(store: &Store) -> Result<()> {
                 .iter()
                 .map(|(_, count, _, _)| count.to_string()),
         );
-        for (cmd, count, pct, tokens_saved) in &top_commands {
+        for (cmd, count, pct, bytes_saved) in &top_commands {
             let short_cmd = shorten_command(cmd, 18);
             let bar = format_bar_with_empty(*pct);
             let bar_colored = if *pct > 80.0 {
@@ -950,8 +949,8 @@ fn run_default(store: &Store) -> Result<()> {
                 bar.bright_red()
             };
 
-            let tokens_str = if *tokens_saved > 0 {
-                format!("(-{} tokens)", format_exact_tokens(*tokens_saved)).bright_black()
+            let tokens_str = if *bytes_saved > 0 {
+                format!("(-{})", format_bytes(*bytes_saved)).bright_black()
             } else {
                 "".bright_black()
             };
@@ -1193,7 +1192,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             "Agent".bright_black(),
             "Count".bright_black(),
             "Saved".bright_black(),
-            "Tokens".bright_black(),
+            "Saved".bright_black(),
             "Signal".bright_black(),
             w_cmd = CMD_KEY_WIDTH
         );
@@ -1202,7 +1201,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             super::column_rule(&[3, CMD_KEY_WIDTH, 11, 5, 6, 6, DETAIL_BAR]).bright_black()
         );
 
-        for (i, (name, cnt, pct, tokens_saved)) in display_filters.iter().enumerate() {
+        for (i, (name, cnt, pct, bytes_saved)) in display_filters.iter().enumerate() {
             let bar = format_bar(*pct, DETAIL_BAR);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
@@ -1229,8 +1228,8 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 // already says why those two facts must not be folded (#471).
                 .unwrap_or("Unknown");
 
-            let tokens_str = if *tokens_saved > 0 {
-                format!("-{}", format_exact_tokens(*tokens_saved))
+            let tokens_str = if *bytes_saved > 0 {
+                format!("-{}", format_bytes(*bytes_saved))
             } else {
                 String::new()
             };
@@ -1445,7 +1444,10 @@ pub struct CommandStat {
     pub command: String,
     pub count: u64,
     pub savings_pct: f64,
-    pub tokens_saved: u64,
+    /// Bytes, and named for it since #589. It briefly held bytes under the old
+    /// name, which is a machine-readable surface asserting the wrong unit, and
+    /// that is the defect this issue is about rather than a cosmetic one.
+    pub bytes_saved: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -1509,11 +1511,11 @@ fn run_json(store: &Store) -> Result<()> {
 
     let commands_json: Vec<CommandStat> = top_commands
         .iter()
-        .map(|(cmd, count, pct, tokens_saved)| CommandStat {
+        .map(|(cmd, count, pct, bytes_saved)| CommandStat {
             command: cmd.clone(),
             count: *count,
             savings_pct: *pct,
-            tokens_saved: *tokens_saved,
+            bytes_saved: *bytes_saved,
         })
         .collect();
 
@@ -1766,6 +1768,36 @@ mod tests {
         }
     }
 
+    /// #589. The alignment test beside this one does not guard the unit: it
+    /// stayed green with the byte formatter replaced by raw digits, which is how
+    /// this hole was found. The period summary used to print a byte count over
+    /// 3.6 and call it tokens, so what needs pinning is that the column carries
+    /// a counted unit and not a derived one.
+    #[test]
+    fn the_period_summary_reports_bytes_and_not_a_derived_unit() {
+        let rows = [PeriodRow {
+            label: "Today",
+            count: 118,
+            raw_bytes: 137_000,
+            filtered_bytes: 74_000,
+            reduction_pct: 46.0,
+        }];
+
+        let line = format_period_rows(&rows).join("\n");
+
+        // 137,000 B is 133.8 KB by `format_bytes`, written out by hand from its
+        // rules rather than by calling it.
+        assert!(
+            line.contains("133.8 KB") && line.contains("72.3 KB"),
+            "the summary must print the bytes it counted: {line}"
+        );
+        assert!(
+            !line.contains("tokens"),
+            "the summary went back to a unit calibrated against another vendor's \
+             tokenizer: {line}"
+        );
+    }
+
     #[test]
     fn aligns_period_columns_across_mixed_number_widths() {
         // Arrange: the widths that broke the old hardcoded layout, a 3-digit
@@ -1774,22 +1806,22 @@ mod tests {
             PeriodRow {
                 label: "Today",
                 count: 118,
-                raw_tokens: 137_000,
-                filtered_tokens: 74_000,
+                raw_bytes: 137_000,
+                filtered_bytes: 74_000,
                 reduction_pct: 46.2,
             },
             PeriodRow {
                 label: "This Week",
                 count: 1_218,
-                raw_tokens: 10_200_000,
-                filtered_tokens: 647_000,
+                raw_bytes: 10_200_000,
+                filtered_bytes: 647_000,
                 reduction_pct: 93.6,
             },
             PeriodRow {
                 label: "All Time",
                 count: 5_047,
-                raw_tokens: 21_200_000,
-                filtered_tokens: 4_800_000,
+                raw_bytes: 21_200_000,
+                filtered_bytes: 4_800_000,
                 reduction_pct: 77.2,
             },
         ];
@@ -1798,7 +1830,8 @@ mod tests {
         let lines = format_period_rows(&rows);
 
         // Assert: every row starts its labels at the same offset.
-        for word in ["commands", "tokens", "saved"] {
+        // `tokens` left this line with #589; the columns it aligned are still here.
+        for word in ["commands", "saved"] {
             let offsets: Vec<_> = lines
                 .iter()
                 .map(|l| l.find(word).unwrap_or_else(|| panic!("{word} missing")))

@@ -3478,6 +3478,57 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
+    /// #586, review on #594. The hooks page first said the reply mirrors whatever
+    /// shape arrived. That is true for the wrapped `Read` and false for the bare
+    /// one, which comes back in OMNI's own `{status, result}` shape. I asserted
+    /// it after testing only the request side, which is the exact failure #187
+    /// is about: a contract crossed and checked on one side.
+    ///
+    /// Pinned here so the corrected sentence cannot drift from the code again.
+    #[test]
+    fn each_read_shape_gets_the_reply_the_manual_promises() {
+        let body: String = (0..200)
+            .map(|i| format!("2026-08-12T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        let reply_keys = |wrapped: bool| {
+            let response = if wrapped {
+                json!({"file": {"filePath": "notes.txt", "content": body,
+                                "startLine": 1, "numLines": 200, "totalLines": 200}})
+            } else {
+                json!({"content": body})
+            };
+            let payload = json!({
+                "session_id": "shape-586",
+                "tool_name": "Read",
+                "tool_input": {"path": "notes.txt"},
+                "tool_response": response,
+            })
+            .to_string();
+
+            let dir = tempfile::tempdir().expect("tempdir");
+            let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+            let _ = process_payload(&payload, Some(store.clone()), None);
+            let out = process_payload(&payload, Some(store.clone()), None).unwrap_or_default();
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap_or(json!({}));
+            let updated = v["hookSpecificOutput"]["updatedToolOutput"].clone();
+            updated
+                .as_object()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+
+        assert_eq!(
+            reply_keys(true),
+            vec!["file".to_string()],
+            "a wrapped Read must come back in the host's own shape"
+        );
+        let bare = reply_keys(false);
+        assert!(
+            bare.contains(&"result".to_string()) && !bare.contains(&"file".to_string()),
+            "the manual now says a bare Read replies in OMNI's shape, got {bare:?}"
+        );
+    }
+
     /// #557, review. An earlier guard read the output back and called any line
     /// starting with `[OMNI:` a marker, so a file whose own lines start that way
     /// defeated it. This repository writes those strings into its changelog and
