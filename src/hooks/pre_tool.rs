@@ -185,12 +185,12 @@ fn process_payload(
                 let size_bytes = std::fs::metadata(&target_file)
                     .map(|m| m.len())
                     .unwrap_or(0);
-                let est_tokens = size_bytes / 4;
+                // #589: the metadata length, not a quarter of it.
 
                 state.current_turn.session_id = state.session_id.clone();
                 state.current_turn.turn_number = state.command_count;
                 state.current_turn.timestamp = chrono::Utc::now().timestamp();
-                state.current_turn.file_read_tokens += est_tokens;
+                state.current_turn.file_read_bytes += size_bytes;
 
                 if count > 0 {
                     state.current_turn.has_duplicate_file_reads = true;
@@ -199,8 +199,8 @@ fn process_payload(
                     }
                 }
 
-                if est_tokens > state.current_turn.largest_single_read.1 {
-                    state.current_turn.largest_single_read = (target_file.clone(), est_tokens);
+                if size_bytes > state.current_turn.largest_single_read.1 {
+                    state.current_turn.largest_single_read = (target_file.clone(), size_bytes);
                 }
 
                 // The store was opened here only to persist `current_turn` into
@@ -328,6 +328,45 @@ fn extract_target_file(cmd: &str) -> Option<String> {
                 .map(|s| s.to_string())
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod context_breakdown_589 {
+    use super::*;
+
+    /// #589. The display guard in `cli/stats.rs` only checks how the number is
+    /// printed, so quartering the file size again left the whole suite green.
+    /// Found by break-testing rather than by reading, which is why the
+    /// accumulation gets its own assertion: what has to be true is that the turn
+    /// holds the size the file really is.
+    #[test]
+    fn a_read_adds_the_files_real_size_to_the_turn() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("notes.txt");
+        let body = "x".repeat(4_096);
+        std::fs::write(&path, &body).expect("write fixture");
+        let on_disk = std::fs::metadata(&path).expect("metadata").len();
+        assert_eq!(
+            on_disk, 4_096,
+            "the fixture is not the size the test assumes"
+        );
+
+        let session = Arc::new(Mutex::new(crate::pipeline::SessionState::new()));
+        let payload = serde_json::json!({
+            "session_id": "breakdown-589",
+            "tool_name": "Bash",
+            "tool_input": {"command": format!("cat {}", path.display())},
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(session.clone()));
+
+        let recorded = session.lock().expect("lock").current_turn.file_read_bytes;
+        assert_eq!(
+            recorded, on_disk,
+            "the turn recorded a derived figure rather than the size it measured"
+        );
     }
 }
 

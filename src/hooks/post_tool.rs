@@ -1039,7 +1039,7 @@ pub fn process_payload(
                 state.current_turn.session_id = state.session_id.clone();
                 state.current_turn.turn_number = state.command_count;
                 state.current_turn.timestamp = chrono::Utc::now().timestamp();
-                state.current_turn.tool_output_tokens += result.filtered_tokens as u64;
+                // Recorded after the safety truncation below, not here (#595 review).
 
                 // L1-02: Increment loop iteration budget
                 state.loop_context.budget_used += result.filtered_tokens as u64;
@@ -1102,6 +1102,44 @@ pub fn process_payload(
         crate::guard::limits::MAX_OUTPUT_BYTES,
         |dropped| store.as_ref().and_then(|s| s.store_rewind(dropped)),
     );
+
+    // The breakdown counts what the agent was handed, which is neither the
+    // distiller's product nor always this function's own output.
+    //
+    // Two ways to get it wrong and review on #595 found both. Reading
+    // `delivered_bytes` before the cap overstated every payload the truncation
+    // cut. Reading `final_out` after it understates a passthrough, because that
+    // arm returns `None` a few lines below and the host keeps its **original**
+    // bytes, untruncated. The condition here is the same one that decides the
+    // return, and it is the `delivered` distinction #566 already drew for the
+    // accounting columns.
+    if let Some(ref sess) = session
+        && let Ok(mut state) = sess.lock()
+    {
+        // `content` is normalize's flattened view, so on a payload carrying both
+        // streams it includes the `\n[stderr]\n` separator this code invented,
+        // 10 bytes the host's structured response does not hold. Measured on
+        // this installation: 896 of 9,267 traces carry both streams, so the
+        // overcount is 10 B on 9.7% of calls.
+        //
+        // The same gap runs the other way past `trim_enormous`: a payload over
+        // its 2 MB cap is shortened before this line, so this would understate
+        // it. Never reached here, 0 of 9,267 traces exceed 2 MB and the largest
+        // on record is 820,000 B, 39% of the cap.
+        //
+        // Both are known and left, because the alternative is the serialised
+        // `raw_response`, which is not what the host renders either and would
+        // trade one approximation for another without being able to say which
+        // is closer (#595 review). What this line is, precisely: the flattened
+        // view's length, which equals what the host kept except for a separator
+        // this code added and a cap nothing has crossed.
+        let handed_over = if route == Route::Passthrough && !redacted_here {
+            content.len()
+        } else {
+            final_out.len()
+        };
+        state.current_turn.tool_output_bytes += handed_over as u64;
+    }
 
     // A passthrough hands back exactly what the command produced, so there is
     // nothing to replace. Emitting those identical bytes with a marker on top
@@ -3526,6 +3564,50 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(
             bare.contains(&"result".to_string()) && !bare.contains(&"file".to_string()),
             "the manual now says a bare Read replies in OMNI's shape, got {bare:?}"
+        );
+    }
+
+    /// #595 review. The breakdown counts what the model was handed, and a
+    /// passthrough is the case where that is not this function's own output:
+    /// it returns `None` and the host keeps its original bytes. Recording the
+    /// post-cap `final_out` there understated exactly the payloads big enough
+    /// for the cap to matter.
+    #[test]
+    fn a_passthrough_counts_the_bytes_the_host_kept() {
+        // Incompressible, so the route really is a passthrough, and **over**
+        // `MAX_OUTPUT_BYTES`, which is the whole point: under the cap
+        // `final_out` and the host's own bytes are the same string and the
+        // assertion below passes either way. Sized against the threshold the
+        // path actually crosses, after a first fixture at 30 KB proved nothing.
+        let body: String = (0..3_000)
+            .map(|i| format!("{:016x} {:016x}\n", i * 2_654_435_761u64, i * 40_503))
+            .collect();
+        assert!(
+            body.len() > crate::guard::limits::MAX_OUTPUT_BYTES,
+            "the fixture must exceed the cap or the two branches agree: {}",
+            body.len()
+        );
+        let payload = json!({
+            "session_id": "passthrough-595",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat blob.hex"},
+            "tool_response": {"content": body},
+        })
+        .to_string();
+
+        let session = Arc::new(Mutex::new(crate::pipeline::SessionState::new()));
+        let out = process_payload(&payload, None, Some(session.clone()));
+        assert!(
+            out.is_none(),
+            "the fixture stopped being a passthrough, so this proves nothing"
+        );
+
+        let recorded = session.lock().expect("lock").current_turn.tool_output_bytes;
+        assert_eq!(
+            recorded,
+            body.len() as u64,
+            "a passthrough leaves the host's own bytes in context, so that is \
+             what the breakdown has to count"
         );
     }
 
