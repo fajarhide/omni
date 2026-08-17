@@ -57,6 +57,16 @@ struct PreHookInput {
     /// field `hooks::normalize` reads for the post-hook.
     #[serde(rename = "session_id", alias = "sessionId", default)]
     session_id: Option<String>,
+    /// The host's subagent id, unset when the main agent made the call.
+    ///
+    /// Forwarded for the same reason the session id is, and it has to be, since
+    /// the session id alone is not one reader: Claude Code hands a subagent the
+    /// parent's session id. Without this the rewritten `omni exec` child runs
+    /// the pipe ledger under the parent's scope and tells a subagent its bytes
+    /// were already shown, which is the defect this branch fixes on the
+    /// post-hook path and would have left standing on this one (#581).
+    #[serde(rename = "agent_id", alias = "agentId", default)]
+    agent_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -124,9 +134,15 @@ fn process_payload(
     // the only chance to tell the child, which inherits nothing else (#360).
     let host = host_from_payload(parsed.hook_event_name.as_deref(), parsed.turn_id.is_some());
 
-    if let Some(rewritten) =
-        crate::cli::rewrite::rewrite_logic(cmd_str, host, parsed.session_id.as_deref())
-    {
+    // Composed here rather than in the child, so the reader is decided once and
+    // `--session` keeps meaning "the scope this run belongs to". `host_session()`
+    // feeds nothing but the ledger scope, so there is no second meaning to break.
+    let scope = parsed
+        .session_id
+        .as_deref()
+        .map(|s| crate::ledger::scope_for(s, parsed.agent_id.as_deref()));
+
+    if let Some(rewritten) = crate::cli::rewrite::rewrite_logic(cmd_str, host, scope.as_deref()) {
         let mut updated_input = parsed.tool_input.clone();
         updated_input.command = Some(rewritten);
 
@@ -312,6 +328,44 @@ fn extract_target_file(cmd: &str) -> Option<String> {
                 .map(|s| s.to_string())
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod subagent_scope_581 {
+    use super::*;
+
+    /// #581, review on #588's sibling PR. The post-hook fix left the pipe path
+    /// keying on the bare session id, so a subagent running an allow-listed
+    /// command through the rewritten `omni exec` would still have been told the
+    /// parent's bytes were already shown. The two paths are one pipeline behind
+    /// two doors and this repo has shipped a one-door fix three times.
+    #[test]
+    fn the_rewritten_child_carries_the_subagents_scope() {
+        let payload = |agent: Option<&str>| {
+            let mut v = serde_json::json!({
+                "session_id": "parent-1",
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "git status"},
+            });
+            if let Some(a) = agent {
+                v["agent_id"] = serde_json::json!(a);
+            }
+            v.to_string()
+        };
+
+        let main = process_payload(&payload(None), None).unwrap_or_default();
+        assert!(
+            main.contains("--session parent-1"),
+            "the main agent's scope must stay the bare session id: {main}"
+        );
+
+        let sub = process_payload(&payload(Some("agent-9")), None).unwrap_or_default();
+        assert!(
+            sub.contains("--session parent-1/agent-9"),
+            "the subagent's scope never reached the rewritten child: {sub}"
+        );
     }
 }
 
