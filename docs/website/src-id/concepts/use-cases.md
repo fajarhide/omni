@@ -1,6 +1,6 @@
 # Di mana OMNI membantu
 
-Enam situasi, masing-masing dengan angka terukurnya. Dua di antaranya kasus
+Sebelas situasi, masing-masing dengan angka terukurnya. Dua di antaranya kasus
 ketika OMNI tidak melakukan apa-apa, dan keduanya sengaja dimuat di sini:
 perkakas yang mengaku membantu di mana-mana adalah perkakas yang tidak bisa
 ditebak siapa pun.
@@ -106,6 +106,76 @@ perintah berikutnya tidak menghemat apa pun untuk Anda, ia merusak pipeline Anda
 
 **Angkanya: 0%**, memang dirancang begitu. Lihat
 [Yang tidak pernah disentuh](format-safety.md).
+
+## 7. Anda membaca satu berkas besar dalam beberapa bagian
+
+**Situasinya.** Sebuah berkas lebih panjang dari satu bacaan, jadi agent mengambilnya di
+sebuah offset, lalu berikutnya, lalu berikutnya lagi. Tiap jendela mengulang bagian kepala
+berkasnya, karena memang itu isi sebuah jendela pada offset.
+
+**Yang OMNI lakukan.** Ia melipat kepala yang berulang itu dan menggeser penomoran
+barisnya agar cocok, sehingga baris yang masih Anda lihat bernomor sesuai posisi
+sebenarnya di berkas. Paruh kedua itu penting: lipatan yang menomori ulang isi di bawahnya
+lebih buruk daripada tidak melipat sama sekali, dan itu sebabnya kasus ini ditolak selama
+satu rilis sampai penomorannya bisa dijaga benar.
+
+**Angkanya: 0,0% sebelumnya, 4,7% sesudahnya**, diukur pada empat jendela yang tumpang
+tindih dari satu berkas markdown. Berkas source tidak terpengaruh, karena distiller
+readfile menjangkaunya lebih dulu di 46,6% bagaimanapun.
+
+## 8. Anda mengirim subagent
+
+**Situasinya.** Agent Anda memunculkan pembantu untuk pekerjaan yang cakupannya sempit.
+Pembantu itu memulai dengan konteks kosong lalu membaca berkas yang sudah dibaca induknya.
+
+**Yang OMNI lakukan.** Ia memberi pembantu itu pandangannya sendiri. Claude Code
+menyerahkan session id milik induk kepada subagent, jadi ledger yang dikunci pada sesi
+saja akan menjawab pembantu itu dengan riwayat induknya dan memberitahunya 200 baris sudah
+ditampilkan, padahal konteks itu tidak pernah menerimanya. Sekarang pembantu itu melihat
+isinya, atau penanda yang menyatakan terang bahwa tidak ada yang ditampilkan di sini.
+
+**Angkanya: tidak ada rasio, dan justru itu intinya.** Ini kasus kebenaran. Penghematannya
+tidak pernah jadi masalah; klaimnya yang bermasalah.
+
+## 9. Anda mengikuti penanda untuk mengambil isinya kembali
+
+**Situasinya.** Sebuah penanda berbunyi `omni retrieve <handle>`. Anda menjalankannya,
+atau agent Anda yang menjalankannya, lalu membaca hasilnya.
+
+**Yang OMNI lakukan.** Ia menyerahkan byte itu utuh. Sebelumnya, byte itu kembali melewati
+pipeline, menghasilkan hash yang sama, dan terlipat menjadi penanda yang tadi menyuruh
+Anda ke sana, sehingga mengikuti instruksinya justru mengembalikan instruksinya.
+
+**Angkanya: satu kali kirim, bukan pengecualian.** Pengulangan berikutnya melipat lagi,
+dan itu penting karena 15,05% arsip di instalasi nyata pernah ditarik setidaknya sekali,
+sehingga mengecualikan semuanya berarti menukar klaim palsu dengan penghematan yang
+hilang.
+
+## 10. Konteks Anda dipadatkan di tengah sesi
+
+**Situasinya.** Sesinya panjang, host memadatkan percakapannya, dan separuh dari yang
+dipegang agent Anda hilang.
+
+**Yang OMNI lakukan.** Ia melupakan. Seluruh lisensi ledger adalah bahwa agent masih
+memegang byte yang digantikan sebuah handle, dan compaction adalah titik di mana itu
+berhenti benar, jadi himpunan yang sudah ditampilkan ikut pergi. Tidak ada apa pun setelah
+compaction yang mengklaim Anda sudah melihat sesuatu yang tidak lagi Anda pegang.
+
+**Angkanya: tidak ada rasio.** Ia mengorbankan penghematan dengan sengaja, dan itulah
+pertukaran yang menjaga penandanya tetap benar.
+
+## 11. Setiap request membawa daftar perkakas yang tidak pernah Anda panggil
+
+**Situasinya.** OMNI mendaftar sebagai server MCP, dan definisi perkakas berada di awal
+setiap request di setiap sesi. Berbeda dengan keluaran, byte di awal tidak dibayar sekali:
+ia dibaca ulang di setiap request sesudahnya.
+
+**Yang OMNI lakukan.** Ia hanya mengiklankan perkakas yang memang dipakai tier host Anda,
+sembilan alih-alih dua puluh lima, dengan `OMNI_MCP_TOOLS=all` untuk mengembalikan sisanya
+dan `omni doctor` yang menyebut set mana yang sedang berlaku.
+
+**Angkanya: 4.940 byte hilang dari setiap request.** Diukur di 229 sesi: enam belas dari
+dua puluh lima perkakas itu tidak pernah sekali pun dipanggil.
 
 ## Dan satu lagi yang juga tidak terjadi apa-apa
 

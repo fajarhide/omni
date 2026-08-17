@@ -18,6 +18,19 @@ Di dalam Claude Code cukup dua baris, sisanya diurus agent:
 /plugin install omni@omni
 ```
 
+## Apa yang dibelinya, terukur
+
+| | |
+|---|---:|
+| berkas yang dibaca agent dua kali | **97,2%** dari bacaan kedua |
+| `git log -15` | **94%** lebih kecil, semua commit tetap ada |
+| `cargo test`, 490 lulus dan 10 gagal | **92,9%** lebih kecil, kegagalannya tetap ada |
+| keluaran build dan test di seluruh korpus | **78,0%** |
+| definisi perkakas di setiap request | **4.940 byte** lebih ringan |
+
+Setiap angka itu bisa Anda putar ulang di riwayat Anda sendiri. Itulah inti dari sisa
+halaman ini.
+
 ## Masalahnya, dalam satu layar
 
 Agent Anda menjalankan test. Empat ratus baris kembali, yang penting satu.
@@ -69,6 +82,20 @@ keluar.
 
 Ini namanya ledger, dan pada riwayat perintah sungguhan ia bekerja lebih banyak
 daripada semua penyaring digabung.
+
+## Buktikan di mesin Anda sendiri
+
+Kebanyakan alat di ranah ini meminta Anda mempercayai angka dari laptop orang lain.
+Jalankan ini saja:
+
+```bash
+omni stats                     # apa yang OMNI lakukan di riwayat Anda, dalam byte terhitung
+omni retrieve <handle>         # handle mana pun dari penanda mana pun, dicetak utuh
+```
+
+Setiap angka di situs ini berasal dari korpus yang bisa Anda bangun ulang.
+[Benchmark](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat metodenya dan
+perintah persisnya untuk tiap baris, termasuk perbandingan yang kami kalah di dalamnya.
 
 ## Yang Anda dapat
 

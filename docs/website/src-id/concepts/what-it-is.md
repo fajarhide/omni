@@ -82,6 +82,25 @@ Kalau Anda lebih suka melihat ini sebagai situasi ketimbang sebagai tahapan,
 [Di mana OMNI membantu](use-cases.md) memuat enam situasi lengkap dengan
 penghematan terukurnya.
 
+## Apa yang ia lakukan pada dirinya sendiri
+
+Semua di atas soal keluaran. Ada hal kedua yang disunting OMNI, dan lama sekali ia tidak
+menyuntingnya sama sekali: bobotnya sendiri.
+
+OMNI mendaftar sebagai server MCP, dan definisi perkakas berada di **awal** setiap request
+di setiap sesi tempat ia terpasang. Byte di awal tidak dibayar sekali. Ia dibawa sejak
+request pertama dan dibaca ulang di setiap request sesudahnya, sedangkan byte yang dibuang
+dari keluaran tool disisipkan di tengah dan dibaca lebih sedikit kali.
+
+Diukur di 229 sesi, enam belas dari dua puluh lima perkakas yang diiklankan OMNI tidak
+pernah sekali pun dipanggil, dan keenam belasnya berbobot 4.940 byte. Distiller-nya
+membuang median 4.942 byte dari keluaran tool pada sesi yang benar-benar padat. Dua byte
+bedanya, dan sisi awal itulah yang dibawa sejak permulaan.
+
+Jadi sekarang OMNI hanya memberi tahu host perkakas yang memang dipakai tier-nya. Alat
+yang menghabiskan konteks untuk menjelaskan dirinya sebanyak yang ia hemat bukanlah alat
+efisiensi token, dan menyadarinya menuntut pengukurannya sendiri diarahkan ke dirinya.
+
 ## Apa yang bukan dia
 
 **Bukan kompresor.** Ia tidak berusaha membuat keluaran menjadi kecil. Ia

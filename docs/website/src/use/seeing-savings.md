@@ -22,6 +22,27 @@ It leads with **session lifetime**: how many commands a session carries before t
 host closes it. That is the meter a user actually watches. The distillation
 percentage below it is a diagnostic for one host's pipeline, not a product claim.
 
+## What the numbers are counted in
+
+**Bytes, and they are counted rather than derived.** Every absolute figure the report
+prints is a byte total out of `distillations`, and every percentage is a ratio of two of
+them.
+
+They used to be tokens, which were those same byte counts divided by 3.6, a constant
+calibrated against `cl100k_base`. That is GPT's encoding, so the unit could not be
+defended even though the arithmetic was sound. Percentages were never affected: the
+divisor cancels in a ratio, which is why the reduction figures did not move when the
+absolute ones did.
+
+One block is still an estimate and says so. The context breakdown accumulates file sizes
+from metadata, so `Context Breakdown` is exact for what it counts and is not a token
+count in disguise.
+
+**If you parse `--json`, the `commands[].tokens_saved` field is now `bytes_saved`.** It
+held bytes under the old name for one release, which is a machine-readable surface
+asserting the wrong unit, so it was renamed rather than left lying. Consumers have to
+follow.
+
 ## Reading it without fooling yourself
 
 **Split by `agent_id` before quoting anything.** Rows recorded under `terminal` are

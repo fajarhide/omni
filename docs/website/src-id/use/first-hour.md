@@ -1,8 +1,12 @@
 # Satu jam pertama
 
-Diasumsikan `omni init` dan `omni doctor` sudah dijalankan. Tidak ada di sini
-yang mengubah konfigurasi; semuanya soal belajar membaca apa yang sedang
-dikerjakan OMNI supaya Anda bisa menilainya.
+Diasumsikan `omni init` dan `omni doctor` sudah dijalankan. Tidak ada di sini yang
+mengubah konfigurasi.
+
+Yang dibeli satu jam ini adalah kemampuan **memeriksa** OMNI alih-alih mempercayainya. Di
+ujungnya Anda bisa melihat potongan apa pun berdampingan dengan aslinya, menarik kembali
+apa pun yang ia buang, dan membedakan penanda miliknya dari baris yang sekadar mirip
+penanda. Keterampilan terakhir itulah yang membuat dua yang pertama ada gunanya.
 
 ## Lihat satu penyulingan terjadi
 
@@ -42,6 +46,12 @@ host menutupnya, karena itulah yang sebenarnya dibebankan jendela konteks kepada
 Anda. Persentase penyulingan di bawahnya adalah alat diagnosis untuk pipeline
 satu host.
 
+Setiap angka mutlak yang ia cetak berupa byte, dan byte itu dihitung. Dulu ia melaporkan
+token, dan token itu adalah hitungan byte yang sama dibagi konstanta yang dikalibrasi
+terhadap tokenizer vendor lain, jadi satuannya tidak bisa dipertahankan meski
+aritmetikanya benar. Persentasenya tidak pernah terpengaruh: pembaginya saling meniadakan
+di dalam rasio.
+
 ```sh
 omni stats --detail        # per perintah, per rute, per sesi, per agent
 omni stats --rerun         # distiller mana yang berongkos satu run ulang
@@ -51,6 +61,39 @@ omni dashboard             # angka yang sama di peramban, hanya di 127.0.0.1
 `--rerun` yang menarik. Persentase pengurangan tidak bisa memberi tahu apakah
 sebuah distiller membuang sesuatu yang lalu harus diambil ulang agent; yang ini
 bisa.
+
+## Tarik kembali sesuatu yang ia buang
+
+Setiap penanda menyebutkan sebuah handle. Jalankan:
+
+```sh
+omni retrieve 0000000000000000
+```
+
+Handle itu persisnya adalah contoh dokumentasi dan ditolak dengan menyebut namanya, dan
+justru itu inti bagian ini. Salin handle sungguhan dari penanda di keluaran Anda sendiri
+dan byte-nya kembali apa adanya, dan exit code-nya memberi tahu mana yang terjadi: 0 kalau
+handle-nya ketemu, 1 kalau tidak.
+
+Pasangan itu pemeriksaan kepercayaan tercepat yang ada. Alat yang membuang sesuatu tapi
+tidak bisa mengembalikannya adalah alat yang harus Anda percayai buta.
+
+## Bedakan penanda asli dari yang sekadar teks
+
+Halaman ini penuh penanda, begitu pula source OMNI sendiri, dan begitu pula laporan bug
+mana pun yang mengutipnya. Mencari bentuk penanda di transkrip Anda akan menemukan
+semuanya.
+
+Handle-nya yang membedakan. Semua contoh di manual ini memakai nilai cadangan
+`0000000000000000`, yang tidak akan pernah diberikan kepada lipatan sungguhan, jadi:
+
+```sh
+omni retrieve <handle-dari-keluaran-Anda>   # exit 0, beserta isinya
+omni retrieve 0000000000000000              # exit 1, "the documentation example"
+```
+
+Kalau Anda sedang mengukur apakah OMNI melakukan sesuatu sama sekali pada suatu run, exit
+code itulah jawabannya, bukan hasil grep terhadap `[OMNI`.
 
 ## Pancang apa yang sedang Anda kerjakan
 

@@ -74,6 +74,25 @@ saying what happened.
 If you would rather see this as situations than as stages,
 [Where OMNI helps](use-cases.md) has six of them with the measured saving on each.
 
+## What it does to itself
+
+Everything above is about output. There is a second thing OMNI edits, and for a long time
+it did not edit it at all: its own weight.
+
+OMNI registers as an MCP server, and tool definitions sit in the **prefix** of every
+request of every session it is attached to. A prefix byte is not paid once. It is carried
+from the first request and re-read on every one after it, where a byte removed from tool
+output was inserted somewhere in the middle and is read fewer times.
+
+Measured across 229 sessions, sixteen of the twenty-five tools OMNI advertised had never
+been called once, and those sixteen were 4,940 bytes. The distillers remove a median of
+4,942 bytes from tool output in a session that pushes real volume through the hook. Two
+bytes apart, and the prefix side is the one carried from the start.
+
+So OMNI now tells a host about the tools its tier actually uses. A tool that spends as
+much context describing itself as it saves is not a token-efficiency tool, and noticing
+that required pointing its own measurement at itself.
+
 ## What it is not
 
 **Not a compressor.** It is not trying to make output small. It is trying to make

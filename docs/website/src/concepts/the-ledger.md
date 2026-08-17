@@ -76,6 +76,29 @@ for the premise to be false, and the answer is usually there.
 It is also why this is a cache invalidation problem and not a memory system. The
 ledger does not store knowledge. It stores receipts.
 
+## The three readers the premise fails for
+
+Every rule worth knowing here is a defence of the moment the premise stops being true.
+There are exactly three readers it fails for, and the ledger answers each differently.
+
+**A subagent.** Claude Code hands a helper the parent's session id, so a ledger keyed on
+the session alone would answer it with the parent's history and claim 200 lines were
+already shown to a context that had received none of them. The scope is the reader, not
+the session, so a helper accumulates its own and falls through to the project scope for
+anything else, where the wording says plainly that nothing was shown here.
+
+**A context that was compacted.** The host says so before it happens, and the ledger
+forgets that session's shown-set at that moment. It costs savings on purpose. Nothing
+after a compaction claims you already have something you no longer hold.
+
+**A reader following a handle.** Asking for bytes back is proof the reader does not have
+them, so the delivery answering a pull is handed over whole. Before, it went through the
+pipeline, hashed the same, and came back as the very marker that sent the reader there.
+One delivery, not an exemption: the next repeat folds again.
+
+The pattern is worth more than the three cases. When the ledger surprises you, ask which
+reader is holding the bytes, and whether anything told OMNI that reader had changed.
+
 ## The flow, one command at a time
 
 ![Four questions decide a fold: does the line state a failure, has it been shown before, does the run save more than its marker costs, and did the archive write succeed. Any no sends the lines out verbatim.](../media/the-ledger-decision.svg)

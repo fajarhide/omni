@@ -23,6 +23,27 @@ host menutupnya. Itu meteran yang benar-benar diperhatikan pengguna. Persentase
 penyulingan di bawahnya adalah alat diagnosis untuk pipeline satu host, bukan
 klaim produk.
 
+## Angkanya dihitung dalam satuan apa
+
+**Byte, dan byte itu dihitung, bukan diturunkan.** Setiap angka mutlak yang dicetak
+laporan ini adalah total byte dari `distillations`, dan setiap persentase adalah rasio
+dari dua di antaranya.
+
+Dulu satuannya token, yaitu hitungan byte yang sama dibagi 3,6, konstanta yang
+dikalibrasi terhadap `cl100k_base`. Itu encoding milik GPT, jadi satuannya tidak bisa
+dipertahankan meski aritmetikanya benar. Persentasenya tidak pernah terpengaruh:
+pembaginya saling meniadakan di dalam rasio, dan itu sebabnya angka reduksinya tidak
+bergeser ketika angka mutlaknya bergeser.
+
+Satu blok masih berupa taksiran dan ia menyatakannya. Context breakdown mengumpulkan
+ukuran berkas dari metadata, jadi `Context Breakdown` eksak untuk apa yang ia hitung dan
+bukan hitungan token yang menyamar.
+
+**Kalau Anda mem-parse `--json`, field `commands[].tokens_saved` sekarang bernama
+`bytes_saved`.** Selama satu rilis ia menyimpan byte dengan nama lama, dan itu permukaan
+yang dibaca mesin sambil menyatakan satuan yang keliru, jadi ia diganti nama alih-alih
+dibiarkan berbohong. Konsumennya harus ikut menyesuaikan.
+
 ## Membacanya tanpa membodohi diri sendiri
 
 **Pisahkan menurut `agent_id` sebelum mengutip apa pun.** Baris yang tercatat di
