@@ -18,11 +18,15 @@ omni init
 ```
 
 Without Homebrew, take the release archive for the platform from
-<https://github.com/fajarhide/omni/releases> and check it against the
-`SHA256SUMS` published beside it before putting the binary on the path. Two
-things decide whether that check is worth anything: on macOS the command is
-`shasum -a 256 -c`, and the check has to gate the untar with `&&`, since a shell
-running pasted lines carries on past a failed one.
+<https://github.com/fajarhide/omni/releases>, pull the line for that archive out
+of the `SHA256SUMS` published beside it into a file of its own, and verify it
+with `sha256sum -c <that file>`, or `shasum -a 256 -c <that file>` on macOS.
+Then untar and put the binary on the path. Two things decide whether the check is
+worth anything. The manifest line has to reach the tool as a file rather than a
+pipe, because a `grep` that matches nothing sends an empty stream and macOS reads
+that as a pass, so a mistyped archive name would install unverified. And the
+verification has to gate the untar with `&&`, because a shell running pasted
+lines carries on past a failed one.
 
 **Do not name a host you have not established you are running in.** With no
 terminal to draw its menu on, which is the case when an agent runs it, `omni init`
