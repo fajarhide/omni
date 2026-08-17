@@ -385,13 +385,24 @@ fn reserved_example_handle() -> String {
 fn every_worked_example_uses_the_reserved_handle() {
     let reserved = reserved_example_handle();
     let root = repo_root();
-    let mut files: Vec<PathBuf> = walkdir::WalkDir::new(root.join("src"))
-        .into_iter()
+
+    // Wider than `doc_files()` on purpose, and the extra roots are not padding.
+    // `i18n/` is the one that would have bitten: CONTRIBUTING requires a README
+    // change to reach all six translations, so an example added to the guarded
+    // README propagates into six unguarded files by policy. `plugins/` ships a
+    // skill file with `omni retrieve` in it, and `tests/` is where a fixture
+    // would go. None of the three carries a handle today, so this is a fence
+    // rather than a fix, which is the point of a guard (#588 review).
+    let mut files: Vec<PathBuf> = ["src", "tests", "i18n", "plugins"]
+        .iter()
+        .flat_map(|dir| walkdir::WalkDir::new(root.join(dir)).into_iter())
         .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|x| x == "rs"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "rs" || x == "md"))
         .map(|e| e.path().to_path_buf())
         .collect();
     files.extend(doc_files());
+    files.sort();
+    files.dedup();
 
     let mut offenders = Vec::new();
     let mut seen = 0usize;
@@ -399,6 +410,10 @@ fn every_worked_example_uses_the_reserved_handle() {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
         };
+        // Line at a time, so a marker wrapped across two lines is invisible to
+        // this scan. No `omni retrieve` literal in the tree is broken that way
+        // today, and a scan over joined text would match prose that happens to
+        // end in those words. Stated rather than handled (#588 review).
         for (n, line) in text.lines().enumerate() {
             for (idx, _) in line.match_indices("omni retrieve ") {
                 let rest = &line[idx + "omni retrieve ".len()..];

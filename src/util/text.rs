@@ -99,19 +99,26 @@ pub fn truncate_with_marker(
 /// a guarantee rather than a 1-in-2^64 coincidence.
 pub const EXAMPLE_HANDLE: &str = "0000000000000000";
 
+/// Where the one payload in 2^64 that hashes to `EXAMPLE_HANDLE` is sent.
+///
+/// A literal rather than a rehash. Review on #588 pointed out that rehashing
+/// the digest could only ever run on `EXAMPLE_HANDLE` itself, so it returned a
+/// single fixed value anyway, recomputed on every call, and minted a second
+/// special handle that nothing named or documented. Collision odds are 2^-64
+/// against any one value whether it was derived or typed, so the derivation
+/// bought nothing and cost an unaudited constant.
+const COLLIDED_EXAMPLE_HANDLE: &str = "0000000000000001";
+
 /// Moves a freshly minted handle off the one value the examples reserve.
 ///
 /// Split from `store_rewind` so it can be driven directly: the branch it
 /// protects fires once in 2^64 real payloads, so a test that went through the
 /// hasher would never reach it and would be decorative.
 pub fn avoid_example_handle(key: String) -> String {
-    if key != EXAMPLE_HANDLE {
-        return key;
+    if key == EXAMPLE_HANDLE {
+        return COLLIDED_EXAMPLE_HANDLE.to_string();
     }
-    use sha2::{Digest, Sha256};
-    let mut again = Sha256::new();
-    again.update(key.as_bytes());
-    safe_slice(&hex::encode(again.finalize()), 16).to_string()
+    key
 }
 
 /// The `, omni retrieve <hash>` clause, or an honest statement that there is
