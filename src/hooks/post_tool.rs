@@ -1039,7 +1039,7 @@ pub fn process_payload(
                 state.current_turn.session_id = state.session_id.clone();
                 state.current_turn.turn_number = state.command_count;
                 state.current_turn.timestamp = chrono::Utc::now().timestamp();
-                state.current_turn.tool_output_bytes += result.delivered_bytes as u64;
+                // Recorded after the safety truncation below, not here (#595 review).
 
                 // L1-02: Increment loop iteration budget
                 state.loop_context.budget_used += result.filtered_tokens as u64;
@@ -1102,6 +1102,15 @@ pub fn process_payload(
         crate::guard::limits::MAX_OUTPUT_BYTES,
         |dropped| store.as_ref().and_then(|s| s.store_rewind(dropped)),
     );
+
+    // The breakdown counts what the agent was handed, so it is read after the
+    // cap rather than before it. Recording `delivered_bytes` earlier overstated
+    // every payload the truncation actually cut (#595 review).
+    if let Some(ref sess) = session
+        && let Ok(mut state) = sess.lock()
+    {
+        state.current_turn.tool_output_bytes += final_out.len() as u64;
+    }
 
     // A passthrough hands back exactly what the command produced, so there is
     // nothing to replace. Emitting those identical bytes with a marker on top
