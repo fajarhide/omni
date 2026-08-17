@@ -1120,10 +1120,19 @@ pub fn process_payload(
         // streams it includes the `\n[stderr]\n` separator this code invented,
         // 10 bytes the host's structured response does not hold. Measured on
         // this installation: 896 of 9,267 traces carry both streams, so the
-        // overcount is 10 B on 9.7% of calls. Known and left, because the
-        // alternative is the serialised `raw_response`, which is not what the
-        // host renders either and would trade one approximation for another
-        // without saying which is closer (#595 review).
+        // overcount is 10 B on 9.7% of calls.
+        //
+        // The same gap runs the other way past `trim_enormous`: a payload over
+        // its 2 MB cap is shortened before this line, so this would understate
+        // it. Never reached here, 0 of 9,267 traces exceed 2 MB and the largest
+        // on record is 820,000 B, 39% of the cap.
+        //
+        // Both are known and left, because the alternative is the serialised
+        // `raw_response`, which is not what the host renders either and would
+        // trade one approximation for another without being able to say which
+        // is closer (#595 review). What this line is, precisely: the flattened
+        // view's length, which equals what the host kept except for a separator
+        // this code added and a cap nothing has crossed.
         let handed_over = if route == Route::Passthrough && !redacted_here {
             content.len()
         } else {
