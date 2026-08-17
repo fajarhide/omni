@@ -1103,13 +1103,25 @@ pub fn process_payload(
         |dropped| store.as_ref().and_then(|s| s.store_rewind(dropped)),
     );
 
-    // The breakdown counts what the agent was handed, so it is read after the
-    // cap rather than before it. Recording `delivered_bytes` earlier overstated
-    // every payload the truncation actually cut (#595 review).
+    // The breakdown counts what the agent was handed, which is neither the
+    // distiller's product nor always this function's own output.
+    //
+    // Two ways to get it wrong and review on #595 found both. Reading
+    // `delivered_bytes` before the cap overstated every payload the truncation
+    // cut. Reading `final_out` after it understates a passthrough, because that
+    // arm returns `None` a few lines below and the host keeps its **original**
+    // bytes, untruncated. The condition here is the same one that decides the
+    // return, and it is the `delivered` distinction #566 already drew for the
+    // accounting columns.
     if let Some(ref sess) = session
         && let Ok(mut state) = sess.lock()
     {
-        state.current_turn.tool_output_bytes += final_out.len() as u64;
+        let handed_over = if route == Route::Passthrough && !redacted_here {
+            content.len()
+        } else {
+            final_out.len()
+        };
+        state.current_turn.tool_output_bytes += handed_over as u64;
     }
 
     // A passthrough hands back exactly what the command produced, so there is
@@ -3535,6 +3547,42 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(
             bare.contains(&"result".to_string()) && !bare.contains(&"file".to_string()),
             "the manual now says a bare Read replies in OMNI's shape, got {bare:?}"
+        );
+    }
+
+    /// #595 review. The breakdown counts what the model was handed, and a
+    /// passthrough is the case where that is not this function's own output:
+    /// it returns `None` and the host keeps its original bytes. Recording the
+    /// post-cap `final_out` there understated exactly the payloads big enough
+    /// for the cap to matter.
+    #[test]
+    fn a_passthrough_counts_the_bytes_the_host_kept() {
+        // Random-ish and incompressible, so the pipeline cannot beat the
+        // guardrail and the route really is a passthrough.
+        let body: String = (0..900)
+            .map(|i| format!("{:016x} {:016x}\n", i * 2_654_435_761u64, i * 40_503))
+            .collect();
+        let payload = json!({
+            "session_id": "passthrough-595",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat blob.hex"},
+            "tool_response": {"content": body},
+        })
+        .to_string();
+
+        let session = Arc::new(Mutex::new(crate::pipeline::SessionState::new()));
+        let out = process_payload(&payload, None, Some(session.clone()));
+        assert!(
+            out.is_none(),
+            "the fixture stopped being a passthrough, so this proves nothing"
+        );
+
+        let recorded = session.lock().expect("lock").current_turn.tool_output_bytes;
+        assert_eq!(
+            recorded,
+            body.len() as u64,
+            "a passthrough leaves the host's own bytes in context, so that is \
+             what the breakdown has to count"
         );
     }
 
