@@ -1263,10 +1263,17 @@ fn build_additional_context(
     // F-10: Inject for significant single-call savings.
     //
     // The bars moved from tokens to bytes with the figures they gate, at the 3.6
-    // bytes per token the estimator used, so the banner fires exactly as often
-    // as it did. Converting them was not optional: leaving `>= 500` while the
-    // quantity became bytes would have fired the banner on a saving 3.6 times
-    // smaller, which is more markers rather than fewer (#589).
+    // bytes per token the estimator used. Converting them was not optional:
+    // leaving `>= 500` while the quantity became bytes would have fired the
+    // banner on a saving 3.6 times smaller, which is more markers rather than
+    // fewer (#589).
+    //
+    // Not an exact translation, and review on #592 was right to say so. The old
+    // gate subtracted two independently `ceil`ed estimates, so it disagrees with
+    // this one over savings of 1,797 to 1,799 B, a three byte window, measured
+    // rather than reasoned about. The disagreement is one-way: the old bar fired
+    // and this one is silent, never the reverse, so the banner can only have got
+    // quieter.
     if saved_bytes_this_call >= 1800 {
         msgs.push(format!(
             "[OMNI: -{} this call | -{} session | {savings:.0}% compression]",
@@ -2014,6 +2021,48 @@ mod tests {
         assert!(
             build_additional_context(&result, &None).is_none(),
             "a 1.2 KB saving is under the bar and must not reach the agent's context"
+        );
+    }
+
+    /// The three byte window where the converted bar and the old one disagree,
+    /// pinned so the claim in the changelog stays true if either moves.
+    ///
+    /// Review on #592 pointed out that subtracting two independently `ceil`ed
+    /// estimates is not the same comparison as subtracting the bytes, and it is
+    /// right. What makes it acceptable is the direction rather than the size: a
+    /// saving in the window fired the old bar and is silent now, never the
+    /// reverse, so the conversion cannot make OMNI write into the agent's
+    /// context more often than it used to.
+    #[test]
+    fn the_converted_bar_is_never_noisier_than_the_one_it_replaced() {
+        let old_fires = |i: usize, o: usize| {
+            use crate::util::token_estimate::{ContentHint, estimate_tokens};
+            estimate_tokens(i, ContentHint::Mixed)
+                .saturating_sub(estimate_tokens(o, ContentHint::Mixed))
+                >= 500
+        };
+        let new_fires = |i: usize, o: usize| i.saturating_sub(o) >= 1800;
+
+        let mut disagreements = 0;
+        for delta in 1_700..=1_900usize {
+            for out in 0..40usize {
+                let input = out + delta;
+                if old_fires(input, out) != new_fires(input, out) {
+                    disagreements += 1;
+                    assert!(
+                        old_fires(input, out) && !new_fires(input, out),
+                        "the converted bar fired where the old one did not, at {delta} B saved"
+                    );
+                    assert!(
+                        (1_797..=1_799).contains(&delta),
+                        "the disagreement escaped the measured window at {delta} B saved"
+                    );
+                }
+            }
+        }
+        assert!(
+            disagreements > 0,
+            "no disagreement found at all, so this scan is broken rather than clean"
         );
     }
 
