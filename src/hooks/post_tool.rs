@@ -1984,6 +1984,39 @@ mod tests {
         );
     }
 
+    /// #589. The banner's bar was expressed in the same estimated unit as the
+    /// figure it gates, so moving the figure to bytes without moving the bar
+    /// would have fired it on a saving 3.6 times smaller, quietly tripling how
+    /// often OMNI writes into the agent's context. Nothing guarded that, which
+    /// is why a saving in the gap between the old number and the new one is
+    /// asserted silent here.
+    #[test]
+    fn a_saving_under_the_converted_bar_writes_no_banner() {
+        let result = crate::pipeline::DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "cat".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            // 1,200 B saved: over the old bar of 500, under the converted 1,800.
+            input_bytes: 4_000,
+            output_bytes: 2_800,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 1_112,
+            filtered_tokens: 778,
+            delivered_bytes: 2_800,
+        };
+
+        assert!(
+            build_additional_context(&result, &None).is_none(),
+            "a 1.2 KB saving is under the bar and must not reach the agent's context"
+        );
+    }
+
     /// #212: the banner and the `distillations` row describe the same call and
     /// disagreed about it, the banner ran a bytes-per-token heuristic over the
     /// byte delta while the row ran a real tokenizer over each string. On the
