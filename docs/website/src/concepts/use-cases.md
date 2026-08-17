@@ -1,7 +1,7 @@
 # Where OMNI helps
 
-Six situations, with the measured number attached to each. Two of them are cases where
-OMNI does nothing, and those are in here on purpose: a tool that claims to help
+Eleven situations, with the measured number attached to each. Two of them are cases
+where OMNI does nothing, and those are in here on purpose: a tool that claims to help
 everywhere is a tool nobody can predict.
 
 Every figure comes from the same replay of 6,656 real commands described in
@@ -96,6 +96,74 @@ byte. A compressor that reformats a payload the next command is about to parse h
 saved you anything, it has broken your pipeline.
 
 **The number: 0%**, by design. See [What it refuses to touch](format-safety.md).
+
+## 7. You read one big file in several passes
+
+**The situation.** A file is longer than one read, so the agent takes it at an offset,
+then another, then another. Each window repeats the head of the file, because that is
+what a window at an offset contains.
+
+**What OMNI does.** It folds the repeated head and moves the line numbering to match, so
+the lines you can still see are numbered where the file really has them. That second half
+matters: a fold that renumbers what is under it is worse than no fold, and it is why this
+case was refused for a release until the numbering could be kept true.
+
+**The number: 0.0% before, 4.7% after**, measured on four overlapping windows of one
+markdown file. Source files are unaffected, since the readfile distiller reaches those
+first at 46.6% either way.
+
+## 8. You dispatch a subagent
+
+**The situation.** Your agent spawns a helper to do a scoped job. The helper starts with
+an empty context and reads a file the parent already read.
+
+**What OMNI does.** It gives the helper its own view. Claude Code hands a subagent the
+parent's session id, so a ledger keyed on the session alone would answer the helper with
+the parent's history and tell it 200 lines were already shown, about bytes that context
+had never received. The helper now sees either the content or a marker that says plainly
+nothing was shown here.
+
+**The number: no ratio, and that is the point.** This is a correctness case. The saving
+was never the problem; the claim was.
+
+## 9. You follow a marker to get the content back
+
+**The situation.** A marker says `omni retrieve <handle>`. You run it, or your agent
+does, and reads the result.
+
+**What OMNI does.** It hands those bytes over whole. Before, they went back through the
+pipeline, hashed the same, and were folded into the very marker that sent you there, so
+following the instruction returned the instruction.
+
+**The number: one delivery, not an exemption.** The next repeat folds again, which
+matters because 15.05% of the archive on a real installation has been pulled at least
+once, and exempting all of it would trade a false claim for a lost saving.
+
+## 10. Your context gets compacted mid-session
+
+**The situation.** The session runs long, the host compacts the conversation, and half
+of what your agent was holding is gone.
+
+**What OMNI does.** It forgets. The ledger's whole licence is that the agent still holds
+the bytes a handle replaces, and compaction is where that stops being true, so the
+shown-set goes with it. Nothing after a compaction claims you have already seen something
+you no longer have.
+
+**The number: no ratio.** It costs savings on purpose, and it is the trade that keeps the
+markers true.
+
+## 11. Every request carries a tool list you never call
+
+**The situation.** OMNI registers as an MCP server, and tool definitions sit in the
+prefix of every request of every session. Unlike output, a prefix byte is not paid once:
+it is re-read on every request after the first.
+
+**What OMNI does.** It advertises the tools your host's tier actually uses, nine instead
+of twenty-five, with `OMNI_MCP_TOOLS=all` to restore the rest and `omni doctor` naming
+which set is in force.
+
+**The number: 4,940 bytes off every request.** Measured across 229 sessions: sixteen of
+the twenty-five had never been called once.
 
 ## And one more where nothing happens
 
