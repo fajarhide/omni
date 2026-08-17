@@ -7,3 +7,7 @@
   from file metadata, so there is no measured total behind it, and it now says so and
   prints `~` rather than pretending to a count. #592 fixed the same defect in the hook
   banner; this is the report surface. (#589)
+- **`omni stats --json` renamed `tokens_saved` to `bytes_saved`.** The field briefly held
+  bytes under the old name, which is a machine-readable surface asserting the wrong unit.
+  A consumer reading that key has to update; the alternative was leaving the name lying.
+  (#589)

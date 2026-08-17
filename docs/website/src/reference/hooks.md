@@ -128,9 +128,14 @@ to move it:
                                "startLine": 1, "numLines": 40, "totalLines": 400 } } }
 ```
 
-The reply mirrors whichever shape arrived, under `hookSpecificOutput.updatedToolOutput`.
-Claude Code validates it against **the host tool's own output schema**, so a `Bash`
-rewrite carries `content` and a `Read` rewrite carries `file.content`.
+The reply goes under `hookSpecificOutput.updatedToolOutput`, and Claude Code validates it
+against **the host tool's own output schema**. A wrapped `Read` gets a `file` reply back,
+which is the shape the host accepts.
+
+A bare `tool_response.content` does **not** get a bare reply. Verified rather than assumed:
+it comes back as `{status, result}`, which is OMNI's own shape and is what #187 was about.
+So the bare form is fine for asking what the ledger did, and its reply is not what a real
+`Read` would accept.
 
 **Both `Read` shapes are real and they reach different stages.** A `Read` payload written
 with a bare `tool_response.content` is accepted and reaches the ledger, while

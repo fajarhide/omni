@@ -1192,7 +1192,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             "Agent".bright_black(),
             "Count".bright_black(),
             "Saved".bright_black(),
-            "Tokens".bright_black(),
+            "Saved".bright_black(),
             "Signal".bright_black(),
             w_cmd = CMD_KEY_WIDTH
         );
@@ -1444,7 +1444,10 @@ pub struct CommandStat {
     pub command: String,
     pub count: u64,
     pub savings_pct: f64,
-    pub tokens_saved: u64,
+    /// Bytes, and named for it since #589. It briefly held bytes under the old
+    /// name, which is a machine-readable surface asserting the wrong unit, and
+    /// that is the defect this issue is about rather than a cosmetic one.
+    pub bytes_saved: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -1512,7 +1515,7 @@ fn run_json(store: &Store) -> Result<()> {
             command: cmd.clone(),
             count: *count,
             savings_pct: *pct,
-            tokens_saved: *bytes_saved,
+            bytes_saved: *bytes_saved,
         })
         .collect();
 

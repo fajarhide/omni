@@ -136,9 +136,14 @@ baris yang selamat harus menggesernya:
                                "startLine": 1, "numLines": 40, "totalLines": 400 } } }
 ```
 
-Balasannya mengikuti bentuk yang datang, di bawah `hookSpecificOutput.updatedToolOutput`.
-Claude Code memvalidasinya terhadap **skema keluaran milik tool itu sendiri**, jadi
-penulisan ulang `Bash` membawa `content` dan `Read` membawa `file.content`.
+Balasannya berada di bawah `hookSpecificOutput.updatedToolOutput`, dan Claude Code
+memvalidasinya terhadap **skema keluaran milik tool itu sendiri**. `Read` yang terbungkus
+mendapat balasan `file`, dan itulah bentuk yang diterima host.
+
+`tool_response.content` yang polos **tidak** mendapat balasan polos. Diverifikasi, bukan
+diasumsikan: ia kembali sebagai `{status, result}`, yaitu bentuk milik OMNI sendiri dan
+itulah pokok #187. Jadi bentuk polos berguna untuk menanyakan apa yang dilakukan ledger,
+dan balasannya bukan yang akan diterima `Read` sungguhan.
 
 **Kedua bentuk `Read` itu sama-sama sah dan keduanya mencapai tahap yang berbeda.** Muatan
 `Read` dengan `tool_response.content` polos tetap diterima dan sampai ke ledger, sedangkan
