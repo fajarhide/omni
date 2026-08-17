@@ -147,6 +147,12 @@ hari, jadi sebuah korpus lenyap seminggu setelah diukur.
   menerbitkannya selama keduanya masih ada.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.
+* **Semua angka di atas adalah byte per perintah, dan itu bukan tagihan Anda.**
+  Token input yang ditagih kira-kira mengikuti jumlah giliran dikali ukuran prefix,
+  jadi payload yang dipendekkan baru membayar kalau ikut menghapus satu giliran.
+  Diukur ujung ke ujung pada sesi utuh, penghematannya rata-rata lebih besar
+  daripada tabel ini dan tidak dijamin pada satu sesi mana pun, termasuk run yang
+  tagihannya tidak turun sama sekali.
 
 Angka-angka itu bisa Anda reproduksi sendiri, di mesin Anda:
 

@@ -148,6 +148,11 @@ một tập dữ liệu biến mất một tuần sau khi được đo.
   thời gian đó.
 * **21 ms mỗi lệnh**, lớn dần theo lịch sử của bạn chứ không theo kích thước payload. Với
   cơ sở dữ liệu 205 MB con số là 61 ms.
+* **Mọi con số ở trên là byte trên mỗi lệnh, và đó không phải hóa đơn của bạn.**
+  Token đầu vào bị tính phí xấp xỉ bằng số lượt nhân kích thước prefix, nên rút
+  ngắn payload chỉ có giá trị khi nó cũng bớt được một lượt. Đo đầu cuối trên cả
+  phiên, mức tiết kiệm trung bình lớn hơn bảng này và không được bảo đảm ở bất kỳ
+  phiên đơn lẻ nào, kể cả những lần chạy mà hóa đơn không giảm chút nào.
 
 Bạn có thể tự tái lập những con số này trên máy mình:
 
