@@ -3418,6 +3418,61 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         (first, second)
     }
 
+    /// #581. A marker tells the reader to run `omni retrieve <handle>`. Those
+    /// bytes come back through the hook, hash the same, and were folded into the
+    /// very marker that sent the reader there, so an agent following the
+    /// instruction got the instruction back. Reproduced on `ded23da` before the
+    /// fix: step three below returned
+    /// `[OMNI: identical to the 200 lines already shown, omni retrieve ...]`.
+    ///
+    /// The second assertion is the one that keeps this from being a permanent
+    /// exemption. Once the reader holds the content the ledger's claim is true
+    /// again, so folding has to resume on the next repeat or the fix would trade
+    /// a false claim for a lost saving on every pulled handle, 15.05% of the
+    /// archive on this machine.
+    #[test]
+    fn a_pull_is_answered_once_and_then_folding_resumes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let body: String = (0..200)
+            .map(|i| format!("2026-08-12T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect();
+        let payload = json!({
+            "session_id": "loop-581",
+            "tool_name": "Read",
+            "tool_input": {"path": "notes.txt"},
+            "tool_response": {"content": body},
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(store.clone()), None);
+        let folded = process_payload(&payload, Some(store.clone()), None).unwrap_or_default();
+        let handle = folded
+            .split("omni retrieve ")
+            .nth(1)
+            .and_then(|rest| rest.split(|c: char| !c.is_ascii_hexdigit()).next())
+            .map(str::to_string)
+            .expect("the second read must fold and name a handle");
+
+        store
+            .retrieve_rewind(&handle)
+            .expect("the handle the marker printed must resolve");
+
+        let answering = process_payload(&payload, Some(store.clone()), None).unwrap_or_default();
+        assert!(
+            !answering.contains("omni retrieve"),
+            "the delivery answering the pull was folded back into the marker \
+             that sent the reader to it: {answering}"
+        );
+
+        let after = process_payload(&payload, Some(store.clone()), None).unwrap_or_default();
+        assert!(
+            after.contains("omni retrieve"),
+            "folding did not resume, so a pulled handle is exempt for good \
+             rather than for one delivery: {after}"
+        );
+    }
+
     /// #557, review. An earlier guard read the output back and called any line
     /// starting with `[OMNI:` a marker, so a file whose own lines start that way
     /// defeated it. This repository writes those strings into its changelog and

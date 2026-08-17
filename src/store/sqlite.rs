@@ -796,6 +796,15 @@ impl SqliteBackend {
             "ALTER TABLE ledger_folds ADD COLUMN payload_bytes INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        // #581. Set when a handle is pulled and cleared by the delivery that
+        // answers it, so the content a marker sent the reader to fetch is not
+        // folded back into that same marker on its way in. Separate from
+        // `retrieved`, which is a lifetime counter `rewind_metrics` and #512's
+        // adaptive rate both read and must not be reset.
+        let _ = conn.execute(
+            "ALTER TABLE rewind_store ADD COLUMN owed INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
         let _ = conn.execute(
             "ALTER TABLE distillations ADD COLUMN collapse_original INTEGER DEFAULT 0",
             [],
@@ -1310,6 +1319,31 @@ impl SqliteBackend {
         self.record_retrieve_event(&family, hash, &agent_id);
     }
 
+    /// Consumes the debt a pull left behind, and says whether there was one.
+    ///
+    /// #581. A marker tells the reader to run `omni retrieve <handle>`. Whichever
+    /// way those bytes come back, through a file it then reads or through the
+    /// command's own output, they pass the hook again and hash the same, so the
+    /// ledger replaced them with the very marker that sent the reader there. An
+    /// agent following the instruction got the instruction back.
+    ///
+    /// One delivery, not a permanent exemption. Once the reader has the content
+    /// the ledger's claim is true again and the next repeat folds normally,
+    /// which is why this clears the flag as it reads it. The `UPDATE` does both
+    /// in one statement so two hooks racing cannot each be told they are the one
+    /// answering the pull.
+    pub fn take_owed_delivery(&self, hash: &str) -> bool {
+        let Ok(conn) = self.pool.get() else {
+            return false;
+        };
+        conn.execute(
+            "UPDATE rewind_store SET owed = 0 WHERE hash = ?1 AND owed = 1",
+            params![hash],
+        )
+        .map(|changed| changed > 0)
+        .unwrap_or(false)
+    }
+
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
         let conn = match self.pool.get() {
             Ok(c) => c,
@@ -1326,8 +1360,11 @@ impl SqliteBackend {
             .unwrap_or(None);
 
         if content.is_some() {
+            // `owed` says a reader asked for these bytes back and has not been
+            // handed them yet, which is the one moment the ledger's "already
+            // shown" is provably false about this content (#581).
             let _ = conn.execute(
-                "UPDATE rewind_store SET retrieved = retrieved + 1 WHERE hash = ?1",
+                "UPDATE rewind_store SET retrieved = retrieved + 1, owed = 1 WHERE hash = ?1",
                 params![hash],
             );
         }
