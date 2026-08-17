@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Berhenti membayar untuk membaca ulang output yang sama.</b> OMNI mengubah byte berulang menjadi handle yang bisa diambil kembali: 97,2% untuk berkas yang dibaca agen Anda dua kali, 14,9% pada 6.656 perintah nyata. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa Anda putar ulang pada korpus Anda sendiri.</em>
+    <em><b>Berhenti membayar untuk membaca ulang output yang sama.</b> OMNI mengubah byte berulang menjadi handle yang bisa diambil kembali: 97,2% untuk berkas yang dibaca agen Anda dua kali, dan pada 5.984 perintah nyata 69,6% di minggu yang berat, 14,9% di minggu biasa. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa Anda putar ulang pada korpus Anda sendiri.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -97,17 +97,11 @@ Angka nyata, diukur pada `tests/fixtures/` dan trace yang diputar ulang, bukan h
 
 | Perintah | Tanpa OMNI | Dengan OMNI | Hemat |
 |---|---|---|---|
-| `cargo test` (490 lulus, 10 gagal) | 16,5 KB output per-test | ringkasan lulus/gagal dari runner-nya sendiri | **92,9%** |
-| `git status` (kotor) | 496 B porcelain | branch dan path yang berubah | **61,7%** |
-| `docker build` (noise cache berat) | 9,2 KB hash layer dan progress bar | hasil build, cache hit dilipat | **35,9%** |
-| `git diff` (banyak berkas) | lockfile, spasi, perubahan hasil generate | kode yang benar-benar berubah | **25,2%** |
+| `cargo test` (490 lulus, 10 gagal) | 16,5 KB output per-test | ringkasan lulus/gagal dari runner-nya sendiri | **93,0%** |
+| `git status` (kotor) | 496 B porcelain | branch dan path yang berubah | **66,7%** |
+| `docker build` (noise cache berat) | 9,2 KB hash layer dan progress bar | hasil build, cache hit dilipat | **98,9%** |
+| `git diff` (banyak berkas) | lockfile, spasi, perubahan hasil generate | kode yang benar-benar berubah | **37,8%** |
 | `kubectl get pods` (35 pod, 5 crash) | tabel penuh | tabel penuh | **0%**, memang begitu |
-
-Setiap angka di atas adalah payload yang **benar-benar dikirim**, termasuk penanda
-pemulihan ~77 byte yang OMNI lampirkan setiap kali ia membuang sesuatu. Rilis
-sebelumnya mengutip output distiller sebelum penanda itu, yang membuat payload kecil
-terlihat lebih bagus: `git diff` terbaca 25,2% di sini dan 44,6% tanpanya. Penanda
-itulah yang membuat potongannya bisa dikembalikan, jadi ia layak ikut dihitung.
 
 Baris `kubectl get pods` yang menarik. Dulu ia melaporkan 9,3%; sekarang tidak
 melaporkan apa-apa, karena tabel pod adalah enumerasi di mana setiap baris adalah
@@ -126,7 +120,7 @@ bukan kalimat yang meminta Anda percaya.
 | **Tidak pernah mengarang hasil** | distiller yang tidak berhasil mem-parse sinyal apa pun mengembalikan output mentah, bukan string hijau `no errors` atau `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Kegagalan tidak pernah ditutupi** | perintah yang keluar dengan status bukan nol diteruskan apa adanya | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Data terstruktur tidak pernah disentuh** | JSON / YAML / NDJSON / CSV lewat byte demi byte | `pipeline::format` |
-| **Angkanya diukur, bukan diharapkan** | 6.656 trace nyata diputar ulang di biner rilis, dan 97,3% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
+| **Angkanya diukur, bukan diharapkan** | 5.984 trace nyata diputar ulang di biner rilis, dan 96,1% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
 
 Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **aslinya selalu bisa Anda pulihkan, dan ia tidak akan pernah membohongi agen Anda.**
 
@@ -134,14 +128,20 @@ Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **asliny
 
 ## Tolok Ukur
 
-Diukur pada biner rilis dengan memutar ulang **6.656 eksekusi perintah nyata**
-sepanjang **3 sampai 10 Agustus 2026 UTC**, semuanya output yang sampai ke model.
+Diukur pada biner rilis dengan memutar ulang **5.984 eksekusi perintah nyata**
+sepanjang **11 sampai 14 Agustus 2026 UTC**, semuanya output yang sampai ke model.
 Jendela waktunya bagian dari angkanya: `execution_traces` dipangkas setelah tujuh
 hari, jadi sebuah korpus lenyap seminggu setelah diukur.
 
-* Output build dan test: **76,9%**. Baca ulang berkas, kelas terbesar: **0,0%** dari
-  filter dan **26,3%** dari ledger, dan celah itulah alasan ledger ada.
-* **97,3% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
+* **32,6%** dari filter, **69,6%** dengan ledger. Baca ulang berkas, kelas terbesar
+  menurut byte: **39,2%** dari filter dan **89,6%** dengan ledger, dan celah itulah
+  alasan ledger ada.
+* **Baca korpusnya sebelum angkanya.** Jendela ini tidak biasa dan ia menaikkan semua
+  angka di sini: ada 286 grup payload yang identik byte per byte dan grup-grup itu saja
+  sudah **80,6%** dari total byte, sementara 148 dari 5.984 panggilan membawa 64,7%
+  di antaranya. Itu minggu ketika mesin ini hanya mengerjakan dan mengukur OMNI. Harness
+  yang sama pada satu minggu kerja biasa terbaca **14,9%**.
+* **96,1% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
   itulah yang memberi tahu Anda seberapa berarti sisanya. **Tidak ada panggilan yang
   justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
   menerbitkannya selama keduanya masih ada.

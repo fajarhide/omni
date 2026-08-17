@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Đừng trả tiền để đọc lại cùng một output.</b> OMNI biến những byte lặp lại thành handle lấy lại được: 97,2% với một tệp agent của bạn đọc hai lần, 14,9% trên 6.656 lệnh thật. Không xóa gì, không bịa gì, và mọi con số đều chạy lại được trên corpus của chính bạn.</em>
+    <em><b>Đừng trả tiền để đọc lại cùng một output.</b> OMNI biến những byte lặp lại thành handle lấy lại được: 97,2% với một tệp agent của bạn đọc hai lần, và trên 5.984 lệnh thật là 69,6% trong một tuần nặng, 14,9% trong một tuần bình thường. Không xóa gì, không bịa gì, và mọi con số đều chạy lại được trên corpus của chính bạn.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -98,17 +98,11 @@ Con số thật, đo trên `tests/fixtures/` và các trace phát lại, không 
 
 | Lệnh | Không có OMNI | Có OMNI | Tiết kiệm |
 |---|---|---|---|
-| `cargo test` (490 đạt, 10 hỏng) | 16,5 KB đầu ra từng test | bản tóm tắt đạt/hỏng của chính runner | **92,9%** |
-| `git status` (có thay đổi) | 496 B đầu ra porcelain | nhánh và các đường dẫn đã đổi | **61,7%** |
-| `docker build` (nhiễu cache nặng) | 9,2 KB hash layer và thanh tiến trình | kết quả build, cache hit được gộp | **35,9%** |
-| `git diff` (nhiều tệp) | lockfile, khoảng trắng, thay đổi do sinh mã | phần mã thực sự thay đổi | **25,2%** |
+| `cargo test` (490 đạt, 10 hỏng) | 16,5 KB đầu ra từng test | bản tóm tắt đạt/hỏng của chính runner | **93,0%** |
+| `git status` (có thay đổi) | 496 B đầu ra porcelain | nhánh và các đường dẫn đã đổi | **66,7%** |
+| `docker build` (nhiễu cache nặng) | 9,2 KB hash layer và thanh tiến trình | kết quả build, cache hit được gộp | **98,9%** |
+| `git diff` (nhiều tệp) | lockfile, khoảng trắng, thay đổi do sinh mã | phần mã thực sự thay đổi | **37,8%** |
 | `kubectl get pods` (35 pod, 5 crash) | toàn bộ bảng | toàn bộ bảng | **0%**, có chủ đích |
-
-Mọi con số ở trên là payload **thực sự được giao**, đã tính cả dấu khôi phục khoảng
-77 byte mà OMNI gắn vào mỗi khi nó bỏ đi thứ gì đó. Các bản phát hành trước trích đầu
-ra của bộ chưng cất trước dấu đó, khiến các payload nhỏ trông đẹp hơn thực tế:
-`git diff` đọc là 25,2% ở đây và 44,6% nếu không tính. Chính dấu đó làm cho phần bị cắt
-khôi phục được, nên nó thuộc về con số.
 
 Dòng đáng chú ý là `kubectl get pods`. Trước đây nó báo 9,3%; giờ nó không báo gì cả, vì
 một bảng pod là một liệt kê mà mỗi dòng là một dữ liệu, không có nhiễu nào để bỏ. Mất
@@ -127,7 +121,7 @@ một câu xin bạn tin.
 | **Không bao giờ bịa kết quả** | bộ chưng cất không phân tích được tín hiệu nào sẽ trả về đầu ra thô, chứ không phải một dòng xanh `no errors` hay `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Thất bại không bao giờ bị che** | lệnh thoát với mã khác 0 được cho qua nguyên vẹn | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Dữ liệu có cấu trúc không bị chạm** | JSON / YAML / NDJSON / CSV đi qua từng byte một | `pipeline::format` |
-| **Số liệu là đo được, không phải kỳ vọng** | 6.656 trace thật phát lại trên bản binary phát hành, và 97,3% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
+| **Số liệu là đo được, không phải kỳ vọng** | 5.984 trace thật phát lại trên bản binary phát hành, và 96,1% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
 
 Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
 
@@ -135,14 +129,20 @@ một câu xin bạn tin.
 
 ## Đo đạc
 
-Đo trên bản binary phát hành bằng cách phát lại **6.656 lần thực thi lệnh thật**
-trong khoảng **3 đến 10 tháng 8 năm 2026 UTC**, tất cả đều là đầu ra tới được mô hình.
+Đo trên bản binary phát hành bằng cách phát lại **5.984 lần thực thi lệnh thật**
+trong khoảng **11 đến 14 tháng 8 năm 2026 UTC**, tất cả đều là đầu ra tới được mô hình.
 Khoảng thời gian là một phần của con số: `execution_traces` bị cắt sau bảy ngày, nên
 một tập dữ liệu biến mất một tuần sau khi được đo.
 
-* Đầu ra build và test **76,9%**. Lớp lớn nhất là đọc lại tệp: bộ lọc lấy **0,0%**, ledger
-  lấy **26,3%**, và chính khoảng cách đó là lý do ledger tồn tại.
-* **97,3% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
+* **32,6%** từ bộ lọc, **69,6%** khi có ledger. Lớp lớn nhất tính theo byte là đọc lại
+  tệp: bộ lọc lấy **39,2%**, cùng ledger là **89,6%**, và chính khoảng cách đó là lý do
+  ledger tồn tại.
+* **Đọc tập dữ liệu trước khi đọc con số.** Khoảng thời gian này bất thường và nó thổi
+  phồng mọi con số bên dưới: có 286 nhóm payload giống nhau từng byte và riêng chúng đã
+  chiếm **80,6%** tổng số byte, còn 148 trong 5.984 lệnh gọi mang 64,7% số đó. Đó là tuần
+  cỗ máy này chỉ làm và đo chính OMNI. Cũng bộ đo đó trên một tuần làm việc bình thường
+  đọc ra **14,9%**.
+* **96,1% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
   phần còn lại đáng giá bao nhiêu. **Không lệnh gọi nào làm đầu ra lớn hơn**
   trong lần đo này. Từng có 2 cho tới ([#398](https://github.com/fajarhide/omni/issues/398)), và chúng tôi đã công bố chúng suốt
   thời gian đó.
