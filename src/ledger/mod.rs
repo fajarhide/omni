@@ -605,6 +605,22 @@ pub fn line_key(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// #581. The main agent's scope has to stay the bare session id, byte for
+    /// byte. Composing it differently still folds correctly inside one run,
+    /// because both calls agree, so the hook-level tests cannot see a change
+    /// here. What it would break is an upgrade: rows written by the previous
+    /// binary are keyed on the bare id, and a new formula orphans them mid
+    /// session and silently stops folding against them.
+    #[test]
+    fn the_main_agents_scope_is_the_session_id_unchanged() {
+        assert_eq!(super::scope_for("sess-1", None), "sess-1");
+        assert_eq!(super::scope_for("sess-1", Some("")), "sess-1");
+        assert_eq!(
+            super::scope_for("sess-1", Some("agent-9")),
+            "sess-1/agent-9"
+        );
+    }
+
     use super::*;
 
     fn temp_store() -> (Store, tempfile::TempDir) {
