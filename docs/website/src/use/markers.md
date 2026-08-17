@@ -100,3 +100,22 @@ Works on every host, with or without MCP. Agents with the MCP server wired can c
 One boundary a handle cannot promise: the archive is a rolling 30 day window, so
 `omni retrieve` on content older than that will not resolve. Verbatim traces are
 shorter still at seven days.
+
+## Telling a real marker from a printed one
+
+Markers appear in prose too. This page is full of them, so is OMNI's source, and so
+is any bug report that quotes one. That matters if you are measuring whether OMNI
+was active on a run, because searching a transcript for the marker shape will find
+the examples as readily as the folds.
+
+The handle is what separates them. Every worked example in this manual and in OMNI's
+own source uses one reserved value, `0000000000000000`, which no real fold can ever
+be assigned:
+
+```sh
+omni retrieve 0000000000000000   # exit 1, "the documentation example"
+omni retrieve <handle-you-found> # exit 0 if OMNI really folded it
+```
+
+So the exit code answers the question, and a marker copied out of documentation
+cannot be mistaken for evidence that anything was shortened.

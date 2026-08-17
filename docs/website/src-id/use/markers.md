@@ -104,3 +104,22 @@ bisa memanggil `omni_retrieve` sendiri tanpa bertanya ke Anda.
 Satu batas yang tidak bisa dijanjikan sebuah handle: arsipnya jendela bergulir 30
 hari, jadi `omni retrieve` atas isi yang lebih tua dari itu tidak akan ketemu.
 Jejak apa adanya bahkan lebih pendek, tujuh hari.
+
+## Membedakan penanda asli dari penanda yang sekadar dicetak
+
+Penanda juga muncul di dalam prosa. Halaman ini penuh dengannya, begitu pula source
+OMNI sendiri, dan begitu pula laporan bug mana pun yang mengutipnya. Itu penting
+ketika Anda mengukur apakah OMNI aktif pada suatu run, karena mencari bentuk penanda
+di dalam transkrip akan menemukan contohnya semudah menemukan lipatan aslinya.
+
+Handle-nya yang membedakan. Setiap contoh di manual ini dan di source OMNI memakai
+satu nilai cadangan, `0000000000000000`, yang tidak akan pernah diberikan kepada
+lipatan sungguhan:
+
+```sh
+omni retrieve 0000000000000000   # exit 1, "the documentation example"
+omni retrieve <handle-yang-Anda-temukan> # exit 0 jika OMNI benar-benar melipatnya
+```
+
+Jadi exit code-nya yang menjawab pertanyaan itu, dan penanda yang disalin dari
+dokumentasi tidak bisa disalahartikan sebagai bukti bahwa ada yang dipendekkan.
