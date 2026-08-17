@@ -1150,16 +1150,23 @@ fn build_additional_context(
     // 16,983 - 1,209 = 15,774. Two live estimators, neither reconciled, one of
     // them printed into the agent's context (#212). `raw_tokens` and
     // `filtered_tokens` are already counted for this result, use them.
-    let saved_this_call = result.raw_tokens.saturating_sub(result.filtered_tokens);
+    // #589. What the banner prints is bytes, which are counted, rather than the
+    // token figures above, which are those bytes over a constant calibrated
+    // against `cl100k_base`. The percentage is unaffected either way: the
+    // divisor cancels in a ratio, so it was the one defensible number on the
+    // line all along.
+    let saved_bytes_this_call = result.input_bytes.saturating_sub(result.output_bytes);
 
-    let mut session_total = 0;
+    let mut session_bytes_total: u64 = 0;
     let mut command_count = 0;
     let mut pressure_msg = None;
 
     if let Some(lock) = session
         && let Ok(mut s) = lock.lock()
     {
-        session_total = s.estimated_tokens_saved();
+        session_bytes_total = s
+            .cumulative_input_bytes
+            .saturating_sub(s.cumulative_output_bytes);
         command_count = s.command_count;
 
         // Feature A: Context Pressure System
@@ -1253,16 +1260,32 @@ fn build_additional_context(
         }
     }
 
-    // F-10: Inject for significant single-call savings (>= 500 tokens)
-    if saved_this_call >= 500 {
+    // F-10: Inject for significant single-call savings.
+    //
+    // The bars moved from tokens to bytes with the figures they gate, at the 3.6
+    // bytes per token the estimator used. Converting them was not optional:
+    // leaving `>= 500` while the quantity became bytes would have fired the
+    // banner on a saving 3.6 times smaller, which is more markers rather than
+    // fewer (#589).
+    //
+    // Not an exact translation, and review on #592 was right to say so. The old
+    // gate subtracted two independently `ceil`ed estimates, so it disagrees with
+    // this one over savings of 1,797 to 1,799 B, a three byte window, measured
+    // rather than reasoned about. The disagreement is one-way: the old bar fired
+    // and this one is silent, never the reverse, so the banner can only have got
+    // quieter.
+    if saved_bytes_this_call >= 1800 {
         msgs.push(format!(
-            "[OMNI: -{saved_this_call}tok this call | -{session_total}tok session | {savings:.0}% compression]",
+            "[OMNI: -{} this call | -{} session | {savings:.0}% compression]",
+            crate::cli::stats::format_bytes(saved_bytes_this_call as u64),
+            crate::cli::stats::format_bytes(session_bytes_total),
             savings = result.savings_pct()
         ));
-    } else if command_count > 0 && command_count.is_multiple_of(10) && session_total >= 1000 {
+    } else if command_count > 0 && command_count.is_multiple_of(10) && session_bytes_total >= 3600 {
         // F-10: Inject milestone summary every 10 commands if total savings significant
         msgs.push(format!(
-            "[OMNI session milestone: -{session_total}tok saved across {command_count} commands]"
+            "[OMNI session milestone: -{} saved across {command_count} commands]",
+            crate::cli::stats::format_bytes(session_bytes_total)
         ));
     }
 
@@ -1968,6 +1991,81 @@ mod tests {
         );
     }
 
+    /// #589. The banner's bar was expressed in the same estimated unit as the
+    /// figure it gates, so moving the figure to bytes without moving the bar
+    /// would have fired it on a saving 3.6 times smaller, quietly tripling how
+    /// often OMNI writes into the agent's context. Nothing guarded that, which
+    /// is why a saving in the gap between the old number and the new one is
+    /// asserted silent here.
+    #[test]
+    fn a_saving_under_the_converted_bar_writes_no_banner() {
+        let result = crate::pipeline::DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "cat".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            // 1,200 B saved: over the old bar of 500, under the converted 1,800.
+            input_bytes: 4_000,
+            output_bytes: 2_800,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 1_112,
+            filtered_tokens: 778,
+            delivered_bytes: 2_800,
+        };
+
+        assert!(
+            build_additional_context(&result, &None).is_none(),
+            "a 1.2 KB saving is under the bar and must not reach the agent's context"
+        );
+    }
+
+    /// The three byte window where the converted bar and the old one disagree,
+    /// pinned so the claim in the changelog stays true if either moves.
+    ///
+    /// Review on #592 pointed out that subtracting two independently `ceil`ed
+    /// estimates is not the same comparison as subtracting the bytes, and it is
+    /// right. What makes it acceptable is the direction rather than the size: a
+    /// saving in the window fired the old bar and is silent now, never the
+    /// reverse, so the conversion cannot make OMNI write into the agent's
+    /// context more often than it used to.
+    #[test]
+    fn the_converted_bar_is_never_noisier_than_the_one_it_replaced() {
+        let old_fires = |i: usize, o: usize| {
+            use crate::util::token_estimate::{ContentHint, estimate_tokens};
+            estimate_tokens(i, ContentHint::Mixed)
+                .saturating_sub(estimate_tokens(o, ContentHint::Mixed))
+                >= 500
+        };
+        let new_fires = |i: usize, o: usize| i.saturating_sub(o) >= 1800;
+
+        let mut disagreements = 0;
+        for delta in 1_700..=1_900usize {
+            for out in 0..40usize {
+                let input = out + delta;
+                if old_fires(input, out) != new_fires(input, out) {
+                    disagreements += 1;
+                    assert!(
+                        old_fires(input, out) && !new_fires(input, out),
+                        "the converted bar fired where the old one did not, at {delta} B saved"
+                    );
+                    assert!(
+                        (1_797..=1_799).contains(&delta),
+                        "the disagreement escaped the measured window at {delta} B saved"
+                    );
+                }
+            }
+        }
+        assert!(
+            disagreements > 0,
+            "no disagreement found at all, so this scan is broken rather than clean"
+        );
+    }
+
     /// #212: the banner and the `distillations` row describe the same call and
     /// disagreed about it, the banner ran a bytes-per-token heuristic over the
     /// byte delta while the row ran a real tokenizer over each string. On the
@@ -1996,9 +2094,18 @@ mod tests {
 
         let banner = build_additional_context(&result, &None).expect("banner for a large saving");
 
+        // 30,000 - 2,129 = 27,871 B, which `format_bytes` renders as `27.2 KB`.
+        // Written out by hand from that function's rules rather than by calling
+        // it, so this asserts the string a reader sees rather than agreeing with
+        // whatever the formatter happens to do.
+        //
+        // #589 made this stricter rather than looser. The banner used to report
+        // a token figure derived from these same bytes, so "agrees with the row"
+        // meant "agrees after an estimator". It now prints the row's own two
+        // columns subtracted, with nothing in between.
         assert!(
-            banner.contains("-15774tok this call"),
-            "banner must report raw_tokens - filtered_tokens, got: {banner}"
+            banner.contains("-27.2 KB this call"),
+            "banner must report input_bytes - output_bytes, got: {banner}"
         );
     }
 
