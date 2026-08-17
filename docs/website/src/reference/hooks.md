@@ -102,3 +102,38 @@ echo '<host payload json>' | omni --post-hook
 
 `omni exec` and the post-hook route differently, so a result from one is not evidence
 about the other.
+
+### The payload shape, which differs per tool
+
+Getting this wrong fails silently and identically: the hook exits 0, prints nothing, and a
+probe reads that as `0.0% saved`. There is no error to notice, so a distiller that is in
+fact cutting 96% can be written off as not firing.
+
+`Bash` puts the output at the top of `tool_response`:
+
+```json
+{ "session_id": "s1", "tool_name": "Bash",
+  "tool_input":    { "command": "cat server.log" },
+  "tool_response": { "content": "line one\nline two\n" } }
+```
+
+`Read` wraps it in `file`, and the extra keys are not decoration. `startLine` is what the
+host counts `cat -n` numbering from, so a fold that removes lines above the survivors has
+to move it:
+
+```json
+{ "session_id": "s1", "tool_name": "Read",
+  "tool_input":    { "path": "notes.txt" },
+  "tool_response": { "file": { "filePath": "notes.txt", "content": "...",
+                               "startLine": 1, "numLines": 40, "totalLines": 400 } } }
+```
+
+The reply mirrors whichever shape arrived, under `hookSpecificOutput.updatedToolOutput`.
+Claude Code validates it against **the host tool's own output schema**, so a `Bash`
+rewrite carries `content` and a `Read` rewrite carries `file.content`.
+
+**Both `Read` shapes are real and they reach different stages.** A `Read` payload written
+with a bare `tool_response.content` is accepted and reaches the ledger, while
+`tool_response.file.content` reaches the `readfile` distiller and the `startLine`
+adjustment. Neither is wrong; they answer different questions. A probe aimed at one and
+built on the other returns a clean nothing and looks like a verdict.

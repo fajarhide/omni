@@ -749,6 +749,39 @@ fn normalize_tool_name(name: &str) -> String {
 }
 
 #[cfg(test)]
+mod read_payload_shapes_586 {
+    use super::*;
+
+    /// #586. `reference/hooks.md` tells the reader that a `Read` payload has two
+    /// real shapes, a bare `tool_response.content` and a wrapped
+    /// `tool_response.file.content`, and that getting it wrong fails silently
+    /// with a clean `0.0% saved` rather than an error. That page is only worth
+    /// having while both shapes really do parse, so both are asserted here.
+    #[test]
+    fn both_documented_read_shapes_carry_their_content() {
+        let bare = r#"{"session_id":"s1","tool_name":"Read",
+            "tool_input":{"path":"notes.txt"},
+            "tool_response":{"content":"line one\nline two\n"}}"#;
+        let wrapped = r#"{"session_id":"s1","tool_name":"Read",
+            "tool_input":{"path":"notes.txt"},
+            "tool_response":{"file":{"filePath":"notes.txt",
+                "content":"line one\nline two\n","startLine":1,
+                "numLines":2,"totalLines":400}}}"#;
+
+        for (label, payload) in [("bare", bare), ("wrapped", wrapped)] {
+            let n = normalize(payload)
+                .unwrap_or_else(|| panic!("the {label} Read shape did not normalize at all"));
+            assert!(
+                n.content.contains("line one"),
+                "the {label} Read shape parsed but lost its content, which is the \
+                 failure the manual warns reads as 0.0% saved: {:?}",
+                n.content
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     /// A snake_case tool name has to reach the same arm as its PascalCase twin
     /// (#488).

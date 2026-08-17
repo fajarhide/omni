@@ -110,3 +110,38 @@ echo '<json muatan host>' | omni --post-hook
 
 `omni exec` dan post-hook memilih rute yang berbeda, jadi hasil dari yang satu
 bukan bukti tentang yang lain.
+
+### Bentuk muatannya, dan ia berbeda per tool
+
+Salah bentuk gagal secara diam-diam dan seragam: hook keluar 0, tidak mencetak apa pun,
+dan sebuah probe membacanya sebagai `0.0% saved`. Tidak ada error untuk disadari, jadi
+distiller yang sebenarnya memotong 96% bisa dianggap tidak berjalan.
+
+`Bash` menaruh keluarannya langsung di `tool_response`:
+
+```json
+{ "session_id": "s1", "tool_name": "Bash",
+  "tool_input":    { "command": "cat server.log" },
+  "tool_response": { "content": "baris satu\nbaris dua\n" } }
+```
+
+`Read` membungkusnya di dalam `file`, dan kunci tambahannya bukan hiasan. `startLine`
+adalah titik hitung penomoran `cat -n` di sisi host, jadi fold yang membuang baris di atas
+baris yang selamat harus menggesernya:
+
+```json
+{ "session_id": "s1", "tool_name": "Read",
+  "tool_input":    { "path": "notes.txt" },
+  "tool_response": { "file": { "filePath": "notes.txt", "content": "...",
+                               "startLine": 1, "numLines": 40, "totalLines": 400 } } }
+```
+
+Balasannya mengikuti bentuk yang datang, di bawah `hookSpecificOutput.updatedToolOutput`.
+Claude Code memvalidasinya terhadap **skema keluaran milik tool itu sendiri**, jadi
+penulisan ulang `Bash` membawa `content` dan `Read` membawa `file.content`.
+
+**Kedua bentuk `Read` itu sama-sama sah dan keduanya mencapai tahap yang berbeda.** Muatan
+`Read` dengan `tool_response.content` polos tetap diterima dan sampai ke ledger, sedangkan
+`tool_response.file.content` sampai ke distiller `readfile` dan ke penyesuaian `startLine`.
+Tidak ada yang salah; keduanya menjawab pertanyaan berbeda. Probe yang membidik satu tapi
+dibangun di atas yang lain mengembalikan nol bersih dan tampak seperti sebuah kesimpulan.
