@@ -541,9 +541,14 @@ impl<'a> Ledger<'a> {
             // `store_rewind` returns `None` when the row did not land, and the
             // run then stays verbatim rather than becoming a promise nobody can
             // keep (#388).
+            // A run whose handle was just pulled stays verbatim. That delivery is
+            // the answer to the pull, and folding it hands the reader back the
+            // marker it was following (#581). The flag is consumed here, so this
+            // costs one delivery rather than exempting the content for good.
             match long_enough
                 .then(|| self.store.store_rewind(&body))
                 .flatten()
+                .filter(|handle| !self.store.take_owed_delivery(handle))
                 .zip(run.seen)
             {
                 Some((handle, origin)) => {
