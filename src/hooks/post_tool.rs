@@ -1150,16 +1150,23 @@ fn build_additional_context(
     // 16,983 - 1,209 = 15,774. Two live estimators, neither reconciled, one of
     // them printed into the agent's context (#212). `raw_tokens` and
     // `filtered_tokens` are already counted for this result, use them.
-    let saved_this_call = result.raw_tokens.saturating_sub(result.filtered_tokens);
+    // #589. What the banner prints is bytes, which are counted, rather than the
+    // token figures above, which are those bytes over a constant calibrated
+    // against `cl100k_base`. The percentage is unaffected either way: the
+    // divisor cancels in a ratio, so it was the one defensible number on the
+    // line all along.
+    let saved_bytes_this_call = result.input_bytes.saturating_sub(result.output_bytes);
 
-    let mut session_total = 0;
+    let mut session_bytes_total: u64 = 0;
     let mut command_count = 0;
     let mut pressure_msg = None;
 
     if let Some(lock) = session
         && let Ok(mut s) = lock.lock()
     {
-        session_total = s.estimated_tokens_saved();
+        session_bytes_total = s
+            .cumulative_input_bytes
+            .saturating_sub(s.cumulative_output_bytes);
         command_count = s.command_count;
 
         // Feature A: Context Pressure System
@@ -1253,16 +1260,25 @@ fn build_additional_context(
         }
     }
 
-    // F-10: Inject for significant single-call savings (>= 500 tokens)
-    if saved_this_call >= 500 {
+    // F-10: Inject for significant single-call savings.
+    //
+    // The bars moved from tokens to bytes with the figures they gate, at the 3.6
+    // bytes per token the estimator used, so the banner fires exactly as often
+    // as it did. Converting them was not optional: leaving `>= 500` while the
+    // quantity became bytes would have fired the banner on a saving 3.6 times
+    // smaller, which is more markers rather than fewer (#589).
+    if saved_bytes_this_call >= 1800 {
         msgs.push(format!(
-            "[OMNI: -{saved_this_call}tok this call | -{session_total}tok session | {savings:.0}% compression]",
+            "[OMNI: -{} this call | -{} session | {savings:.0}% compression]",
+            crate::cli::stats::format_bytes(saved_bytes_this_call as u64),
+            crate::cli::stats::format_bytes(session_bytes_total),
             savings = result.savings_pct()
         ));
-    } else if command_count > 0 && command_count.is_multiple_of(10) && session_total >= 1000 {
+    } else if command_count > 0 && command_count.is_multiple_of(10) && session_bytes_total >= 3600 {
         // F-10: Inject milestone summary every 10 commands if total savings significant
         msgs.push(format!(
-            "[OMNI session milestone: -{session_total}tok saved across {command_count} commands]"
+            "[OMNI session milestone: -{} saved across {command_count} commands]",
+            crate::cli::stats::format_bytes(session_bytes_total)
         ));
     }
 
@@ -1996,9 +2012,18 @@ mod tests {
 
         let banner = build_additional_context(&result, &None).expect("banner for a large saving");
 
+        // 30,000 - 2,129 = 27,871 B, which `format_bytes` renders as `27.2 KB`.
+        // Written out by hand from that function's rules rather than by calling
+        // it, so this asserts the string a reader sees rather than agreeing with
+        // whatever the formatter happens to do.
+        //
+        // #589 made this stricter rather than looser. The banner used to report
+        // a token figure derived from these same bytes, so "agrees with the row"
+        // meant "agrees after an estimator". It now prints the row's own two
+        // columns subtracted, with nothing in between.
         assert!(
-            banner.contains("-15774tok this call"),
-            "banner must report raw_tokens - filtered_tokens, got: {banner}"
+            banner.contains("-27.2 KB this call"),
+            "banner must report input_bytes - output_bytes, got: {banner}"
         );
     }
 

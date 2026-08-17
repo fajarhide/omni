@@ -1107,13 +1107,10 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         format_bytes(output_total).green()
     );
 
-    println!(
-        "  {:<20} {} {} {}",
-        "Tokens Reduced:".bright_black(),
-        format_exact_tokens(raw_tokens).red(),
-        "→".bright_black(),
-        format_exact_tokens(filtered_tokens).green()
-    );
+    // #589. `Tokens Reduced` used to sit here and was the line above divided by
+    // 3.6, a constant calibrated against `cl100k_base`. It added no information
+    // that `Data Distilled` did not already state exactly, and it stated it in a
+    // unit we cannot defend, so it is gone rather than relabelled.
 
     let ratio_msg = format!("{:.1}% reduction", reduction_pct);
     let ratio_colored = if reduction_pct > 70.0 {
