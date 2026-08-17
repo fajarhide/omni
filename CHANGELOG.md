@@ -8,6 +8,372 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-08-17
+
+### Added
+- **A `Read` with repeats at both ends folds both of them, and the middle keeps
+  its line numbers.** Folds above and below the surviving lines leave those lines
+  as one block, still the same distance into the file and into the view, so one
+  `startLine` closes that gap whatever follows them. The previous release refused
+  this because nothing reported how many marker lines stood above the block, and
+  every way of inferring it from the output was wrong: one marker per fold is
+  wrong when adjacent runs of different origin emit one each, searching the view
+  for the surviving text matches inside a marker when the text is something a
+  marker also says, and recognising markers by their prefix is defeated by a file
+  whose own lines start with it. `substitute` reports the count now, which is the
+  only place that knows.
+
+  Sized before it was built, over 4,552 `Read` results in the local transcripts:
+  folds at both ends are 129 of the 1,868 reads that repeat something and carry
+  257 KB, against 3.29 MB reachable before, so roughly 7.8% more folded bytes.
+  End to end on that shape, same binary either side: **0.0% saved before, 33.8%
+  after**, with `startLine` moving from 100 to 124 exactly as the twenty-five
+  folded head lines require. Reads whose survivors sit in two separate blocks,
+  1,020 of the 1,868, stay refused and always will: one starting number cannot
+  describe two offsets. (#573)
+- **A `Read` that repeats the head of a file folds again, and the host's line
+  numbers stay true.** #557 stopped a fold renumbering the lines under it by
+  refusing the fold. That is correct, and it costs the most common shape there
+  is: re-reading a file at a later offset repeats its head, so the run the ledger
+  can fold is exactly the run with content below it. The host renders
+  `file.content` with `cat -n` numbering counted from `startLine`, so moving
+  `startLine` by the number of marker lines now standing above the survivors puts
+  every one of them back where the file has it. Verified on live host transcripts
+  before being relied on rather than assumed, which is the #158 lesson: a `Read`
+  requested at offset 215 comes back with `215` on its first line.
+
+  The rule is exact rather than clever. The survivors have to be one block
+  running to the end of the payload, which makes the lines above them a
+  subtraction and means nothing has to be searched for. Everything else refuses,
+  including shapes that are correctable in principle, because the alternatives
+  are searching the view for the survivors' text, which can match inside a
+  marker, or a marker count nothing reports. A refused fold costs bytes; a wrong
+  number costs an edit in the wrong place. The shape comes from the ledger's own
+  folded indices, so a file whose lines begin with `[OMNI:` cannot change the
+  answer.
+
+  Measured on four overlapping windows of a markdown file under the host's output
+  cap: **0.0% saved before, 4.7% after**, one fold where there had been none.
+  Source files are unaffected, since the `readfile` distiller acts on those first
+  (46.6% either way).
+- **A fold now records whether it covered the whole output**: `MIN_WHOLE_OUTPUT_FOLD` refuses a whole-output fold under 1 KB because the agent is left holding a handle and no content, and #543 calibrated that floor on four such folds. Nothing recorded which folds were whole-output, so the floor could not be checked against its own corpus after the fact: `distillations` carries `collapse_original = 0` on exactly the four rows the decision cites, and `ledger_folds` had no flag at all. Verifying the claim on a live store meant guessing from the delivered-bytes ratio, which misreads an aggressive `Keep` as a whole-output fold.
+
+  `ledger_folds.whole_output` is set when every line of the payload folded, which is the call-level reading of the same condition the floor tests per run. The two differ only when adjacent runs of different origins tile the payload, and the question the column answers is whether the agent kept any content at all, so the call-level reading is the right one for a table that already aggregates by (origin, source agent) per call.
+
+  ```sql
+  SELECT * FROM ledger_folds WHERE whole_output = 1 AND payload_bytes < 1024;
+  ```
+
+  Zero rows is the floor holding. `payload_bytes` rides along on every row of the call for that query to be a row predicate: summing `bytes` would need a GROUP BY on a per-call key, and `ts` is whole seconds, so two folds by one agent inside one second merge and their combined size can clear a floor that neither cleared alone. That is the audit silently hiding the one thing it exists to find, so the size is recorded per row instead.
+
+  Rows written before the columns carry 0 meaning "not recorded" rather than "was partial", so a query has to bound itself by `ts`. The migration was run against a copy of a real 89 MB store and left its 55 existing rows intact.
+
+### Changed
+- **OMNI advertised 25 MCP tools and 16 of them had never been called.** The
+  definitions sit in the prefix of every request of every session, so they are
+  re-read on each one rather than paid for once. Measured across 229 Claude Code
+  transcripts: nine tools account for all 109 calls, `omni_retrieve` and
+  `omni_explain_savings` alone for 84% of them, and the sixteen that were never
+  called are **4,940 bytes**. That is the same size as the **4,942 bytes** OMNI
+  removes from tool output in the median of the 35 sessions that pushed more
+  than 50 KB through the hook, and it is carried from position
+  0 where it is re-read on every request instead of from the middle of the
+  session, so advertising them cost about twice what the distillers earned. A
+  host is now told about the tools its tier can use: nine on Full and
+  Handoff-first, four on MCP-only, and `omni_run` is guaranteed present on
+  Handoff-first because there it is the only path by which the model reads less.
+  `OMNI_MCP_TOOLS=all` restores every tool, and `omni doctor` says which is in
+  force. The evidence is one machine and Claude Code only, which is why the
+  override exists and why doctor names it. (#577)
+- **The landing page leads with what OMNI buys and the use-case page covers eleven
+  situations instead of six.** No figure changed. The three largest measured ones, 97.2%
+  off a repeated file read, 94% off `git log -15` and 92.9% off a `cargo test` run, were
+  each buried inside a page and are now on the first screen beside the 4,940 bytes the
+  lean MCP surface takes off every request. The aggregate and the 97.3% of calls that save
+  nothing keep their own section, because a tool that claims to help everywhere is one
+  nobody can predict. Five situations are new: reading one file in several passes,
+  dispatching a subagent, following a marker back, a context that gets compacted, and the
+  tool list every request carries. Both languages.
+- **`Your first hour` teaches the two checks that make the rest worth trusting.** It now
+  opens with what the hour buys, checking OMNI rather than trusting it, and adds the two
+  commands that do it: pulling content back through a handle, and telling a real marker
+  apart from one that is only text. Both were verified against a built binary before being
+  written down, exit 1 with `the documentation example` for the reserved handle and exit 0
+  with the content for a real one. The `omni stats` section also says its absolute figures
+  are bytes now and why they used to be something else. Both languages.
+- **`Seeing what it saved` says what its numbers are counted in, and names a breaking
+  change.** Every absolute figure is bytes now, and the page explains why they used to be
+  something else and why the percentages never moved with them. It also documents that
+  `omni stats --json` renamed `commands[].tokens_saved` to `bytes_saved`: the field held
+  bytes under the old name for one release, and a machine-readable surface asserting the
+  wrong unit is the defect rather than a cosmetic slip.
+- **`What OMNI is` covers the second thing OMNI edits: itself.** Tool definitions sit in
+  the prefix of every request, so a prefix byte is carried from the first request while a
+  removed output byte was inserted in the middle. Sixteen of twenty-five advertised tools
+  had never been called across 229 sessions, and they weighed 4,940 bytes against the
+  4,942 the distillers remove from output in a busy session. Both languages throughout.
+- **`The ledger` names the three readers its premise fails for.** The page already rested
+  on one sentence, that the agent is still holding these bytes, and every rule is a
+  defence of the moment that stops being true. There are exactly three readers it fails
+  for and this release answered all three: a subagent carrying the parent's session id, a
+  context the host compacted, and a reader following a handle back. The pattern is stated
+  as the thing worth keeping, since it is what makes the next surprise diagnosable. Both
+  languages.
+- **The mark's ink is the terminal blue, not amber**: the site's terminal block stopped
+  reading in amber when it moved onto the design system's terminal ramp, which left the
+  logo as the only orange left in the product. The three gradient stops are the amber
+  ones converted rather than re-picked: the middle one is `--wl-terminal-blue` exactly,
+  and the outer two keep the old gradient's lightness offsets and chroma ratio at that
+  hue, so the modelling in the artwork survives the swap. All three are in gamut. The
+  path is untouched, and `media/logo.png` is re-rendered from the SVG at the 1254px it
+  already was.
+The README and all six translations now say plainly that every percentage on the
+measurements page is bytes per command and not a bill. Billed input tokens track
+roughly turns times prefix size, so a shortened payload only pays when it also
+removes a turn, and the end to end saving on whole sessions is larger on average
+while not being guaranteed on any single one.
+
+### Fixed
+- **The manual described 0.7.4 after 0.7.5 shipped (#555)**: three behaviour changes
+  landed in the release and reached no page a reader sees. The ledger page gave the two
+  fold bars, 150 bytes for a session-origin run and three times that for a project-origin
+  one, and stopped there, so the floor #543 added was invisible: a fold covering the whole
+  output needs 1024 bytes of input or the run stays verbatim. That is the bar a reader
+  meets first, because a short command whose entire output repeats is the common case. The
+  264-byte input floor was undocumented too, and between them the two explain most of the
+  reports that OMNI did nothing. Both are now on the ledger page in English and
+  Indonesian, with the measurement that set them.
+
+  **The three floors are now guarded rather than written down.** #541 was a count in
+  prose that nothing read, and putting two more numbers on a page would have rebuilt it,
+  so `every_documented_count_matches_the_code` reads `MIN_LEDGER_RUN_GAIN`,
+  `MIN_LEDGER_INPUT` and `MIN_WHOLE_OUTPUT_FOLD` out of `guard/limits.rs` and checks every
+  statement of them in both books, importing the constants rather than parsing them back
+  out of the source. Each claim carries enough of its sentence to belong to one floor and
+  nothing else, and a claim that matches no document at all now fails too, because a
+  pattern reworded past its sentence is a check that quietly stopped checking, which is
+  what #541 was.
+
+  **Coverage is counted per book, not once across the tree.** One shared counter would let
+  the English page keep a claim alive while the Indonesian one stopped stating it, which
+  is #541's reach problem again, one dimension out: the count is right, the guard is
+  green, and one language is no longer being checked. Every wrong number and every
+  single-language reword was proved to turn the test red, in both directions, and so was
+  dropping the tool count from both Indonesian pages that carry it, which nothing caught
+  before this change.
+
+  `ledger_folds` was missing from the database table list, which is the one table #533
+  added and the only one that records why a marker was issued.
+
+  **The release page told the reader to verify a tag by a label that lies for four
+  hours.** `guard::update::get_status` caches the newest known release for 14400 seconds,
+  so a machine that ran `omni doctor` before the tag reports `[AHEAD/RC]` whatever it is
+  running, which is what 0.7.5 did on a fresh install. The reliable half is the absence of
+  the `UNRELEASED` line, computed by `build.rs` from the tree with no cache. The same page
+  forecast a manual tidy on the first fragment cut; that happened on 0.7.5, two heading
+  pairs merged by hand, and the page now says to verify a cut by word count rather than by
+  eye.
+
+  Two samples named old versions: the build transcript on both manual front pages said
+  `Compiling omni v0.7.4`, and the plugin skill's `omni doctor` sample said `v0.7.3`.
+- **A ledger fold renumbered a `Read` result, so every line number below the
+  marker was wrong.** The reply goes back as `file.content` and the host renders
+  it with `cat -n` numbering counted from `startLine`, so it numbers whatever
+  lines OMNI returns. Replacing a run in the middle with a one-line marker
+  removes lines the count was walking over: in the report, real line 130 came
+  back labelled 101 and real line 199, the last in the file, came back as 170,
+  a shift of exactly the fold size minus the marker's own line. Nothing in the
+  payload said so. Those numbers are a contract rather than prose, since the
+  agent writes `file:line` into issues and commit messages and decides what to
+  edit from them, so this is the familiar shape: nothing truncated, no bytes
+  lost, and a confident statement the code cannot support. A fold with nothing
+  under it moves no number, so the whole-output fold and any fold reaching the
+  end of the payload still happen. `Grep` carries its positions inside the text
+  where a fold cannot move them, and `Bash` output is not numbered, so only
+  `Read` is gated. (#557)
+- **A bare `pass=` was redacted as a credential, so a test loop's result was
+  destroyed.** `echo "pass=$P/10"` after ten runs came back as
+  `pass=[REDACTED]`, and nothing in the output said the token had been a count
+  rather than a secret, which leaves re-running the loop or reporting a number
+  nobody saw. A bare `pass` now delivers a count, `3` or `3/10` and nothing
+  else. The `KEY` value rule from #486 is deliberately not reused: it accepts any
+  short lowercase word, which is right for `key` and wrong for `pass`, where
+  `hunter2` is what a password looks like. So `pass=hello` and `pass=hunter2`
+  stay redacted, which is narrower than the report asked for and follows the rule
+  this file already states, that hiding a value which did not need hiding is
+  recoverable and printing a secret is not. `DB_PASS` is named after what it
+  opens and keeps its strength unconditionally; `password=`, `PGPASSWORD=` and
+  `db_pass=` are unchanged. Each of those has a row in the test. (#559)
+- **`passwd=` had never been redacted at all.** Found while fixing the above
+  rather than reported: the pattern set matches on whole segments, so `PASSWD` is
+  neither equal to `PASS` nor a word ending in it, and `PASSWORD` is a different
+  word again. `passwd=hunter2` was delivered in full by every release that has
+  shipped this matcher. Added to the set. (#559)
+- **`kubectl get pods` keeps every row again.** For one release a 10 row pod table
+  arrived as three lines with seven pod names deleted, at a reported 73.5% saving.
+  The distiller was not the thing that changed: `src/distillers/cloud.rs` is
+  byte-identical to 0.7.3. `signals/tools/kubectl.toml` had been shadowing it since
+  #110, #510 retired the TOML layer, and the summariser underneath ran for the first
+  time. It is deleted rather than guarded, because the same arm already hands back
+  every other `kubectl get` listing for exactly this reason: a count of pods cannot be
+  turned back into a pod name. Repeated tables are still cheap, the ledger folds a
+  listing the agent has already seen, and it needs the rows intact to do it. The guard
+  now sits at the hook boundary rather than at the distiller, because collapse runs
+  between them and can eat the rows on its own (#562).
+- **`omni stats` booked savings on calls where the hook sent nothing, and the
+  all-time figure was 4.5x too high.** `process_payload` returns `None` when the
+  route is a passthrough and nothing was redacted, so the host keeps the bytes it
+  already had, but every byte and token column on the recorded row was computed
+  from the distiller's output before that decision was made. A distiller that cut
+  more than the guardrail's tenth and less than the soft threshold therefore
+  booked a saving the model never received. Found by reconciling `distillations`
+  against the host's own transcripts under `~/.claude/projects`, where the
+  `tool_result` bytes are post-hook and are what the model was actually given: over
+  the 45 sessions holding a transcript, 67 of the 389 rows that booked a saving
+  were this shape, 33,751 bytes of 205,873, and one was verified end to end before
+  anything changed (raw 7,744 B, booked 6,356 B, transcript entry 7,744 B with no
+  marker). `applied_only()` could not separate them, because it gates on
+  `delivered_bytes` and `delivered_bytes` was copied from the same string: it
+  equalled `output_bytes` on all 6,145 `claude_code` rows. Existing rows are
+  corrected once by migration rather than by a `CASE` in each of the six queries
+  that sum those columns, and `execution_traces` still holds what the distiller
+  produced. On the reporting installation these rows carried 93.0% of every byte
+  ever booked as saved: all time went from **37.1% to 8.3%** over an unchanged
+  6,386 commands, which matches the 4% to 15% per command measured independently
+  from `execution_traces`. (#566)
+- **A project fold said `from an earlier session`, which reads as a claim the
+  reader had already seen the content.** It means the opposite: the project scope
+  only answers for lines the session scope did not, so those lines were never
+  delivered here. Acting on it, a reader took a `claude plugin --help` page whose
+  `Commands:` block had been elided as a complete one and concluded the CLI had no
+  uninstall subcommand. The run form now says `N lines not shown here`, leading
+  with the only thing the reader has to act on and dropping the provenance, which
+  also makes it nine bytes shorter, 72 to 63. Marker length gates folding, so the
+  honest wording is the cheaper one here rather than a trade against it. The
+  whole-output form keeps the provenance and adds `none shown here`, because there
+  the agent holds nothing at all. The manual carries the new wording in both
+  languages, and `bench_replay` counts project markers on `shown here`, which both
+  forms contain and neither session form does. (#567)
+- **The guard that was supposed to catch a marker the manual does not document
+  could not fail.** It compared each template only up to its first placeholder, so
+  it checked `[OMNI: ` and `[OMNI: identical to ` and nothing else, and any page
+  holding any marker satisfied it. The wording after the count, which is the whole
+  of what a reader looks up, was never read. Proved by putting a retired marker
+  back into the page and watching the suite stay green. A second version, checking
+  each literal fragment independently, let one template borrow another's text: the
+  whole-output session example contains `lines already shown, omni retrieve`, so
+  deleting the ordinary session marker still left it green. It now matches each
+  template whole, with `{lines}` typed as a number and `{handle}` as a hex digest,
+  which is what stops the borrowing. Both experiments turn it red. (#567)
+- **Every hook run sorted the whole `sessions` table to read one row.**
+  `find_latest_session` is `ORDER BY last_active DESC LIMIT 1` and there was no
+  index on that column, so the plan was `SCAN sessions` plus a temp B-tree: it
+  dragged every row's `state_json` through a sort to return one of them, 24 rows
+  and 312 KB on the reporting installation. With the index the plan is
+  `SCAN sessions USING INDEX idx_sessions_last_active` and there is no sort. Worth
+  2% of the hook's wall time measured by A/B on the release binary, which is
+  smaller than the query plan suggests and is reported as measured rather than as
+  the plan implies. (#569)
+- **The skill still failed both skills.sh audits after #558, because a scanner
+  reads a URL and not the sentence disowning it.** #558 replaced the
+  `curl | bash` install with a release archive checked against `SHA256SUMS`, and
+  left one line saying where the pipe installer lives and why it is not the
+  instruction. Gen Agent Trust Hub called that URL "the installation process" and
+  returned Fail at HIGH; Snyk returned Warn at MEDIUM W012, quoting a
+  fetch-and-execute command that was no longer anywhere in the file. Both re-ran
+  on the corrected version, at 12:16Z and 12:15Z on 2026-08-15, so this was the
+  wording and not a stale copy. The three lines are gone. A reader loses nothing:
+  the sentence documented a route it told them not to take, and `README.md` still
+  carries the pipe for anyone who wants it. (#578)
+- **Following a marker returned the marker.** A fold prints `omni retrieve <handle>`, and
+  the bytes that came back passed through the hook, hashed the same, and were folded into
+  the very marker that had sent the reader to fetch them. An agent that did what the
+  marker said got the instruction again, and `OMNI_PASSTHROUGH=1` on the retrieve did not
+  help because the fold lands on the later read rather than on that command. A pull now
+  marks the archived row owed, and the delivery answering it is handed over verbatim. It
+  costs one delivery and not an exemption: the next repeat folds again, which matters
+  because 15.05% of the archive on this installation has been pulled at least once. (#581)
+- **A subagent was told the parent's bytes were already shown.** Claude Code hands a
+  subagent the parent's `session_id`, so keying the ledger on the session alone answered
+  a subagent's first read with the parent's history: a 200 line payload came back as
+  `identical to the 200 lines already shown` to a context that had received none of it.
+  The host does distinguish them, through a top-level `agent_id` that is unset for the
+  main agent, and OMNI was not reading it. The scope is now the reader rather than the
+  session. The fold is kept and only the claim changes: a subagent falls through to the
+  project scope, whose wording since #575 says `none shown here`, so it still gets a
+  marker and a handle. The main agent has no `agent_id`, so its scope is unchanged and no
+  history is orphaned by the upgrade. Not fixed, and recorded on the issue rather than
+  left implied: after compaction the same premise fails with no signal in the payload to
+  detect it. (#581)
+- **A marker OMNI emitted and a marker printed as an example were byte-identical, so
+  nothing could verify OMNI had run.** The examples in the source and the manual were
+  not invented, they were harvested from real sessions: four of the seven distinct
+  handles still resolved on the maintainer's machine, including the canonical one that
+  appears in 99 places. That defeated both ways of asking whether anything was folded,
+  since grepping for the marker shape counted our own documentation and resolving the
+  handle counted it too. Measuring a 0.7.5 A/B it scored an `OMNI_PASSTHROUGH=1` arm as
+  having folded eight times and briefly declared a valid control run invalid. Every
+  example now uses one reserved handle, `0000000000000000`; `store_rewind` can never
+  mint it, and `omni retrieve` refuses it by name instead of blaming the 30 day prune,
+  which for an example is a cause the code cannot know. `omni retrieve` already exited 1
+  for an unknown handle, so the check existed and our own strings were what broke it.
+  (#583)
+- **The hooks page told you to feed `omni --post-hook` a payload and never said what one
+  looks like.** Getting the shape wrong exits 0, prints nothing, and reads as `0.0%
+  saved`, so there is no error to notice and a distiller cutting 96% can be written off as
+  not firing. Both shapes are documented now, in both languages: `Bash` carries the output
+  at `tool_response.content`, `Read` wraps it at `tool_response.file.content` with the
+  `startLine` a fold has to move. Both `Read` forms are real and reach different stages,
+  the bare one the ledger and the wrapped one the `readfile` distiller, which is the pair
+  that cost an hour on 2026-08-17. A test asserts both still parse, so the page cannot
+  quietly stop being true. (#586)
+- **The context breakdown counted a quarter of a file's size and called it tokens.** It
+  accumulated `size_bytes / 4` from file metadata, a rougher estimator than the 3.6 the
+  rest of the report used and still not a Claude token count, so the block had to be
+  labelled a rough estimate to be honest. It accumulates the sizes now, which are counted,
+  and the label goes with the estimator. The largest-file-read line and the share card's
+  `unit` moved with it: the card used to say `tokens` or `bytes` depending on whether the
+  rows happened to carry a token column, so two installs could publish the same saving
+  under different words. No figure `omni stats` prints is derived from another vendor's
+  tokenizer now. (#589)
+- **`omni stats` reported in a unit OMNI cannot defend.** The per-period summary read
+  `10K to 10K tokens`, and the per-command and per-filter annotations read `-N tokens`,
+  all of them a byte count divided by 3.6, a constant calibrated against `cl100k_base`.
+  Every one of those now reports the bytes `distillations` counts exactly, and the
+  percentages beside them are unchanged because the divisor cancels in a ratio. The
+  context breakdown is the one block that could not move: it accumulates `size_bytes / 4`
+  from file metadata, so there is no measured total behind it, and it now says so and
+  prints `~` rather than pretending to a count. #592 fixed the same defect in the hook
+  banner; this is the report surface. (#589)
+- **`omni stats --json` renamed `tokens_saved` to `bytes_saved`.** The field briefly held
+  bytes under the old name, which is a machine-readable surface asserting the wrong unit.
+  A consumer reading that key has to update; the alternative was leaving the name lying.
+  (#589)
+- **The savings banner reported a unit OMNI cannot defend.** `-500tok this call` was a
+  byte count divided by 3.6, a constant calibrated against `cl100k_base`, which is GPT's
+  encoding. It now reports the bytes it counted. The percentage beside it is unchanged and
+  always was sound: the divisor cancels in a ratio, so `(raw/k - filtered/k) / (raw/k)` is
+  `(raw - filtered) / raw` for any `k`. The banner's own bars moved with the figure they
+  gate, 500 and 1000 becoming 1800 and 3600 at the same 3.6, so it does not fire 3.6 times more
+  often, which leaving them would have caused. The translation is close rather than
+  exact: the old bar subtracted two independently rounded estimates and disagrees with
+  the new one over savings of 1,797 to 1,799 B, always in the direction of the old bar
+  firing and the new one staying silent. `omni stats` also printed `Tokens Reduced`
+  directly under `Data Distilled`, the same quantity in exact units, and that line is
+  deleted rather than converted. This makes #212's guard stricter: the banner now prints
+  the `distillations` row's own two columns subtracted, with no estimator between the
+  banner and the record it has to agree with. `omni stats` still labels other figures in
+  the same derived unit and this does not touch them. (#589)
+
+### Removed
+- **The benchmark image is gone from the six translated READMEs**: `performance.png` was
+  hotlinked by `id`, `ja`, `ko`, `vi`, `zh` and `ar`, and by nothing else. `README.md`
+  never carried it, so those six readers were the only ones seeing it, and for weeks what
+  they saw was 58.9% across 1,810 executions while the English table beside them said
+  14.9% across 6,656. The card was regenerated from the current corpus first, then
+  dropped, so nothing was removed to hide a number. Every README keeps the table the
+  image duplicated.
+
 ## [0.7.5] - 2026-08-14
 
 ### Added
