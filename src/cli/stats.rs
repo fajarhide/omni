@@ -1765,6 +1765,36 @@ mod tests {
         }
     }
 
+    /// #589. The alignment test beside this one does not guard the unit: it
+    /// stayed green with the byte formatter replaced by raw digits, which is how
+    /// this hole was found. The period summary used to print a byte count over
+    /// 3.6 and call it tokens, so what needs pinning is that the column carries
+    /// a counted unit and not a derived one.
+    #[test]
+    fn the_period_summary_reports_bytes_and_not_a_derived_unit() {
+        let rows = [PeriodRow {
+            label: "Today",
+            count: 118,
+            raw_bytes: 137_000,
+            filtered_bytes: 74_000,
+            reduction_pct: 46.0,
+        }];
+
+        let line = format_period_rows(&rows).join("\n");
+
+        // 137,000 B is 133.8 KB by `format_bytes`, written out by hand from its
+        // rules rather than by calling it.
+        assert!(
+            line.contains("133.8 KB") && line.contains("72.3 KB"),
+            "the summary must print the bytes it counted: {line}"
+        );
+        assert!(
+            !line.contains("tokens"),
+            "the summary went back to a unit calibrated against another vendor's \
+             tokenizer: {line}"
+        );
+    }
+
     #[test]
     fn aligns_period_columns_across_mixed_number_widths() {
         // Arrange: the widths that broke the old hardcoded layout, a 3-digit
