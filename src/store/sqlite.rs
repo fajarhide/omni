@@ -1310,6 +1310,23 @@ impl SqliteBackend {
     /// rate with reads no agent asked for, which is the same defect in the
     /// other direction.
     pub fn record_rewind_pull(&self, hash: &str) {
+        // #581. The debt is booked here and not in `retrieve_rewind`, for the
+        // same reason the counter above is: `store::query` reads archived
+        // content to answer reports (`query.rs:122` and `:174`), and a report
+        // is not a reader asking for its bytes back. Booking it there created
+        // debt nobody incurred and spent the next matching delivery paying it.
+        // Review on #593 caught that, against a comment two paragraphs up that
+        // says exactly this about the other counter.
+        //
+        // A count rather than a flag, so two readers pulling the same handle
+        // before either is answered earn one verbatim delivery each instead of
+        // the first clearing it for both.
+        if let Ok(conn) = self.pool.get() {
+            let _ = conn.execute(
+                "UPDATE rewind_store SET owed = owed + 1 WHERE hash = ?1",
+                params![hash],
+            );
+        }
         let cmd = self
             .find_command_for_hash(hash)
             .unwrap_or_else(|| "unknown".to_string());
@@ -1337,7 +1354,7 @@ impl SqliteBackend {
             return false;
         };
         conn.execute(
-            "UPDATE rewind_store SET owed = 0 WHERE hash = ?1 AND owed = 1",
+            "UPDATE rewind_store SET owed = owed - 1 WHERE hash = ?1 AND owed > 0",
             params![hash],
         )
         .map(|changed| changed > 0)
@@ -1360,11 +1377,8 @@ impl SqliteBackend {
             .unwrap_or(None);
 
         if content.is_some() {
-            // `owed` says a reader asked for these bytes back and has not been
-            // handed them yet, which is the one moment the ledger's "already
-            // shown" is provably false about this content (#581).
             let _ = conn.execute(
-                "UPDATE rewind_store SET retrieved = retrieved + 1, owed = 1 WHERE hash = ?1",
+                "UPDATE rewind_store SET retrieved = retrieved + 1 WHERE hash = ?1",
                 params![hash],
             );
         }
@@ -3897,6 +3911,45 @@ mod tests {
             "identical content must occupy one row"
         );
         assert_eq!(store.retrieve_rewind(&first), Some(content.to_string()));
+    }
+
+    /// #593 review, the first of two. `store::query` calls `retrieve_rewind` to
+    /// answer reports, so booking the debt there charged a delivery to a read no
+    /// agent made, and the next real fold paid it. The comment on the counter
+    /// beside it already said this about `retrieve_rewind`; the flag went in on
+    /// the wrong side of it anyway.
+    #[test]
+    fn a_report_read_does_not_owe_a_delivery() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+        let handle = store.store_rewind("archived body\n").expect("archived");
+
+        store.retrieve_rewind(&handle).expect("content");
+
+        assert!(
+            !store.take_owed_delivery(&handle),
+            "a read that no agent asked for created a delivery debt"
+        );
+    }
+
+    /// #593 review, the second. A flag would let the first delivery clear the
+    /// debt of two readers, so the second one is folded back into the marker it
+    /// was following. A count pays each of them once.
+    #[test]
+    fn two_pulls_earn_two_verbatim_deliveries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+        let handle = store.store_rewind("archived body\n").expect("archived");
+
+        store.record_rewind_pull(&handle);
+        store.record_rewind_pull(&handle);
+
+        assert!(store.take_owed_delivery(&handle), "first pull unanswered");
+        assert!(store.take_owed_delivery(&handle), "second pull unanswered");
+        assert!(
+            !store.take_owed_delivery(&handle),
+            "the debt outlived the pulls that created it"
+        );
     }
 
     /// #388. The key used to come back on every path, including a swallowed

@@ -3454,9 +3454,14 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             .map(str::to_string)
             .expect("the second read must fold and name a handle");
 
+        // Both calls, in the order `cli/retrieve.rs` and the MCP tool make them.
+        // The debt is booked by `record_rewind_pull`, the door that means an
+        // agent asked, and not by `retrieve_rewind`, which `store::query` also
+        // uses to answer reports (#593 review).
         store
             .retrieve_rewind(&handle)
             .expect("the handle the marker printed must resolve");
+        store.record_rewind_pull(&handle);
 
         let answering = process_payload(&payload, Some(store.clone()), None).unwrap_or_default();
         assert!(
