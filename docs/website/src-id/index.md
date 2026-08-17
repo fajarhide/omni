@@ -94,8 +94,8 @@ omni retrieve <handle>         # handle mana pun dari penanda mana pun, dicetak 
 ```
 
 Setiap angka di situs ini berasal dari korpus yang bisa Anda bangun ulang.
-[Benchmark](develop/benchmarks.md) memuat metodenya dan perintah persisnya untuk tiap
-baris, termasuk perbandingan yang kami kalah di dalamnya.
+[Benchmark](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat metodenya dan
+perintah persisnya untuk tiap baris, termasuk perbandingan yang kami kalah di dalamnya.
 
 ## Yang Anda dapat
 
