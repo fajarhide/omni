@@ -5,11 +5,11 @@ SHA-256 miliknya. Agent menerima penanda yang membawa handle 16 karakter, dan
 handle itu mengembalikan aslinya persis byte demi byte.
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve 0000000000000000
 ```
 
 Itu jalan dari shell mana pun, di sesi mana pun, di host mana pun, dan ia tidak

@@ -20,7 +20,7 @@ penanda yang menyebut jumlahnya dan sebuah handle. Sisanya lewat persis byte dem
 byte.
 
 ```
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 Ia menjangkau kelas yang tidak bisa dijangkau apa pun. Pembacaan berkas adalah
@@ -131,7 +131,7 @@ sendiri di kesempatan berikutnya.
 ### Ambil kembali
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve 0000000000000000
 ```
 
 Pencarian persis pada alamat isi. Tidak ada himpunan kandidat, tidak ada

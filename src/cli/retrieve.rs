@@ -27,7 +27,11 @@ fn print_help() {
     println!("  omni {} {}", "retrieve".cyan(), "<handle>".bright_black());
     println!(
         "\nA handle is the 16 characters inside a marker, for example\n  {}\n",
-        "[OMNI: 50 lines already shown, omni retrieve cd900c16a4a94eb2]".bright_black()
+        format!(
+            "[OMNI: 50 lines already shown, omni retrieve {}]",
+            crate::util::text::EXAMPLE_HANDLE
+        )
+        .bright_black()
     );
 }
 
@@ -57,6 +61,15 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         .trim_start_matches("omni_retrieve(")
         .trim_end_matches(')')
         .trim_matches('"');
+
+    // Said before the lookup, because the generic miss below blames pruning and
+    // that would be a cause this code cannot know. A reader who pasted the
+    // manual's example deserves to be told it was an example (#583).
+    if handle == crate::util::text::EXAMPLE_HANDLE {
+        anyhow::bail!(
+            "`{handle}` is the documentation example, not a real handle. Copy the 16 characters from a marker in your own output instead"
+        );
+    }
 
     match store.retrieve_rewind(handle) {
         Some(content) => {
@@ -110,6 +123,34 @@ mod tests {
         assert!(run(&args(&["omni", "retrieve", &handle]), &store).is_ok());
     }
 
+    /// #583. Four of the seven example handles in our own source and manual
+    /// still resolved on the maintainer's machine, so a checker asking "does
+    /// this handle resolve" counted our documentation as evidence of folding.
+    /// The reserved one has to be refused, and refused for the right reason:
+    /// the generic miss blames the 30 day prune, which for an example is a
+    /// cause this code cannot know.
+    #[test]
+    fn the_documentation_example_is_refused_and_not_blamed_on_pruning() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+
+        let err = run(
+            &args(&["omni", "retrieve", crate::util::text::EXAMPLE_HANDLE]),
+            &store,
+        )
+        .expect_err("the documentation example must not resolve");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("documentation example"),
+            "the reader has to be told it was an example: {msg}"
+        );
+        assert!(
+            !msg.contains("pruned"),
+            "an example was never archived, so pruning cannot be the reason: {msg}"
+        );
+    }
+
     /// #512. `get_retrieve_rate` backs off the route thresholds for a command
     /// family whose full output keeps being needed, and it reads
     /// `retrieve_events`. Only the MCP tool wrote there, while the marker sends
@@ -158,12 +199,15 @@ mod tests {
         }
     }
 
+    /// The fixture moved off all-zeros in #583. That value is now the reserved
+    /// documentation handle and is refused earlier with a different reason, so
+    /// leaving it here would have quietly stopped testing the prune message.
     #[test]
     fn says_why_a_missing_handle_is_missing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
 
-        let err = run(&args(&["omni", "retrieve", "0000000000000000"]), &store)
+        let err = run(&args(&["omni", "retrieve", "ffffffffffffffff"]), &store)
             .expect_err("an unknown handle is an error");
 
         assert!(err.to_string().contains("30 days"), "{err}");

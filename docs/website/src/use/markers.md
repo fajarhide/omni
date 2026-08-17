@@ -6,15 +6,15 @@ them is the difference between trusting the tool and suspecting it.
 ## The shapes
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 Content was cut and archived. The 16 characters are a handle:
-`omni retrieve 3f7bfd89bc5d7cee` prints the original back, byte for byte, from any
+`omni retrieve 0000000000000000` prints the original back, byte for byte, from any
 shell in any session.
 
 ```
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 The ledger. These lines were emitted earlier **in this session**, so the claim is that
@@ -22,7 +22,7 @@ the agent is still holding them and the handle costs nothing unless it wants to
 re-read.
 
 ```
-[OMNI: 40 lines not shown here, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines not shown here, omni retrieve 0000000000000000]
 ```
 
 Also the ledger, different claim. These lines went to a **different session** of this
@@ -35,8 +35,8 @@ on the directory, so anything running in this repository contributes to it. See
 [what two agents share](../concepts/the-ledger.md#what-two-agents-in-one-repo-share).
 
 ```
-[OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
-[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve bc7e821a4340073e]
+[OMNI: identical to the 40 lines already shown, omni retrieve 0000000000000000]
+[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve 0000000000000000]
 ```
 
 The same two claims, for a reply that is repeated **in full**. When the fold covers
@@ -91,7 +91,7 @@ That is the pipeline working, not failing. It happens when:
 ## Getting content back
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve 0000000000000000
 ```
 
 Works on every host, with or without MCP. Agents with the MCP server wired can call

@@ -3,14 +3,14 @@
 Mencetak isi yang diarsipkan sebuah penanda.
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve 0000000000000000
 ```
 
 Handle-nya adalah 16 karakter di dalam sebuah penanda:
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 Ia mengembalikan byte aslinya. Bukan ringkasan, bukan menjalankan ulang perintah

@@ -3,14 +3,14 @@
 Prints the content a marker archived.
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve 0000000000000000
 ```
 
 The handle is the 16 characters inside a marker:
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 It returns the original bytes. Not a summary, not a re-run of your command, and not an

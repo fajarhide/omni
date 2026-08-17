@@ -88,6 +88,32 @@ pub fn truncate_with_marker(
     s.replace_range(head_end..tail_start, &marker);
 }
 
+/// The handle every worked example in our source and manual must use.
+///
+/// #583: the examples were harvested from real sessions, so four of the seven
+/// distinct ones still resolved on the maintainer's machine, including the
+/// manual's canonical `3f7bfd89bc5d7cee`. That defeats both ways of asking
+/// whether OMNI folded anything: grepping for the marker shape counts our own
+/// documentation, and resolving the handle counts it too. Reserving one value
+/// and refusing it in `store_rewind` is what makes "this handle never resolves"
+/// a guarantee rather than a 1-in-2^64 coincidence.
+pub const EXAMPLE_HANDLE: &str = "0000000000000000";
+
+/// Moves a freshly minted handle off the one value the examples reserve.
+///
+/// Split from `store_rewind` so it can be driven directly: the branch it
+/// protects fires once in 2^64 real payloads, so a test that went through the
+/// hasher would never reach it and would be decorative.
+pub fn avoid_example_handle(key: String) -> String {
+    if key != EXAMPLE_HANDLE {
+        return key;
+    }
+    use sha2::{Digest, Sha256};
+    let mut again = Sha256::new();
+    again.update(key.as_bytes());
+    safe_slice(&hex::encode(again.finalize()), 16).to_string()
+}
+
 /// The `, omni retrieve <hash>` clause, or an honest statement that there is
 /// none.
 ///
@@ -229,11 +255,11 @@ mod tests {
 
         truncate_with_marker(&mut s, 500, |dropped| {
             archived = dropped.to_string();
-            Some("deadbeefdeadbeef".to_string())
+            Some(EXAMPLE_HANDLE.to_string())
         });
 
         assert!(
-            s.contains("omni retrieve deadbeefdeadbeef"),
+            s.contains("omni retrieve 0000000000000000"),
             "the marker must name the handle: {s}"
         );
         assert!(
@@ -317,5 +343,23 @@ mod tests {
         let s = "Hello, 🌍!";
         let res = safe_slice(s, 8);
         assert_eq!(res, "Hello, ");
+    }
+
+    /// #583. The whole point of reserving a handle is that it can never name
+    /// real content, so a checker can exclude our own worked examples by value.
+    /// A payload that hashed to it would break that, and the odds are too long
+    /// to reach through the hasher, so the mapping is driven directly.
+    #[test]
+    fn a_minted_handle_is_never_the_one_the_examples_reserve() {
+        assert_ne!(
+            avoid_example_handle(EXAMPLE_HANDLE.to_string()),
+            EXAMPLE_HANDLE,
+            "a real payload was allowed to mint the documentation handle"
+        );
+        assert_eq!(
+            avoid_example_handle("a1b2c3d4e5f60718".to_string()),
+            "a1b2c3d4e5f60718",
+            "every other handle must pass through untouched"
+        );
     }
 }

@@ -7,15 +7,15 @@ mencurigainya.
 ## Bentuk-bentuknya
 
 ```
-[OMNI: 406 lines omitted, omni retrieve 3f7bfd89bc5d7cee for full output]
+[OMNI: 406 lines omitted, omni retrieve 0000000000000000 for full output]
 ```
 
 Ada isi yang dipotong dan diarsipkan. Enam belas karakter itu sebuah handle:
-`omni retrieve 3f7bfd89bc5d7cee` mencetak aslinya kembali, persis byte demi byte,
+`omni retrieve 0000000000000000` mencetak aslinya kembali, persis byte demi byte,
 dari shell mana pun di sesi mana pun.
 
 ```
-[OMNI: 40 lines already shown, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
 Ledger. Baris-baris ini sudah dikeluarkan sebelumnya **di sesi ini**, jadi
@@ -23,7 +23,7 @@ klaimnya adalah agent masih memegangnya dan handle-nya tidak berongkos kecuali i
 memang mau membaca ulang.
 
 ```
-[OMNI: 40 lines not shown here, omni retrieve bc7e821a4340073e]
+[OMNI: 40 lines not shown here, omni retrieve 0000000000000000]
 ```
 
 Ledger juga, klaim berbeda. Baris-baris ini pergi ke **sesi lain** dari proyek
@@ -36,8 +36,8 @@ direktorinya, jadi apa pun yang berjalan di repositori ini ikut menyumbang. Liha
 [apa yang dibagi dua agent](../concepts/the-ledger.md#apa-yang-dibagi-dua-agent-dalam-satu-repo).
 
 ```
-[OMNI: identical to the 40 lines already shown, omni retrieve bc7e821a4340073e]
-[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve bc7e821a4340073e]
+[OMNI: identical to the 40 lines already shown, omni retrieve 0000000000000000]
+[OMNI: identical to 40 lines from an earlier session, none shown here, omni retrieve 0000000000000000]
 ```
 
 Dua klaim yang sama, untuk jawaban yang terulang **seluruhnya**. Ketika
@@ -95,7 +95,7 @@ keluarannya langsung. Itu pipeline yang bekerja, bukan gagal. Itu terjadi ketika
 ## Mengambil isinya kembali
 
 ```sh
-omni retrieve 3f7bfd89bc5d7cee
+omni retrieve 0000000000000000
 ```
 
 Bekerja di semua host, dengan atau tanpa MCP. Agent yang server MCP-nya terpasang
