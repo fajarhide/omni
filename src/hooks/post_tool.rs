@@ -3557,11 +3557,19 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
     /// for the cap to matter.
     #[test]
     fn a_passthrough_counts_the_bytes_the_host_kept() {
-        // Random-ish and incompressible, so the pipeline cannot beat the
-        // guardrail and the route really is a passthrough.
-        let body: String = (0..900)
+        // Incompressible, so the route really is a passthrough, and **over**
+        // `MAX_OUTPUT_BYTES`, which is the whole point: under the cap
+        // `final_out` and the host's own bytes are the same string and the
+        // assertion below passes either way. Sized against the threshold the
+        // path actually crosses, after a first fixture at 30 KB proved nothing.
+        let body: String = (0..3_000)
             .map(|i| format!("{:016x} {:016x}\n", i * 2_654_435_761u64, i * 40_503))
             .collect();
+        assert!(
+            body.len() > crate::guard::limits::MAX_OUTPUT_BYTES,
+            "the fixture must exceed the cap or the two branches agree: {}",
+            body.len()
+        );
         let payload = json!({
             "session_id": "passthrough-595",
             "tool_name": "Bash",
