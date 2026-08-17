@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Stop paying to re-read the same output.</b> OMNI turns repeated bytes into retrievable handles: 97.2% off a file your agent reads twice, 14.9% across 6,656 real commands. Nothing deleted, nothing invented, and every number replays on your own corpus.</em>
+    <em><b>Stop paying to re-read the same output.</b> OMNI turns repeated bytes into retrievable handles: 97.2% off a file your agent reads twice, and across 5,984 real commands 69.6% on a heavy week, 14.9% on an ordinary one. Nothing deleted, nothing invented, and every number replays on your own corpus.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -93,10 +93,10 @@ Measured on the fixtures in `tests/fixtures/`, so you can reproduce any row:
 
 | Command | Without OMNI | With OMNI | Saved |
 |---|---|---|---|
-| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **92.9%** |
-| `git status` (dirty) | 496 B of porcelain | the branch and the changed paths | **61.7%** |
-| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **35.9%** |
-| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **25.2%** |
+| `cargo test` (490 passed, 10 failed) | 16.5 KB of per-test output | the runner's own pass/fail summary | **93.0%** |
+| `git status` (dirty) | 496 B of porcelain | the branch and the changed paths | **66.7%** |
+| `docker build` (heavy cache noise) | 9.2 KB of layer hashes and progress bars | the build result, cache hits folded | **98.9%** |
+| `git diff` (multi-file) | lockfiles, whitespace, generated churn | the code that actually changed | **37.8%** |
 | `kubectl get pods` (35 pods, 5 crashing) | the full table | the full table | **0%**, by design |
 
 That last row is the point of the table. A pod listing is an enumeration where every
@@ -202,12 +202,17 @@ Every figure OMNI publishes states the corpus it came from and the week it cover
 because `execution_traces` is pruned after seven days and a number that outlives its
 corpus cannot be checked by anyone, us included.
 
-On the 2026-08-04 to 08-11 UTC window, replayed on the 0.7.3 release binary over real
-command executions that reached a model:
+On the 2026-08-11 to 08-14 UTC window, replayed on the 0.7.5 release binary over 5,984
+real command executions that reached a model:
 
-* Build and test output: **76.9%**. File re-reads, the largest class: **0.0%** from
-  the filters and **25.0%** from the ledger, which is the gap the ledger exists for.
-* **97.3% of calls saved nothing at all**, and we publish that because it tells you
+* **32.6% from the filters, 69.6% with the ledger.** File re-reads, the largest class
+  by bytes: **39.2%** from the filters and **89.6%** with the ledger, which is the gap
+  the ledger exists for.
+* **Read the corpus before the number.** This window is unusual and it inflates
+  everything here: 286 groups of byte-identical payloads are 80.6% of these bytes, and
+  148 of the 5,984 calls carry 64.7% of them. It was a week of building and
+  benchmarking OMNI. The same harness over a week of ordinary work reads **14.9%**.
+* **96.1% of calls saved nothing at all**, and we publish that because it tells you
   what the rest are worth. **No call came back larger** in this measurement.
   There were 2 until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
 * **21 ms per command**, growing with your history rather than with the payload. On a
@@ -218,25 +223,28 @@ command executions that reached a model:
   saving is larger on average than this table and it is not guaranteed on any single
   session, including runs where the bill did not fall at all.
 
-Per class, over the same 6,656 traces, with what the filters take and what the ledger
+Per class, over the same 5,984 traces, with what the filters take and what the ledger
 adds on top:
 
 | Class | Calls | Input | Filters | + ledger |
 |---|---|---|---|---|
-| other | 4,145 | 2.95 MB | 0.6% | **6.9%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 699 | 1.60 MB | 0.0% | **25.0%** |
-| search (`grep`, `rg`, `find`) | 828 | 1.03 MB | 4.8% | **13.3%** |
-| `git`, `gh` | 661 | 609 KB | 4.4% | **22.1%** |
-| build and test | 69 | 94 KB | 76.9% | **78.0%** |
-| infra (`kubectl`, `az`, `docker`) | 254 | 193 KB | 4.4% | **8.2%** |
-| **aggregate** | **6,656** | **6.47 MB** | **2.7%** | **14.9%** |
+| other | 3,703 | 11.05 MB | 29.1% | **56.2%** |
+| file read (`cat`, `sed`, `head`, `tail`) | 884 | 10.93 MB | 39.2% | **89.6%** |
+| search (`grep`, `rg`, `find`) | 600 | 540 KB | 2.3% | **4.3%** |
+| `git`, `gh` | 696 | 475 KB | 2.5% | **7.0%** |
+| build and test | 36 | 24 KB | 10.8% | **10.8%** |
+| infra (`kubectl`, `az`, `docker`) | 65 | 70 KB | 0.0% | **6.8%** |
+| **aggregate** | **5,984** | **23.09 MB** | **32.6%** | **69.6%** |
 
-Head to head on that corpus, including the half we lose. Filters alone: rtk 6.2%,
-lean-ctx 6.1%, ours 2.7%. With our ledger, 14.9%. Run rtk's filters with our ledger
-and you get 17.6%, which is the largest number on the page and not ours.
+`infra` reads 0.0% from the filters on purpose. It was 1.7% one release ago, bought by
+summarising `kubectl get pods` tables, which deleted the pod names that were the
+answer. That saving is gone and the rows are back.
 
-The two competitors land a tenth of a point apart from opposite shapes: rtk averages
-461 bytes off each of 872 commands, lean-ctx 2,950 off each of 134.
+Head to head on that corpus, including the rows we lose. Filters alone: rtk 6.2%,
+caveman 6.8%, ours 32.6%, and **lean-ctx 49.4%**, which beats our filters by 16.8
+points on a corpus built out of a few enormous repetitive payloads, exactly the shape
+a deep-and-narrow compressor is for. With our ledger we read 69.6%; the closest arm is
+headroom's dedup over our filters at 65.8%, and rtk with our ledger reaches 61.4%.
 
 Reproduce all of it:
 
