@@ -25,3 +25,10 @@
   removed output byte was inserted in the middle. Sixteen of twenty-five advertised tools
   had never been called across 229 sessions, and they weighed 4,940 bytes against the
   4,942 the distillers remove from output in a busy session. Both languages throughout.
+- **`The ledger` names the three readers its premise fails for.** The page already rested
+  on one sentence, that the agent is still holding these bytes, and every rule is a
+  defence of the moment that stops being true. There are exactly three readers it fails
+  for and this release answered all three: a subagent carrying the parent's session id, a
+  context the host compacted, and a reader following a handle back. The pattern is stated
+  as the thing worth keeping, since it is what makes the next surprise diagnosable. Both
+  languages.

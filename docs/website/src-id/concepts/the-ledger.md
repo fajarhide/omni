@@ -85,6 +85,34 @@ salah, dan jawabannya biasanya ada di situ.
 Itu juga sebabnya ini persoalan pembatalan cache, bukan sistem ingatan. Ledger
 tidak menyimpan pengetahuan. Ia menyimpan tanda terima.
 
+## Tiga pembaca yang membuat premisnya gagal
+
+Setiap aturan yang layak diketahui di sini adalah pembelaan atas momen premisnya berhenti
+benar. Ada tepat tiga pembaca yang membuatnya gagal, dan ledger menjawab masing-masing
+dengan cara berbeda.
+
+**Sebuah subagent.** Claude Code menyerahkan session id milik induk kepada pembantunya,
+jadi ledger yang dikunci pada sesi saja akan menjawabnya dengan riwayat induk dan
+mengklaim 200 baris sudah ditampilkan kepada konteks yang tidak pernah menerimanya.
+Cakupannya adalah pembacanya, bukan sesinya, jadi pembantu itu mengumpulkan miliknya
+sendiri dan jatuh ke cakupan proyek untuk selebihnya, yang kata-katanya menyatakan terang
+bahwa tidak ada yang ditampilkan di sini.
+
+**Konteks yang dipadatkan.** Host memberitahukannya sebelum itu terjadi, dan ledger
+melupakan himpunan yang sudah ditampilkan milik sesi itu pada saat itu juga. Ia
+mengorbankan penghematan dengan sengaja. Tidak ada apa pun setelah compaction yang
+mengklaim Anda sudah memegang sesuatu yang tidak lagi Anda pegang.
+
+**Pembaca yang mengikuti sebuah handle.** Meminta byte kembali adalah bukti bahwa
+pembacanya tidak memilikinya, jadi pengiriman yang menjawab penarikan itu diserahkan utuh.
+Sebelumnya ia melewati pipeline, menghasilkan hash yang sama, dan kembali sebagai penanda
+yang tadi menyuruh pembacanya ke sana. Satu kali kirim, bukan pengecualian: pengulangan
+berikutnya melipat lagi.
+
+Polanya lebih berharga daripada ketiga kasusnya. Ketika ledger mengejutkan Anda, tanyakan
+pembaca mana yang sedang memegang byte-nya, dan apakah ada sesuatu yang memberi tahu OMNI
+bahwa pembacanya sudah berganti.
+
 ## Alurnya, satu perintah pada satu waktu
 
 ![Empat pertanyaan menentukan satu pelipatan: apakah barisnya menyatakan kegagalan, apakah ia sudah pernah ditampilkan, apakah deretannya menghemat lebih banyak daripada ongkos penandanya, dan apakah penulisan arsipnya berhasil. Satu saja "tidak" membuat baris-baris itu keluar apa adanya.](../media/the-ledger-decision.svg)
