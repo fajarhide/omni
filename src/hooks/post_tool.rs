@@ -1116,6 +1116,14 @@ pub fn process_payload(
     if let Some(ref sess) = session
         && let Ok(mut state) = sess.lock()
     {
+        // `content` is normalize's flattened view, so on a payload carrying both
+        // streams it includes the `\n[stderr]\n` separator this code invented,
+        // 10 bytes the host's structured response does not hold. Measured on
+        // this installation: 896 of 9,267 traces carry both streams, so the
+        // overcount is 10 B on 9.7% of calls. Known and left, because the
+        // alternative is the serialised `raw_response`, which is not what the
+        // host renders either and would trade one approximation for another
+        // without saying which is closer (#595 review).
         let handed_over = if route == Route::Passthrough && !redacted_here {
             content.len()
         } else {
