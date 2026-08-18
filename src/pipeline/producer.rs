@@ -279,12 +279,21 @@ pub(crate) fn strip_assignments(command: &str) -> &str {
 /// `/opt/homebrew/opt/python@3.11/bin/python3.11` and `python3.11` are one
 /// program and must be one row.
 pub(crate) fn producer_label(command: &str) -> &str {
-    // The producer when there is a single one, and otherwise the head of the
-    // chain. Falling back to the first segment rather than the whole string is
-    // the half #339 missed: a chain still has a first program, and naming the
-    // row after it beats naming it after the assignment in front of it.
+    // The producer when there is a single one, and otherwise the first segment
+    // that actually runs something. `sole_output_command` answers `None` for a
+    // chain with two producers, and the raw string it was falling back to begins
+    // with whatever `cd` or assignment stands in front, which is the half #339
+    // missed. `is_silent` is the same predicate that decides which segments can
+    // own the output, so the label agrees with the routing by construction.
+    //
+    // Every segment silent means nothing wrote to stdout, and the whole string
+    // is then as good a name as any.
     let segment = sole_output_command(command)
-        .or_else(|| split_sequential(command).into_iter().next())
+        .or_else(|| {
+            split_sequential(command)
+                .into_iter()
+                .find(|seg| !is_silent(seg))
+        })
         .unwrap_or(command);
     program_name(strip_assignments(segment))
 }
@@ -372,5 +381,65 @@ fn push_segment<'a>(out: &mut Vec<&'a str>, command: &'a str, start: usize, end:
     let seg = command[start..end].trim();
     if !seg.is_empty() {
         out.push(seg);
+    }
+}
+
+#[cfg(test)]
+mod producer_label_tests {
+    use super::producer_label;
+
+    /// #603, as a matrix rather than one case, because the two writers of
+    /// `filter_name` failed on different shapes: the exec door failed on a bare
+    /// assignment and the hook door only on a chain with two producers. A single
+    /// fixture passes on one door and proves nothing about the other.
+    ///
+    /// Every row is a command shape that really occurs in the recorded corpus.
+    #[test]
+    fn labels_a_command_with_its_program() {
+        let cases = [
+            ("bare", "echo hi", "echo"),
+            ("assignment", "FOO=bar echo hi", "echo"),
+            ("two assignments", "A=1 B=2 echo hi", "echo"),
+            // The shape the hook door got wrong: `sole_output_command` answers
+            // `None` here, and the old fallback took the raw first token.
+            ("assignment then chain", "FOO=bar echo one && echo two", "echo"),
+            ("chain", "echo one && echo two", "echo"),
+            ("cd prefix", "cd /tmp && kubectl get pods", "kubectl"),
+            // Two producers, so `sole_output_command` declines and the fallback
+            // decides. It has to skip the `cd`, or the row is filed under the
+            // one segment that produced no output, which is #339's other half.
+            (
+                "cd prefix and two producers",
+                "cd /tmp && kubectl get pods && kubectl get svc",
+                "kubectl",
+            ),
+            (
+                "assignment, cd, then two producers",
+                "K=1 cd /tmp && echo one && echo two",
+                "echo",
+            ),
+            // 291 rows named a binary's full path before this.
+            ("absolute path", "/opt/homebrew/bin/python3.11 x.py", "python3.11"),
+            (
+                "assignment and absolute path",
+                "S=/tmp/scratch /usr/bin/env node app.js",
+                "env",
+            ),
+            ("quoted program", "\"kubectl\" get pods", "kubectl"),
+            // ponytail: the split is on whitespace before the quotes come off,
+            // so a program name containing a space keeps only its first word.
+            // Inherited from `resolve_profile`, which has routed this way since
+            // it was written, and no recorded command has that shape. A quote
+            // aware split is the upgrade if one ever does.
+            ("quoted program with a space", "\"my prog\" --flag", "my"),
+            // Pipe mode has no command at all, and the caller turns this into
+            // `[pipe]`. Anything else here would invent a program name.
+            ("empty", "", ""),
+            ("assignment only", "FOO=bar", ""),
+        ];
+
+        for (name, command, expected) in cases {
+            assert_eq!(producer_label(command), expected, "case: {name}");
+        }
     }
 }

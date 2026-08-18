@@ -1327,4 +1327,62 @@ mod tests {
             Origin::Session.marker(9, &"0".repeat(HANDLE_LEN)).len()
         );
     }
+
+    /// One fixed-width line, so a fixture's size can be reasoned about against
+    /// `MIN_WHOLE_OUTPUT_FOLD` rather than eyeballed. 34 bytes including the
+    /// terminator.
+    fn row(tag: char, i: usize) -> String {
+        format!("{tag} line {i:04} of the fixture payload\n")
+    }
+
+    /// #601, as a matrix, because the guard has to hold on one axis and stay out
+    /// of the way on the other two. A single fixture proves whichever it happens
+    /// to sit on, and the danger here is a guard that quietly stops the folds
+    /// this feature exists for.
+    ///
+    /// Coverage is what the fold takes of the payload; the floor only applies
+    /// once that is four fifths or more **and** the run is under
+    /// `MIN_WHOLE_OUTPUT_FOLD`.
+    #[test]
+    fn refuses_a_small_fold_that_would_leave_almost_nothing() {
+        // (name, lines reused from the first show, lines new to the second, folds?)
+        let cases = [
+            // The reported shape: 23 of 26 lines folded, 782 B of an 884 B
+            // payload, and the three survivors say nothing about the edit.
+            ("small payload, 88% covered", 23, 3, false),
+            // Same payload size, a third of it folded: the reader keeps enough
+            // to work from, so the trade is the one the ledger is for.
+            ("small payload, 38% covered", 10, 16, true),
+            // Same coverage as the first row on a payload past the floor. The
+            // guard must not reach this: it is the case the feature exists for.
+            ("large payload, 92% covered", 55, 5, true),
+        ];
+
+        for (name, reused, fresh, should_fold) in cases {
+            let (store, _d) = temp_store();
+            let ledger = Ledger::new(&store, "s1");
+
+            let first: String = (0..reused).map(|i| row('s', i)).collect();
+            let seed = format!("{first}{}", (0..40).map(|i| row('p', i)).collect::<String>());
+            assert!(seed.len() > MIN_LEDGER_INPUT, "{name}: seed too small to record");
+            ledger.project(&seed);
+
+            let second: String = (0..reused)
+                .map(|i| row('s', i))
+                .chain((0..fresh).map(|i| row('n', i)))
+                .collect();
+            let folded_bytes = reused * 34;
+            assert_eq!(
+                folded_bytes >= MIN_WHOLE_OUTPUT_FOLD,
+                should_fold && name.starts_with("large"),
+                "{name}: fixture is on the wrong side of the whole-output floor"
+            );
+
+            assert_eq!(
+                ledger.project(&second).is_some(),
+                should_fold,
+                "case: {name}"
+            );
+        }
+    }
 }

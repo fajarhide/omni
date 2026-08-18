@@ -134,6 +134,7 @@ fn distill_unknown_file(content: &str) -> String {
 /// no way to tell the bodies had ever existed: a 24,999 B Python file came back
 /// as 3,275 B of repeated signatures, 86.9% reported as a win, with the business
 /// rule it was read for deleted and unmentioned.
+///
 /// It names no recovery route, and that is the fix rather than an omission
 /// (#598). It used to end `Re-read with offset/limit for the full file.`, which
 /// does not work and cannot: a re-read is a fresh `Read` of the same file, so it
@@ -718,5 +719,46 @@ mod tests {
 
         let out = distill_readfile(&content, "src/lib.rs");
         assert!(out.is_some());
+    }
+
+    /// #598. The note used to end `Re-read with offset/limit for the full file.`
+    /// and that route cannot work: a re-read reaches this same distiller and
+    /// returns this same skeleton, so an agent following the instruction pays a
+    /// round trip for a byte-identical answer.
+    ///
+    /// A matrix rather than one case, because the note has three regimes and the
+    /// interesting one is the boundary: the empty string at zero omitted is what
+    /// keeps a fully rendered file from carrying a marker about nothing.
+    #[test]
+    fn the_omitted_note_names_no_route_it_cannot_honour() {
+        let cases = [
+            ("nothing dropped", 40usize, 40usize, false),
+            ("one line dropped", 40, 39, true),
+            ("most of the file dropped", 303, 42, true),
+            ("kept exceeds total", 10, 40, false),
+        ];
+
+        for (name, total, kept, expect_note) in cases {
+            let note = super::omitted_note(total, kept);
+            assert_eq!(!note.is_empty(), expect_note, "case: {name}");
+            if !expect_note {
+                continue;
+            }
+            assert!(
+                !note.contains("offset") && !note.contains("Re-read"),
+                "case: {name}: the note still advertises the route that fails"
+            );
+            // The count is about the file, and the ledger marker printed under it
+            // counts the reply. Saying which is what stops the two reading as a
+            // contradiction on the same Read.
+            assert!(
+                note.contains("file lines"),
+                "case: {name}: the note does not say what it counted"
+            );
+            assert!(
+                note.contains(&format!("{} of {}", total - kept, total)),
+                "case: {name}: the note lost its denominator"
+            );
+        }
     }
 }
