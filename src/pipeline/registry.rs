@@ -29,17 +29,7 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
     }
 
     let cmd = strip_assignments(command.trim());
-    let base = {
-        let first_word = cmd
-            .split_whitespace()
-            .next()
-            .unwrap_or(cmd)
-            .trim_matches(|c| c == '"' || c == '\'');
-        std::path::Path::new(first_word)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(first_word)
-    };
+    let base = crate::pipeline::producer::program_name(cmd);
     let cmd_lower = cmd.to_lowercase();
 
     // 1. Git: Hunk based

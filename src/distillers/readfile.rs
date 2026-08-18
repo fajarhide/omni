@@ -134,14 +134,31 @@ fn distill_unknown_file(content: &str) -> String {
 /// no way to tell the bodies had ever existed: a 24,999 B Python file came back
 /// as 3,275 B of repeated signatures, 86.9% reported as a win, with the business
 /// rule it was read for deleted and unmentioned.
+///
+/// It names no recovery route, and that is the fix rather than an omission
+/// (#598). It used to end `Re-read with offset/limit for the full file.`, which
+/// does not work and cannot: a re-read is a fresh `Read` of the same file, so it
+/// reaches this same distiller and returns this same skeleton. Following the
+/// instruction verbatim on a 303 line file returned the identical summary a
+/// second time, and a third identical request folded to one ledger marker with
+/// no content at all.
+///
+/// The reply already carries the route that does work, one line below this one:
+/// the `omni retrieve <handle>` marker, whose handle every probe resolved. The
+/// note counts what was dropped and stops there, because the handle is minted
+/// after this function runs and this string cannot name it.
+///
+/// Its number counts **file** lines the skeleton does not render. The marker
+/// below counts **reply** lines cut from what was about to be sent, so the two
+/// legitimately differ on the same read, and `of {total_lines}` is here to say
+/// which denominator this one uses.
 fn omitted_note(total_lines: usize, kept_lines: usize) -> String {
     let omitted = total_lines.saturating_sub(kept_lines);
     if omitted == 0 {
         return String::new();
     }
     format!(
-        "\n\n... [{omitted} of {total_lines} lines omitted, bodies and comments not shown. \
-         Re-read with offset/limit for the full file.] ..."
+        "\n\n... [{omitted} of {total_lines} file lines not rendered here: bodies and comments] ..."
     )
 }
 
@@ -554,7 +571,7 @@ mod tests {
             let out = distill_readfile(&content, path)
                 .unwrap_or_else(|| panic!("{path} should distill at this size"));
             assert!(
-                out.contains("lines omitted"),
+                out.contains("file lines not rendered here"),
                 "{path} dropped lines without saying so:\n{out}"
             );
         }
@@ -570,7 +587,7 @@ mod tests {
         let out = distill_readfile(&content, "a.py").unwrap();
 
         assert!(
-            out.contains(&format!("of {total} lines omitted")),
+            out.contains(&format!("of {total} file lines not rendered here")),
             "expected a count against {total} total, got:\n{out}"
         );
     }
@@ -651,7 +668,7 @@ mod tests {
 
         assert!(out.contains("Log: 1 errors"), "{out}");
         assert!(
-            out.contains("lines omitted"),
+            out.contains("file lines not rendered here"),
             "the lines it did not show still have to be counted:\n{out}"
         );
     }
@@ -667,7 +684,7 @@ mod tests {
         let out = distill_readfile(&content, "deployment.yaml").expect("large enough to distill");
 
         assert!(
-            out.contains("lines omitted"),
+            out.contains("file lines not rendered here"),
             "a key skeleton that drops values must say so:\n{out}"
         );
     }
@@ -704,5 +721,46 @@ mod tests {
 
         let out = distill_readfile(&content, "src/lib.rs");
         assert!(out.is_some());
+    }
+
+    /// #598. The note used to end `Re-read with offset/limit for the full file.`
+    /// and that route cannot work: a re-read reaches this same distiller and
+    /// returns this same skeleton, so an agent following the instruction pays a
+    /// round trip for a byte-identical answer.
+    ///
+    /// A matrix rather than one case, because the note has three regimes and the
+    /// interesting one is the boundary: the empty string at zero omitted is what
+    /// keeps a fully rendered file from carrying a marker about nothing.
+    #[test]
+    fn the_omitted_note_names_no_route_it_cannot_honour() {
+        let cases = [
+            ("nothing dropped", 40usize, 40usize, false),
+            ("one line dropped", 40, 39, true),
+            ("most of the file dropped", 303, 42, true),
+            ("kept exceeds total", 10, 40, false),
+        ];
+
+        for (name, total, kept, expect_note) in cases {
+            let note = super::omitted_note(total, kept);
+            assert_eq!(!note.is_empty(), expect_note, "case: {name}");
+            if !expect_note {
+                continue;
+            }
+            assert!(
+                !note.contains("offset") && !note.contains("Re-read"),
+                "case: {name}: the note still advertises the route that fails"
+            );
+            // The count is about the file, and the ledger marker printed under it
+            // counts the reply. Saying which is what stops the two reading as a
+            // contradiction on the same Read.
+            assert!(
+                note.contains("file lines"),
+                "case: {name}: the note does not say what it counted"
+            );
+            assert!(
+                note.contains(&format!("{} of {}", total - kept, total)),
+                "case: {name}: the note lost its denominator"
+            );
+        }
     }
 }

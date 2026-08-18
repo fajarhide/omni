@@ -491,7 +491,33 @@ impl<'a> Ledger<'a> {
             return None;
         }
 
-        let mut out = String::with_capacity(lines.iter().map(|l| l.len()).sum());
+        let payload_bytes: usize = lines.iter().map(|l| l.len()).sum();
+
+        // How much of this reply the ledger could take, asked once for the
+        // payload rather than once per run (#601, and the review of it).
+        //
+        // The first draft weighed each run against the payload on its own, which
+        // is the wrong denominator and reopens the hole it was closing: three
+        // seen blocks of thirty percent, separated by a line or two of new
+        // content, each pass a four fifths test individually and together fold
+        // ninety percent of the reply. The reader is left with markers and the
+        // separators, which is the reported case wearing three markers instead
+        // of one.
+        //
+        // Coverage is a property of the payload, so it is computed from the
+        // payload. This also subsumes the old whole-output floor exactly: one
+        // run covering everything is a hundred percent coverage, and the byte
+        // test it used to make is the same test this makes.
+        let seen_bytes: usize = runs
+            .iter()
+            .filter(|r| r.seen.is_some())
+            .map(|r| lines[r.start..r.end].iter().map(|l| l.len()).sum::<usize>())
+            .sum();
+        if payload_bytes < MIN_WHOLE_OUTPUT_FOLD && seen_bytes * 5 >= payload_bytes * 4 {
+            return None;
+        }
+
+        let mut out = String::with_capacity(payload_bytes);
         let mut folded: HashSet<usize> = HashSet::new();
         let mut replaced_any = false;
         // How many marker lines stand above the first line that survives. Counted
@@ -531,10 +557,13 @@ impl<'a> Ledger<'a> {
             // has no say in. Four of four recorded under 1 KB were retrieved
             // within nine seconds (#543), so below that floor the trade is
             // negative and the run stays verbatim.
+            // What is left to ask per run, now that coverage is settled for the
+            // payload above: does this run save more than the marker replacing
+            // it costs. The marker is rendered rather than estimated, so the
+            // test cannot drift from the string it is weighing (#450).
             let long_enough = run.seen.is_some_and(|o| {
                 let marker = render(o, &"0".repeat(HANDLE_LEN)).len();
                 body.len() >= marker + o.min_gain()
-                    && (!covers_everything || body.len() >= MIN_WHOLE_OUTPUT_FOLD)
             });
 
             // A handle is only offered for content that is provably retrievable.
@@ -831,7 +860,23 @@ mod tests {
             "a sub-1 KB repeat must stay verbatim rather than become a bare handle"
         );
 
-        let extended = format!("{text}\nsomething this session has never seen before\n");
+        // Four new lines, not one. #601 widened the floor to cover a fold that
+        // takes four fifths or more of its payload, on the evidence that three
+        // surviving lines out of twenty-six were not content anyone could use.
+        // One appended line put this fixture on the wrong side of that, so the
+        // arm below was asserting the floor rather than the absence of it, which
+        // is the failure this test's own prose warns about.
+        let extended = format!(
+            "{text}\n{}",
+            (0..4)
+                .map(|i| format!("something this session has never seen before, {i}\n"))
+                .collect::<String>()
+        );
+        assert!(
+            text.len() * 5 < extended.len() * 4,
+            "the repeated head must be under four fifths of the payload, or this \
+             arm tests the #601 floor instead of a partial fold"
+        );
         let partial = ledger
             .project(&extended)
             .expect("the repeated head still folds beside content the agent can use");
@@ -1145,7 +1190,21 @@ mod tests {
         // either bar is consulted, and the test stops being about the two bars.
         // It also makes the bars above exact: a run marker is what gets rendered
         // here, where a whole-output fold would have rendered the longer wording.
-        let probe = format!("{text}a line neither history has ever seen\n");
+        // Four of them since #601, for the same reason as in the #543 test: one
+        // appended line leaves the fold at nine tenths of the payload, which the
+        // widened floor now refuses, and the two bars this test exists for would
+        // never be reached.
+        let probe = format!(
+            "{text}{}",
+            (0..4)
+                .map(|i| format!("a line neither history has ever seen, {i}\n"))
+                .collect::<String>()
+        );
+        assert!(
+            text.len() * 5 < probe.len() * 4,
+            "the repeat must be under four fifths of the probe, or the #601 floor \
+             decides this before either bar is consulted"
+        );
 
         // Same session: over the session floor, so it projects.
         assert!(Ledger::new(&store, "s1").project(&probe).is_some());
@@ -1236,6 +1295,20 @@ mod tests {
         let (store, _d) = temp_store();
         let payload = "19 |   \"x-csrf-token\": csrf,\n                       20 |   Cookie: cookies,\n                       21 | };\n                       22 | \n                       23 | const profiles = await (await fetch(BASE)).json();\n                       24 | const profileId = profiles.profiles[0].id;\n                       TypeError: undefined is not an object (evaluating 'profiles.profiles[0]')\n                             at /tmp/repro237.ts:24:28\n                       Bun v1.3.14 (macOS arm64)\n";
 
+        // Padded past `MIN_WHOLE_OUTPUT_FOLD` since #601. At its original 500-odd
+        // bytes the coverage floor now refuses the whole call, which would leave
+        // this test asserting that an unfolded payload still contains its own
+        // error line, and that is true of any payload. The point here is that the
+        // error survives a fold, so the fixture has to be big enough to get one.
+        let context: String = (0..12)
+            .map(|i| format!("                       {i} |   const value{i} = await load(i);\n"))
+            .collect();
+        let payload = &format!("{context}{payload}");
+        assert!(
+            payload.len() > MIN_WHOLE_OUTPUT_FOLD,
+            "fixture must clear the coverage floor, or no fold happens at all"
+        );
+
         let ledger = Ledger::new(&store, "s1");
         ledger.project(payload);
         let second = ledger
@@ -1301,5 +1374,126 @@ mod tests {
             Origin::Session.marker(9, &handle).len(),
             Origin::Session.marker(9, &"0".repeat(HANDLE_LEN)).len()
         );
+    }
+
+    /// One fixed-width line, so a fixture's size can be reasoned about against
+    /// `MIN_WHOLE_OUTPUT_FOLD` rather than eyeballed. 34 bytes including the
+    /// terminator.
+    fn row(tag: char, i: usize) -> String {
+        format!("{tag} line {i:04} of the fixture payload\n")
+    }
+
+    /// #601, as a matrix, because the guard has to hold on one axis and stay out
+    /// of the way on the other two. A single fixture proves whichever it happens
+    /// to sit on, and the danger here is a guard that quietly stops the folds
+    /// this feature exists for.
+    ///
+    /// Coverage is what the fold takes of the payload; the floor only applies
+    /// once that is four fifths or more **and** the run is under
+    /// `MIN_WHOLE_OUTPUT_FOLD`.
+    /// The hole the review of #601 found in its first draft, kept as its own
+    /// test because the matrix above cannot express it: every row there has one
+    /// seen block, and this shape has three.
+    ///
+    /// Three seen blocks of roughly thirty percent each, separated by single new
+    /// lines. Weighed per run against the payload, every block passes a four
+    /// fifths test on its own and all three fold, so the reader is left with
+    /// three markers and two separators, which is the reported case wearing more
+    /// markers. Weighed once for the payload, the coverage is what it always was.
+    #[test]
+    fn counts_coverage_over_the_payload_not_over_one_run() {
+        let (store, _d) = temp_store();
+        let ledger = Ledger::new(&store, "s1");
+
+        // Eight lines, 272 bytes, so each block clears the per-run gain floor on
+        // its own. At six lines it sat under that floor and the test passed
+        // whether or not coverage was consulted, which is no test at all.
+        let block = |tag: char| (0..8).map(|i| row(tag, i)).collect::<String>();
+        let seed = format!("{}{}{}", block('a'), block('b'), block('c'));
+        ledger.project(&seed);
+
+        let second = format!(
+            "{}{}{}{}{}",
+            block('a'),
+            row('x', 0),
+            block('b'),
+            row('x', 1),
+            block('c')
+        );
+        assert!(
+            second.len() < MIN_WHOLE_OUTPUT_FOLD,
+            "the payload must sit under the floor, or coverage is not consulted"
+        );
+        let seen = block('a').len() + block('b').len() + block('c').len();
+        assert!(
+            seen * 5 >= second.len() * 4,
+            "the three blocks must clear four fifths together"
+        );
+        assert!(
+            block('a').len() * 5 < second.len() * 4,
+            "and no single block may clear it alone, or this tests the old rule"
+        );
+        assert!(
+            block('a').len()
+                >= Origin::Session.marker(8, &"0".repeat(HANDLE_LEN)).len()
+                    + Origin::Session.min_gain(),
+            "each block must be able to fold on its own, or the guard is not what \
+             stops it and this test has no teeth"
+        );
+
+        assert_eq!(
+            ledger.project(&second),
+            None,
+            "three sub-threshold blocks folded to markers and two separators"
+        );
+    }
+
+    #[test]
+    fn refuses_a_small_fold_that_would_leave_almost_nothing() {
+        // (name, lines reused from the first show, lines new to the second, folds?)
+        let cases = [
+            // The reported shape: 23 of 26 lines folded, 782 B of an 884 B
+            // payload, and the three survivors say nothing about the edit.
+            ("small payload, 88% covered", 23, 3, false),
+            // Same payload size, a third of it folded: the reader keeps enough
+            // to work from, so the trade is the one the ledger is for.
+            ("small payload, 38% covered", 10, 16, true),
+            // Same coverage as the first row on a payload past the floor. The
+            // guard must not reach this: it is the case the feature exists for.
+            ("large payload, 92% covered", 55, 5, true),
+        ];
+
+        for (name, reused, fresh, should_fold) in cases {
+            let (store, _d) = temp_store();
+            let ledger = Ledger::new(&store, "s1");
+
+            let first: String = (0..reused).map(|i| row('s', i)).collect();
+            let seed = format!(
+                "{first}{}",
+                (0..40).map(|i| row('p', i)).collect::<String>()
+            );
+            assert!(
+                seed.len() > MIN_LEDGER_INPUT,
+                "{name}: seed too small to record"
+            );
+            ledger.project(&seed);
+
+            let second: String = (0..reused)
+                .map(|i| row('s', i))
+                .chain((0..fresh).map(|i| row('n', i)))
+                .collect();
+            let folded_bytes = reused * 34;
+            assert_eq!(
+                folded_bytes >= MIN_WHOLE_OUTPUT_FOLD,
+                should_fold && name.starts_with("large"),
+                "{name}: fixture is on the wrong side of the whole-output floor"
+            );
+
+            assert_eq!(
+                ledger.project(&second).is_some(),
+                should_fold,
+                "case: {name}"
+            );
+        }
     }
 }

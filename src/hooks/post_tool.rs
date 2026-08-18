@@ -729,15 +729,14 @@ pub fn process_payload(
         // assignment and its value into this column: 1,079 rows and 264 distinct
         // values in one database, which made every aggregate keyed on it useless
         // and hid the routing defect this change fixes (#339).
-        let producer =
-            crate::pipeline::registry::sole_output_command(clean_command).unwrap_or(clean_command);
+        let producer = crate::pipeline::producer::producer_label(clean_command);
         (
             output,
-            producer
-                .split_whitespace()
-                .next()
-                .unwrap_or("omni")
-                .to_string(),
+            if producer.is_empty() {
+                "omni".to_string()
+            } else {
+                producer.to_string()
+            },
         )
     };
 

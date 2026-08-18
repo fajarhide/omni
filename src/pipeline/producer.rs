@@ -258,6 +258,63 @@ pub(crate) fn strip_assignments(command: &str) -> &str {
     rest
 }
 
+/// The program name to file a recorded row under, for any command string.
+///
+/// #339 taught `sole_output_command` to strip assignments and closed. It fixed
+/// routing and left `distillations.filter_name` wrong in two places, because
+/// neither writer of that column went through here:
+///
+/// * `hooks::pipe` took the first token of the raw command and nothing else, so
+///   the exec and pipe door never received the fix at all.
+/// * `hooks::post_tool` did call `sole_output_command`, but through
+///   `.unwrap_or(command)`. That function answers `None` for any chain with two
+///   producers, and the fallback then handed the raw chain back.
+///
+/// Measured on 0.7.6 before the change: 1,525 of 11,335 rows named an assignment
+/// and 291 named a binary's full path, 16.0% of the corpus, against #339's own
+/// 1,079 before it was closed. Every aggregate keyed on this column was wrong by
+/// that much, including the workload numbers this repo sizes distillers from.
+///
+/// The file name, not the path, for the same reason `resolve_profile` takes it:
+/// `/opt/homebrew/opt/python@3.11/bin/python3.11` and `python3.11` are one
+/// program and must be one row.
+pub(crate) fn producer_label(command: &str) -> &str {
+    // The producer when there is a single one, and otherwise the first segment
+    // that actually runs something. `sole_output_command` answers `None` for a
+    // chain with two producers, and the raw string it was falling back to begins
+    // with whatever `cd` or assignment stands in front, which is the half #339
+    // missed. `is_silent` is the same predicate that decides which segments can
+    // own the output, so the label agrees with the routing by construction.
+    //
+    // Every segment silent means nothing wrote to stdout, and the whole string
+    // is then as good a name as any.
+    let segment = sole_output_command(command)
+        .or_else(|| {
+            split_sequential(command)
+                .into_iter()
+                .find(|seg| !is_silent(seg))
+        })
+        .unwrap_or(command);
+    program_name(strip_assignments(segment))
+}
+
+/// The bare program name of an already-stripped command.
+///
+/// Shared with `resolve_profile`, which decided routing on exactly this and had
+/// its own copy. Two copies of one predicate drift and only one of them gets
+/// reported, which is how the two halves of #339 came apart in the first place.
+pub(crate) fn program_name(command: &str) -> &str {
+    let first = command
+        .split_whitespace()
+        .next()
+        .unwrap_or(command)
+        .trim_matches(|c| c == '"' || c == '\'');
+    std::path::Path::new(first)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(first)
+}
+
 /// `i=0` and `f=path/to.yaml` set a variable and print nothing. Distinguished
 /// from a command by the `=` before any `/`, so `./bin/x=y` is still a command.
 pub(crate) fn is_assignment(word: &str) -> bool {
@@ -324,5 +381,73 @@ fn push_segment<'a>(out: &mut Vec<&'a str>, command: &'a str, start: usize, end:
     let seg = command[start..end].trim();
     if !seg.is_empty() {
         out.push(seg);
+    }
+}
+
+#[cfg(test)]
+mod producer_label_tests {
+    use super::producer_label;
+
+    /// #603, as a matrix rather than one case, because the two writers of
+    /// `filter_name` failed on different shapes: the exec door failed on a bare
+    /// assignment and the hook door only on a chain with two producers. A single
+    /// fixture passes on one door and proves nothing about the other.
+    ///
+    /// Every row is a command shape that really occurs in the recorded corpus.
+    #[test]
+    fn labels_a_command_with_its_program() {
+        let cases = [
+            ("bare", "echo hi", "echo"),
+            ("assignment", "FOO=bar echo hi", "echo"),
+            ("two assignments", "A=1 B=2 echo hi", "echo"),
+            // The shape the hook door got wrong: `sole_output_command` answers
+            // `None` here, and the old fallback took the raw first token.
+            (
+                "assignment then chain",
+                "FOO=bar echo one && echo two",
+                "echo",
+            ),
+            ("chain", "echo one && echo two", "echo"),
+            ("cd prefix", "cd /tmp && kubectl get pods", "kubectl"),
+            // Two producers, so `sole_output_command` declines and the fallback
+            // decides. It has to skip the `cd`, or the row is filed under the
+            // one segment that produced no output, which is #339's other half.
+            (
+                "cd prefix and two producers",
+                "cd /tmp && kubectl get pods && kubectl get svc",
+                "kubectl",
+            ),
+            (
+                "assignment, cd, then two producers",
+                "K=1 cd /tmp && echo one && echo two",
+                "echo",
+            ),
+            // 291 rows named a binary's full path before this.
+            (
+                "absolute path",
+                "/opt/homebrew/bin/python3.11 x.py",
+                "python3.11",
+            ),
+            (
+                "assignment and absolute path",
+                "S=/tmp/scratch /usr/bin/env node app.js",
+                "env",
+            ),
+            ("quoted program", "\"kubectl\" get pods", "kubectl"),
+            // ponytail: the split is on whitespace before the quotes come off,
+            // so a program name containing a space keeps only its first word.
+            // Inherited from `resolve_profile`, which has routed this way since
+            // it was written, and no recorded command has that shape. A quote
+            // aware split is the upgrade if one ever does.
+            ("quoted program with a space", "\"my prog\" --flag", "my"),
+            // Pipe mode has no command at all, and the caller turns this into
+            // `[pipe]`. Anything else here would invent a program name.
+            ("empty", "", ""),
+            ("assignment only", "FOO=bar", ""),
+        ];
+
+        for (name, command, expected) in cases {
+            assert_eq!(producer_label(command), expected, "case: {name}");
+        }
     }
 }
