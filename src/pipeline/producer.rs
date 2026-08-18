@@ -402,7 +402,11 @@ mod producer_label_tests {
             ("two assignments", "A=1 B=2 echo hi", "echo"),
             // The shape the hook door got wrong: `sole_output_command` answers
             // `None` here, and the old fallback took the raw first token.
-            ("assignment then chain", "FOO=bar echo one && echo two", "echo"),
+            (
+                "assignment then chain",
+                "FOO=bar echo one && echo two",
+                "echo",
+            ),
             ("chain", "echo one && echo two", "echo"),
             ("cd prefix", "cd /tmp && kubectl get pods", "kubectl"),
             // Two producers, so `sole_output_command` declines and the fallback
@@ -419,7 +423,11 @@ mod producer_label_tests {
                 "echo",
             ),
             // 291 rows named a binary's full path before this.
-            ("absolute path", "/opt/homebrew/bin/python3.11 x.py", "python3.11"),
+            (
+                "absolute path",
+                "/opt/homebrew/bin/python3.11 x.py",
+                "python3.11",
+            ),
             (
                 "assignment and absolute path",
                 "S=/tmp/scratch /usr/bin/env node app.js",

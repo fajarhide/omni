@@ -1363,8 +1363,14 @@ mod tests {
             let ledger = Ledger::new(&store, "s1");
 
             let first: String = (0..reused).map(|i| row('s', i)).collect();
-            let seed = format!("{first}{}", (0..40).map(|i| row('p', i)).collect::<String>());
-            assert!(seed.len() > MIN_LEDGER_INPUT, "{name}: seed too small to record");
+            let seed = format!(
+                "{first}{}",
+                (0..40).map(|i| row('p', i)).collect::<String>()
+            );
+            assert!(
+                seed.len() > MIN_LEDGER_INPUT,
+                "{name}: seed too small to record"
+            );
             ledger.project(&seed);
 
             let second: String = (0..reused)

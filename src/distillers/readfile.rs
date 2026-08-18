@@ -157,7 +157,9 @@ fn omitted_note(total_lines: usize, kept_lines: usize) -> String {
     if omitted == 0 {
         return String::new();
     }
-    format!("\n\n... [{omitted} of {total_lines} file lines not rendered here: bodies and comments] ...")
+    format!(
+        "\n\n... [{omitted} of {total_lines} file lines not rendered here: bodies and comments] ..."
+    )
 }
 
 /// The scan behind every `--- … ---` section runs over the **whole** file, not
