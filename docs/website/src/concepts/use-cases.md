@@ -62,10 +62,10 @@ later. And [memory across sessions](../use/memory.md) survives the compaction: p
 knowledge, recurring error patterns, and the goal you pinned with `omni goal` are in
 SQLite, not in the context window.
 
-**The honest limit.** OMNI cannot stop a compaction, and at the moment one happens it
-deliberately forgets what it had shown you, because the licence to replace lines with a
-handle is that the agent is still holding those lines, and compaction is when that stops
-being true.
+**Where the limit is, and why it is deliberate.** OMNI cannot stop a compaction. When
+one happens it drops what it had shown you on purpose, because a handle is only honest
+while the agent is still holding those lines, and compaction is exactly when that stops
+being true. That rule is what keeps every marker true on the other side of one.
 
 ## 5. You switch agents, or machines, mid-project
 
@@ -78,11 +78,11 @@ ledger's project scope will hand it a handle for output an earlier session alrea
 produced. That marker says `not shown here` rather than `already shown`,
 because this agent has genuinely never seen those bytes and the wording has to be true.
 
-**The honest number.** Cross-session repetition is **3.7%** of post-filter bytes against
-**19.1%** within a session, so this is worth about a fifth of the in-session saving.
-It is real, and it is not the headline.
+**The number: 3.7%** of post-filter bytes repeat across sessions, against **19.1%**
+within one. So this is a real bonus on top of the in-session saving rather than the main
+event, and it arrives without anyone configuring anything.
 
-**The honest caveat.** Two agents in one repository share that history by side effect
+**What is not keyed on the agent yet.** Two agents in one repository share that history by side effect
 rather than by design. The marker used to say `from an earlier session`, which reads as
 *your* earlier session when it was someone else's, and worse, as a claim the content had
 already arrived; it now says `not shown here`. [The ledger](the-ledger.md#what-two-agents-in-one-repo-share) is

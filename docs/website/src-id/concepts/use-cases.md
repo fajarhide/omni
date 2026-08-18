@@ -67,10 +67,11 @@ berarti temboknya datang belakangan. Dan [ingatan antar sesi](../use/memory.md)
 selamat dari pemadatan: pengetahuan proyek, pola galat yang berulang, dan tujuan
 yang Anda pancang dengan `omni goal` ada di SQLite, bukan di jendela konteks.
 
-**Batas jujurnya.** OMNI tidak bisa mencegah pemadatan, dan pada saat pemadatan
-terjadi ia sengaja melupakan apa yang sudah ia tunjukkan, karena izin untuk
-mengganti baris dengan handle adalah bahwa agent masih memegang baris-baris itu,
-dan pemadatan adalah saat hal itu berhenti benar.
+**Di mana batasnya, dan kenapa itu disengaja.** OMNI tidak bisa mencegah pemadatan.
+Ketika pemadatan terjadi, ia sengaja melepas apa yang sudah ia tunjukkan, karena
+sebuah handle hanya jujur selama agent masih memegang baris-baris itu, dan
+pemadatan persis saat hal itu berhenti benar. Aturan itulah yang membuat setiap
+penanda tetap benar di seberang pemadatan.
 
 ## 5. Anda pindah agent, atau pindah mesin, di tengah proyek
 
@@ -84,11 +85,11 @@ handle untuk keluaran yang sudah dihasilkan sesi sebelumnya. Penanda itu berbuny
 `not shown here`, bukan `already shown`, karena agent ini memang belum
 pernah melihat byte tersebut dan kalimatnya harus benar.
 
-**Angka jujurnya.** Pengulangan lintas sesi adalah **3,7%** dari byte setelah
-penyaringan, berbanding **19,1%** di dalam satu sesi, jadi nilainya sekitar
-seperlima penghematan dalam sesi. Ia nyata, dan ia bukan judulnya.
+**Angkanya: 3,7%** byte setelah penyaringan berulang lintas sesi, berbanding
+**19,1%** di dalam satu sesi. Jadi ini bonus nyata di atas penghematan dalam sesi,
+bukan acara utamanya, dan ia datang tanpa ada yang perlu dikonfigurasi.
 
-**Peringatan jujurnya.** Dua agent dalam satu repositori berbagi riwayat itu
+**Yang belum dikunci ke agent.** Dua agent dalam satu repositori berbagi riwayat itu
 sebagai efek samping, bukan karena dirancang begitu. Penandanya dulu berbunyi
 `from an earlier session`, yang terbaca sebagai sesi *Anda* padahal itu sesi orang
 lain, dan lebih buruk lagi sebagai klaim bahwa isinya sudah sampai; sekarang ia

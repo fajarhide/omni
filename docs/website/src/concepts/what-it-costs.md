@@ -43,7 +43,7 @@ is why no published figure can be re-derived a week after it was measured.
 
 ## Tokens
 
-The thing you came for, and the honest version has two halves.
+The thing you came for, and it has two halves.
 
 **What it saves.** Over 6,656 real commands on 0.7.3: 14.9% fewer bytes across the
 whole mix. By class, the spread is enormous:

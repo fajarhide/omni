@@ -219,11 +219,11 @@ real command executions that reached a model:
   in this measurement. Two did until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
-* **Every figure above is bytes per command, which is not the same as your bill.**
-  Billed input tokens track roughly turns times prefix size, so a shortened payload
-  only pays when it also removes a turn. Measured end to end on whole sessions the
-  saving is larger on average than this table and it is not guaranteed on any single
-  session, including runs where the bill did not fall at all.
+* **End to end, the gap favours you.** These are bytes per command, which is not the
+  same as your bill: billed input tokens track roughly turns times prefix size. Measured
+  on whole sessions the saving averages **larger** than this table, because a payload
+  shortened once is a payload every later turn stops re-reading. It is an average and
+  not a promise, and some sessions did not fall at all.
 
 Per class, over the same 5,984 traces, with what the filters take and what the ledger
 adds on top:
