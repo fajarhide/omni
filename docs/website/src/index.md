@@ -135,10 +135,10 @@ report.
 
 The **14.9%** in the table above is a different corpus on purpose: the same harness over
 a week of ordinary work, with every one of those hands-back counted in alongside the
-wins. Read the two together. The per-class row is what predicts your workload, and the
-aggregate is the floor of what the tool does rather than the ceiling. Both corpora, the
-method, and every unflattering figure we have are on
-[Benchmarks](develop/benchmarks.md).
+wins. It is an average over that mix, not a promise for yours. The per-class rows are
+what predict your own workload and they run from **4.3%** on search to **89.6%** on file
+re-reads, so find the classes you actually run. Both corpora, the method, and every
+unflattering figure we have are on [Benchmarks](develop/benchmarks.md).
 
 Against the closest comparable tools on identical bytes, the ledger is what puts OMNI
 ahead overall. The full head-to-head, including the arm where another tool's filters
