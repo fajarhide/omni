@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Stop paying to re-read the same output.</b> OMNI turns repeated bytes into retrievable handles: 97.2% off a file your agent reads twice, and across 5,984 real commands 69.6% on a heavy week, 14.9% on an ordinary one. Nothing deleted, nothing invented, and every number replays on your own corpus.</em>
+    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice, <b>89.6%</b> off file reads across the corpus. Nothing deleted, nothing invented, and every number replays on your own history.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)

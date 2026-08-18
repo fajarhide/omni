@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Berhenti membayar untuk membaca ulang output yang sama.</b> OMNI mengubah byte berulang menjadi handle yang bisa diambil kembali: 97,2% untuk berkas yang dibaca agen Anda dua kali, dan pada 5.984 perintah nyata 69,6% di minggu yang berat, 14,9% di minggu biasa. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa Anda putar ulang pada korpus Anda sendiri.</em>
+    <em><b>Agent Anda membayar dua kali untuk output yang sudah pernah dilihatnya.</b> OMNI menggantinya dengan handle yang bisa diambil kembali: <b>97,2%</b> untuk file yang dibaca dua kali, <b>89,6%</b> untuk pembacaan file di seluruh korpus. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa diputar ulang di riwayat Anda sendiri.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)

@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Đừng trả tiền để đọc lại cùng một output.</b> OMNI biến những byte lặp lại thành handle lấy lại được: 97,2% với một tệp agent của bạn đọc hai lần, và trên 5.984 lệnh thật là 69,6% trong một tuần nặng, 14,9% trong một tuần bình thường. Không xóa gì, không bịa gì, và mọi con số đều chạy lại được trên corpus của chính bạn.</em>
+    <em><b>Agent của bạn trả tiền hai lần cho output nó đã thấy rồi.</b> OMNI trả lại một handle lấy lại được thay vì thế: <b>97,2%</b> với tệp đọc hai lần, <b>89,6%</b> với việc đọc tệp trên toàn tập dữ liệu. Không xoá gì, không bịa gì, và mọi con số đều phát lại được trên chính lịch sử của bạn.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
