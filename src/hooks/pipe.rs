@@ -326,10 +326,13 @@ fn distill(
 
         (
             out,
-            cmd.split_whitespace()
-                .next()
-                .unwrap_or("[pipe]")
-                .to_string(),
+            // `[pipe]` only for pipe mode, where there is no command at all. A
+            // command that is present is named after its program, through the
+            // same helper the hook path uses (#603).
+            match crate::pipeline::producer::producer_label(cmd) {
+                "" => "[pipe]".to_string(),
+                label => label.to_string(),
+            },
             k_count,
             d_count,
             collapse_savings_data,

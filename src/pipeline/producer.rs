@@ -258,6 +258,54 @@ pub(crate) fn strip_assignments(command: &str) -> &str {
     rest
 }
 
+/// The program name to file a recorded row under, for any command string.
+///
+/// #339 taught `sole_output_command` to strip assignments and closed. It fixed
+/// routing and left `distillations.filter_name` wrong in two places, because
+/// neither writer of that column went through here:
+///
+/// * `hooks::pipe` took the first token of the raw command and nothing else, so
+///   the exec and pipe door never received the fix at all.
+/// * `hooks::post_tool` did call `sole_output_command`, but through
+///   `.unwrap_or(command)`. That function answers `None` for any chain with two
+///   producers, and the fallback then handed the raw chain back.
+///
+/// Measured on 0.7.6 before the change: 1,525 of 11,335 rows named an assignment
+/// and 291 named a binary's full path, 16.0% of the corpus, against #339's own
+/// 1,079 before it was closed. Every aggregate keyed on this column was wrong by
+/// that much, including the workload numbers this repo sizes distillers from.
+///
+/// The file name, not the path, for the same reason `resolve_profile` takes it:
+/// `/opt/homebrew/opt/python@3.11/bin/python3.11` and `python3.11` are one
+/// program and must be one row.
+pub(crate) fn producer_label(command: &str) -> &str {
+    // The producer when there is a single one, and otherwise the head of the
+    // chain. Falling back to the first segment rather than the whole string is
+    // the half #339 missed: a chain still has a first program, and naming the
+    // row after it beats naming it after the assignment in front of it.
+    let segment = sole_output_command(command)
+        .or_else(|| split_sequential(command).into_iter().next())
+        .unwrap_or(command);
+    program_name(strip_assignments(segment))
+}
+
+/// The bare program name of an already-stripped command.
+///
+/// Shared with `resolve_profile`, which decided routing on exactly this and had
+/// its own copy. Two copies of one predicate drift and only one of them gets
+/// reported, which is how the two halves of #339 came apart in the first place.
+pub(crate) fn program_name(command: &str) -> &str {
+    let first = command
+        .split_whitespace()
+        .next()
+        .unwrap_or(command)
+        .trim_matches(|c| c == '"' || c == '\'');
+    std::path::Path::new(first)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(first)
+}
+
 /// `i=0` and `f=path/to.yaml` set a variable and print nothing. Distinguished
 /// from a command by the `=` before any `/`, so `./bin/x=y` is still a command.
 pub(crate) fn is_assignment(word: &str) -> bool {
