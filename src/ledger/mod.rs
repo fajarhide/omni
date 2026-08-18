@@ -491,7 +491,8 @@ impl<'a> Ledger<'a> {
             return None;
         }
 
-        let mut out = String::with_capacity(lines.iter().map(|l| l.len()).sum());
+        let payload_bytes: usize = lines.iter().map(|l| l.len()).sum();
+        let mut out = String::with_capacity(payload_bytes);
         let mut folded: HashSet<usize> = HashSet::new();
         let mut replaced_any = false;
         // How many marker lines stand above the first line that survives. Counted
@@ -531,10 +532,34 @@ impl<'a> Ledger<'a> {
             // has no say in. Four of four recorded under 1 KB were retrieved
             // within nine seconds (#543), so below that floor the trade is
             // negative and the run stays verbatim.
+            // The whole-output floor, applied to the folds that are the
+            // whole output in every way that matters to a reader (#601).
+            //
+            // `covers_everything` is exact and the danger is not. Resolving a
+            // merge conflict and re-reading the same window folded 23 of 26
+            // lines and delivered `zulu-08/09/10`: three lines that had nothing
+            // to do with the edit, under a marker reading `23 lines already
+            // shown`, which an agent verifying a deletion reads as *nothing
+            // changed*. The deletion and the reorder that were the entire point
+            // produced no new line, so there was nothing for the fold to emit.
+            //
+            // A remainder that small is not context, it is a round trip the
+            // agent has no say in, which is the argument `MIN_WHOLE_OUTPUT_FOLD`
+            // already makes for the exact case. So the floor widens to cover it
+            // and the wording does not: a partial fold still says `N lines
+            // already shown`, because it still is one.
+            //
+            // Priced on 847 recorded folds before choosing four fifths: the
+            // guard refuses 3 of them and 1,748 bytes of 1,439,813, or 0.12% of
+            // everything the ledger has ever saved on this machine. It cannot
+            // reach a large payload, where a 90% fold is the case this feature
+            // exists for and the floor is already met many times over.
+            let leaves_almost_nothing = body.len() * 5 >= payload_bytes * 4;
             let long_enough = run.seen.is_some_and(|o| {
                 let marker = render(o, &"0".repeat(HANDLE_LEN)).len();
                 body.len() >= marker + o.min_gain()
-                    && (!covers_everything || body.len() >= MIN_WHOLE_OUTPUT_FOLD)
+                    && (!(covers_everything || leaves_almost_nothing)
+                        || body.len() >= MIN_WHOLE_OUTPUT_FOLD)
             });
 
             // A handle is only offered for content that is provably retrievable.
