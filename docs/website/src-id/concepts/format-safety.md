@@ -70,8 +70,9 @@ keluarannya identik dengan dan tanpa variabel itu, OMNI tidak terlibat.
 persen lebih besar, karena penandanya berongkos lebih mahal daripada yang dihemat
 kompresinya. Wajar, bukan cacat.
 
-**Perintah yang keluarannya utuh saja.** Sekitar 97% panggilan tidak menghemat
-apa pun, karena memang tidak ada yang bisa dihemat. Itu pipeline yang bekerja.
+**Perintah yang keluarannya utuh saja.** Sebagian besar panggilan dikembalikan utuh,
+karena mengambil sesuatu akan tidak aman atau tidak sepadan dengan ongkos penandanya.
+Itu pipeline yang bekerja.
 
 **Aliran biner `kubectl`.** SPDY merusak yang itu, ada atau tidak ada OMNI.
 

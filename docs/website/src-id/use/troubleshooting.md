@@ -32,7 +32,8 @@ begitu. Bukan kesempatan yang terlewat.
 Penandanya berongkos lebih mahal daripada yang dihemat kompresinya pada muatan
 pendek.
 
-**97% panggilan tidak menghemat apa pun.** Wajar. Memang tidak ada yang bisa
+**Sebagian besar panggilan tidak menghemat apa pun.** Wajar. Mengambil sesuatu akan
+tidak aman atau tidak sepadan dengan ongkos penandanya, dan memang tidak ada yang bisa
 dihemat.
 
 **Pembacaan berkas menunjukkan nol penghematan token di sesi yang membaca banyak

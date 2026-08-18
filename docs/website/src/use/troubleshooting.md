@@ -29,7 +29,8 @@ anything destined for `jq` pass through by design. Not a missed opportunity.
 **Negative savings on small output**, roughly `-1%` to `-4%`. The marker costs more
 than the compression saves on a short payload.
 
-**97% of calls saving nothing.** Expected. There was nothing to save.
+**Most calls saving nothing.** Expected. Taking anything would have been unsafe or
+would not have paid for its own marker.
 
 **File reads showing zero token savings in a session that read many files.** OMNI's
 surface on most hosts is shell output. Your agent's own file-reading tool, skill files

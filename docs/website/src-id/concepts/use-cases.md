@@ -1,7 +1,7 @@
 # Di mana OMNI membantu
 
 Sebelas situasi, masing-masing dengan angka terukurnya. Dua di antaranya kasus
-ketika OMNI tidak melakukan apa-apa, dan keduanya sengaja dimuat di sini:
+ketika OMNI menyingkir, dan keduanya sengaja dimuat di sini:
 perkakas yang mengaku membantu di mana-mana adalah perkakas yang tidak bisa
 ditebak siapa pun.
 

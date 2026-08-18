@@ -79,8 +79,8 @@ a bug worth reporting, and it is the exact class this project cares about most.
 
 ## When there is no marker at all
 
-Most of the time. Around 97% of calls save nothing and hand the output straight back.
-That is the pipeline working, not failing. It happens when:
+Most of the time, and that is the pipeline working rather than failing. OMNI hands the
+output straight back whenever taking anything would be unsafe or would not pay:
 
 - The payload is JSON, YAML, CSV or TSV. Never touched, on purpose.
 - The command failed. A non-zero exit passes through verbatim.

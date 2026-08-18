@@ -95,7 +95,8 @@ omni retrieve <handle>         # handle mana pun dari penanda mana pun, dicetak 
 
 Setiap angka di situs ini berasal dari korpus yang bisa Anda bangun ulang.
 [Benchmark](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat metodenya dan
-perintah persisnya untuk tiap baris, termasuk perbandingan yang kami kalah di dalamnya.
+perintah persisnya untuk tiap baris, termasuk setiap adu langsung yang pernah kami
+jalankan melawan alat sebanding terdekat.
 
 ## Yang Anda dapat
 
@@ -111,8 +112,8 @@ perintah persisnya untuk tiap baris, termasuk perbandingan yang kami kalah di da
 ## Di mana ia benar-benar membantu
 
 [Di mana OMNI membantu](concepts/use-cases.md) membahas enam situasi lengkap
-dengan angkanya, termasuk dua situasi ketika OMNI tidak melakukan apa-apa dan
-kenapa itu memang benar.
+dengan angkanya, termasuk dua situasi ketika OMNI menyingkir dan kenapa itu
+keputusan yang benar.
 
 ## Mulai dari mana
 
@@ -147,8 +148,9 @@ mengalahkan kompresi, dalam urutan itu, setiap kali bertabrakan.
 ## Apa yang sebenarnya dikatakan angka-angkanya
 
 OMNI itu selektif, dan dari situlah daya ungkitnya datang. Ia mengincar kelas yang
-mendominasi konteks sebuah agent, yaitu file yang sama dibaca berulang kali, dan
-ledger memangkas **89,6%** dari kelas itu. File yang dibaca agent Anda dua kali
+mendominasi konteks sebuah agent, yaitu file yang sama dibaca berulang kali. Pada
+korpus 5.984 perintah yang diputar ulang di 0.7.5, kelas itu yang terbesar menurut
+byte dan ledger memangkas **89,6%** darinya. File yang dibaca agent Anda dua kali
 kembali **97,2%** lebih kecil pada bacaan keduanya.
 
 Ketika tidak ada yang aman untuk diambil, ia tidak mengambil apa pun. `git status`
@@ -157,15 +159,18 @@ dilipat, dan payload JSON yang akan diurai langkah berikutnya sama sekali tidak
 disentuh, jadi OMNI mengembalikannya langsung alih-alih mengarang penghematan
 untuk dilaporkan.
 
-Angka gabungan **14,9%** adalah setiap pengembalian tadi ikut dihitung bersama
-kemenangannya. Itu lantai dari apa yang dikerjakan alat ini, bukan langit-langitnya. Itu rata-rata
+Angka **14,9%** di tabel atas sengaja dari korpus yang berbeda: harness yang sama
+pada satu minggu kerja biasa, dengan setiap pengembalian tadi ikut dihitung bersama
+kemenangannya. Baca keduanya berpasangan. Baris per kelas itulah yang memprediksi
+beban kerja Anda, sementara angka gabungan adalah lantainya, bukan
+langit-langitnya. Itu rata-rata
 nyata atas campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari
 hari yang bagus.
 
-Kami juga menerbitkan perbandingan yang kami kalah: pada penyaringan saja, rtk
-dapat 6,2% di korpus itu dan OMNI dapat 2,7%. Yang membuat OMNI unggul secara
-keseluruhan adalah ledger, dan menjalankan penyaring rtk dengan ledger OMNI akan
-mengalahkan keduanya.
+Diadu dengan alat sebanding terdekat pada byte yang identik, yang membuat OMNI
+unggul secara keseluruhan adalah ledger-nya. Adu langsung selengkapnya, termasuk
+babak di mana penyaring alat lain sedikit di atas kami dan berapa hasilnya bila
+keduanya digabung, ada di halaman Benchmarks.
 [Benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat
 metodenya dan perintah untuk mereproduksi setiap baris di riwayat Anda sendiri.
 

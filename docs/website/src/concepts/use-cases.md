@@ -1,8 +1,9 @@
 # Where OMNI helps
 
 Eleven situations, with the measured number attached to each. Two of them are cases
-where OMNI does nothing, and those are in here on purpose: a tool that claims to help
-everywhere is a tool nobody can predict.
+where OMNI stands aside, and those are in here on purpose: a tool that claims to help
+everywhere is a tool nobody can predict, and knowing where it declines is what makes
+the rest worth trusting.
 
 Every figure comes from the same replay of 6,656 real commands described in
 [Benchmarks](../develop/benchmarks.md), so they are averages over a real mix rather

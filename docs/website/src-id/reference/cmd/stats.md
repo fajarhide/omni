@@ -47,8 +47,9 @@ harus menyaring `agent_id` sendiri.
 pengurangan paling besar, karena menghapus jawabannya terkompresi dengan sangat
 baik. Sandingkan angka mana pun dengan `omni diff` pada perintah sungguhan.
 
-**Angka rendah biasanya benar.** Sekitar 97% panggilan tidak menghemat apa pun
-karena memang tidak ada yang bisa dihemat.
+**Angka gabungan yang rendah biasanya benar, dan bukan itu ukuran menilai OMNI.**
+Sebagian besar panggilan memang dikembalikan utuh, jadi baca baris per kelasnya untuk
+melihat di mana kerjanya benar-benar terjadi.
 
 **`--share` dan `--card` tidak mungkin berbeda dari laporannya.** Keduanya
 membaca agregasi yang sama dengan `omni stats` sendiri, sebuah pilihan yang

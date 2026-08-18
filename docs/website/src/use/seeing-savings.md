@@ -54,9 +54,11 @@ anyone querying the database directly.
 history reported the highest reductions, because deleting the answer compresses very
 well. Pair any number with `omni diff` on a real command.
 
-**A low percentage is usually correct.** Around 97% of calls save nothing because
-there was nothing to save. Structured payloads, failed commands and enumerations all
-pass through by design.
+**A low aggregate is usually correct, and it is not the number to judge OMNI by.** Most
+calls are handed back untouched because taking anything would be unsafe or would not
+pay: structured payloads, failed commands and enumerations all pass through by design.
+The per-command rows are where the work shows, so sort by what a class actually saved
+rather than reading the average.
 
 ## The check a percentage cannot make
 
