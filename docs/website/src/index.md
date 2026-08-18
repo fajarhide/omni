@@ -120,14 +120,23 @@ back unchanged. Structured data like JSON and YAML is never touched at all. Anyt
 removed leaves a marker saying so. Those three rules outrank compression, in that order,
 every time they conflict.
 
-## The honest version of the numbers
+## What the numbers actually say
 
-Across 6,656 real commands, **97.3% of calls saved nothing at all**, because there was
-nothing to save. A two-line `git status` has no ceremony to drop and no repeats to fold,
-so OMNI hands it straight back rather than inventing a saving to report.
+OMNI is selective, and that is where its leverage comes from. It goes after the class
+that dominates an agent's context, the same file read again and again, and the ledger
+takes **89.6%** off that class. A file your agent reads twice comes back **97.2%**
+smaller the second time.
 
-The 14.9% is what is left after counting all of those zeroes. It is a real average over a
-real mix, not a best case picked from a good day.
+Where there is nothing safe to take it takes nothing. A two-line `git status` has no
+ceremony to drop and no repeats to fold, and a JSON payload a later step parses is never
+touched at all, so OMNI hands those straight back rather than inventing a saving to
+report.
+
+The **14.9%** aggregate is every one of those hands-back counted in alongside the wins.
+It is a real average over a real mix rather than a best case picked from a good day, and
+it is the floor of what the tool does, not the ceiling. The per-class table in
+[Benchmarks](develop/benchmarks.md) is where the leverage is visible, and every
+unflattering figure we have is on that page too.
 
 We publish the comparison we lose, too: on filtering alone, rtk gets 6.2% on that corpus
 and OMNI gets 2.7%. It is the ledger that puts OMNI ahead overall, and running rtk's

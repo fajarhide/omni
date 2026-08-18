@@ -171,10 +171,11 @@ the twenty-five had never been called once.
 ceremony to drop and nothing has been seen before, so OMNI hands back all 35 rows and
 reports a 0% saving.
 
-**97.3% of all calls in the corpus are like this.** That is the number worth
-internalising: OMNI is not a thing that shrinks everything a little, it is a thing that
-does nothing most of the time and a great deal occasionally. The 14.9% aggregate is
-what is left after every one of those zeroes is counted in.
+**Most calls in this corpus look like this, and that is the shape of the tool.** OMNI is
+not a thing that shrinks everything a little. It stands aside until there is something
+worth taking, then takes a great deal: on this corpus, 78.0% off build and test output
+and 25.0% off file reads. The 14.9% aggregate counts every stand-aside in alongside
+those wins, which is why the per-class row is the one to read for your own workload.
 
 ## What this adds up to
 

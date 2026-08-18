@@ -183,10 +183,12 @@ dua puluh lima perkakas itu tidak pernah sekali pun dipanggil.
 fakta. Tidak ada basa-basi untuk dibuang dan belum ada yang pernah dilihat, jadi
 OMNI mengembalikan seluruh 35 baris dan melaporkan penghematan 0%.
 
-**97,3% dari semua panggilan di korpus seperti ini.** Itu angka yang layak
-diresapi: OMNI bukan barang yang mengecilkan segalanya sedikit, ia barang yang
-tidak berbuat apa-apa hampir sepanjang waktu lalu berbuat banyak sesekali. Angka
-gabungan 14,9% adalah sisa setelah setiap nol tadi ikut dihitung.
+**Sebagian besar panggilan di korpus ini bentuknya begini, dan itulah bentuk
+alatnya.** OMNI bukan barang yang mengecilkan segalanya sedikit. Ia menyingkir
+sampai ada yang layak diambil, lalu mengambil banyak sekali: di korpus ini 78,0%
+dari keluaran build dan test, dan 25,0% dari pembacaan file. Angka gabungan 14,9%
+menghitung setiap kali ia menyingkir bersama kemenangan-kemenangan itu, jadi baris
+per kelas itulah yang perlu dibaca untuk beban kerja Anda sendiri.
 
 ## Totalnya jadi apa
 

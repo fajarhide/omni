@@ -60,9 +60,11 @@ di seluruh campuran. Per kelas, sebarannya sangat lebar:
 | infra | 4,4% | 8,2% |
 | selebihnya | 0,6% | 6,9% |
 
-**Yang ia biayakan.** Setiap penanda adalah byte yang dibayar agent, dan 97,3%
-panggilan tidak menghemat apa pun sambil tetap membayar latensi pipeline. Pada
-keluaran pendek, penandanya bisa melampaui penghematannya.
+**Yang ia biayakan.** Setiap penanda adalah byte yang dibayar agent, dan pada
+keluaran pendek sebuah penanda bisa memakan lebih banyak daripada yang dihemat
+lipatannya. Karena itu sebuah lipatan harus melewati lantai dulu sebelum
+diizinkan, dan karena itu pula sebagian besar panggilan dikembalikan utuh. Latensi
+pipeline dibayar di setiap perintah, diambil atau tidak.
 
 Ada juga ongkos yang tidak bisa dinyatakan hitungan byte mana pun: satu
 pengambilan. Ketika agent butuh isi di balik sebuah handle, ia membayar satu kali

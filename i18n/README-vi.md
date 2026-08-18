@@ -121,7 +121,7 @@ một câu xin bạn tin.
 | **Không bao giờ bịa kết quả** | bộ chưng cất không phân tích được tín hiệu nào sẽ trả về đầu ra thô, chứ không phải một dòng xanh `no errors` hay `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Thất bại không bao giờ bị che** | lệnh thoát với mã khác 0 được cho qua nguyên vẹn | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Dữ liệu có cấu trúc không bị chạm** | JSON / YAML / NDJSON / CSV đi qua từng byte một | `pipeline::format` |
-| **Số liệu là đo được, không phải kỳ vọng** | 5.984 trace thật phát lại trên bản binary phát hành, và 96,1% lệnh gọi không tiết kiệm được gì, con số đó chúng tôi cũng công bố | [`Đo đạc`](#đo-đạc) |
+| **Số liệu là đo được, không phải kỳ vọng** | 5.984 trace thật phát lại trên bản binary phát hành, và mọi con số đều nêu rõ tập dữ liệu cùng tuần đo | [`Đo đạc`](#đo-đạc) |
 
 Đó là điều mà một tỉ lệ nén lớn hơn không mua được: **bạn luôn khôi phục được bản gốc, và nó sẽ không bao giờ nói dối agent của bạn.**
 
@@ -142,8 +142,10 @@ một tập dữ liệu biến mất một tuần sau khi được đo.
   chiếm **80,6%** tổng số byte, còn 148 trong 5.984 lệnh gọi mang 64,7% số đó. Đó là tuần
   cỗ máy này chỉ làm và đo chính OMNI. Cũng bộ đo đó trên một tuần làm việc bình thường
   đọc ra **14,9%**.
-* **96,1% lệnh gọi không tiết kiệm được gì**, và chúng tôi công bố vì đó là con số cho biết
-  phần còn lại đáng giá bao nhiêu. **Không lệnh gọi nào làm đầu ra lớn hơn**
+* **Nó phát huy đúng chỗ có nhiều byte.** Đọc lại tệp là lớp lớn nhất trong tập dữ liệu
+  này và sổ cái cắt đi **89,6%** của lớp đó. Khi không có gì an toàn để cắt, một
+  `git status` hai dòng hay một payload JSON mà bước sau sẽ phân tích, OMNI trả nguyên
+  đầu ra thay vì bịa ra một khoản tiết kiệm. **Không lệnh gọi nào làm đầu ra lớn hơn**
   trong lần đo này. Từng có 2 cho tới ([#398](https://github.com/fajarhide/omni/issues/398)), và chúng tôi đã công bố chúng suốt
   thời gian đó.
 * **21 ms mỗi lệnh**, lớn dần theo lịch sử của bạn chứ không theo kích thước payload. Với

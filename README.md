@@ -212,9 +212,11 @@ real command executions that reached a model:
   everything here: 286 groups of byte-identical payloads are 80.6% of these bytes, and
   148 of the 5,984 calls carry 64.7% of them. It was a week of building and
   benchmarking OMNI. The same harness over a week of ordinary work reads **14.9%**.
-* **96.1% of calls saved nothing at all**, and we publish that because it tells you
-  what the rest are worth. **No call came back larger** in this measurement.
-  There were 2 until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
+* **It fires where your bytes are.** File re-reads are the largest class in this
+  corpus and the ledger takes **89.6%** off them. Where there is nothing safe to
+  take, a two-line `git status` or a JSON payload a later step parses, OMNI hands the
+  output back untouched rather than inventing a saving. **No call came back larger**
+  in this measurement. Two did until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
 * **Every figure above is bytes per command, which is not the same as your bill.**

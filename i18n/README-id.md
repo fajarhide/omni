@@ -120,7 +120,7 @@ bukan kalimat yang meminta Anda percaya.
 | **Tidak pernah mengarang hasil** | distiller yang tidak berhasil mem-parse sinyal apa pun mengembalikan output mentah, bukan string hijau `no errors` atau `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Kegagalan tidak pernah ditutupi** | perintah yang keluar dengan status bukan nol diteruskan apa adanya | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Data terstruktur tidak pernah disentuh** | JSON / YAML / NDJSON / CSV lewat byte demi byte | `pipeline::format` |
-| **Angkanya diukur, bukan diharapkan** | 5.984 trace nyata diputar ulang di biner rilis, dan 96,1% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
+| **Angkanya diukur, bukan diharapkan** | 5.984 trace nyata diputar ulang di biner rilis, dan setiap angka menyebut korpus serta rentang minggunya | [`Tolok ukur`](#tolok-ukur) |
 
 Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **aslinya selalu bisa Anda pulihkan, dan ia tidak akan pernah membohongi agen Anda.**
 
@@ -141,9 +141,11 @@ hari, jadi sebuah korpus lenyap seminggu setelah diukur.
   sudah **80,6%** dari total byte, sementara 148 dari 5.984 panggilan membawa 64,7%
   di antaranya. Itu minggu ketika mesin ini hanya mengerjakan dan mengukur OMNI. Harness
   yang sama pada satu minggu kerja biasa terbaca **14,9%**.
-* **96,1% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
-  itulah yang memberi tahu Anda seberapa berarti sisanya. **Tidak ada panggilan yang
-  justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
+* **Ia bekerja di tempat byte Anda berada.** Pembacaan file adalah kelas terbesar di
+  korpus ini dan ledger memangkas **89,6%** darinya. Ketika tidak ada yang aman untuk
+  diambil, `git status` dua baris atau payload JSON yang akan diurai langkah
+  berikutnya, OMNI mengembalikan keluarannya utuh alih-alih mengarang penghematan.
+  **Tidak ada panggilan yang justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
   menerbitkannya selama keduanya masih ada.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.

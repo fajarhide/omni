@@ -144,14 +144,21 @@ masukan itu tanpa diubah. Data terstruktur seperti JSON dan YAML sama sekali
 tidak disentuh. Apa pun yang dibuang meninggalkan penanda. Ketiga aturan itu
 mengalahkan kompresi, dalam urutan itu, setiap kali bertabrakan.
 
-## Versi jujur dari angka-angkanya
+## Apa yang sebenarnya dikatakan angka-angkanya
 
-Dari 6.656 perintah nyata, **97,3% panggilan tidak menghemat apa-apa**, karena
-memang tidak ada yang bisa dihemat. `git status` dua baris tidak punya basa-basi
-untuk dibuang dan tidak punya pengulangan untuk dilipat, jadi OMNI
-mengembalikannya langsung alih-alih mengarang penghematan untuk dilaporkan.
+OMNI itu selektif, dan dari situlah daya ungkitnya datang. Ia mengincar kelas yang
+mendominasi konteks sebuah agent, yaitu file yang sama dibaca berulang kali, dan
+ledger memangkas **89,6%** dari kelas itu. File yang dibaca agent Anda dua kali
+kembali **97,2%** lebih kecil pada bacaan keduanya.
 
-Angka 14,9% itu adalah sisa setelah semua nol tadi ikut dihitung. Itu rata-rata
+Ketika tidak ada yang aman untuk diambil, ia tidak mengambil apa pun. `git status`
+dua baris tidak punya basa-basi untuk dibuang dan tidak punya pengulangan untuk
+dilipat, dan payload JSON yang akan diurai langkah berikutnya sama sekali tidak
+disentuh, jadi OMNI mengembalikannya langsung alih-alih mengarang penghematan
+untuk dilaporkan.
+
+Angka gabungan **14,9%** adalah setiap pengembalian tadi ikut dihitung bersama
+kemenangannya. Itu lantai dari apa yang dikerjakan alat ini, bukan langit-langitnya. Itu rata-rata
 nyata atas campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari
 hari yang bagus.
 
