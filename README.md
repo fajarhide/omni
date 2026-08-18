@@ -242,11 +242,15 @@ adds on top:
 summarising `kubectl get pods` tables, which deleted the pod names that were the
 answer. That saving is gone and the rows are back.
 
-Head to head on that corpus, including the rows we lose. Filters alone: rtk 6.2%,
-caveman 6.8%, ours 32.6%, and **lean-ctx 49.4%**, which beats our filters by 16.8
+Head to head on that corpus, identical bytes into every arm. **OMNI with its ledger is
+the top arm at 69.6%**, ahead of headroom's dedup over our filters at 65.8%, lean-ctx
+at 49.4%, caveman at 6.8% and rtk at 6.2%. Bolting our ledger onto rtk lifts it to
+61.4% and onto caveman 61.7%, which is the clearest statement of where the work is.
+
+Our filters on their own take 32.6%, and lean-ctx beats that sub-component by 16.8
 points on a corpus built out of a few enormous repetitive payloads, exactly the shape
-a deep-and-narrow compressor is for. With our ledger we read 69.6%; the closest arm is
-headroom's dedup over our filters at 65.8%, and rtk with our ledger reaches 61.4%.
+a deep-and-narrow compressor is for. Every arm is in the table on the benchmarks page,
+that one included.
 
 Reproduce all of it:
 
