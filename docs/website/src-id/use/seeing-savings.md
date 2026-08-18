@@ -57,9 +57,12 @@ ini melaporkan pengurangan paling besar, karena menghapus jawabannya terkompresi
 dengan sangat baik. Sandingkan angka mana pun dengan `omni diff` pada perintah
 sungguhan.
 
-**Persentase rendah biasanya benar.** Sekitar 97% panggilan tidak menghemat apa
-pun karena memang tidak ada yang bisa dihemat. Muatan terstruktur, perintah yang
-gagal dan pendaftaran semuanya lewat begitu saja, memang dirancang begitu.
+**Angka gabungan yang rendah biasanya benar, dan bukan itu ukuran menilai OMNI.**
+Sebagian besar panggilan dikembalikan utuh karena mengambil sesuatu akan tidak aman
+atau tidak sepadan: muatan terstruktur, perintah yang gagal, dan pendaftaran semuanya
+lewat begitu saja, memang dirancang begitu. Baris per perintahlah tempat kerjanya
+terlihat, jadi urutkan berdasarkan apa yang benar-benar dihemat tiap kelas, bukan
+membaca rata-ratanya.
 
 ## Pemeriksaan yang tidak bisa dilakukan persentase
 

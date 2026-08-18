@@ -83,8 +83,9 @@ ini.
 
 ## Ketika sama sekali tidak ada penanda
 
-Sering. Sekitar 97% panggilan tidak menghemat apa pun dan mengembalikan
-keluarannya langsung. Itu pipeline yang bekerja, bukan gagal. Itu terjadi ketika:
+Sering, dan itu tandanya pipeline bekerja, bukan gagal. OMNI mengembalikan
+keluarannya langsung setiap kali mengambil sesuatu akan tidak aman atau tidak
+sepadan. Itu terjadi ketika:
 
 - Muatannya JSON, YAML, CSV atau TSV. Tidak pernah disentuh, memang disengaja.
 - Perintahnya gagal. Keluar dengan status bukan nol lewat apa adanya.

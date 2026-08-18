@@ -1,7 +1,7 @@
 # Di mana OMNI membantu
 
 Sebelas situasi, masing-masing dengan angka terukurnya. Dua di antaranya kasus
-ketika OMNI tidak melakukan apa-apa, dan keduanya sengaja dimuat di sini:
+ketika OMNI menyingkir, dan keduanya sengaja dimuat di sini:
 perkakas yang mengaku membantu di mana-mana adalah perkakas yang tidak bisa
 ditebak siapa pun.
 
@@ -67,10 +67,11 @@ berarti temboknya datang belakangan. Dan [ingatan antar sesi](../use/memory.md)
 selamat dari pemadatan: pengetahuan proyek, pola galat yang berulang, dan tujuan
 yang Anda pancang dengan `omni goal` ada di SQLite, bukan di jendela konteks.
 
-**Batas jujurnya.** OMNI tidak bisa mencegah pemadatan, dan pada saat pemadatan
-terjadi ia sengaja melupakan apa yang sudah ia tunjukkan, karena izin untuk
-mengganti baris dengan handle adalah bahwa agent masih memegang baris-baris itu,
-dan pemadatan adalah saat hal itu berhenti benar.
+**Di mana batasnya, dan kenapa itu disengaja.** OMNI tidak bisa mencegah pemadatan.
+Ketika pemadatan terjadi, ia sengaja melepas apa yang sudah ia tunjukkan, karena
+sebuah handle hanya jujur selama agent masih memegang baris-baris itu, dan
+pemadatan persis saat hal itu berhenti benar. Aturan itulah yang membuat setiap
+penanda tetap benar di seberang pemadatan.
 
 ## 5. Anda pindah agent, atau pindah mesin, di tengah proyek
 
@@ -84,11 +85,11 @@ handle untuk keluaran yang sudah dihasilkan sesi sebelumnya. Penanda itu berbuny
 `not shown here`, bukan `already shown`, karena agent ini memang belum
 pernah melihat byte tersebut dan kalimatnya harus benar.
 
-**Angka jujurnya.** Pengulangan lintas sesi adalah **3,7%** dari byte setelah
-penyaringan, berbanding **19,1%** di dalam satu sesi, jadi nilainya sekitar
-seperlima penghematan dalam sesi. Ia nyata, dan ia bukan judulnya.
+**Angkanya: 3,7%** byte setelah penyaringan berulang lintas sesi, berbanding
+**19,1%** di dalam satu sesi. Jadi ini bonus nyata di atas penghematan dalam sesi,
+bukan acara utamanya, dan ia datang tanpa ada yang perlu dikonfigurasi.
 
-**Peringatan jujurnya.** Dua agent dalam satu repositori berbagi riwayat itu
+**Yang belum dikunci ke agent.** Dua agent dalam satu repositori berbagi riwayat itu
 sebagai efek samping, bukan karena dirancang begitu. Penandanya dulu berbunyi
 `from an earlier session`, yang terbaca sebagai sesi *Anda* padahal itu sesi orang
 lain, dan lebih buruk lagi sebagai klaim bahwa isinya sudah sampai; sekarang ia
@@ -183,10 +184,12 @@ dua puluh lima perkakas itu tidak pernah sekali pun dipanggil.
 fakta. Tidak ada basa-basi untuk dibuang dan belum ada yang pernah dilihat, jadi
 OMNI mengembalikan seluruh 35 baris dan melaporkan penghematan 0%.
 
-**97,3% dari semua panggilan di korpus seperti ini.** Itu angka yang layak
-diresapi: OMNI bukan barang yang mengecilkan segalanya sedikit, ia barang yang
-tidak berbuat apa-apa hampir sepanjang waktu lalu berbuat banyak sesekali. Angka
-gabungan 14,9% adalah sisa setelah setiap nol tadi ikut dihitung.
+**Sebagian besar panggilan di korpus ini bentuknya begini, dan itulah bentuk
+alatnya.** OMNI bukan barang yang mengecilkan segalanya sedikit. Ia menyingkir
+sampai ada yang layak diambil, lalu mengambil banyak sekali: di korpus ini 78,0%
+dari keluaran build dan test, dan 25,0% dari pembacaan file. Angka gabungan 14,9%
+menghitung setiap kali ia menyingkir bersama kemenangan-kemenangan itu, jadi baris
+per kelas itulah yang perlu dibaca untuk beban kerja Anda sendiri.
 
 ## Totalnya jadi apa
 

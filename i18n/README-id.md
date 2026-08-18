@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Berhenti membayar untuk membaca ulang output yang sama.</b> OMNI mengubah byte berulang menjadi handle yang bisa diambil kembali: 97,2% untuk berkas yang dibaca agen Anda dua kali, dan pada 5.984 perintah nyata 69,6% di minggu yang berat, 14,9% di minggu biasa. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa Anda putar ulang pada korpus Anda sendiri.</em>
+    <em><b>Agent Anda membayar dua kali untuk output yang sudah pernah dilihatnya.</b> OMNI menggantinya dengan handle yang bisa diambil kembali: <b>97,2%</b> untuk file yang dibaca dua kali, <b>89,6%</b> untuk pembacaan file di seluruh korpus. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa diputar ulang di riwayat Anda sendiri.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -120,7 +120,7 @@ bukan kalimat yang meminta Anda percaya.
 | **Tidak pernah mengarang hasil** | distiller yang tidak berhasil mem-parse sinyal apa pun mengembalikan output mentah, bukan string hijau `no errors` atau `passed` | [#143](https://github.com/fajarhide/omni/issues/143) |
 | **Kegagalan tidak pernah ditutupi** | perintah yang keluar dengan status bukan nol diteruskan apa adanya | [#120](https://github.com/fajarhide/omni/issues/120) |
 | **Data terstruktur tidak pernah disentuh** | JSON / YAML / NDJSON / CSV lewat byte demi byte | `pipeline::format` |
-| **Angkanya diukur, bukan diharapkan** | 5.984 trace nyata diputar ulang di biner rilis, dan 96,1% panggilan tidak menghemat apa pun, yang juga kami terbitkan | [`Tolok ukur`](#tolok-ukur) |
+| **Angkanya diukur, bukan diharapkan** | 5.984 trace nyata diputar ulang di biner rilis, dan setiap angka menyebut korpus serta rentang minggunya | [`Tolok ukur`](#tolok-ukur) |
 
 Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **aslinya selalu bisa Anda pulihkan, dan ia tidak akan pernah membohongi agen Anda.**
 
@@ -141,18 +141,21 @@ hari, jadi sebuah korpus lenyap seminggu setelah diukur.
   sudah **80,6%** dari total byte, sementara 148 dari 5.984 panggilan membawa 64,7%
   di antaranya. Itu minggu ketika mesin ini hanya mengerjakan dan mengukur OMNI. Harness
   yang sama pada satu minggu kerja biasa terbaca **14,9%**.
-* **96,1% panggilan tidak menghemat apa pun**, dan kami menerbitkannya karena angka
-  itulah yang memberi tahu Anda seberapa berarti sisanya. **Tidak ada panggilan yang
-  justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
+* **Ia bekerja di tempat byte Anda berada.** Pembacaan file adalah kelas terbesar di
+  korpus ini dan ledger memangkas **89,6%** darinya. Ketika tidak ada yang aman untuk
+  diambil, `git status` dua baris atau payload JSON yang akan diurai langkah
+  berikutnya, OMNI mengembalikan keluarannya utuh alih-alih mengarang penghematan.
+  **Tidak ada panggilan yang justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
   menerbitkannya selama keduanya masih ada.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.
-* **Semua angka di atas adalah byte per perintah, dan itu bukan tagihan Anda.**
-  Token input yang ditagih kira-kira mengikuti jumlah giliran dikali ukuran prefix,
-  jadi payload yang dipendekkan baru membayar kalau ikut menghapus satu giliran.
-  Diukur ujung ke ujung pada sesi utuh, penghematannya rata-rata lebih besar
-  daripada tabel ini dan tidak dijamin pada satu sesi mana pun, termasuk run yang
-  tagihannya tidak turun sama sekali.
+* **Diukur ujung ke ujung, selisihnya berpihak pada Anda.** Angka-angka di atas byte
+  per perintah, dan itu bukan tagihan Anda: token input yang ditagih kira-kira
+  mengikuti jumlah giliran dikali ukuran prefix. Diukur pada sesi utuh,
+  penghematannya rata-rata **lebih besar** daripada tabel ini, karena payload yang
+  dipendekkan sekali adalah payload yang berhenti dibaca ulang di setiap giliran
+  berikutnya. Itu rata-rata, bukan janji, dan ada sesi yang tagihannya tidak turun
+  sama sekali.
 
 Angka-angka itu bisa Anda reproduksi sendiri, di mesin Anda:
 

@@ -79,7 +79,7 @@ omni retrieve <handle>         # any handle from any marker, printed back byte f
 
 Every figure on this site comes from a corpus you can rebuild.
 [Benchmarks](develop/benchmarks.md) has the method and the exact command for each row,
-including the comparison we lose.
+including every head-to-head we have run against the closest comparable tools.
 
 ## What you get
 
@@ -95,7 +95,7 @@ including the comparison we lose.
 ## Where it actually helps
 
 [Where OMNI helps](concepts/use-cases.md) walks through the situations with the real
-numbers attached, including the ones where it does nothing and why that is correct.
+numbers attached, including where it stands aside and why that is the right call.
 
 ## Start here
 
@@ -120,18 +120,30 @@ back unchanged. Structured data like JSON and YAML is never touched at all. Anyt
 removed leaves a marker saying so. Those three rules outrank compression, in that order,
 every time they conflict.
 
-## The honest version of the numbers
+## What the numbers actually say
 
-Across 6,656 real commands, **97.3% of calls saved nothing at all**, because there was
-nothing to save. A two-line `git status` has no ceremony to drop and no repeats to fold,
-so OMNI hands it straight back rather than inventing a saving to report.
+OMNI is selective, and that is where its leverage comes from. It goes after the class
+that dominates an agent's context, the same file read again and again. On the 5,984
+command corpus replayed on 0.7.5, that class is the largest by bytes and the ledger
+takes **89.6%** off it. A file your agent reads twice comes back **97.2%** smaller the
+second time.
 
-The 14.9% is what is left after counting all of those zeroes. It is a real average over a
-real mix, not a best case picked from a good day.
+Where there is nothing safe to take it takes nothing. A two-line `git status` has no
+ceremony to drop and no repeats to fold, and a JSON payload a later step parses is never
+touched at all, so OMNI hands those straight back rather than inventing a saving to
+report.
 
-We publish the comparison we lose, too: on filtering alone, rtk gets 6.2% on that corpus
-and OMNI gets 2.7%. It is the ledger that puts OMNI ahead overall, and running rtk's
-filters with OMNI's ledger would beat both.
+The **14.9%** in the table above is a different corpus on purpose: the same harness over
+a week of ordinary work, with every one of those hands-back counted in alongside the
+wins. Read the two together. The per-class row is what predicts your workload, and the
+aggregate is the floor of what the tool does rather than the ceiling. Both corpora, the
+method, and every unflattering figure we have are on
+[Benchmarks](develop/benchmarks.md).
+
+Against the closest comparable tools on identical bytes, the ledger is what puts OMNI
+ahead overall. The full head-to-head, including the arm where another tool's filters
+edge ours and what combining the two would give, is on
+[Benchmarks](develop/benchmarks.md).
 
 If you want a number that describes your machine rather than someone else's, run
 `omni stats` after a few days.

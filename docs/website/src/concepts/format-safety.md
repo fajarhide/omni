@@ -64,8 +64,9 @@ output is identical with and without it, OMNI was not involved.
 larger, because the marker costs more than the compression saves. Expected, not a
 defect.
 
-**A command whose output arrives intact anyway.** Around 97% of calls save nothing at
-all, because there was nothing to save. That is the pipeline working.
+**A command whose output arrives intact anyway.** Most calls are handed back untouched,
+because taking anything would be unsafe or would not pay for its own marker. That is the
+pipeline working.
 
 **`kubectl` binary streams.** SPDY corrupts those with or without OMNI in the picture.
 

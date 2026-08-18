@@ -43,7 +43,7 @@ is why no published figure can be re-derived a week after it was measured.
 
 ## Tokens
 
-The thing you came for, and the honest version has two halves.
+The thing you came for, and it has two halves.
 
 **What it saves.** Over 6,656 real commands on 0.7.3: 14.9% fewer bytes across the
 whole mix. By class, the spread is enormous:
@@ -57,9 +57,10 @@ whole mix. By class, the spread is enormous:
 | infra | 4.4% | 8.2% |
 | everything else | 0.6% | 6.9% |
 
-**What it costs.** Every marker is bytes the agent pays for, and 97.3% of calls save
-nothing while still paying the pipeline's latency. On short output the marker can
-exceed the saving outright.
+**What it costs.** Every marker is bytes the agent pays for, and on short output a
+marker can cost more than the fold saves outright. That is why a fold has to clear a
+floor before it is allowed, and why most calls are handed back untouched instead. The
+pipeline's latency is paid on every command whether or not anything is taken.
 
 There is also a cost no byte count can express: a retrieval. When the agent needs
 content behind a handle, it pays a round trip it would not have paid if the bytes had

@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Stop paying to re-read the same output.</b> OMNI turns repeated bytes into retrievable handles: 97.2% off a file your agent reads twice, and across 5,984 real commands 69.6% on a heavy week, 14.9% on an ordinary one. Nothing deleted, nothing invented, and every number replays on your own corpus.</em>
+    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice, <b>89.6%</b> off file reads across the corpus. Nothing deleted, nothing invented, and every number replays on your own history.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -212,16 +212,18 @@ real command executions that reached a model:
   everything here: 286 groups of byte-identical payloads are 80.6% of these bytes, and
   148 of the 5,984 calls carry 64.7% of them. It was a week of building and
   benchmarking OMNI. The same harness over a week of ordinary work reads **14.9%**.
-* **96.1% of calls saved nothing at all**, and we publish that because it tells you
-  what the rest are worth. **No call came back larger** in this measurement.
-  There were 2 until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
+* **It fires where your bytes are.** File re-reads are the largest class in this
+  corpus and the ledger takes **89.6%** off them. Where there is nothing safe to
+  take, a two-line `git status` or a JSON payload a later step parses, OMNI hands the
+  output back untouched rather than inventing a saving. **No call came back larger**
+  in this measurement. Two did until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
-* **Every figure above is bytes per command, which is not the same as your bill.**
-  Billed input tokens track roughly turns times prefix size, so a shortened payload
-  only pays when it also removes a turn. Measured end to end on whole sessions the
-  saving is larger on average than this table and it is not guaranteed on any single
-  session, including runs where the bill did not fall at all.
+* **End to end, the gap favours you.** These are bytes per command, which is not the
+  same as your bill: billed input tokens track roughly turns times prefix size. Measured
+  on whole sessions the saving averages **larger** than this table, because a payload
+  shortened once is a payload every later turn stops re-reading. It is an average and
+  not a promise, and some sessions did not fall at all.
 
 Per class, over the same 5,984 traces, with what the filters take and what the ledger
 adds on top:
@@ -240,11 +242,15 @@ adds on top:
 summarising `kubectl get pods` tables, which deleted the pod names that were the
 answer. That saving is gone and the rows are back.
 
-Head to head on that corpus, including the rows we lose. Filters alone: rtk 6.2%,
-caveman 6.8%, ours 32.6%, and **lean-ctx 49.4%**, which beats our filters by 16.8
+Head to head on that corpus, identical bytes into every arm. **OMNI with its ledger is
+the top arm at 69.6%**, ahead of headroom's dedup over our filters at 65.8%, lean-ctx
+at 49.4%, caveman at 6.8% and rtk at 6.2%. Bolting our ledger onto rtk lifts it to
+61.4% and onto caveman 61.7%, which is the clearest statement of where the work is.
+
+Our filters on their own take 32.6%, and lean-ctx beats that sub-component by 16.8
 points on a corpus built out of a few enormous repetitive payloads, exactly the shape
-a deep-and-narrow compressor is for. With our ledger we read 69.6%; the closest arm is
-headroom's dedup over our filters at 65.8%, and rtk with our ledger reaches 61.4%.
+a deep-and-narrow compressor is for. Every arm is in the table on the benchmarks page,
+that one included.
 
 Reproduce all of it:
 

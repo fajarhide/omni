@@ -1,8 +1,9 @@
 # Where OMNI helps
 
 Eleven situations, with the measured number attached to each. Two of them are cases
-where OMNI does nothing, and those are in here on purpose: a tool that claims to help
-everywhere is a tool nobody can predict.
+where OMNI stands aside, and those are in here on purpose: a tool that claims to help
+everywhere is a tool nobody can predict, and knowing where it declines is what makes
+the rest worth trusting.
 
 Every figure comes from the same replay of 6,656 real commands described in
 [Benchmarks](../develop/benchmarks.md), so they are averages over a real mix rather
@@ -61,10 +62,10 @@ later. And [memory across sessions](../use/memory.md) survives the compaction: p
 knowledge, recurring error patterns, and the goal you pinned with `omni goal` are in
 SQLite, not in the context window.
 
-**The honest limit.** OMNI cannot stop a compaction, and at the moment one happens it
-deliberately forgets what it had shown you, because the licence to replace lines with a
-handle is that the agent is still holding those lines, and compaction is when that stops
-being true.
+**Where the limit is, and why it is deliberate.** OMNI cannot stop a compaction. When
+one happens it drops what it had shown you on purpose, because a handle is only honest
+while the agent is still holding those lines, and compaction is exactly when that stops
+being true. That rule is what keeps every marker true on the other side of one.
 
 ## 5. You switch agents, or machines, mid-project
 
@@ -77,11 +78,11 @@ ledger's project scope will hand it a handle for output an earlier session alrea
 produced. That marker says `not shown here` rather than `already shown`,
 because this agent has genuinely never seen those bytes and the wording has to be true.
 
-**The honest number.** Cross-session repetition is **3.7%** of post-filter bytes against
-**19.1%** within a session, so this is worth about a fifth of the in-session saving.
-It is real, and it is not the headline.
+**The number: 3.7%** of post-filter bytes repeat across sessions, against **19.1%**
+within one. So this is a real bonus on top of the in-session saving rather than the main
+event, and it arrives without anyone configuring anything.
 
-**The honest caveat.** Two agents in one repository share that history by side effect
+**What is not keyed on the agent yet.** Two agents in one repository share that history by side effect
 rather than by design. The marker used to say `from an earlier session`, which reads as
 *your* earlier session when it was someone else's, and worse, as a claim the content had
 already arrived; it now says `not shown here`. [The ledger](the-ledger.md#what-two-agents-in-one-repo-share) is
@@ -171,10 +172,11 @@ the twenty-five had never been called once.
 ceremony to drop and nothing has been seen before, so OMNI hands back all 35 rows and
 reports a 0% saving.
 
-**97.3% of all calls in the corpus are like this.** That is the number worth
-internalising: OMNI is not a thing that shrinks everything a little, it is a thing that
-does nothing most of the time and a great deal occasionally. The 14.9% aggregate is
-what is left after every one of those zeroes is counted in.
+**Most calls in this corpus look like this, and that is the shape of the tool.** OMNI is
+not a thing that shrinks everything a little. It stands aside until there is something
+worth taking, then takes a great deal: on this corpus, 78.0% off build and test output
+and 25.0% off file reads. The 14.9% aggregate counts every stand-aside in alongside
+those wins, which is why the per-class row is the one to read for your own workload.
 
 ## What this adds up to
 

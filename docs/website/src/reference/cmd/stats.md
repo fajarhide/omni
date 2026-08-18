@@ -45,8 +45,9 @@ querying `~/.omni/omni.db` directly has to filter by `agent_id` themselves.
 highest reductions, because deleting the answer compresses very well. Pair any figure
 with `omni diff` on a real command.
 
-**A low number is usually right.** Around 97% of calls save nothing because there was
-nothing to save.
+**A low aggregate is usually right, and it is not the number to judge OMNI by.** Most
+calls are handed back untouched by design, so read the per-class rows to see where the
+work actually happened.
 
 **`--share` and `--card` cannot drift from the report.** Both read the same
 aggregation as `omni stats` itself, which was a deliberate choice after an earlier
