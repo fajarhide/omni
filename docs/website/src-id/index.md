@@ -161,9 +161,10 @@ untuk dilaporkan.
 
 Angka **14,9%** di tabel atas sengaja dari korpus yang berbeda: harness yang sama
 pada satu minggu kerja biasa, dengan setiap pengembalian tadi ikut dihitung bersama
-kemenangannya. Baca keduanya berpasangan. Baris per kelas itulah yang memprediksi
-beban kerja Anda, sementara angka gabungan adalah lantainya, bukan
-langit-langitnya. Itu rata-rata
+kemenangannya. Itu rata-rata atas campuran tersebut, bukan janji untuk campuran Anda.
+Baris per kelas itulah yang memprediksi beban kerja Anda sendiri, dan rentangnya dari
+**4,3%** pada pencarian sampai **89,6%** pada pembacaan ulang file, jadi cari kelas
+yang benar-benar Anda jalankan. Itu rata-rata
 nyata atas campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari
 hari yang bagus.
 
