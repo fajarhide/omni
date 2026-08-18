@@ -134,15 +134,29 @@ fn distill_unknown_file(content: &str) -> String {
 /// no way to tell the bodies had ever existed: a 24,999 B Python file came back
 /// as 3,275 B of repeated signatures, 86.9% reported as a win, with the business
 /// rule it was read for deleted and unmentioned.
+/// It names no recovery route, and that is the fix rather than an omission
+/// (#598). It used to end `Re-read with offset/limit for the full file.`, which
+/// does not work and cannot: a re-read is a fresh `Read` of the same file, so it
+/// reaches this same distiller and returns this same skeleton. Following the
+/// instruction verbatim on a 303 line file returned the identical summary a
+/// second time, and a third identical request folded to one ledger marker with
+/// no content at all.
+///
+/// The reply already carries the route that does work, one line below this one:
+/// the `omni retrieve <handle>` marker, whose handle every probe resolved. The
+/// note counts what was dropped and stops there, because the handle is minted
+/// after this function runs and this string cannot name it.
+///
+/// Its number counts **file** lines the skeleton does not render. The marker
+/// below counts **reply** lines cut from what was about to be sent, so the two
+/// legitimately differ on the same read, and `of {total_lines}` is here to say
+/// which denominator this one uses.
 fn omitted_note(total_lines: usize, kept_lines: usize) -> String {
     let omitted = total_lines.saturating_sub(kept_lines);
     if omitted == 0 {
         return String::new();
     }
-    format!(
-        "\n\n... [{omitted} of {total_lines} lines omitted, bodies and comments not shown. \
-         Re-read with offset/limit for the full file.] ..."
-    )
+    format!("\n\n... [{omitted} of {total_lines} file lines not rendered here: bodies and comments] ...")
 }
 
 /// The scan behind every `--- … ---` section runs over the **whole** file, not
