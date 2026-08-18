@@ -856,7 +856,23 @@ mod tests {
             "a sub-1 KB repeat must stay verbatim rather than become a bare handle"
         );
 
-        let extended = format!("{text}\nsomething this session has never seen before\n");
+        // Four new lines, not one. #601 widened the floor to cover a fold that
+        // takes four fifths or more of its payload, on the evidence that three
+        // surviving lines out of twenty-six were not content anyone could use.
+        // One appended line put this fixture on the wrong side of that, so the
+        // arm below was asserting the floor rather than the absence of it, which
+        // is the failure this test's own prose warns about.
+        let extended = format!(
+            "{text}\n{}",
+            (0..4)
+                .map(|i| format!("something this session has never seen before, {i}\n"))
+                .collect::<String>()
+        );
+        assert!(
+            text.len() * 5 < extended.len() * 4,
+            "the repeated head must be under four fifths of the payload, or this \
+             arm tests the #601 floor instead of a partial fold"
+        );
         let partial = ledger
             .project(&extended)
             .expect("the repeated head still folds beside content the agent can use");
@@ -1170,7 +1186,21 @@ mod tests {
         // either bar is consulted, and the test stops being about the two bars.
         // It also makes the bars above exact: a run marker is what gets rendered
         // here, where a whole-output fold would have rendered the longer wording.
-        let probe = format!("{text}a line neither history has ever seen\n");
+        // Four of them since #601, for the same reason as in the #543 test: one
+        // appended line leaves the fold at nine tenths of the payload, which the
+        // widened floor now refuses, and the two bars this test exists for would
+        // never be reached.
+        let probe = format!(
+            "{text}{}",
+            (0..4)
+                .map(|i| format!("a line neither history has ever seen, {i}\n"))
+                .collect::<String>()
+        );
+        assert!(
+            text.len() * 5 < probe.len() * 4,
+            "the repeat must be under four fifths of the probe, or the #601 floor \
+             decides this before either bar is consulted"
+        );
 
         // Same session: over the session floor, so it projects.
         assert!(Ledger::new(&store, "s1").project(&probe).is_some());

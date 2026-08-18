@@ -571,7 +571,7 @@ mod tests {
             let out = distill_readfile(&content, path)
                 .unwrap_or_else(|| panic!("{path} should distill at this size"));
             assert!(
-                out.contains("lines omitted"),
+                out.contains("file lines not rendered here"),
                 "{path} dropped lines without saying so:\n{out}"
             );
         }
@@ -587,7 +587,7 @@ mod tests {
         let out = distill_readfile(&content, "a.py").unwrap();
 
         assert!(
-            out.contains(&format!("of {total} lines omitted")),
+            out.contains(&format!("of {total} file lines not rendered here")),
             "expected a count against {total} total, got:\n{out}"
         );
     }
@@ -668,7 +668,7 @@ mod tests {
 
         assert!(out.contains("Log: 1 errors"), "{out}");
         assert!(
-            out.contains("lines omitted"),
+            out.contains("file lines not rendered here"),
             "the lines it did not show still have to be counted:\n{out}"
         );
     }
@@ -684,7 +684,7 @@ mod tests {
         let out = distill_readfile(&content, "deployment.yaml").expect("large enough to distill");
 
         assert!(
-            out.contains("lines omitted"),
+            out.contains("file lines not rendered here"),
             "a key skeleton that drops values must say so:\n{out}"
         );
     }
