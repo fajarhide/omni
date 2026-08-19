@@ -95,11 +95,113 @@ fn distill_status(input: &str) -> String {
     out
 }
 
-fn distill_diff(segments: &[OutputSegment], _input: &str) -> String {
+/// The old and new line counts a hunk header declares, from `@@ -a,b +c,d @@`.
+/// A missing count means one line, which is how git writes a single-line hunk.
+fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
+    let body = line.strip_prefix("@@ ")?;
+    let (ranges, _) = body.split_once(" @@")?;
+    let (old, new) = ranges.split_once(' ')?;
+    let count = |r: &str| -> Option<usize> {
+        match r.get(1..)?.split_once(',') {
+            Some((_, n)) => n.parse().ok(),
+            None => Some(1),
+        }
+    };
+    Some((count(old)?, count(new)?))
+}
+
+/// Walks a payload line by line and says which lines are hunk body.
+///
+/// Position is what separates diff payload from the prose around it, not the
+/// leading character, and the hunk header is the only thing that says where the
+/// body ends. Two review findings on #618 are the same mistake at different
+/// distances: `git show --format=%B -p` prints the commit body unindented, so a
+/// bullet opening with `-` read as a removal; and running to the next
+/// `diff --git` instead let a *later* commit's message in `git log -p` be read as
+/// patch content, which is what the declared counts fix.
+///
+/// Deciding by position also settles a case the obvious prefix test gets wrong in
+/// the other direction: a removed line whose own text starts with `--` renders as
+/// `--- …`, so excluding `---` would drop a real removal.
+#[derive(Default)]
+struct HunkWalk {
+    old_left: usize,
+    new_left: usize,
+}
+
+impl HunkWalk {
+    /// Feeds one line, returning whether it is inside a hunk body. A header is
+    /// not body, so it returns false for one.
+    fn step(&mut self, line: &str) -> bool {
+        if let Some((old, new)) = parse_hunk_header(line) {
+            self.old_left = old;
+            self.new_left = new;
+            return false;
+        }
+        if self.old_left == 0 && self.new_left == 0 {
+            return false;
+        }
+        match line.as_bytes().first() {
+            Some(b'+') => {
+                self.new_left = self.new_left.saturating_sub(1);
+                true
+            }
+            Some(b'-') => {
+                self.old_left = self.old_left.saturating_sub(1);
+                true
+            }
+            // `\ No newline at end of file` annotates the line above it and is
+            // not itself a line of either side, so it spends no budget.
+            Some(b'\\') => true,
+            // A context line, and an empty one counts too: git writes it as a
+            // lone space, which anything that strips trailing whitespace turns
+            // into "". Treating that as the end of the hunk would undercount the
+            // rest of it, which is the failure this whole function exists to stop.
+            Some(b' ') | None => {
+                self.old_left = self.old_left.saturating_sub(1);
+                self.new_left = self.new_left.saturating_sub(1);
+                true
+            }
+            _ => {
+                self.old_left = 0;
+                self.new_left = 0;
+                false
+            }
+        }
+    }
+}
+
+/// The diffstat, counted the way `git show --numstat` counts it.
+fn count_hunk_lines(input: &str) -> (usize, usize) {
+    let mut walk = HunkWalk::default();
+    let (mut added, mut removed) = (0, 0);
+    for line in input.lines() {
+        if walk.step(line) {
+            match line.as_bytes().first() {
+                Some(b'+') => added += 1,
+                Some(b'-') => removed += 1,
+                _ => {}
+            }
+        }
+    }
+    (added, removed)
+}
+
+/// Whether a segment carries a hunk, which is what makes it diff rather than the
+/// prose around one.
+fn holds_a_hunk(content: &str) -> bool {
+    content.lines().any(|l| l.starts_with("@@ "))
+}
+
+fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
     let mut out = String::new();
-    let mut added = 0;
-    let mut removed = 0;
     let mut files = std::collections::HashSet::new();
+
+    // Counted over the payload, never over what survived the filter below. The
+    // summary labels the diff it replaces, so a line the scorer dropped is still
+    // a line the diff changed, and reporting the surviving count as the diffstat
+    // is a measurement the output cannot support (#616).
+    let (added, removed) = count_hunk_lines(input);
 
     for seg in segments {
         if seg.content.starts_with("diff --git") {
@@ -115,32 +217,38 @@ fn distill_diff(segments: &[OutputSegment], _input: &str) -> String {
             continue;
         }
 
-        if seg.tier == SignalTier::Noise {
+        // A hunk is never noise. `is_blank_or_decorative` tiers a block whose
+        // lines hold only `-`, `=`, `*` or `_` as Noise, which is exactly what a
+        // diff removing a rule of `=====` looks like once each line carries its
+        // `-` marker. Skipping the segment dropped the hunk from the output and
+        // from the counts below, so a 1+/5- diff came out as
+        // `git diff: 1 files changed, 0+, 0-` with no hunk at all (#616). The
+        // per-line filter further down already decides what a segment
+        // contributes; the tier only gets to drop a segment carrying no diff.
+        if seg.tier == SignalTier::Noise && !holds_a_hunk(&seg.content) {
             continue;
         }
 
         let mut hunk_out = String::new();
-        // Since all hunks contain "@@ -", their tier is Important (0.7).
-        // To achieve >60% reduction, we only keep context lines if specifically boosted by session context (context_score > 0).
+        // Context lines are kept only when session context boosted the segment,
+        // which is what buys the >60% reduction. The old note here claimed a hunk
+        // is always Important because it contains "@@ -"; the tier is assigned by
+        // `classify_block` over the whole block and a decorative one comes back
+        // Noise, which is the assumption #616 was built on.
         let keep_context = seg.context_score > 0.0 || seg.tier == SignalTier::Critical;
 
+        // The same walk the counts use, so what is shown and what is counted
+        // cannot disagree.
+        let mut walk = HunkWalk::default();
         for line in seg.content.lines() {
-            if line.starts_with("@@ ") {
-                hunk_out.push_str(line);
-                hunk_out.push('\n');
-            } else if line.starts_with('+') && !line.starts_with("+++") {
-                added += 1;
-                hunk_out.push_str(line);
-                hunk_out.push('\n');
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                removed += 1;
-                hunk_out.push_str(line);
-                hunk_out.push('\n');
-            } else if keep_context
-                && !line.starts_with("+++")
-                && !line.starts_with("---")
-                && !line.starts_with("index")
-            {
+            let in_body = walk.step(line);
+            let keep = line.starts_with("@@ ")
+                || (in_body && (line.starts_with('+') || line.starts_with('-')))
+                || (keep_context
+                    && !line.starts_with("+++")
+                    && !line.starts_with("---")
+                    && !line.starts_with("index"));
+            if keep {
                 hunk_out.push_str(line);
                 hunk_out.push('\n');
             }
@@ -363,5 +471,150 @@ Date:   Mon Mar 20 10:00:00 2026 +0700
             !out.contains("this body line must not survive"),
             "body leaked as subject: {out:?}"
         );
+    }
+
+    /// #616. The summary is a claim about the diff, so it has to be measured
+    /// from the diff. It used to count the `+`/`-` lines that survived the
+    /// filter, and a hunk whose removed lines hold only rule characters is
+    /// tiered `Noise` by `is_blank_or_decorative` and was skipped before either
+    /// the emit or the count. A 1+/5- diff came back as
+    /// `git diff: 1 files changed, 0+, 0-` with no hunk under it, which reads as
+    /// a commit that changed nothing.
+    ///
+    /// Scored through the real scorer on purpose: with a hand-built `Important`
+    /// segment the tier that causes this never occurs and the test passes either
+    /// way.
+    #[test]
+    fn diffstat_counts_the_diff_and_a_decorative_hunk_survives() {
+        let input = "\
+diff --git a/docs/banner.txt b/docs/banner.txt
+index 1111111..2222222 100644
+--- a/docs/banner.txt
++++ b/docs/banner.txt
+@@ -1,7 +1,2 @@
+ title
+-=====
+-=====
+-=====
+-=====
+-=====
++short
+";
+        let cmd = "git show abc1234 -- docs/banner.txt";
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let segments =
+            crate::pipeline::scorer::score_segments(input, profile.segmentation, None, cmd);
+        assert!(
+            segments.iter().any(|s| s.tier == SignalTier::Noise),
+            "fixture no longer produces the Noise tier this guards: {:?}",
+            segments.iter().map(|s| &s.tier).collect::<Vec<_>>()
+        );
+
+        let out = distill_diff(&segments, input);
+
+        assert!(
+            out.contains("1 files changed, 1+, 5-"),
+            "diffstat does not match the payload: {out:?}"
+        );
+        assert_eq!(
+            out.lines().filter(|l| *l == "-=====").count(),
+            5,
+            "the removed hunk did not survive: {out:?}"
+        );
+    }
+
+    /// Review of #618. Position decides whether a line is diff payload, not its
+    /// leading character. `git show --format=%B -p` prints the commit body
+    /// unindented, so a body line opening with `-` reads as a removal; counting
+    /// those turned a 60+/60- diff into `61+, 62-`.
+    ///
+    /// The hunk here also removes a line whose own text starts with `--`, which
+    /// git renders as `--- comment`. Excluding it by prefix, the obvious way to
+    /// keep the file headers out, would drop a real removal instead.
+    #[test]
+    fn diffstat_counts_hunk_lines_and_not_the_prose_around_them() {
+        let input = "\
+fix: rewrite the table
+
+- dropped the legacy branch
+- dropped the second legacy branch
++ added nothing, this is prose
+
+diff --git a/src/table.rs b/src/table.rs
+index 1111111..2222222 100644
+--- a/src/table.rs
++++ b/src/table.rs
+@@ -1,3 +1,2 @@
+ use std::fmt;
+--- comment
+-let x = 1;
++let x = 2;
+";
+        let cmd = "git show --format=%B -p abc1234 -- src/table.rs";
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let segments =
+            crate::pipeline::scorer::score_segments(input, profile.segmentation, None, cmd);
+        let out = distill_diff(&segments, input);
+
+        assert!(
+            out.contains("1 files changed, 1+, 2-"),
+            "prose leaked into the diffstat: {out:?}"
+        );
+        assert!(
+            out.contains("--- comment"),
+            "a removal whose text starts with `--` was dropped from the output \
+             while the summary counted it: {out:?}"
+        );
+    }
+
+    /// Second review pass on #618. A hunk ends where its own header says it does,
+    /// not at the next `diff --git`. `git log --format=%B -p` puts the next
+    /// commit's message straight after the previous commit's last hunk, so
+    /// running to the next file header read that message as patch content: two
+    /// 1+/1- commits came out as `2+, 3-` because of three prose bullets.
+    #[test]
+    fn a_later_commit_message_is_not_counted_as_patch() {
+        let input = "\
+chore: plain message, no bullets
+
+diff --git a/big.txt b/big.txt
+index 1111111..2222222 100644
+--- a/big.txt
++++ b/big.txt
+@@ -1 +1 @@
+-one
++two
+fix: rewrite the table
+
+- dropped the legacy branch
+- dropped the second legacy branch
++ added nothing, this is prose
+
+diff --git a/big.txt b/big.txt
+index 3333333..1111111 100644
+--- a/big.txt
++++ b/big.txt
+@@ -1 +1 @@
+-zero
++one
+";
+        let cmd = "git log --format=%B -p -2 -- big.txt";
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let segments =
+            crate::pipeline::scorer::score_segments(input, profile.segmentation, None, cmd);
+        let out = distill_diff(&segments, input);
+
+        assert!(
+            out.contains("2+, 2-"),
+            "a later commit's message was counted as patch content: {out:?}"
+        );
+    }
+
+    #[test]
+    fn hunk_header_counts_default_to_one_line() {
+        assert_eq!(parse_hunk_header("@@ -1,3 +1,2 @@"), Some((3, 2)));
+        assert_eq!(parse_hunk_header("@@ -1 +1 @@"), Some((1, 1)));
+        assert_eq!(parse_hunk_header("@@ -27,6 +27,7 @@ image:"), Some((6, 7)));
+        assert_eq!(parse_hunk_header("-not a header"), None);
     }
 }
