@@ -1480,11 +1480,36 @@ impl OmniServer {
     /// `policy::FULL`. That default is deliberate: the cost of a tool is paid
     /// by every user on every request, and the benefit is paid by whoever calls
     /// it (#577).
+    /// Drop the two schema keys that cost bytes and tell a caller nothing.
+    ///
+    /// `schemars` stamps every parameter struct with `$schema`, a 56 byte URL
+    /// naming the JSON Schema draft, and `title`, which is the Rust struct name
+    /// (`OmniRunParams`). Neither changes how a tool is called, and both sit in
+    /// the prefix of every request for the life of a session, which is the unit
+    /// #609 measured the surface in. Over the nine advertised tools: 2,972 B to
+    /// 2,286 B, 23.1%, with no tool removed and no description shortened.
+    ///
+    /// `title` also leaked an internal type name onto the wire, which is not
+    /// something a caller should be reading.
+    fn strip_schema_boilerplate(
+        router: &mut rmcp::handler::server::router::tool::ToolRouter<Self>,
+    ) {
+        for route in router.map.values_mut() {
+            let mut schema = (*route.attr.input_schema).clone();
+            let dropped_url = schema.remove("$schema").is_some();
+            let dropped_title = schema.remove("title").is_some();
+            if dropped_url || dropped_title {
+                route.attr.input_schema = std::sync::Arc::new(schema);
+            }
+        }
+    }
+
     fn router_from(
         agent_id: &str,
         keep_everything: bool,
     ) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
         let mut router = Self::tool_router();
+        Self::strip_schema_boilerplate(&mut router);
         if keep_everything {
             return router;
         }
@@ -1773,6 +1798,11 @@ mod tests {
     /// The gate from the design: the advertised surface on a Full-tier host is
     /// under 3,000 bytes. It was 7,912 before this, and the 4,940 that came off
     /// is the half that had never been called.
+    ///
+    /// Ratcheted to 2,500 for #609, which took another 686 B off by dropping the
+    /// `$schema` and `title` keys `schemars` stamps on every parameter struct.
+    /// The old 3,000 gate stayed green through that whole regression, which is
+    /// what a bound set far above the measurement buys you.
     #[test]
     fn the_advertised_surface_is_smaller_than_it_was() {
         let router = OmniServer::router_from("claude_code", false);
@@ -1789,8 +1819,8 @@ mod tests {
             listed.len()
         );
         assert!(
-            bytes < 3_000,
-            "advertised surface is {bytes} B, gate is 3000"
+            bytes <= 2_500,
+            "advertised surface is {bytes} B, gate is 2500 (it measured 2,286 on #609)"
         );
     }
 
@@ -1808,6 +1838,31 @@ mod tests {
             names.iter().any(|n| n == "omni_run"),
             "advertised: {names:?}"
         );
+    }
+
+    /// #609. The surface sits in the prefix of every request for the life of a
+    /// session, so bytes that tell a caller nothing are paid over and over.
+    /// `schemars` stamps each parameter struct with `$schema`, a URL naming the
+    /// draft, and `title`, the Rust struct name. Neither affects how a tool is
+    /// called; together they were 686 B of 2,972 B.
+    ///
+    /// Asserted on `router_from` rather than `tool_router`, because the raw
+    /// router is the source the strip runs on and still carries both keys.
+    /// Checked on both arms: the override restores every *tool*, not the
+    /// boilerplate.
+    #[test]
+    fn the_advertised_schemas_carry_no_boilerplate() {
+        for keep_everything in [false, true] {
+            for tool in OmniServer::router_from("claude_code", keep_everything).list_all() {
+                for key in ["$schema", "title"] {
+                    assert!(
+                        !tool.input_schema.contains_key(key),
+                        "{} still advertises {key} (keep_everything={keep_everything})",
+                        tool.name
+                    );
+                }
+            }
+        }
     }
 
     /// The escape hatch, because a cut nobody can undo is a cut that gets
