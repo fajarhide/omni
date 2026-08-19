@@ -83,6 +83,14 @@ ok "cargo clippy: no warnings"
 
 # 8. Smoke test
 if [ -x tests/smoke_test.sh ]; then
+    # Build what we are about to validate. Without this the gate tests whichever
+    # binary happens to sit in target/release, which on 0.7.6 was two days old and
+    # failed 2 of 46 checks that `make binary-check` had just passed against a
+    # freshly built target/ci/omni. A gate that can go green on a stale build is
+    # not a gate, and smoke_test.sh silently falls back to target/debug/omni when
+    # the release path is missing (#597).
+    echo "   Building release binary..."
+    cargo build --release > /tmp/omni-build 2>&1 || { cat /tmp/omni-build && fail "release build failed"; }
     echo "   Running smoke tests..."
     bash tests/smoke_test.sh ./target/release/omni > /tmp/omni-smoke 2>&1 || { cat /tmp/omni-smoke && fail "smoke test failed"; }
     ok "Smoke test: all pass"
