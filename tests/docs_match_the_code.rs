@@ -311,6 +311,11 @@ fn every_marker_the_ledger_can_print_is_documented() {
                 pattern.push_str(match m.as_str() {
                     "{lines}" => r"\d+",
                     "{handle}" => "[0-9a-f]+",
+                    // Empty on most folds by design: the source is named only
+                    // when it differs from the command being answered (#622), so
+                    // requiring it in every documented example would document the
+                    // exception as the rule. `markers.md` shows both shapes.
+                    "{from}" => ".*",
                     _ => ".+",
                 });
                 last = m.end();

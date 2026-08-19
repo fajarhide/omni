@@ -47,6 +47,23 @@ baris di tempat run ulang akan mencetak ratusan baris yang sama. Apa pun yang
 kurang dari seluruh jawaban memakai kalimat di atasnya.
 
 ```
+[OMNI: 40 lines already shown from charlie.tf, omni retrieve 0000000000000000]
+```
+
+Keempatnya bisa membawa `from <sumber>`, yang menyebut perintah yang keluarannya
+pertama kali menampilkan baris-baris itu. Ia hanya muncul kalau perintah tersebut
+**bukan** perintah yang baru saja Anda jalankan, yaitu kasus yang tidak bisa Anda
+pastikan dari penandanya sendiri: membaca satu berkas lalu sebuah blok dilipat
+karena berkas lain sudah menampilkannya lebih dulu. Tanpa klausa itu, membandingkan
+dua berkas untuk memeriksa apakah blok bersamanya sama dijawab dengan menghapus
+buktinya.
+
+Membaca ulang berkas yang sama tidak membawa klausa apa pun, dan itu disengaja,
+bukan kelalaian. Panjang penanda menentukan apa yang layak dilipat sama sekali,
+jadi mencantumkan sumber di setiap penanda akan memotong penghematan pada kasus
+yang umum demi menamai kasus yang jarang.
+
+```
 [N similar lines collapsed]
 ```
 
