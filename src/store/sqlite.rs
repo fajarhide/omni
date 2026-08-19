@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use anyhow::{Context, Result};
 use r2d2::Pool;
@@ -2495,7 +2494,7 @@ impl SqliteBackend {
                was_resolved = 0,
                resolution_hint = '',
                tool_family = CASE WHEN tool_family = '' THEN ?3 ELSE tool_family END",
-            params![hash, &pattern_text[..pattern_text.len().min(500)], tool_family, now],
+            params![hash, crate::util::text::safe_slice(pattern_text, 500), tool_family, now],
         );
     }
 
@@ -2511,7 +2510,7 @@ impl SqliteBackend {
             "UPDATE pattern_memory SET was_resolved = 1, resolution_hint = ?1
              WHERE tool_family = ?2 AND was_resolved = 0 AND last_seen > ?3",
             params![
-                &resolution_hint[..resolution_hint.len().min(500)],
+                crate::util::text::safe_slice(resolution_hint, 500),
                 tool_family,
                 now - 3600
             ],

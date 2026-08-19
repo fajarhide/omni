@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -189,7 +188,7 @@ impl Transcript {
             .find(|e| matches!(e.kind, EntryKind::PipeInput | EntryKind::UserInput))
             .map(|e| {
                 if e.payload.len() > 60 {
-                    format!("{}...", &e.payload[..57])
+                    format!("{}...", crate::util::text::safe_slice(&e.payload, 57))
                 } else {
                     e.payload.clone()
                 }
@@ -205,7 +204,7 @@ impl Transcript {
 
         format!(
             "Session {} ({}, {} pending): last input: {}",
-            &self.session_id[..self.session_id.len().min(12)],
+            crate::util::text::safe_slice(&self.session_id, 12),
             age_str,
             pending,
             last_input,
@@ -367,7 +366,7 @@ fn truncate_payload(payload: &str, max_bytes: usize) -> String {
     } else {
         format!(
             "{}... [truncated, {} total bytes]",
-            &payload[..max_bytes],
+            crate::util::text::safe_slice(payload, max_bytes),
             payload.len()
         )
     }

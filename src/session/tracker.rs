@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use crate::pipeline::{DistillResult, SessionState};
 use crate::store::sqlite::Store;
@@ -330,13 +329,19 @@ pub fn infer_task(session: &SessionState) -> Option<String> {
 
     task.map(|t| {
         if t.len() > 50 {
-            t[..47].to_string() + "..."
+            crate::util::text::safe_slice(&t, 47).to_string() + "..."
         } else {
             t
         }
     })
 }
 
+// Three slices here, each proven to sit on a char boundary rather than assumed
+// to: `rfind` returns one by definition, and the prefix loop below skips every
+// index that is not one, which is also what `prefix_len` inherits. A blanket
+// file-level allow used to cover these and hid the one that was genuinely wrong
+// (#619), so the exemption is per-function and says why.
+#[allow(clippy::string_slice)]
 pub fn infer_domain(session: &SessionState) -> Option<String> {
     let paths: Vec<String> = session.hot_files.keys().cloned().collect();
     if paths.is_empty() {
@@ -357,6 +362,15 @@ pub fn infer_domain(session: &SessionState) -> Option<String> {
 
         let first = dirs[0].as_str();
         for r in 0..=min_len {
+            // `r` walks bytes, so most values of it land inside a multi-byte
+            // character and slicing there panics. Any path with an accent or a
+            // CJK segment took the process down here, and two such paths are
+            // enough to reach this loop (#619). Skipping the non-boundaries also
+            // leaves `prefix_len` on one, which is what makes the slice below
+            // safe.
+            if !first.is_char_boundary(r) {
+                continue;
+            }
             let prefix = &first[..r];
             if dirs.iter().all(|p| p.starts_with(prefix)) {
                 prefix_len = r;
@@ -528,6 +542,24 @@ mod tests {
         // prefix -> "src/auth/"
         // split -> ["src", "auth"] -> last is "auth"
         assert_eq!(domain.unwrap(), "auth");
+    }
+
+    /// #619. The common-prefix loop walked byte indices and sliced at each one,
+    /// so any path with a multi-byte character in it panicked here. Two hot files
+    /// under a directory are all it takes to reach the loop, and an accented or
+    /// CJK directory name is ordinary rather than adversarial.
+    #[test]
+    fn infers_domain_from_paths_with_multi_byte_characters() {
+        let mut state = SessionState::new();
+        state.add_hot_file("src/café/handler.rs");
+        state.add_hot_file("src/café/router.rs");
+
+        // Panicked before the boundary skip; the assertion is that it returns.
+        let domain = infer_domain(&state);
+        assert!(
+            domain.is_some_and(|d| !d.is_empty()),
+            "a multi-byte path should still infer a domain"
+        );
     }
 
     #[test]
