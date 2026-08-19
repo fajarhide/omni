@@ -19,7 +19,7 @@ impl CheckerContext {
     pub fn get_verification_payload(&self, limit: usize) -> String {
         let distillations = self
             .store
-            .get_recent_distillations(&self.maker_session, limit);
+            .get_recent_distillations(Some(&self.maker_session), limit);
         if distillations.is_empty() {
             return format!(
                 "No activity found for maker session: {}.",

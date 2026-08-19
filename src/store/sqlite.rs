@@ -1419,14 +1419,28 @@ impl SqliteBackend {
     }
 
     /// Get recent distillation rows for omni_history MCP tool
-    pub fn get_recent_distillations(&self, session_id: &str, limit: usize) -> Vec<DistillationRow> {
+    /// Recent distillations, optionally narrowed to one session.
+    ///
+    /// `None` is the honest answer from the MCP server. `SessionState::new` mints
+    /// `{millis}-{pid}-{counter}` every time it is constructed, while the hook
+    /// path keys its rows on the **host** session id: 11,281 rows on this machine
+    /// carry a host UUID against 892 minted ones. The server filtering on its own
+    /// id therefore matched nothing in a Claude Code session, which is most of
+    /// what `omni_explain_savings` was reporting when it said "No recent
+    /// distillations" (#602). The server cannot see the host id, so it asks by
+    /// recency and says so, rather than filtering on a value known to be wrong.
+    pub fn get_recent_distillations(
+        &self,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Vec<DistillationRow> {
         let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
         let mut stmt = match conn.prepare(
             "SELECT command, input_bytes, output_bytes, route, filter_name
-             FROM distillations WHERE session_id = ?1
+             FROM distillations WHERE (?1 IS NULL OR session_id = ?1)
              ORDER BY ts DESC LIMIT ?2",
         ) {
             Ok(s) => s,
@@ -1461,14 +1475,18 @@ impl SqliteBackend {
     /// A first draft of this queried `scope` against the session id and returned
     /// nothing in production while its test passed, because the test wrote rows
     /// by hand instead of through `Ledger::project`. Caught in review of #625.
-    pub fn get_recent_ledger_folds(&self, session_id: &str, limit: usize) -> Vec<LedgerFoldRow> {
+    pub fn get_recent_ledger_folds(
+        &self,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Vec<LedgerFoldRow> {
         let Ok(conn) = self.pool.get() else {
             return vec![];
         };
         let Ok(mut stmt) = conn.prepare(
             "SELECT origin, lines, bytes, whole_output
              FROM ledger_folds
-             WHERE session = ?1
+             WHERE (?1 IS NULL OR session = ?1)
              ORDER BY ts DESC, id DESC LIMIT ?2",
         ) else {
             return vec![];
@@ -3313,14 +3331,27 @@ mod tests {
             "a repeat above the floor must fold, or this tests a floor and not the lookup"
         );
 
-        let mine = store.get_recent_ledger_folds("sess-a", 10);
+        let mine = store.get_recent_ledger_folds(Some("sess-a"), 10);
         assert!(
             !mine.is_empty(),
             "the session that folded cannot see its own folds"
         );
         assert!(
-            store.get_recent_ledger_folds("sess-b", 10).is_empty(),
+            store.get_recent_ledger_folds(Some("sess-b"), 10).is_empty(),
             "a session with no folds borrowed another's"
+        );
+
+        // The shape the MCP server actually asks in. It cannot see the host
+        // session id, and the id it does hold is minted by `SessionState::new`,
+        // so filtering on that returns nothing and reads as "nothing happened".
+        assert!(
+            !store.get_recent_ledger_folds(None, 10).is_empty(),
+            "an unfiltered lookup must see the folds, or the MCP tool is blind again"
+        );
+        let minted = format!("{}-{}-0", 1_787_000_000_000i64, std::process::id());
+        assert!(
+            store.get_recent_ledger_folds(Some(&minted), 10).is_empty(),
+            "a minted id matched a host-keyed row, so this fixture proves nothing"
         );
     }
 
