@@ -532,7 +532,13 @@ impl SqliteBackend {
                 lines        INTEGER NOT NULL,
                 bytes        INTEGER NOT NULL,
                 whole_output INTEGER NOT NULL DEFAULT 0,
-                payload_bytes INTEGER NOT NULL DEFAULT 0
+                payload_bytes INTEGER NOT NULL DEFAULT 0,
+                -- Which session produced the fold. `scope` above is keyed on the
+                -- project when there is one, deliberately, so that the cross-agent
+                -- question #533 exists to answer stays askable. That leaves the
+                -- table with no way to say "this session", which is the question
+                -- `omni_explain_savings` asks (#602).
+                session   TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_ledger_folds_ts ON ledger_folds(ts);
 
@@ -797,6 +803,14 @@ impl SqliteBackend {
         );
         let _ = conn.execute(
             "ALTER TABLE ledger_folds ADD COLUMN payload_bytes INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        // #602. Rows written before this have no session, so a per-session
+        // lookup finds nothing for them, which is honest: the column did not
+        // exist and the project-keyed `scope` cannot be narrowed to one session
+        // after the fact.
+        let _ = conn.execute(
+            "ALTER TABLE ledger_folds ADD COLUMN session TEXT NOT NULL DEFAULT ''",
             [],
         );
         // #581. Set when a handle is pulled and cleared by the delivery that
@@ -1440,9 +1454,13 @@ impl SqliteBackend {
     /// (#602). Counted on the machine that confirmed it: 936 rows in
     /// `ledger_folds`, none of them visible to the tool.
     ///
-    /// The scope key is `session` or `session/agent` (`ledger::scope_for`), so a
-    /// lookup that matches only the bare session id misses every agent-scoped
-    /// fold, which on this corpus is all of them.
+    /// Keyed on the fold's own `session` column and not on `scope`. `scope` is
+    /// deliberately the **project** whenever there is one, so the cross-agent
+    /// question #533 exists to answer stays askable, and every one of the 936
+    /// rows on the machine that confirmed this bug holds a filesystem path there.
+    /// A first draft of this queried `scope` against the session id and returned
+    /// nothing in production while its test passed, because the test wrote rows
+    /// by hand instead of through `Ledger::project`. Caught in review of #625.
     pub fn get_recent_ledger_folds(&self, session_id: &str, limit: usize) -> Vec<LedgerFoldRow> {
         let Ok(conn) = self.pool.get() else {
             return vec![];
@@ -1450,7 +1468,7 @@ impl SqliteBackend {
         let Ok(mut stmt) = conn.prepare(
             "SELECT origin, lines, bytes, whole_output
              FROM ledger_folds
-             WHERE scope = ?1 OR scope LIKE ?1 || '/%'
+             WHERE session = ?1
              ORDER BY ts DESC, id DESC LIMIT ?2",
         ) else {
             return vec![];
@@ -1971,7 +1989,13 @@ impl SqliteBackend {
     /// a store that cannot be reached costs a measurement and never a marker.
     /// Same reasoning as `ledger_record` above: the ledger's writes are evidence,
     /// and evidence must not be able to change the output.
-    pub fn ledger_record_folds(&self, scope: &str, agent_id: &str, folds: &[FoldRecord]) {
+    pub fn ledger_record_folds(
+        &self,
+        scope: &str,
+        agent_id: &str,
+        session: &str,
+        folds: &[FoldRecord],
+    ) {
         if folds.is_empty() {
             return;
         }
@@ -1986,8 +2010,8 @@ impl SqliteBackend {
             let Ok(mut stmt) = tx.prepare_cached(
                 "INSERT INTO ledger_folds
                      (ts, scope, agent_id, source_agent, origin, lines, bytes, whole_output,
-                      payload_bytes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                      payload_bytes, session)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             ) else {
                 return;
             };
@@ -2001,7 +2025,8 @@ impl SqliteBackend {
                     f.lines as i64,
                     f.bytes as i64,
                     i64::from(f.whole_output),
-                    f.payload_bytes as i64
+                    f.payload_bytes as i64,
+                    session
                 ]);
             }
         }
@@ -3255,42 +3280,47 @@ mod tests {
     }
 
     /// #602. `omni_explain_savings` reported "No recent distillations" for a
-    /// session whose only compression was cross-turn folding, because folds go
-    /// to `ledger_folds` and the tool read `distillations`.
+    /// session whose only compression was cross-turn folding, because folds go to
+    /// `ledger_folds` and the tool read `distillations`.
     ///
-    /// The scope key is what makes this easy to get wrong: `ledger::scope_for`
-    /// writes `session/agent` whenever an agent is known, which on the corpus
-    /// that confirmed the bug is every row. A lookup matching only the bare
-    /// session id finds nothing and looks exactly like the bug it fixes.
+    /// Driven through `Ledger::project`, the real write path, rather than by
+    /// inserting rows by hand. The first version of this test did insert them,
+    /// invented a session-shaped `scope`, and passed against a fix that returned
+    /// nothing in production: `scope` holds the **project** whenever there is one,
+    /// by design, and all 936 rows on the machine that confirmed the bug carry a
+    /// filesystem path there. A fixture that writes its own rows cannot catch a
+    /// disagreement between the writer and the reader, which is the only thing
+    /// that was wrong.
     #[test]
-    fn folds_are_visible_under_both_scope_forms() {
+    fn folds_are_found_by_the_session_that_made_them() {
         let (store, _dir) = get_temp_store();
-        let fold = |lines| FoldRecord {
-            source_agent: "claude_code".to_string(),
-            origin: "session",
-            lines,
-            bytes: lines * 40,
-            whole_output: false,
-            payload_bytes: 4096,
+        let text: String = (1..=40)
+            .map(|i| format!("    key_{i:02} = \"value_{i:02}\" padding padding padding\n"))
+            .collect();
+
+        let fold_once = |scope: &str| {
+            crate::ledger::Ledger::new(&store, scope)
+                .with_project("/repo")
+                .by("claude_code")
+                .project(&text)
         };
-        store.ledger_record_folds("sess-a", "claude_code", &[fold(3)]);
-        store.ledger_record_folds("sess-b/claude_code", "claude_code", &[fold(7)]);
-
-        let bare = store.get_recent_ledger_folds("sess-a", 10);
-        assert_eq!(bare.len(), 1, "bare session scope not found: {bare:?}");
-        assert_eq!(bare[0].lines, 3);
-
-        let agent_scoped = store.get_recent_ledger_folds("sess-b", 10);
-        assert_eq!(
-            agent_scoped.len(),
-            1,
-            "agent-scoped fold invisible to a session lookup, which is the #602 shape"
-        );
-        assert_eq!(agent_scoped[0].lines, 7);
-
         assert!(
-            store.get_recent_ledger_folds("sess-c", 10).is_empty(),
-            "a session with no folds must not borrow another's"
+            fold_once("sess-a/claude_code").is_none(),
+            "nothing shown yet"
+        );
+        assert!(
+            fold_once("sess-a/claude_code").is_some(),
+            "a repeat above the floor must fold, or this tests a floor and not the lookup"
+        );
+
+        let mine = store.get_recent_ledger_folds("sess-a", 10);
+        assert!(
+            !mine.is_empty(),
+            "the session that folded cannot see its own folds"
+        );
+        assert!(
+            store.get_recent_ledger_folds("sess-b", 10).is_empty(),
+            "a session with no folds borrowed another's"
         );
     }
 

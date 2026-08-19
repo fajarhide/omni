@@ -53,6 +53,36 @@ use crate::store::sqlite::Store;
 /// from the other file" from "this came from the one I asked for" (#622).
 const MAX_SOURCE_IN_MARKER: usize = 40;
 
+/// One line of a source name, safe to interpolate into a marker.
+///
+/// A marker is a single line, and the count of markers standing above the first
+/// surviving line is computed from that (#573). A source is a raw command, and
+/// **46.9% of recorded commands carry a newline** (4,961 of 10,578 traces:
+/// heredocs, chained builds, pasted scripts), so interpolating one unfiltered
+/// would let the command split the marker into lines of its own choosing and
+/// corrupt both the framing and the accounting.
+///
+/// First line only, control characters dropped, runs of whitespace collapsed,
+/// then cut at a char boundary. Truncation alone is not enough: it preserves
+/// every newline before the cut.
+fn source_label(source: &str) -> String {
+    let first = source.lines().next().unwrap_or("");
+    let mut out = String::with_capacity(first.len());
+    let mut in_space = false;
+    for c in first.chars() {
+        if c.is_control() || c.is_whitespace() {
+            if !out.is_empty() && !in_space {
+                out.push(' ');
+                in_space = true;
+            }
+        } else {
+            out.push(c);
+            in_space = false;
+        }
+    }
+    crate::util::text::safe_slice(out.trim_end(), MAX_SOURCE_IN_MARKER).to_string()
+}
+
 /// Which history a run was found in, because the two cannot make the same claim.
 ///
 /// This distinction is the whole of the project scope. An earlier draft cancelled
@@ -86,10 +116,7 @@ impl Origin {
         // answered (#622). `Seen` decides that; this only renders it, and keeps
         // it short because the fold gate weighs this string.
         let from = match source {
-            Some(s) => format!(
-                " from {}",
-                crate::util::text::safe_slice(s, MAX_SOURCE_IN_MARKER)
-            ),
+            Some(s) => format!(" from {}", source_label(s)),
             None => String::new(),
         };
         match self {
@@ -126,10 +153,7 @@ impl Origin {
     /// for and is strictly more information than the run wording carried.
     fn whole_output_marker(self, lines: usize, handle: &str, source: Option<&str>) -> String {
         let from = match source {
-            Some(s) => format!(
-                " from {}",
-                crate::util::text::safe_slice(s, MAX_SOURCE_IN_MARKER)
-            ),
+            Some(s) => format!(" from {}", source_label(s)),
             None => String::new(),
         };
         match self {
@@ -253,6 +277,16 @@ pub fn scope_for(session: &str, agent: Option<&str>) -> String {
         Some(a) if !a.is_empty() => format!("{session}/{a}"),
         _ => session.to_string(),
     }
+}
+
+/// The session half of a scope key, which is the inverse of `scope_for`.
+///
+/// Kept beside it so the two cannot drift: a fold row records the project in its
+/// `scope` column by design, and `omni_explain_savings` still has to be able to
+/// ask "what did this session fold" (#602). Agent ids carry no `/`, so the first
+/// segment is the session.
+pub fn session_of(scope: &str) -> &str {
+    scope.split('/').next().unwrap_or(scope)
 }
 
 /// Addresses the ledger for one session, and optionally for its project.
@@ -519,7 +553,10 @@ impl<'a> Ledger<'a> {
             // repository two agents share, and a session scope cannot be compared
             // across agents by definition.
             let scope = self.project.as_deref().unwrap_or(&self.scope);
-            self.store.ledger_record_folds(scope, &self.agent, &folds);
+            // `scope` above is the project when there is one, so the session
+            // has to travel separately or the row cannot answer for itself.
+            self.store
+                .ledger_record_folds(scope, &self.agent, session_of(&self.scope), &folds);
         }
 
         self.store
@@ -1222,6 +1259,33 @@ mod tests {
         assert!(
             !second.contains("already shown"),
             "the ledger claimed a sighting that was a marker: {second}"
+        );
+    }
+
+    /// Review of #625. A source is a raw command and 46.9% of recorded commands
+    /// carry a newline, so interpolating one unfiltered lets the command split
+    /// the marker into lines of its own. A marker is a single line, and the count
+    /// of markers standing above the first surviving line is derived from that
+    /// (#573), so the framing is load-bearing rather than cosmetic.
+    #[test]
+    fn a_source_cannot_break_out_of_its_marker() {
+        let nasty = "cat <<EOF\nsecond line\nthird line\nEOF";
+        let marker = Origin::Session.marker(9, &"0".repeat(HANDLE_LEN), Some(nasty));
+        assert_eq!(
+            marker.lines().count(),
+            1,
+            "a multi-line source split the marker: {marker:?}"
+        );
+        assert!(
+            marker.contains("from cat <<EOF") && !marker.contains("second line"),
+            "expected the first line only: {marker:?}"
+        );
+
+        let tabs = Origin::Session.marker(9, &"0".repeat(HANDLE_LEN), Some("go\ttest\t./..."));
+        assert_eq!(tabs.lines().count(), 1, "a tab split the marker: {tabs:?}");
+        assert!(
+            tabs.contains("from go test ./..."),
+            "whitespace was not collapsed: {tabs:?}"
         );
     }
 
