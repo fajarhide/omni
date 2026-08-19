@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 /// Engram: Automatic Subtask Digest
 ///
@@ -272,6 +271,12 @@ fn has_decision_keywords(text: &str) -> bool {
     KEYWORDS.iter().any(|k| lower.contains(k))
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find("-m ")` plus that needle's three bytes, all ASCII.
+#[allow(clippy::string_slice)]
 fn extract_commit_msg(command: &str) -> Option<String> {
     // git commit -m "message"
     if let Some(pos) = command.find("-m ") {

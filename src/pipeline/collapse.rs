@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use crate::pipeline::scorer::classify_line;
 use crate::pipeline::{CollapseMode, SignalTier};
@@ -92,6 +91,12 @@ fn normalize_for_content(clean: &str, mode: &CollapseMode) -> String {
     }
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find(" ... ")` returns a char boundary.
+#[allow(clippy::string_slice)]
 /// For test output: "test foo::bar::baz_42 ... ok" → "test _ ... ok"
 fn normalize_test_line(trimmed: &str) -> String {
     // Fast path: "test <name> ... ok/FAILED/ignored"
