@@ -488,6 +488,10 @@ impl SqliteBackend {
                 line_hash TEXT NOT NULL,
                 ts        INTEGER NOT NULL,
                 agent_id  TEXT NOT NULL DEFAULT 'unknown',
+                -- What command first showed this line, so a fold can say whose
+                -- bytes it is replacing (#622). Empty means unrecorded, which
+                -- suppresses the marker's source clause rather than guessing.
+                source    TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (scope, line_hash)
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger_lines(ts);
@@ -528,7 +532,13 @@ impl SqliteBackend {
                 lines        INTEGER NOT NULL,
                 bytes        INTEGER NOT NULL,
                 whole_output INTEGER NOT NULL DEFAULT 0,
-                payload_bytes INTEGER NOT NULL DEFAULT 0
+                payload_bytes INTEGER NOT NULL DEFAULT 0,
+                -- Which session produced the fold. `scope` above is keyed on the
+                -- project when there is one, deliberately, so that the cross-agent
+                -- question #533 exists to answer stays askable. That leaves the
+                -- table with no way to say "this session", which is the question
+                -- `omni_explain_savings` asks (#602).
+                session   TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_ledger_folds_ts ON ledger_folds(ts);
 
@@ -795,6 +805,14 @@ impl SqliteBackend {
             "ALTER TABLE ledger_folds ADD COLUMN payload_bytes INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        // #602. Rows written before this have no session, so a per-session
+        // lookup finds nothing for them, which is honest: the column did not
+        // exist and the project-keyed `scope` cannot be narrowed to one session
+        // after the fact.
+        let _ = conn.execute(
+            "ALTER TABLE ledger_folds ADD COLUMN session TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         // #581. Set when a handle is pulled and cleared by the delivery that
         // answers it, so the content a marker sent the reader to fetch is not
         // folded back into that same marker on its way in. Separate from
@@ -833,6 +851,21 @@ impl SqliteBackend {
         // is honest about rows written before anyone was recorded.
         let _ = conn.execute(
             "ALTER TABLE ledger_lines ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'unknown'",
+            [],
+        );
+        // #622. What command first showed this line. The table keyed lines by
+        // (scope, hash) alone, so a fold could replace a block in file B with one
+        // shown from file A and the marker had no way to say so. Reading two
+        // files to check a shared block matches is exactly that case, and the
+        // dedup answered it by deleting the evidence.
+        //
+        // It is also what makes the frequency measurable: nothing in the corpus
+        // could say how often a fold draws on a different source, because the
+        // column did not exist. Same reason `ledger_folds` was added by #533.
+        // Rows written before this keep the empty default, which reads as
+        // "unrecorded" and suppresses the marker clause rather than guessing.
+        let _ = conn.execute(
+            "ALTER TABLE ledger_lines ADD COLUMN source TEXT NOT NULL DEFAULT ''",
             [],
         );
         // #212: `output_bytes` is what the distiller returned, which is not the
@@ -1386,14 +1419,28 @@ impl SqliteBackend {
     }
 
     /// Get recent distillation rows for omni_history MCP tool
-    pub fn get_recent_distillations(&self, session_id: &str, limit: usize) -> Vec<DistillationRow> {
+    /// Recent distillations, optionally narrowed to one session.
+    ///
+    /// `None` is the honest answer from the MCP server. `SessionState::new` mints
+    /// `{millis}-{pid}-{counter}` every time it is constructed, while the hook
+    /// path keys its rows on the **host** session id: 11,281 rows on this machine
+    /// carry a host UUID against 892 minted ones. The server filtering on its own
+    /// id therefore matched nothing in a Claude Code session, which is most of
+    /// what `omni_explain_savings` was reporting when it said "No recent
+    /// distillations" (#602). The server cannot see the host id, so it asks by
+    /// recency and says so, rather than filtering on a value known to be wrong.
+    pub fn get_recent_distillations(
+        &self,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Vec<DistillationRow> {
         let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return vec![],
         };
         let mut stmt = match conn.prepare(
             "SELECT command, input_bytes, output_bytes, route, filter_name
-             FROM distillations WHERE session_id = ?1
+             FROM distillations WHERE (?1 IS NULL OR session_id = ?1)
              ORDER BY ts DESC LIMIT ?2",
         ) {
             Ok(s) => s,
@@ -1406,6 +1453,50 @@ impl SqliteBackend {
                 output_bytes: row.get::<_, i64>(2)? as usize,
                 route: row.get(3)?,
                 filter_name: row.get(4)?,
+            })
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    /// Recent cross-turn folds for a session, which `distillations` never holds.
+    ///
+    /// The ledger writes its own table, and `omni_explain_savings` read only
+    /// `distillations`, so a route that fired and handed back a live retrieve
+    /// handle was reported as "No recent distillations found in current session"
+    /// (#602). Counted on the machine that confirmed it: 936 rows in
+    /// `ledger_folds`, none of them visible to the tool.
+    ///
+    /// Keyed on the fold's own `session` column and not on `scope`. `scope` is
+    /// deliberately the **project** whenever there is one, so the cross-agent
+    /// question #533 exists to answer stays askable, and every one of the 936
+    /// rows on the machine that confirmed this bug holds a filesystem path there.
+    /// A first draft of this queried `scope` against the session id and returned
+    /// nothing in production while its test passed, because the test wrote rows
+    /// by hand instead of through `Ledger::project`. Caught in review of #625.
+    pub fn get_recent_ledger_folds(
+        &self,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Vec<LedgerFoldRow> {
+        let Ok(conn) = self.pool.get() else {
+            return vec![];
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT origin, lines, bytes, whole_output
+             FROM ledger_folds
+             WHERE (?1 IS NULL OR session = ?1)
+             ORDER BY ts DESC, id DESC LIMIT ?2",
+        ) else {
+            return vec![];
+        };
+        match stmt.query_map(params![session_id, limit as i64], |row| {
+            Ok(LedgerFoldRow {
+                origin: row.get(0)?,
+                lines: row.get::<_, i64>(1)? as usize,
+                bytes: row.get::<_, i64>(2)? as usize,
+                whole_output: row.get::<_, i64>(3)? != 0,
             })
         }) {
             Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
@@ -1833,7 +1924,7 @@ impl SqliteBackend {
         &self,
         scope: &str,
         hashes: &[String],
-    ) -> std::collections::HashMap<String, String> {
+    ) -> std::collections::HashMap<String, SeenLine> {
         let mut found = std::collections::HashMap::new();
         let Ok(conn) = self.pool.get() else {
             return found;
@@ -1851,7 +1942,7 @@ impl SqliteBackend {
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT line_hash, agent_id FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
+                "SELECT line_hash, agent_id, source FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
             );
             let Ok(mut stmt) = conn.prepare_cached(&sql) else {
                 continue;
@@ -1860,7 +1951,13 @@ impl SqliteBackend {
                 .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
                 .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    SeenLine {
+                        agent: r.get::<_, String>(1)?,
+                        source: r.get::<_, String>(2)?,
+                    },
+                ))
             }) {
                 found.extend(rows.flatten());
             }
@@ -1879,7 +1976,7 @@ impl SqliteBackend {
     /// One transaction and one cached statement for the whole batch: this is the
     /// loop where `prepare_cached` actually pays, unlike the one-shot statements
     /// a hook process runs once each.
-    pub fn ledger_record(&self, scope: &str, hashes: &[String], agent_id: &str) {
+    pub fn ledger_record(&self, scope: &str, hashes: &[String], agent_id: &str, source: &str) {
         let Ok(mut conn) = self.pool.get() else {
             return;
         };
@@ -1889,13 +1986,16 @@ impl SqliteBackend {
         };
         {
             let Ok(mut stmt) = tx.prepare_cached(
-                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             ) else {
                 return;
             };
+            // `INSERT OR IGNORE` keeps the first writer, so `source` names the
+            // command that actually showed the line rather than the last one to
+            // repeat it. That is the property the marker's claim rests on (#622).
             for h in hashes {
-                let _ = stmt.execute(params![scope, h, ts, agent_id]);
+                let _ = stmt.execute(params![scope, h, ts, agent_id, source]);
             }
         }
         let _ = tx.commit();
@@ -1907,7 +2007,13 @@ impl SqliteBackend {
     /// a store that cannot be reached costs a measurement and never a marker.
     /// Same reasoning as `ledger_record` above: the ledger's writes are evidence,
     /// and evidence must not be able to change the output.
-    pub fn ledger_record_folds(&self, scope: &str, agent_id: &str, folds: &[FoldRecord]) {
+    pub fn ledger_record_folds(
+        &self,
+        scope: &str,
+        agent_id: &str,
+        session: &str,
+        folds: &[FoldRecord],
+    ) {
         if folds.is_empty() {
             return;
         }
@@ -1922,8 +2028,8 @@ impl SqliteBackend {
             let Ok(mut stmt) = tx.prepare_cached(
                 "INSERT INTO ledger_folds
                      (ts, scope, agent_id, source_agent, origin, lines, bytes, whole_output,
-                      payload_bytes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                      payload_bytes, session)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             ) else {
                 return;
             };
@@ -1937,7 +2043,8 @@ impl SqliteBackend {
                     f.lines as i64,
                     f.bytes as i64,
                     i64::from(f.whole_output),
-                    f.payload_bytes as i64
+                    f.payload_bytes as i64,
+                    session
                 ]);
             }
         }
@@ -2677,6 +2784,31 @@ pub struct DistillationRow {
     pub filter_name: String,
 }
 
+/// One cross-turn fold, as `omni_explain_savings` needs to report it (#602).
+///
+/// No command column, because a fold is not attributed to one: the ledger keys
+/// lines by scope and hash, so the bytes it replaced may have been shown by a
+/// different command than the one being answered. Saying which would need a
+/// source per line, which the table does not carry.
+/// What the ledger remembers about a line it has shown before.
+///
+/// `source` is the command that showed it first, and is empty for rows written
+/// before #622 added the column. Empty means unrecorded, which suppresses the
+/// marker's source clause rather than guessing at one.
+#[derive(Debug, Clone)]
+pub struct SeenLine {
+    pub agent: String,
+    pub source: String,
+}
+
+#[derive(Debug)]
+pub struct LedgerFoldRow {
+    pub origin: String,
+    pub lines: usize,
+    pub bytes: usize,
+    pub whole_output: bool,
+}
+
 /// One filter's re-run comparison: distilled output against raw output (#109).
 ///
 /// `Passthrough` rows are the control arm, the agent read the original bytes -
@@ -3163,6 +3295,64 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #602. `omni_explain_savings` reported "No recent distillations" for a
+    /// session whose only compression was cross-turn folding, because folds go to
+    /// `ledger_folds` and the tool read `distillations`.
+    ///
+    /// Driven through `Ledger::project`, the real write path, rather than by
+    /// inserting rows by hand. The first version of this test did insert them,
+    /// invented a session-shaped `scope`, and passed against a fix that returned
+    /// nothing in production: `scope` holds the **project** whenever there is one,
+    /// by design, and all 936 rows on the machine that confirmed the bug carry a
+    /// filesystem path there. A fixture that writes its own rows cannot catch a
+    /// disagreement between the writer and the reader, which is the only thing
+    /// that was wrong.
+    #[test]
+    fn folds_are_found_by_the_session_that_made_them() {
+        let (store, _dir) = get_temp_store();
+        let text: String = (1..=40)
+            .map(|i| format!("    key_{i:02} = \"value_{i:02}\" padding padding padding\n"))
+            .collect();
+
+        let fold_once = |scope: &str| {
+            crate::ledger::Ledger::new(&store, scope)
+                .with_project("/repo")
+                .by("claude_code")
+                .project(&text)
+        };
+        assert!(
+            fold_once("sess-a/claude_code").is_none(),
+            "nothing shown yet"
+        );
+        assert!(
+            fold_once("sess-a/claude_code").is_some(),
+            "a repeat above the floor must fold, or this tests a floor and not the lookup"
+        );
+
+        let mine = store.get_recent_ledger_folds(Some("sess-a"), 10);
+        assert!(
+            !mine.is_empty(),
+            "the session that folded cannot see its own folds"
+        );
+        assert!(
+            store.get_recent_ledger_folds(Some("sess-b"), 10).is_empty(),
+            "a session with no folds borrowed another's"
+        );
+
+        // The shape the MCP server actually asks in. It cannot see the host
+        // session id, and the id it does hold is minted by `SessionState::new`,
+        // so filtering on that returns nothing and reads as "nothing happened".
+        assert!(
+            !store.get_recent_ledger_folds(None, 10).is_empty(),
+            "an unfiltered lookup must see the folds, or the MCP tool is blind again"
+        );
+        let minted = format!("{}-{}-0", 1_787_000_000_000i64, std::process::id());
+        assert!(
+            store.get_recent_ledger_folds(Some(&minted), 10).is_empty(),
+            "a minted id matched a host-keyed row, so this fixture proves nothing"
+        );
     }
 
     /// #441. The largest population in the corpus was one undifferentiated

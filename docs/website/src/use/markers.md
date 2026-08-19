@@ -45,6 +45,21 @@ every line, the marker is the whole output rather than a gap inside it, so it sa
 hundreds. Anything less than the whole reply keeps the wording above.
 
 ```
+[OMNI: 40 lines already shown from charlie.tf, omni retrieve 0000000000000000]
+```
+
+Any of the four can carry `from <source>`, naming the command whose output first
+showed those lines. It appears only when that command is **not** the one you just
+ran, which is the case you cannot resolve from the marker alone: reading one file
+and having a block elided because a different file showed it earlier. Without the
+clause, comparing two files to check a shared block matches is answered by deleting
+the evidence.
+
+Re-reading the same file carries no clause, and that is deliberate rather than an
+omission. Marker length decides what is worth folding at all, so a source on every
+marker would cost savings on the common case to label the rare one.
+
+```
 [N similar lines collapsed]
 ```
 

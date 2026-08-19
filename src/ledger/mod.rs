@@ -45,6 +45,44 @@ use crate::guard::limits::{
 };
 use crate::store::sqlite::Store;
 
+/// How much of a source name a marker will carry.
+///
+/// The fold gate weighs the rendered marker, so every byte here is a byte a run
+/// must beat before folding is worth it (#450). Forty is enough for a file name
+/// and the tail of its directory, which is what a reader needs to tell "this came
+/// from the other file" from "this came from the one I asked for" (#622).
+const MAX_SOURCE_IN_MARKER: usize = 40;
+
+/// One line of a source name, safe to interpolate into a marker.
+///
+/// A marker is a single line, and the count of markers standing above the first
+/// surviving line is computed from that (#573). A source is a raw command, and
+/// **46.9% of recorded commands carry a newline** (4,961 of 10,578 traces:
+/// heredocs, chained builds, pasted scripts), so interpolating one unfiltered
+/// would let the command split the marker into lines of its own choosing and
+/// corrupt both the framing and the accounting.
+///
+/// First line only, control characters dropped, runs of whitespace collapsed,
+/// then cut at a char boundary. Truncation alone is not enough: it preserves
+/// every newline before the cut.
+fn source_label(source: &str) -> String {
+    let first = source.lines().next().unwrap_or("");
+    let mut out = String::with_capacity(first.len());
+    let mut in_space = false;
+    for c in first.chars() {
+        if c.is_control() || c.is_whitespace() {
+            if !out.is_empty() && !in_space {
+                out.push(' ');
+                in_space = true;
+            }
+        } else {
+            out.push(c);
+            in_space = false;
+        }
+    }
+    crate::util::text::safe_slice(out.trim_end(), MAX_SOURCE_IN_MARKER).to_string()
+}
+
 /// Which history a run was found in, because the two cannot make the same claim.
 ///
 /// This distinction is the whole of the project scope. An earlier draft cancelled
@@ -73,10 +111,17 @@ impl Origin {
     /// get them back. The session form was 87 bytes and is 65; trimming it moved
     /// the aggregate by 0.3 points on its own, because a shorter marker makes
     /// smaller runs worth folding (#450).
-    fn marker(self, lines: usize, handle: &str) -> String {
+    fn marker(self, lines: usize, handle: &str, source: Option<&str>) -> String {
+        // Only ever present when the source differs from the command being
+        // answered (#622). `Seen` decides that; this only renders it, and keeps
+        // it short because the fold gate weighs this string.
+        let from = match source {
+            Some(s) => format!(" from {}", source_label(s)),
+            None => String::new(),
+        };
         match self {
             Self::Session => {
-                format!("[OMNI: {lines} lines already shown, omni retrieve {handle}]")
+                format!("[OMNI: {lines} lines already shown{from}, omni retrieve {handle}]")
             }
             // #567. `from an earlier session` states provenance and reads as
             // "you have seen this", which is the opposite of what it means: the
@@ -90,7 +135,7 @@ impl Origin {
             // session form's trim was worth 0.3 points on its own (#450), so the
             // honest wording is the cheaper one here rather than a trade.
             Self::Project => {
-                format!("[OMNI: {lines} lines not shown here, omni retrieve {handle}]")
+                format!("[OMNI: {lines} lines not shown here{from}, omni retrieve {handle}]")
             }
         }
     }
@@ -106,16 +151,20 @@ impl Origin {
     ///
     /// It states the identity instead, which is the fact the re-run was asking
     /// for and is strictly more information than the run wording carried.
-    fn whole_output_marker(self, lines: usize, handle: &str) -> String {
+    fn whole_output_marker(self, lines: usize, handle: &str, source: Option<&str>) -> String {
+        let from = match source {
+            Some(s) => format!(" from {}", source_label(s)),
+            None => String::new(),
+        };
         match self {
             Self::Session => format!(
-                "[OMNI: identical to the {lines} lines already shown, omni retrieve {handle}]"
+                "[OMNI: identical to the {lines} lines already shown{from}, omni retrieve {handle}]"
             ),
             // The whole payload, and none of it delivered here, so the agent
             // holds nothing at all. Worth the extra bytes to say both: this
             // marker is already gated at `MIN_WHOLE_OUTPUT_FOLD` (#567).
             Self::Project => format!(
-                "[OMNI: identical to {lines} lines from an earlier session, none shown here, omni retrieve {handle}]"
+                "[OMNI: identical to {lines} lines from an earlier session{from}, none shown here, omni retrieve {handle}]"
             ),
         }
     }
@@ -230,6 +279,16 @@ pub fn scope_for(session: &str, agent: Option<&str>) -> String {
     }
 }
 
+/// The session half of a scope key, which is the inverse of `scope_for`.
+///
+/// Kept beside it so the two cannot drift: a fold row records the project in its
+/// `scope` column by design, and `omni_explain_savings` still has to be able to
+/// ask "what did this session fold" (#602). Agent ids carry no `/`, so the first
+/// segment is the session.
+pub fn session_of(scope: &str) -> &str {
+    scope.split('/').next().unwrap_or(scope)
+}
+
 /// Addresses the ledger for one session, and optionally for its project.
 ///
 /// Cross-session repetition measures 3.7% of post-filter bytes against 19.1%
@@ -243,6 +302,10 @@ pub struct Ledger<'a> {
     /// `None` disables project scope entirely, which is what every caller that
     /// cannot name a project passes.
     project: Option<String>,
+    /// What command is being answered, so a fold can say when the bytes it is
+    /// replacing came from a different one (#622). Empty means the caller could
+    /// not name one, which suppresses the clause rather than guessing.
+    source: String,
     /// Who is being shown these lines, recorded and read by nothing (#509).
     ///
     /// The project scope is keyed on the directory alone, so two agents in one
@@ -252,11 +315,30 @@ pub struct Ledger<'a> {
     agent: String,
 }
 
+/// Where a run was seen, and whose bytes it is replacing.
+///
+/// `source` is `Some` only when the ledger recorded one **and** it differs from
+/// the command being answered. That is the case a reader cannot resolve from the
+/// marker alone: reading file B and having a block elided because file A showed
+/// it earlier, which is what #622 reported. Same-source folds are the common case
+/// and carry no clause, which matters because marker length gates folding: the
+/// gate weighs the rendered string, so every byte added here is a byte a run must
+/// beat before it is worth replacing (#450).
+///
+/// It is part of the grouping key, so a stretch whose lines came from two
+/// different commands splits into two runs rather than picking one of them to
+/// name.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct Seen {
+    origin: Origin,
+    source: Option<String>,
+}
+
 /// One stretch of output, and where it was seen before if it was.
 struct Run {
     start: usize,
     end: usize,
-    seen: Option<Origin>,
+    seen: Option<Seen>,
 }
 
 impl<'a> Ledger<'a> {
@@ -265,6 +347,7 @@ impl<'a> Ledger<'a> {
             store,
             scope: scope.into(),
             project: None,
+            source: String::new(),
             agent: "unknown".to_string(),
         }
     }
@@ -272,6 +355,13 @@ impl<'a> Ledger<'a> {
     /// Adds the project history to what this ledger can draw on.
     pub fn with_project(mut self, project: impl Into<String>) -> Self {
         self.project = Some(project.into());
+        self
+    }
+
+    /// Names the command being answered, which is what a fold compares against
+    /// before claiming a different source in its marker.
+    pub fn from(mut self, source: impl Into<String>) -> Self {
+        self.source = source.into();
         self
     }
 
@@ -361,16 +451,26 @@ impl<'a> Ledger<'a> {
             .map(|(hash, _)| hash)
             .collect();
 
+        // The source clause is decided here, once, so the grouping key and the
+        // rendered marker cannot disagree: a run only claims a source when the
+        // ledger recorded one and it is not the command being answered (#622).
+        let differing = |seen: &crate::store::sqlite::SeenLine| {
+            (!seen.source.is_empty() && seen.source != self.source).then(|| seen.source.clone())
+        };
         let origin_of = |h: &String| {
             if never_fold.contains(h) {
                 return None;
             }
-            if in_session.contains_key(h) {
-                Some(Origin::Session)
-            } else if in_project.contains_key(h) {
-                Some(Origin::Project)
+            if let Some(seen) = in_session.get(h) {
+                Some(Seen {
+                    origin: Origin::Session,
+                    source: differing(seen),
+                })
             } else {
-                None
+                in_project.get(h).map(|seen| Seen {
+                    origin: Origin::Project,
+                    source: differing(seen),
+                })
             }
         };
 
@@ -423,7 +523,7 @@ impl<'a> Ledger<'a> {
                 let Some(origin) = origin_of(&hashes[i]) else {
                     continue;
                 };
-                let (label, source) = match origin {
+                let (label, source) = match origin.origin {
                     Origin::Session => ("session", in_session.get(&hashes[i])),
                     Origin::Project => ("project", in_project.get(&hashes[i])),
                 };
@@ -431,7 +531,7 @@ impl<'a> Ledger<'a> {
                 // always writes one. Counting it as `unknown` beats dropping the
                 // row and quietly understating the total.
                 let entry = tally
-                    .entry((label, source.map_or("unknown", String::as_str)))
+                    .entry((label, source.map_or("unknown", |s| s.agent.as_str())))
                     .or_default();
                 entry.0 += 1;
                 entry.1 += lines[i].len();
@@ -453,17 +553,21 @@ impl<'a> Ledger<'a> {
             // repository two agents share, and a session scope cannot be compared
             // across agents by definition.
             let scope = self.project.as_deref().unwrap_or(&self.scope);
-            self.store.ledger_record_folds(scope, &self.agent, &folds);
+            // `scope` above is the project when there is one, so the session
+            // has to travel separately or the row cannot answer for itself.
+            self.store
+                .ledger_record_folds(scope, &self.agent, session_of(&self.scope), &folds);
         }
 
         self.store
-            .ledger_record(&self.scope, &delivered, &self.agent);
+            .ledger_record(&self.scope, &delivered, &self.agent, &self.source);
         // The project history is written too, so a later session can draw on this
         // one. Same rows, a second scope key. A folded line is already in both
         // scopes, since that is what made it foldable, so filtering it out of
         // this write changes nothing and keeps the two calls saying one thing.
         if let Some(p) = &self.project {
-            self.store.ledger_record(p, &delivered, &self.agent);
+            self.store
+                .ledger_record(p, &delivered, &self.agent, &self.source);
         }
 
         // What the fold did to the numbering below it (#557). Read from the
@@ -484,7 +588,7 @@ impl<'a> Ledger<'a> {
         &self,
         lines: &[&str],
         hashes: &[String],
-        origin_of: &dyn Fn(&String) -> Option<Origin>,
+        origin_of: &dyn Fn(&String) -> Option<Seen>,
     ) -> Option<(String, HashSet<usize>, usize)> {
         let runs = group_runs(hashes, origin_of);
         if !runs.iter().any(|r| r.seen.is_some()) {
@@ -540,11 +644,13 @@ impl<'a> Ledger<'a> {
             // emitted the long one, which is the drift the rest of this comment
             // exists to prevent.
             let covers_everything = run.start == 0 && run.end == lines.len();
-            let render = |o: Origin, handle: &str| {
+            let render = |seen: &Seen, handle: &str| {
+                let src = seen.source.as_deref();
                 if covers_everything {
-                    o.whole_output_marker(run.end - run.start, handle)
+                    seen.origin
+                        .whole_output_marker(run.end - run.start, handle, src)
                 } else {
-                    o.marker(run.end - run.start, handle)
+                    seen.origin.marker(run.end - run.start, handle, src)
                 }
             };
 
@@ -561,9 +667,9 @@ impl<'a> Ledger<'a> {
             // payload above: does this run save more than the marker replacing
             // it costs. The marker is rendered rather than estimated, so the
             // test cannot drift from the string it is weighing (#450).
-            let long_enough = run.seen.is_some_and(|o| {
-                let marker = render(o, &"0".repeat(HANDLE_LEN)).len();
-                body.len() >= marker + o.min_gain()
+            let long_enough = run.seen.as_ref().is_some_and(|seen| {
+                let marker = render(seen, &"0".repeat(HANDLE_LEN)).len();
+                body.len() >= marker + seen.origin.min_gain()
             });
 
             // A handle is only offered for content that is provably retrievable.
@@ -578,10 +684,10 @@ impl<'a> Ledger<'a> {
                 .then(|| self.store.store_rewind(&body))
                 .flatten()
                 .filter(|handle| !self.store.take_owed_delivery(handle))
-                .zip(run.seen)
+                .zip(run.seen.as_ref())
             {
-                Some((handle, origin)) => {
-                    out.push_str(&render(origin, &handle));
+                Some((handle, seen)) => {
+                    out.push_str(&render(seen, &handle));
                     // The run carried its own terminator, so the marker needs one
                     // only when the text it replaced ended a line. A run at the
                     // very end of an output with no trailing newline does not.
@@ -609,7 +715,7 @@ impl<'a> Ledger<'a> {
 /// Grouping by `Option<Origin>` rather than by a boolean is what stops a session
 /// run and a project run merging into one marker, which would have to pick one of
 /// two claims for content that is half and half.
-fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Origin>) -> Vec<Run> {
+fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Seen>) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::new();
     for (i, h) in hashes.iter().enumerate() {
         let seen = origin_of(h);
@@ -1156,6 +1262,102 @@ mod tests {
         );
     }
 
+    /// Review of #625. A source is a raw command and 46.9% of recorded commands
+    /// carry a newline, so interpolating one unfiltered lets the command split
+    /// the marker into lines of its own. A marker is a single line, and the count
+    /// of markers standing above the first surviving line is derived from that
+    /// (#573), so the framing is load-bearing rather than cosmetic.
+    #[test]
+    fn a_source_cannot_break_out_of_its_marker() {
+        let nasty = "cat <<EOF\nsecond line\nthird line\nEOF";
+        let marker = Origin::Session.marker(9, &"0".repeat(HANDLE_LEN), Some(nasty));
+        assert_eq!(
+            marker.lines().count(),
+            1,
+            "a multi-line source split the marker: {marker:?}"
+        );
+        assert!(
+            marker.contains("from cat <<EOF") && !marker.contains("second line"),
+            "expected the first line only: {marker:?}"
+        );
+
+        let tabs = Origin::Session.marker(9, &"0".repeat(HANDLE_LEN), Some("go\ttest\t./..."));
+        assert_eq!(tabs.lines().count(), 1, "a tab split the marker: {tabs:?}");
+        assert!(
+            tabs.contains("from go test ./..."),
+            "whitespace was not collapsed: {tabs:?}"
+        );
+    }
+
+    /// #622. Reading file B had a block elided because file A showed it earlier,
+    /// and the marker named neither file. Comparing two files to see whether a
+    /// shared block matches is exactly that case, and the dedup answered it by
+    /// deleting the evidence.
+    ///
+    /// Both halves are asserted, because they trade against each other: the
+    /// clause has to appear when the source differs, and has to stay away when it
+    /// does not. Marker length gates folding, so a clause on every fold would
+    /// cost savings on the common case of re-reading one file.
+    #[test]
+    fn a_fold_says_when_it_is_replacing_another_source() {
+        let (store, _d) = temp_store();
+        // Shaped like the report: a shared block with unique lines around it. A
+        // payload that is *only* the shared block folds whole, which
+        // `MIN_WHOLE_OUTPUT_FOLD` refuses under 1 KB, so that fixture tests the
+        // floor and never reaches the marker.
+        let shared: String = (1..=20)
+            .map(|i| format!("    key_{i:02} = \"value_{i:02}\"\n"))
+            .collect();
+        let file = |name: &str| {
+            let uniq: String = (1..=30)
+                .map(|i| format!("  uniq_{name}_{i:02} = {i}\n"))
+                .collect();
+            format!("name = \"{name}\"\n{shared}{uniq}")
+        };
+        assert!(
+            shared.len() > MIN_LEDGER_RUN_GAIN,
+            "the shared run must be worth folding, or this tests the gain gate"
+        );
+
+        let first = Ledger::new(&store, "s1")
+            .from("charlie.tf")
+            .project(&file("charlie"));
+        assert!(
+            first.is_none(),
+            "nothing has been shown yet, so there is nothing to fold"
+        );
+
+        let cross = Ledger::new(&store, "s1")
+            .from("delta.tf")
+            .project(&file("delta"))
+            .expect("the shared block repeats and is worth a marker");
+        assert!(
+            cross.contains("from charlie.tf"),
+            "a fold drawing on another source did not say so: {cross}"
+        );
+
+        // A fresh scope, so this measures the same-source path and not the
+        // leftovers of the one above. Sized past `MIN_WHOLE_OUTPUT_FOLD`: a
+        // re-read of one file folds the whole payload, which is refused under
+        // 1 KB, and that refusal would pass this assertion for the wrong reason.
+        let charlie = file("charlie");
+        assert!(
+            charlie.len() > MIN_WHOLE_OUTPUT_FOLD,
+            "fixture must clear the whole-output floor, or the same-source arm proves nothing"
+        );
+        Ledger::new(&store, "s2")
+            .from("charlie.tf")
+            .project(&charlie);
+        let same = Ledger::new(&store, "s2")
+            .from("charlie.tf")
+            .project(&charlie)
+            .expect("re-reading one file folds its own repeat");
+        assert!(
+            !same.contains(" from "),
+            "re-reading one file paid for a source clause it did not need: {same}"
+        );
+    }
+
     /// The project scope pays a retrieval the session scope does not, so it
     /// carries its own floor. A run that clears the session bar and not the
     /// project one stays verbatim rather than costing the agent a round trip.
@@ -1169,10 +1371,14 @@ mod tests {
         let text: String = (0..9)
             .map(|i| format!("2026-08-10T00:00:0{i}Z  handler finished request {i}\n"))
             .collect();
-        let session_bar =
-            Origin::Session.marker(9, &"0".repeat(HANDLE_LEN)).len() + Origin::Session.min_gain();
-        let project_bar =
-            Origin::Project.marker(9, &"0".repeat(HANDLE_LEN)).len() + Origin::Project.min_gain();
+        let session_bar = Origin::Session
+            .marker(9, &"0".repeat(HANDLE_LEN), None)
+            .len()
+            + Origin::Session.min_gain();
+        let project_bar = Origin::Project
+            .marker(9, &"0".repeat(HANDLE_LEN), None)
+            .len()
+            + Origin::Project.min_gain();
         assert!(
             text.len() > MIN_LEDGER_INPUT && text.len() >= session_bar,
             "fixture must clear the session bar, or it tests the early return"
@@ -1337,8 +1543,10 @@ mod tests {
         let ledger = Ledger::new(&store, "s1");
         ledger.project(&format!("{run}{}", payload()));
 
-        let bar =
-            Origin::Session.marker(3, &"0".repeat(HANDLE_LEN)).len() + Origin::Session.min_gain();
+        let bar = Origin::Session
+            .marker(3, &"0".repeat(HANDLE_LEN), None)
+            .len()
+            + Origin::Session.min_gain();
         assert!(
             run.len() >= bar,
             "fixture must clear the gain bar ({} vs {bar}), or it tests the old bound",
@@ -1371,8 +1579,10 @@ mod tests {
 
         assert_eq!(handle.len(), HANDLE_LEN);
         assert_eq!(
-            Origin::Session.marker(9, &handle).len(),
-            Origin::Session.marker(9, &"0".repeat(HANDLE_LEN)).len()
+            Origin::Session.marker(9, &handle, None).len(),
+            Origin::Session
+                .marker(9, &"0".repeat(HANDLE_LEN), None)
+                .len()
         );
     }
 
@@ -1435,7 +1645,9 @@ mod tests {
         );
         assert!(
             block('a').len()
-                >= Origin::Session.marker(8, &"0".repeat(HANDLE_LEN)).len()
+                >= Origin::Session
+                    .marker(8, &"0".repeat(HANDLE_LEN), None)
+                    .len()
                     + Origin::Session.min_gain(),
             "each block must be able to fold on its own, or the guard is not what \
              stops it and this test has no teeth"

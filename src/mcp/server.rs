@@ -853,12 +853,13 @@ impl OmniServer {
             Err(_) => return "Error: session lock failed".to_string(),
         };
 
-        let session_id = session.session_id.clone();
         let total_saved = session.estimated_tokens_saved();
         let cmd_count = session.command_count;
 
-        // Query distillations from store
-        let conn_result = self.store.get_recent_distillations(&session_id, limit);
+        // Same reason as `omni_explain_savings`: the id on this side is minted
+        // locally and the rows are keyed on the host's, so filtering by it
+        // reported an empty history for a session that had one (#602).
+        let conn_result = self.store.get_recent_distillations(None, limit);
 
         if conn_result.is_empty() {
             return format!(
@@ -938,18 +939,26 @@ impl OmniServer {
     ) -> String {
         let limit = params.0.limit;
         let limit = limit.unwrap_or(10).min(50) as usize;
-        let session_id = self
-            .session
-            .lock()
-            .ok()
-            .map(|s| s.session_id.clone())
-            .unwrap_or_default();
-        let rows = self.store.get_recent_distillations(&session_id, limit);
+        // Deliberately not filtered by session. `SessionState` mints its own id
+        // and the hook keys its rows on the host's, so filtering here matched
+        // nothing and this tool answered "No recent distillations" for sessions
+        // that had plenty (#602). Recency is what it can honestly offer.
+        let rows = self.store.get_recent_distillations(None, limit);
+        // The ledger writes its own table, so a session whose only compression
+        // was cross-turn folding read back as "nothing happened" while its
+        // markers carried live retrieve handles (#602). This is the tool the docs
+        // point at for judging whether a route paid for itself, and the fold
+        // route is exactly where a marker plus a handle can cost more than the
+        // lines it replaced, so it is the case the tool most needed to see.
+        let folds = self.store.get_recent_ledger_folds(None, limit);
+        if rows.is_empty() && folds.is_empty() {
+            return "No recent distillations or folds recorded.".to_string();
+        }
         if rows.is_empty() {
-            return "No recent distillations found in current session.".to_string();
+            return Self::render_folds(&folds);
         }
         let mut out = format!(
-            "OMNI Savings Explanation (last {} commands):\n\n",
+            "OMNI Savings Explanation (last {} commands recorded):\n\n",
             rows.len()
         );
         for d in &rows {
@@ -966,6 +975,37 @@ impl OmniServer {
             out.push_str(&format!(
                 "- {}: {} → {} bytes ({:.0}% saved)\n  Route: {}{}\n",
                 d.command, d.input_bytes, d.output_bytes, pct, d.route, filter_display
+            ));
+        }
+        if !folds.is_empty() {
+            out.push('\n');
+            out.push_str(&Self::render_folds(&folds));
+        }
+        out
+    }
+
+    /// The fold half of the savings report.
+    ///
+    /// Bytes and lines only, and no command: the ledger keys lines by scope and
+    /// hash, so the bytes a fold replaced may have been shown by a different
+    /// command than the one being answered, and naming the current one would be
+    /// a guess dressed as attribution. That gap is #622.
+    fn render_folds(folds: &[crate::store::sqlite::LedgerFoldRow]) -> String {
+        let lines: usize = folds.iter().map(|f| f.lines).sum();
+        let bytes: usize = folds.iter().map(|f| f.bytes).sum();
+        let mut out = format!(
+            "Cross-turn folds (last {}): {} lines, {} bytes replaced by markers\n\n",
+            folds.len(),
+            lines,
+            bytes
+        );
+        for f in folds {
+            out.push_str(&format!(
+                "- {} lines, {} bytes, {} scope{}\n",
+                f.lines,
+                f.bytes,
+                f.origin,
+                if f.whole_output { ", whole output" } else { "" }
             ));
         }
         out
