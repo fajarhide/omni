@@ -95,11 +95,30 @@ fn distill_status(input: &str) -> String {
     out
 }
 
-fn distill_diff(segments: &[OutputSegment], _input: &str) -> String {
+/// Whether a line is diff payload rather than prose around it.
+fn is_diff_line(line: &str) -> bool {
+    line.starts_with("@@ ")
+        || (line.starts_with('+') && !line.starts_with("+++"))
+        || (line.starts_with('-') && !line.starts_with("---"))
+}
+
+fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
     let mut out = String::new();
-    let mut added = 0;
-    let mut removed = 0;
     let mut files = std::collections::HashSet::new();
+
+    // Counted over the payload, never over what survived the filter below. The
+    // summary labels the diff it replaces, so a line the scorer dropped is still
+    // a line the diff changed, and reporting the surviving count as the diffstat
+    // is a measurement the output cannot support (#616). `git show --numstat`
+    // counts the same lines: body only, both file headers excluded.
+    let added = input
+        .lines()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .count();
+    let removed = input
+        .lines()
+        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+        .count();
 
     for seg in segments {
         if seg.content.starts_with("diff --git") {
@@ -115,32 +134,33 @@ fn distill_diff(segments: &[OutputSegment], _input: &str) -> String {
             continue;
         }
 
-        if seg.tier == SignalTier::Noise {
+        // A hunk is never noise. `is_blank_or_decorative` tiers a block whose
+        // lines hold only `-`, `=`, `*` or `_` as Noise, which is exactly what a
+        // diff removing a rule of `=====` looks like once each line carries its
+        // `-` marker. Skipping the segment dropped the hunk from the output and
+        // from the counts below, so a 1+/5- diff came out as
+        // `git diff: 1 files changed, 0+, 0-` with no hunk at all (#616). The
+        // per-line filter further down already decides what a segment
+        // contributes; the tier only gets to drop a segment carrying no diff.
+        if seg.tier == SignalTier::Noise && !seg.content.lines().any(is_diff_line) {
             continue;
         }
 
         let mut hunk_out = String::new();
-        // Since all hunks contain "@@ -", their tier is Important (0.7).
-        // To achieve >60% reduction, we only keep context lines if specifically boosted by session context (context_score > 0).
+        // Context lines are kept only when session context boosted the segment,
+        // which is what buys the >60% reduction. The old note here claimed a hunk
+        // is always Important because it contains "@@ -"; the tier is assigned by
+        // `classify_block` over the whole block and a decorative one comes back
+        // Noise, which is the assumption #616 was built on.
         let keep_context = seg.context_score > 0.0 || seg.tier == SignalTier::Critical;
 
         for line in seg.content.lines() {
-            if line.starts_with("@@ ") {
-                hunk_out.push_str(line);
-                hunk_out.push('\n');
-            } else if line.starts_with('+') && !line.starts_with("+++") {
-                added += 1;
-                hunk_out.push_str(line);
-                hunk_out.push('\n');
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                removed += 1;
-                hunk_out.push_str(line);
-                hunk_out.push('\n');
-            } else if keep_context
-                && !line.starts_with("+++")
-                && !line.starts_with("---")
-                && !line.starts_with("index")
-            {
+            let keep = is_diff_line(line)
+                || (keep_context
+                    && !line.starts_with("+++")
+                    && !line.starts_with("---")
+                    && !line.starts_with("index"));
+            if keep {
                 hunk_out.push_str(line);
                 hunk_out.push('\n');
             }
@@ -362,6 +382,56 @@ Date:   Mon Mar 20 10:00:00 2026 +0700
         assert!(
             !out.contains("this body line must not survive"),
             "body leaked as subject: {out:?}"
+        );
+    }
+
+    /// #616. The summary is a claim about the diff, so it has to be measured
+    /// from the diff. It used to count the `+`/`-` lines that survived the
+    /// filter, and a hunk whose removed lines hold only rule characters is
+    /// tiered `Noise` by `is_blank_or_decorative` and was skipped before either
+    /// the emit or the count. A 1+/5- diff came back as
+    /// `git diff: 1 files changed, 0+, 0-` with no hunk under it, which reads as
+    /// a commit that changed nothing.
+    ///
+    /// Scored through the real scorer on purpose: with a hand-built `Important`
+    /// segment the tier that causes this never occurs and the test passes either
+    /// way.
+    #[test]
+    fn diffstat_counts_the_diff_and_a_decorative_hunk_survives() {
+        let input = "\
+diff --git a/docs/banner.txt b/docs/banner.txt
+index 1111111..2222222 100644
+--- a/docs/banner.txt
++++ b/docs/banner.txt
+@@ -1,7 +1,2 @@
+ title
+-=====
+-=====
+-=====
+-=====
+-=====
++short
+";
+        let cmd = "git show abc1234 -- docs/banner.txt";
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let segments =
+            crate::pipeline::scorer::score_segments(input, profile.segmentation, None, cmd);
+        assert!(
+            segments.iter().any(|s| s.tier == SignalTier::Noise),
+            "fixture no longer produces the Noise tier this guards: {:?}",
+            segments.iter().map(|s| &s.tier).collect::<Vec<_>>()
+        );
+
+        let out = distill_diff(&segments, input);
+
+        assert!(
+            out.contains("1 files changed, 1+, 5-"),
+            "diffstat does not match the payload: {out:?}"
+        );
+        assert_eq!(
+            out.lines().filter(|l| *l == "-=====").count(),
+            5,
+            "the removed hunk did not survive: {out:?}"
         );
     }
 }
