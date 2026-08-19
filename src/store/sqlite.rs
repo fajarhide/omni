@@ -1413,6 +1413,42 @@ impl SqliteBackend {
         }
     }
 
+    /// Recent cross-turn folds for a session, which `distillations` never holds.
+    ///
+    /// The ledger writes its own table, and `omni_explain_savings` read only
+    /// `distillations`, so a route that fired and handed back a live retrieve
+    /// handle was reported as "No recent distillations found in current session"
+    /// (#602). Counted on the machine that confirmed it: 936 rows in
+    /// `ledger_folds`, none of them visible to the tool.
+    ///
+    /// The scope key is `session` or `session/agent` (`ledger::scope_for`), so a
+    /// lookup that matches only the bare session id misses every agent-scoped
+    /// fold, which on this corpus is all of them.
+    pub fn get_recent_ledger_folds(&self, session_id: &str, limit: usize) -> Vec<LedgerFoldRow> {
+        let Ok(conn) = self.pool.get() else {
+            return vec![];
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT origin, lines, bytes, whole_output
+             FROM ledger_folds
+             WHERE scope = ?1 OR scope LIKE ?1 || '/%'
+             ORDER BY ts DESC, id DESC LIMIT ?2",
+        ) else {
+            return vec![];
+        };
+        match stmt.query_map(params![session_id, limit as i64], |row| {
+            Ok(LedgerFoldRow {
+                origin: row.get(0)?,
+                lines: row.get::<_, i64>(1)? as usize,
+                bytes: row.get::<_, i64>(2)? as usize,
+                whole_output: row.get::<_, i64>(3)? != 0,
+            })
+        }) {
+            Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
     pub fn delete_session(&self, id: &str) -> Result<()> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
@@ -2677,6 +2713,20 @@ pub struct DistillationRow {
     pub filter_name: String,
 }
 
+/// One cross-turn fold, as `omni_explain_savings` needs to report it (#602).
+///
+/// No command column, because a fold is not attributed to one: the ledger keys
+/// lines by scope and hash, so the bytes it replaced may have been shown by a
+/// different command than the one being answered. Saying which would need a
+/// source per line, which the table does not carry.
+#[derive(Debug)]
+pub struct LedgerFoldRow {
+    pub origin: String,
+    pub lines: usize,
+    pub bytes: usize,
+    pub whole_output: bool,
+}
+
 /// One filter's re-run comparison: distilled output against raw output (#109).
 ///
 /// `Passthrough` rows are the control arm, the agent read the original bytes -
@@ -3163,6 +3213,46 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #602. `omni_explain_savings` reported "No recent distillations" for a
+    /// session whose only compression was cross-turn folding, because folds go
+    /// to `ledger_folds` and the tool read `distillations`.
+    ///
+    /// The scope key is what makes this easy to get wrong: `ledger::scope_for`
+    /// writes `session/agent` whenever an agent is known, which on the corpus
+    /// that confirmed the bug is every row. A lookup matching only the bare
+    /// session id finds nothing and looks exactly like the bug it fixes.
+    #[test]
+    fn folds_are_visible_under_both_scope_forms() {
+        let (store, _dir) = get_temp_store();
+        let fold = |lines| FoldRecord {
+            source_agent: "claude_code".to_string(),
+            origin: "session",
+            lines,
+            bytes: lines * 40,
+            whole_output: false,
+            payload_bytes: 4096,
+        };
+        store.ledger_record_folds("sess-a", "claude_code", &[fold(3)]);
+        store.ledger_record_folds("sess-b/claude_code", "claude_code", &[fold(7)]);
+
+        let bare = store.get_recent_ledger_folds("sess-a", 10);
+        assert_eq!(bare.len(), 1, "bare session scope not found: {bare:?}");
+        assert_eq!(bare[0].lines, 3);
+
+        let agent_scoped = store.get_recent_ledger_folds("sess-b", 10);
+        assert_eq!(
+            agent_scoped.len(),
+            1,
+            "agent-scoped fold invisible to a session lookup, which is the #602 shape"
+        );
+        assert_eq!(agent_scoped[0].lines, 7);
+
+        assert!(
+            store.get_recent_ledger_folds("sess-c", 10).is_empty(),
+            "a session with no folds must not borrow another's"
+        );
     }
 
     /// #441. The largest population in the corpus was one undifferentiated
