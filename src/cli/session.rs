@@ -1,6 +1,5 @@
 // Safety: String indexing uses session IDs (hex/ASCII) and ASCII delimiter
 // positions from find()/rfind() which are always valid char boundaries.
-#![allow(clippy::string_slice)]
 
 use crate::store::sqlite::Store;
 use crate::store::transcript;
@@ -118,7 +117,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             };
             let task = s.inferred_task.as_deref().unwrap_or("not detected");
             let sid = if s.session_id.len() > 8 {
-                &s.session_id[..8]
+                crate::util::text::safe_slice(&s.session_id, 8)
             } else {
                 &s.session_id
             };
@@ -191,7 +190,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             .unwrap_or_else(|| "unknown time".to_string());
 
         let sid = if state.session_id.len() > 8 {
-            &state.session_id[..8]
+            crate::util::text::safe_slice(&state.session_id, 8)
         } else {
             &state.session_id
         };
@@ -257,7 +256,7 @@ pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
             for err in state.active_errors.iter().take(3) {
                 let e = err.replace('\n', " ");
                 let clean = if e.len() > 80 {
-                    format!("{}...", &e[..77])
+                    format!("{}...", crate::util::text::safe_slice(&e, 77))
                 } else {
                     e
                 };
@@ -283,7 +282,7 @@ fn run_resume() -> anyhow::Result<()> {
             super::print_rule();
 
             let sid = if t.session_id.len() > 8 {
-                &t.session_id[..8]
+                crate::util::text::safe_slice(&t.session_id, 8)
             } else {
                 &t.session_id
             };
@@ -317,7 +316,7 @@ fn run_resume() -> anyhow::Result<()> {
             for entry in t.entries.iter().filter(|e| e.is_pending()) {
                 let kind = format!("{:?}", entry.kind);
                 let payload_preview = if entry.payload.len() > 60 {
-                    format!("{}...", &entry.payload[..57])
+                    format!("{}...", crate::util::text::safe_slice(&entry.payload, 57))
                 } else {
                     entry.payload.clone()
                 };
@@ -367,7 +366,7 @@ fn run_transcript() -> anyhow::Result<()> {
 
     let t = &recent[0];
     let sid = if t.session_id.len() > 8 {
-        &t.session_id[..8]
+        crate::util::text::safe_slice(&t.session_id, 8)
     } else {
         &t.session_id
     };
@@ -413,7 +412,7 @@ fn run_transcript() -> anyhow::Result<()> {
             .unwrap_or_else(|| "??".to_string());
 
         let payload_preview = if entry.payload.len() > 50 {
-            format!("{}...", &entry.payload[..47])
+            format!("{}...", crate::util::text::safe_slice(&entry.payload, 47))
         } else {
             entry.payload.clone()
         }
@@ -578,7 +577,7 @@ fn run_health(store: &Store) -> anyhow::Result<()> {
     } else {
         for cmd in state.last_commands.iter().take(5) {
             let display = if cmd.len() > 60 {
-                format!("{}...", &cmd[..57])
+                format!("{}...", crate::util::text::safe_slice(cmd, 57))
             } else {
                 cmd.clone()
             };
@@ -1027,10 +1026,13 @@ mod tests {
             ctx.push_str(&format!(" Hot: {}.", hot_str));
         }
         if err != "none" {
-            ctx.push_str(&format!(" Error: {}", &err[..err.len().min(80)]));
+            ctx.push_str(&format!(
+                " Error: {}",
+                crate::util::text::safe_slice(err, 80)
+            ));
         }
         if ctx.len() > 200 {
-            ctx.truncate(197);
+            crate::util::text::safe_truncate(&mut ctx, 197);
             ctx.push_str("...");
         }
 

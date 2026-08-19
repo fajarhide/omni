@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use crate::store::sqlite::Store;
 use anyhow::{Context, Result};
@@ -199,7 +198,10 @@ fn shorten_command(cmd: &str, max_len: usize) -> String {
     if short.len() <= max_len {
         short
     } else {
-        format!("{}...", &short[..max_len.saturating_sub(3)])
+        format!(
+            "{}...",
+            crate::util::text::safe_slice(&short, max_len.saturating_sub(3))
+        )
     }
 }
 

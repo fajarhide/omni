@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use crate::pipeline::scorer::score_segments;
 use crate::pipeline::{SessionState, SignalTier};
@@ -304,7 +303,7 @@ impl OmniServer {
         let goal_hash = {
             let mut hasher = Sha256::new();
             hasher.update(params.0.goal.as_bytes());
-            hex::encode(hasher.finalize())[..16].to_string()
+            crate::util::text::safe_slice(&hex::encode(hasher.finalize()), 16).to_string()
         };
 
         match params.0.action.as_str() {
@@ -587,7 +586,7 @@ impl OmniServer {
                     s.active_errors.len(),
                     s.active_errors
                         .first()
-                        .map(|e| e[..e.len().min(80)].to_string())
+                        .map(|e| crate::util::text::safe_slice(e, 80).to_string())
                         .unwrap_or_default()
                 ));
             }
@@ -610,7 +609,7 @@ impl OmniServer {
                 ));
                 let mut pattern_preview = p.pattern_text.replace('\n', " ");
                 if pattern_preview.len() > 100 {
-                    pattern_preview.truncate(97);
+                    crate::util::text::safe_truncate(&mut pattern_preview, 97);
                     pattern_preview.push_str("...");
                 }
                 report.push_str(&format!("  Pattern: {}\n\n", pattern_preview));
@@ -792,7 +791,7 @@ impl OmniServer {
                     goal_str, last_session_str, task, hot_str, err
                 );
                 if msg.len() > 400 {
-                    msg.truncate(397);
+                    crate::util::text::safe_truncate(&mut msg, 397);
                     msg.push_str("...");
                 }
                 msg
@@ -881,7 +880,7 @@ impl OmniServer {
             out.push_str(&format!(
                 "  {:2}. {:<40} {} → {} bytes  {:.0}%  {}\n",
                 i + 1,
-                &row.command[..row.command.len().min(40)],
+                crate::util::text::safe_slice(&row.command, 40),
                 row.input_bytes,
                 row.output_bytes,
                 savings_pct,
@@ -1267,7 +1266,10 @@ impl OmniServer {
         } else {
             for err in &session.active_errors {
                 let clean = err.replace('\n', " ");
-                out.push_str(&format!("- {}\n", &clean[..clean.len().min(120)]));
+                out.push_str(&format!(
+                    "- {}\n",
+                    crate::util::text::safe_slice(&clean, 120)
+                ));
             }
         }
 
@@ -1304,7 +1306,7 @@ impl OmniServer {
         // Recent Commands
         out.push_str("\n## Recent Commands\n");
         for cmd in session.last_commands.iter().take(10) {
-            out.push_str(&format!("- `{}`\n", &cmd[..cmd.len().min(80)]));
+            out.push_str(&format!("- `{}`\n", crate::util::text::safe_slice(cmd, 80)));
         }
 
         // Context Pressure
