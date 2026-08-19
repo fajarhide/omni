@@ -95,11 +95,39 @@ fn distill_status(input: &str) -> String {
     out
 }
 
-/// Whether a line is diff payload rather than prose around it.
-fn is_diff_line(line: &str) -> bool {
-    line.starts_with("@@ ")
-        || (line.starts_with('+') && !line.starts_with("+++"))
-        || (line.starts_with('-') && !line.starts_with("---"))
+/// The diffstat, counted the way `git show --numstat` counts it: `+` and `-`
+/// lines inside a hunk, and nothing outside one.
+///
+/// Position is what separates a diff line from prose, not the leading character.
+/// `git show --format=%B -p` prints the commit body unindented, so a body line
+/// opening with `-` reads as a removal, and counting those turned a 60+/60- diff
+/// into `61+, 62-` (review of #618). Being inside a hunk also excludes the
+/// `---`/`+++` file headers by position, which matters: a removed line whose own
+/// text starts with `--` renders as `--- …`, so testing the prefix would have
+/// dropped a real removal.
+fn count_hunk_lines(input: &str) -> (usize, usize) {
+    let mut in_hunk = false;
+    let (mut added, mut removed) = (0, 0);
+    for line in input.lines() {
+        if line.starts_with("diff --git") {
+            in_hunk = false;
+        } else if line.starts_with("@@ ") {
+            in_hunk = true;
+        } else if in_hunk {
+            if line.starts_with('+') {
+                added += 1;
+            } else if line.starts_with('-') {
+                removed += 1;
+            }
+        }
+    }
+    (added, removed)
+}
+
+/// Whether a segment carries a hunk, which is what makes it diff rather than the
+/// prose around one.
+fn holds_a_hunk(content: &str) -> bool {
+    content.lines().any(|l| l.starts_with("@@ "))
 }
 
 fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
@@ -109,16 +137,8 @@ fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
     // Counted over the payload, never over what survived the filter below. The
     // summary labels the diff it replaces, so a line the scorer dropped is still
     // a line the diff changed, and reporting the surviving count as the diffstat
-    // is a measurement the output cannot support (#616). `git show --numstat`
-    // counts the same lines: body only, both file headers excluded.
-    let added = input
-        .lines()
-        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
-        .count();
-    let removed = input
-        .lines()
-        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
-        .count();
+    // is a measurement the output cannot support (#616).
+    let (added, removed) = count_hunk_lines(input);
 
     for seg in segments {
         if seg.content.starts_with("diff --git") {
@@ -142,7 +162,7 @@ fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
         // `git diff: 1 files changed, 0+, 0-` with no hunk at all (#616). The
         // per-line filter further down already decides what a segment
         // contributes; the tier only gets to drop a segment carrying no diff.
-        if seg.tier == SignalTier::Noise && !seg.content.lines().any(is_diff_line) {
+        if seg.tier == SignalTier::Noise && !holds_a_hunk(&seg.content) {
             continue;
         }
 
@@ -154,8 +174,17 @@ fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
         // Noise, which is the assumption #616 was built on.
         let keep_context = seg.context_score > 0.0 || seg.tier == SignalTier::Critical;
 
+        // Same position rule the counts use, so what is shown and what is counted
+        // cannot disagree. A removed line whose own text starts with `--` renders
+        // as `--- …`, and the prefix test that used to stand here dropped it from
+        // the output while the summary still counted it (review of #618).
+        let mut in_hunk = false;
         for line in seg.content.lines() {
-            let keep = is_diff_line(line)
+            if line.starts_with("@@ ") {
+                in_hunk = true;
+            }
+            let keep = line.starts_with("@@ ")
+                || (in_hunk && (line.starts_with('+') || line.starts_with('-')))
                 || (keep_context
                     && !line.starts_with("+++")
                     && !line.starts_with("---")
@@ -432,6 +461,50 @@ index 1111111..2222222 100644
             out.lines().filter(|l| *l == "-=====").count(),
             5,
             "the removed hunk did not survive: {out:?}"
+        );
+    }
+
+    /// Review of #618. Position decides whether a line is diff payload, not its
+    /// leading character. `git show --format=%B -p` prints the commit body
+    /// unindented, so a body line opening with `-` reads as a removal; counting
+    /// those turned a 60+/60- diff into `61+, 62-`.
+    ///
+    /// The hunk here also removes a line whose own text starts with `--`, which
+    /// git renders as `--- comment`. Excluding it by prefix, the obvious way to
+    /// keep the file headers out, would drop a real removal instead.
+    #[test]
+    fn diffstat_counts_hunk_lines_and_not_the_prose_around_them() {
+        let input = "\
+fix: rewrite the table
+
+- dropped the legacy branch
+- dropped the second legacy branch
++ added nothing, this is prose
+
+diff --git a/src/table.rs b/src/table.rs
+index 1111111..2222222 100644
+--- a/src/table.rs
++++ b/src/table.rs
+@@ -1,3 +1,2 @@
+ use std::fmt;
+--- comment
+-let x = 1;
++let x = 2;
+";
+        let cmd = "git show --format=%B -p abc1234 -- src/table.rs";
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let segments =
+            crate::pipeline::scorer::score_segments(input, profile.segmentation, None, cmd);
+        let out = distill_diff(&segments, input);
+
+        assert!(
+            out.contains("1 files changed, 1+, 2-"),
+            "prose leaked into the diffstat: {out:?}"
+        );
+        assert!(
+            out.contains("--- comment"),
+            "a removal whose text starts with `--` was dropped from the output \
+             while the summary counted it: {out:?}"
         );
     }
 }

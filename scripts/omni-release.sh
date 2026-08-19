@@ -91,8 +91,17 @@ if [ -x tests/smoke_test.sh ]; then
     # the release path is missing (#597).
     echo "   Building release binary..."
     cargo build --release > /tmp/omni-build 2>&1 || { cat /tmp/omni-build && fail "release build failed"; }
+    # Ask cargo where it put the binary rather than assuming ./target. With
+    # CARGO_TARGET_DIR or a build.target-dir in .cargo/config.toml, the build
+    # lands elsewhere and a hard-coded path re-opens exactly the divergence this
+    # step closes: the smoke test would read a stale ./target/release/omni, or
+    # fall through to ./target/debug/omni and say nothing about it.
+    TARGET_DIR=$(cargo metadata --format-version 1 --no-deps --offline 2>/dev/null \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+    [ -n "$TARGET_DIR" ] || TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+    [ -x "$TARGET_DIR/release/omni" ] || fail "release binary not at $TARGET_DIR/release/omni after build"
     echo "   Running smoke tests..."
-    bash tests/smoke_test.sh ./target/release/omni > /tmp/omni-smoke 2>&1 || { cat /tmp/omni-smoke && fail "smoke test failed"; }
+    bash tests/smoke_test.sh "$TARGET_DIR/release/omni" > /tmp/omni-smoke 2>&1 || { cat /tmp/omni-smoke && fail "smoke test failed"; }
     ok "Smoke test: all pass"
 fi
 
