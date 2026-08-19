@@ -429,6 +429,10 @@ fn fold_cross_turn(
         .unwrap_or_else(|_| "unknown".to_string());
     let folded = crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
+        // What this payload is answering, so a fold drawing on a different
+        // command can say so instead of silently replacing one file's block with
+        // another's (#622). For a `Read` this is the path, for Bash the command.
+        .from(normalized.command.as_str())
         .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
         .project_reporting_shift(&text);
 

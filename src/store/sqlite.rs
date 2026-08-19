@@ -488,6 +488,10 @@ impl SqliteBackend {
                 line_hash TEXT NOT NULL,
                 ts        INTEGER NOT NULL,
                 agent_id  TEXT NOT NULL DEFAULT 'unknown',
+                -- What command first showed this line, so a fold can say whose
+                -- bytes it is replacing (#622). Empty means unrecorded, which
+                -- suppresses the marker's source clause rather than guessing.
+                source    TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (scope, line_hash)
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger_lines(ts);
@@ -833,6 +837,21 @@ impl SqliteBackend {
         // is honest about rows written before anyone was recorded.
         let _ = conn.execute(
             "ALTER TABLE ledger_lines ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'unknown'",
+            [],
+        );
+        // #622. What command first showed this line. The table keyed lines by
+        // (scope, hash) alone, so a fold could replace a block in file B with one
+        // shown from file A and the marker had no way to say so. Reading two
+        // files to check a shared block matches is exactly that case, and the
+        // dedup answered it by deleting the evidence.
+        //
+        // It is also what makes the frequency measurable: nothing in the corpus
+        // could say how often a fold draws on a different source, because the
+        // column did not exist. Same reason `ledger_folds` was added by #533.
+        // Rows written before this keep the empty default, which reads as
+        // "unrecorded" and suppresses the marker clause rather than guessing.
+        let _ = conn.execute(
+            "ALTER TABLE ledger_lines ADD COLUMN source TEXT NOT NULL DEFAULT ''",
             [],
         );
         // #212: `output_bytes` is what the distiller returned, which is not the
@@ -1869,7 +1888,7 @@ impl SqliteBackend {
         &self,
         scope: &str,
         hashes: &[String],
-    ) -> std::collections::HashMap<String, String> {
+    ) -> std::collections::HashMap<String, SeenLine> {
         let mut found = std::collections::HashMap::new();
         let Ok(conn) = self.pool.get() else {
             return found;
@@ -1887,7 +1906,7 @@ impl SqliteBackend {
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT line_hash, agent_id FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
+                "SELECT line_hash, agent_id, source FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
             );
             let Ok(mut stmt) = conn.prepare_cached(&sql) else {
                 continue;
@@ -1896,7 +1915,13 @@ impl SqliteBackend {
                 .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
                 .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    SeenLine {
+                        agent: r.get::<_, String>(1)?,
+                        source: r.get::<_, String>(2)?,
+                    },
+                ))
             }) {
                 found.extend(rows.flatten());
             }
@@ -1915,7 +1940,7 @@ impl SqliteBackend {
     /// One transaction and one cached statement for the whole batch: this is the
     /// loop where `prepare_cached` actually pays, unlike the one-shot statements
     /// a hook process runs once each.
-    pub fn ledger_record(&self, scope: &str, hashes: &[String], agent_id: &str) {
+    pub fn ledger_record(&self, scope: &str, hashes: &[String], agent_id: &str, source: &str) {
         let Ok(mut conn) = self.pool.get() else {
             return;
         };
@@ -1925,13 +1950,16 @@ impl SqliteBackend {
         };
         {
             let Ok(mut stmt) = tx.prepare_cached(
-                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             ) else {
                 return;
             };
+            // `INSERT OR IGNORE` keeps the first writer, so `source` names the
+            // command that actually showed the line rather than the last one to
+            // repeat it. That is the property the marker's claim rests on (#622).
             for h in hashes {
-                let _ = stmt.execute(params![scope, h, ts, agent_id]);
+                let _ = stmt.execute(params![scope, h, ts, agent_id, source]);
             }
         }
         let _ = tx.commit();
@@ -2719,6 +2747,17 @@ pub struct DistillationRow {
 /// lines by scope and hash, so the bytes it replaced may have been shown by a
 /// different command than the one being answered. Saying which would need a
 /// source per line, which the table does not carry.
+/// What the ledger remembers about a line it has shown before.
+///
+/// `source` is the command that showed it first, and is empty for rows written
+/// before #622 added the column. Empty means unrecorded, which suppresses the
+/// marker's source clause rather than guessing at one.
+#[derive(Debug, Clone)]
+pub struct SeenLine {
+    pub agent: String,
+    pub source: String,
+}
+
 #[derive(Debug)]
 pub struct LedgerFoldRow {
     pub origin: String,
