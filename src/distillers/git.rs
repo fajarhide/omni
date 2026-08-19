@@ -95,29 +95,92 @@ fn distill_status(input: &str) -> String {
     out
 }
 
-/// The diffstat, counted the way `git show --numstat` counts it: `+` and `-`
-/// lines inside a hunk, and nothing outside one.
+/// The old and new line counts a hunk header declares, from `@@ -a,b +c,d @@`.
+/// A missing count means one line, which is how git writes a single-line hunk.
+fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
+    let body = line.strip_prefix("@@ ")?;
+    let (ranges, _) = body.split_once(" @@")?;
+    let (old, new) = ranges.split_once(' ')?;
+    let count = |r: &str| -> Option<usize> {
+        match r.get(1..)?.split_once(',') {
+            Some((_, n)) => n.parse().ok(),
+            None => Some(1),
+        }
+    };
+    Some((count(old)?, count(new)?))
+}
+
+/// Walks a payload line by line and says which lines are hunk body.
 ///
-/// Position is what separates a diff line from prose, not the leading character.
-/// `git show --format=%B -p` prints the commit body unindented, so a body line
-/// opening with `-` reads as a removal, and counting those turned a 60+/60- diff
-/// into `61+, 62-` (review of #618). Being inside a hunk also excludes the
-/// `---`/`+++` file headers by position, which matters: a removed line whose own
-/// text starts with `--` renders as `--- …`, so testing the prefix would have
-/// dropped a real removal.
+/// Position is what separates diff payload from the prose around it, not the
+/// leading character, and the hunk header is the only thing that says where the
+/// body ends. Two review findings on #618 are the same mistake at different
+/// distances: `git show --format=%B -p` prints the commit body unindented, so a
+/// bullet opening with `-` read as a removal; and running to the next
+/// `diff --git` instead let a *later* commit's message in `git log -p` be read as
+/// patch content, which is what the declared counts fix.
+///
+/// Deciding by position also settles a case the obvious prefix test gets wrong in
+/// the other direction: a removed line whose own text starts with `--` renders as
+/// `--- …`, so excluding `---` would drop a real removal.
+#[derive(Default)]
+struct HunkWalk {
+    old_left: usize,
+    new_left: usize,
+}
+
+impl HunkWalk {
+    /// Feeds one line, returning whether it is inside a hunk body. A header is
+    /// not body, so it returns false for one.
+    fn step(&mut self, line: &str) -> bool {
+        if let Some((old, new)) = parse_hunk_header(line) {
+            self.old_left = old;
+            self.new_left = new;
+            return false;
+        }
+        if self.old_left == 0 && self.new_left == 0 {
+            return false;
+        }
+        match line.as_bytes().first() {
+            Some(b'+') => {
+                self.new_left = self.new_left.saturating_sub(1);
+                true
+            }
+            Some(b'-') => {
+                self.old_left = self.old_left.saturating_sub(1);
+                true
+            }
+            // `\ No newline at end of file` annotates the line above it and is
+            // not itself a line of either side, so it spends no budget.
+            Some(b'\\') => true,
+            // A context line, and an empty one counts too: git writes it as a
+            // lone space, which anything that strips trailing whitespace turns
+            // into "". Treating that as the end of the hunk would undercount the
+            // rest of it, which is the failure this whole function exists to stop.
+            Some(b' ') | None => {
+                self.old_left = self.old_left.saturating_sub(1);
+                self.new_left = self.new_left.saturating_sub(1);
+                true
+            }
+            _ => {
+                self.old_left = 0;
+                self.new_left = 0;
+                false
+            }
+        }
+    }
+}
+
+/// The diffstat, counted the way `git show --numstat` counts it.
 fn count_hunk_lines(input: &str) -> (usize, usize) {
-    let mut in_hunk = false;
+    let mut walk = HunkWalk::default();
     let (mut added, mut removed) = (0, 0);
     for line in input.lines() {
-        if line.starts_with("diff --git") {
-            in_hunk = false;
-        } else if line.starts_with("@@ ") {
-            in_hunk = true;
-        } else if in_hunk {
-            if line.starts_with('+') {
-                added += 1;
-            } else if line.starts_with('-') {
-                removed += 1;
+        if walk.step(line) {
+            match line.as_bytes().first() {
+                Some(b'+') => added += 1,
+                Some(b'-') => removed += 1,
+                _ => {}
             }
         }
     }
@@ -174,17 +237,13 @@ fn distill_diff(segments: &[OutputSegment], input: &str) -> String {
         // Noise, which is the assumption #616 was built on.
         let keep_context = seg.context_score > 0.0 || seg.tier == SignalTier::Critical;
 
-        // Same position rule the counts use, so what is shown and what is counted
-        // cannot disagree. A removed line whose own text starts with `--` renders
-        // as `--- …`, and the prefix test that used to stand here dropped it from
-        // the output while the summary still counted it (review of #618).
-        let mut in_hunk = false;
+        // The same walk the counts use, so what is shown and what is counted
+        // cannot disagree.
+        let mut walk = HunkWalk::default();
         for line in seg.content.lines() {
-            if line.starts_with("@@ ") {
-                in_hunk = true;
-            }
+            let in_body = walk.step(line);
             let keep = line.starts_with("@@ ")
-                || (in_hunk && (line.starts_with('+') || line.starts_with('-')))
+                || (in_body && (line.starts_with('+') || line.starts_with('-')))
                 || (keep_context
                     && !line.starts_with("+++")
                     && !line.starts_with("---")
@@ -506,5 +565,56 @@ index 1111111..2222222 100644
             "a removal whose text starts with `--` was dropped from the output \
              while the summary counted it: {out:?}"
         );
+    }
+
+    /// Second review pass on #618. A hunk ends where its own header says it does,
+    /// not at the next `diff --git`. `git log --format=%B -p` puts the next
+    /// commit's message straight after the previous commit's last hunk, so
+    /// running to the next file header read that message as patch content: two
+    /// 1+/1- commits came out as `2+, 3-` because of three prose bullets.
+    #[test]
+    fn a_later_commit_message_is_not_counted_as_patch() {
+        let input = "\
+chore: plain message, no bullets
+
+diff --git a/big.txt b/big.txt
+index 1111111..2222222 100644
+--- a/big.txt
++++ b/big.txt
+@@ -1 +1 @@
+-one
++two
+fix: rewrite the table
+
+- dropped the legacy branch
+- dropped the second legacy branch
++ added nothing, this is prose
+
+diff --git a/big.txt b/big.txt
+index 3333333..1111111 100644
+--- a/big.txt
++++ b/big.txt
+@@ -1 +1 @@
+-zero
++one
+";
+        let cmd = "git log --format=%B -p -2 -- big.txt";
+        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        let segments =
+            crate::pipeline::scorer::score_segments(input, profile.segmentation, None, cmd);
+        let out = distill_diff(&segments, input);
+
+        assert!(
+            out.contains("2+, 2-"),
+            "a later commit's message was counted as patch content: {out:?}"
+        );
+    }
+
+    #[test]
+    fn hunk_header_counts_default_to_one_line() {
+        assert_eq!(parse_hunk_header("@@ -1,3 +1,2 @@"), Some((3, 2)));
+        assert_eq!(parse_hunk_header("@@ -1 +1 @@"), Some((1, 1)));
+        assert_eq!(parse_hunk_header("@@ -27,6 +27,7 @@ image:"), Some((6, 7)));
+        assert_eq!(parse_hunk_header("-not a header"), None);
     }
 }
