@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use anyhow::Result;
 use colored::Colorize;
@@ -796,6 +795,13 @@ fn detect_sibling_command() -> Option<String> {
     None
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find("-c ")` plus that needle's three bytes, and `rfind(['&', ';'])` plus
+/// one, both ASCII.
+#[allow(clippy::string_slice)]
 fn extract_command_from_pipeline(line: &str) -> Option<String> {
     // Split by pipe and find the segment immediately before "omni"
     let pipe_parts: Vec<&str> = line.split('|').collect();

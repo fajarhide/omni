@@ -1,5 +1,4 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
-#![allow(clippy::string_slice)]
 
 use crate::pipeline::SignalTier;
 use crate::pipeline::scorer::score_segments;
@@ -17,6 +16,13 @@ pub enum OmniQLQuery {
 }
 
 // Parser
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// The one fixed index is guarded by `get(..12)`, which answers None on a
+/// non-boundary instead of panicking.
+#[allow(clippy::string_slice)]
 #[allow(clippy::collapsible_if)]
 pub fn parse_query(q: &str) -> Option<OmniQLQuery> {
     let q_trimmed = q.trim();
@@ -35,7 +41,14 @@ pub fn parse_query(q: &str) -> Option<OmniQLQuery> {
             return Some(OmniQLQuery::WarningsFromTool(tool));
         }
     } else if q_lower.starts_with("context for ") {
-        let file = if q_trimmed.to_lowercase().starts_with("context for ") {
+        // The guard used to test `to_lowercase()` and then slice the *original*
+        // at a hard-coded 12. Lowercasing can change a string's byte length, so
+        // the two are not the same offset and the slice could land inside a
+        // character. `get` answers None on a non-boundary instead of panicking,
+        // which makes this safe by construction rather than by argument (#621).
+        let file = if let Some(prefix) = q_trimmed.get(..12)
+            && prefix.eq_ignore_ascii_case("context for ")
+        {
             q_trimmed[12..].trim().to_string()
         } else {
             return None;

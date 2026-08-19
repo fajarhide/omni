@@ -1,6 +1,5 @@
 // Safety: All string indexing uses positions from find()/rfind() on ASCII
 // delimiters (':', '(', '/', ' ') which always return valid char boundaries.
-#![allow(clippy::string_slice)]
 
 use crate::distillers::Distiller;
 use crate::pipeline::{OutputSegment, SignalTier};
@@ -239,6 +238,14 @@ fn looks_like_a_written_file(t: &str) -> bool {
 // vitest
 // ---------------------------------------------------------------------------
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// Every index here comes from `find`/`rfind` on an ASCII needle, and the
+/// offsets added to them are that needle's own byte length, so each is a char
+/// boundary by construction.
+#[allow(clippy::string_slice)]
 fn distill_vitest(input: &str) -> String {
     let mut passed_tests = 0;
     let mut failed_tests = 0;
@@ -380,6 +387,13 @@ fn distill_vitest(input: &str) -> String {
 // TypeScript Compiler (TSC)
 // ---------------------------------------------------------------------------
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// Indices from `find`/`rfind` on ASCII needles; `+1` steps past a one byte
+/// delimiter and `..idx` ends on one.
+#[allow(clippy::string_slice)]
 fn distill_tsc(input: &str) -> String {
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut total_errors = 0;
@@ -488,6 +502,12 @@ fn distill_tsc(input: &str) -> String {
 // Playwright
 // ---------------------------------------------------------------------------
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `rfind(" in '")` and `+5`, which is that needle's exact byte length.
+#[allow(clippy::string_slice)]
 fn distill_playwright(input: &str) -> String {
     let mut passed = 0;
     let mut failed = 0;
@@ -631,6 +651,13 @@ fn format_eslint_locations(problems: &[EslintProblem]) -> String {
     out
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// Indices from `find`/`rfind` on ASCII needles, with `+1` and `+2` matching
+/// the length of the `(` and `, ` they step past.
+#[allow(clippy::string_slice)]
 fn distill_eslint(input: &str) -> String {
     let mut total_errors = 0;
     let mut total_warnings = 0;

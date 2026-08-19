@@ -1,6 +1,5 @@
 // Safety: All string indexing uses positions from find()/rfind() on ASCII
 // delimiters (':', '=', '.', '_') which always return valid char boundaries.
-#![allow(clippy::string_slice)]
 
 use crate::distillers::Distiller;
 use crate::pipeline::{OutputSegment, SignalTier};
@@ -107,6 +106,12 @@ fn is_numbered_single_file_grep(lines: &[&str]) -> bool {
     numbered >= 3
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find(':')` returns a char boundary.
+#[allow(clippy::string_slice)]
 fn is_grep_output(lines: &[&str]) -> bool {
     if is_numbered_single_file_grep(lines) {
         return true;
@@ -204,6 +209,12 @@ fn is_tree_output(lines: &[&str]) -> bool {
     connectors >= 3 && connectors * 2 > non_empty
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find('=')` returns a char boundary.
+#[allow(clippy::string_slice)]
 fn is_env_output(lines: &[&str]) -> bool {
     // env: 5+ lines of "UPPERCASE_KEY=value"
     let count = lines
@@ -403,6 +414,14 @@ fn distill_ls_output(input: &str) -> String {
 // find distiller
 // ---------------------------------------------------------------------------
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `end` is built from `char_indices` plus `len_utf8`, so it is a boundary by
+/// construction, and `..=i` closes on a one byte `/` from `rfind`. The loop
+/// body says the same where it does the work.
+#[allow(clippy::string_slice)]
 /// Longest directory prefix shared by every path, cut at a `/` so the remainder
 /// stays a valid relative path, a prefix ending mid-filename would not round-trip.
 /// Empty when the paths share no directory.
@@ -709,6 +728,12 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     ))
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find('=')` returns a boundary and `+1` steps past one ASCII byte.
+#[allow(clippy::string_slice)]
 pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
     let mut out = String::with_capacity(input.len());
     let mut redacted = 0u32;
@@ -782,6 +807,12 @@ fn is_sensitive_key(key: &str) -> bool {
         })
 }
 
+/// Slices here are proven to sit on a char boundary rather than assumed to.
+/// A file-level allow used to cover them and hid a real panic elsewhere (#619),
+/// so the exemption is per function and says why.
+///
+/// `find('=')` returns a boundary and `+1` steps past one ASCII byte.
+#[allow(clippy::string_slice)]
 pub fn distill_env_output(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut redacted_count = 0u32;
