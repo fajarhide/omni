@@ -1715,7 +1715,9 @@ mod tests {
     async fn test_omni_retrieve_returns_stored_content() {
         let dir = tempdir().unwrap();
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let hash = store.store_rewind("testing_payload").expect("archived");
+        let hash = store
+            .store_rewind_whole("testing_payload")
+            .expect("archived");
         let session = Arc::new(Mutex::new(SessionState::new()));
 
         let server = OmniServer { store, session };

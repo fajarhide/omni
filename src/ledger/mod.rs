@@ -680,8 +680,12 @@ impl<'a> Ledger<'a> {
             // the answer to the pull, and folding it hands the reader back the
             // marker it was following (#581). The flag is consumed here, so this
             // costs one delivery rather than exempting the content for good.
+            // The run, and the payload it was cut out of. A fold archives one
+            // block of a reply, never the reply, so a handle that reported its
+            // own length as the whole let `omni retrieve` present ten of
+            // fourteen lines as a complete answer (#627).
             match long_enough
-                .then(|| self.store.store_rewind(&body))
+                .then(|| self.store.store_rewind(&body, payload_bytes))
                 .flatten()
                 .filter(|handle| !self.store.take_owed_delivery(handle))
                 .zip(run.seen.as_ref())
@@ -798,6 +802,46 @@ mod tests {
 
         assert!(second.len() < text.len());
         assert!(second.contains("lines already shown"));
+    }
+
+    /// #627. A fold archives the run it replaced, never the reply, so the handle
+    /// has to carry the size of the payload it came out of. Without it
+    /// `omni retrieve` frames ten folded lines of a fourteen line output as
+    /// `10 lines · 227 B`, which reads as the whole answer.
+    #[test]
+    fn a_folded_run_records_the_payload_it_was_cut_from() {
+        let (store, _d) = temp_store();
+        let seen: Vec<String> = (0..10)
+            .map(|i| format!("2026-08-10T00:00:{i:02}Z  handler finished request {i} in 12ms"))
+            .collect();
+        let first = seen.join("\n");
+        let mut both = seen.clone();
+        for i in 0..4 {
+            both.push(format!(
+                "2026-08-10T00:01:{i:02}Z  a line nobody has seen, number {i}"
+            ));
+        }
+        let second_input = both.join("\n");
+
+        let ledger = Ledger::new(&store, "s1");
+        ledger.project(&first);
+        let view = ledger.project(&second_input).expect("the repeat folds");
+
+        let handle = view
+            .split("omni retrieve ")
+            .nth(1)
+            .and_then(|s| s.split(']').next())
+            .expect("the marker names a handle");
+        let (content, whole) = store
+            .retrieve_rewind_sized(handle)
+            .expect("the handle resolves");
+
+        assert!(
+            whole > content.len(),
+            "a folded run is one block of the reply, not the reply: {} vs {}",
+            whole,
+            content.len()
+        );
     }
 
     /// #519. A re-run of an identical command folded into one run covering the
@@ -1574,7 +1618,7 @@ mod tests {
     fn renders_a_marker_the_gain_test_can_predict() {
         let (store, _d) = temp_store();
         let handle = store
-            .store_rewind("some content worth archiving\n")
+            .store_rewind_whole("some content worth archiving\n")
             .expect("a healthy store archives");
 
         assert_eq!(handle.len(), HANDLE_LEN);

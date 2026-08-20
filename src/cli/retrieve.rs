@@ -35,6 +35,32 @@ fn print_help() {
     );
 }
 
+/// The stderr frame, built where a test can read it.
+///
+/// `N lines · N B` reads as a measurement of the whole command's output, and for
+/// a ledger fold it measures one block of it: a reader took ten of fourteen
+/// entries as a complete listing and nearly designed a dependency layering
+/// against it (#627). The extra clause is said only when the two differ, so a
+/// handle that does hold an entire output keeps the short frame.
+fn frame(handle: &str, content: &str, whole_len: usize) -> String {
+    let part = if whole_len > content.len() {
+        format!(
+            " · one block of a {} output",
+            super::stats::format_bytes(whole_len as u64)
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "{} {} · {} lines · {}{}",
+        "omni retrieve".bold().cyan(),
+        handle.bright_black(),
+        content.lines().count(),
+        super::stats::format_bytes(content.len() as u64).bright_black(),
+        part.bright_black()
+    )
+}
+
 pub fn run(args: &[String], store: &Store) -> Result<()> {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
@@ -71,8 +97,8 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         );
     }
 
-    match store.retrieve_rewind(handle) {
-        Some(content) => {
+    match store.retrieve_rewind_sized(handle) {
+        Some((content, whole_len)) => {
             // The same door the marker tells the agent to use, so it counts the
             // same as the MCP tool (#512).
             store.record_rewind_pull(handle);
@@ -81,14 +107,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
             // header on stdout would have done it by editing archived bytes that
             // a caller is about to paste or parse. Same rule the pipeline holds
             // itself to: what a later step reads is not ours to decorate.
-            let lines = content.lines().count();
-            eprintln!(
-                "{} {} · {} lines · {}",
-                "omni retrieve".bold().cyan(),
-                handle.bright_black(),
-                lines,
-                super::stats::format_bytes(content.len() as u64).bright_black()
-            );
+            eprintln!("{}", frame(handle, &content, whole_len));
             print!("{content}");
             if !content.ends_with('\n') {
                 println!();
@@ -112,12 +131,34 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    /// #627. `omni retrieve` returned ten of the fourteen lines a command
+    /// produced, under `10 lines · 227 B`. Nothing was lost, the other four were
+    /// on screen and the handle holds what the fold replaced, but the frame
+    /// reads as a measurement of the whole and the reader took the short listing
+    /// as complete.
+    #[test]
+    fn says_when_a_handle_holds_one_block_of_a_larger_output() {
+        let block = "one\ntwo\nthree\n";
+
+        let whole = frame("abcd", block, block.len());
+        assert!(
+            !whole.contains("one block of"),
+            "a handle holding everything keeps the short frame: {whole}"
+        );
+
+        let part = frame("abcd", block, block.len() * 4);
+        assert!(
+            part.contains("one block of"),
+            "a fragment must not be framed as the whole output: {part}"
+        );
+    }
+
     #[test]
     fn prints_what_the_marker_archived() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
         let handle = store
-            .store_rewind("the original forty lines\n")
+            .store_rewind_whole("the original forty lines\n")
             .expect("archived");
 
         assert!(run(&args(&["omni", "retrieve", &handle]), &store).is_ok());
@@ -163,7 +204,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("omni.db");
         let store = Store::open_path(&db).expect("store");
-        let handle = store.store_rewind("archived output\n").expect("archived");
+        let handle = store
+            .store_rewind_whole("archived output\n")
+            .expect("archived");
 
         // No distillation row names this hash, so the family resolves to
         // `unknown`, which is the key the row lands under.
@@ -185,7 +228,7 @@ mod tests {
     fn accepts_the_handle_in_every_shape_a_marker_has_printed() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
-        let handle = store.store_rewind("content\n").expect("archived");
+        let handle = store.store_rewind_whole("content\n").expect("archived");
 
         for form in [
             handle.clone(),

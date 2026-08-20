@@ -35,9 +35,11 @@ const TAIL_BUDGET_FRACTION: usize = 5;
 /// reporting 42% saved (#508). Keeping the head alone inverts what the tool is
 /// for on exactly the payload that matters most.
 ///
-/// `archive` is handed the elided middle and returns the handle it stored it
-/// under, so the marker can name a way back. It is a callback because only the
-/// hooks own a store, and this module is not going to grow one.
+/// `archive` is handed the elided middle and the size of the output it came out
+/// of, and returns the handle it stored it under, so the marker can name a way
+/// back. It is a callback because only the hooks own a store, and this module is
+/// not going to grow one. The second argument is what stops `omni retrieve` from
+/// labelling that middle as if it were the whole output (#627).
 ///
 /// Trims to line boundaries, so the counts are exact and nobody is handed half a
 /// row. Output with no newline at all has no lines to count, so it keeps the
@@ -45,7 +47,7 @@ const TAIL_BUDGET_FRACTION: usize = 5;
 pub fn truncate_with_marker(
     s: &mut String,
     max_bytes: usize,
-    archive: impl FnOnce(&str) -> Option<String>,
+    archive: impl FnOnce(&str, usize) -> Option<String>,
 ) {
     if s.len() <= max_bytes {
         return;
@@ -70,7 +72,7 @@ pub fn truncate_with_marker(
         // long there is nothing left to keep at the end. Report bytes, because
         // "1 of 1 lines kept" for a fragment is a count that says nothing.
         let end = floor_boundary(s, max_bytes);
-        let handle = archived_handle(&s[end..], archive);
+        let handle = archived_handle(&s[end..], total_bytes, archive);
         s.truncate(end);
         s.push_str(&format!(
             "\n[OMNI: output truncated, {end} of {total_bytes} bytes kept{handle}]\n"
@@ -79,7 +81,7 @@ pub fn truncate_with_marker(
     }
 
     let dropped_lines = s[head_end..tail_start].lines().count();
-    let handle = archived_handle(&s[head_end..tail_start], archive);
+    let handle = archived_handle(&s[head_end..tail_start], total_bytes, archive);
     let marker = format!(
         "[OMNI: output truncated, {} of {total_lines} lines kept, {dropped_lines} dropped from the middle{handle}]\n",
         total_lines - dropped_lines
@@ -128,11 +130,15 @@ pub fn avoid_example_handle(key: String) -> String {
 /// is what keeps 30 days of history at 13.3 MB instead of 83.1 MB (#271). A
 /// failed insert reads the same as no store, for the reason `post_tool`'s
 /// `rewind_marker` gives: what the reader can do about it is identical (#388).
-fn archived_handle(dropped: &str, archive: impl FnOnce(&str) -> Option<String>) -> String {
+fn archived_handle(
+    dropped: &str,
+    whole_len: usize,
+    archive: impl FnOnce(&str, usize) -> Option<String>,
+) -> String {
     if dropped.len() > crate::guard::limits::MAX_REWIND_BYTES {
         return String::new();
     }
-    match archive(dropped) {
+    match archive(dropped, whole_len) {
         Some(hash) => format!(", omni retrieve {hash}"),
         None => String::new(),
     }
@@ -213,7 +219,7 @@ mod tests {
     fn truncation_marker_states_how_many_lines_survived() {
         let mut s: String = (0..100).map(|i| format!("row {i}\n")).collect();
 
-        truncate_with_marker(&mut s, 100, |_| None);
+        truncate_with_marker(&mut s, 100, |_, _| None);
 
         let kept = s.lines().filter(|l| l.starts_with("row ")).count();
         assert!(
@@ -239,7 +245,7 @@ mod tests {
             .collect();
         s.push_str("RuntimeError: FATAL: connection pool exhausted (max=64)\n");
 
-        truncate_with_marker(&mut s, 50_000, |_| None);
+        truncate_with_marker(&mut s, 50_000, |_, _| None);
 
         assert!(
             s.contains("RuntimeError: FATAL"),
@@ -260,7 +266,7 @@ mod tests {
         let mut s: String = (0..1000).map(|i| format!("row {i:04}\n")).collect();
         let mut archived = String::new();
 
-        truncate_with_marker(&mut s, 500, |dropped| {
+        truncate_with_marker(&mut s, 500, |dropped, _| {
             archived = dropped.to_string();
             Some(EXAMPLE_HANDLE.to_string())
         });
@@ -282,7 +288,7 @@ mod tests {
         let mut s: String = (0..20_000).map(|i| format!("row {i:06}\n")).collect();
         let mut offered = false;
 
-        truncate_with_marker(&mut s, 50_000, |_| {
+        truncate_with_marker(&mut s, 50_000, |_, _| {
             offered = true;
             Some("nope".to_string())
         });
@@ -306,7 +312,7 @@ mod tests {
         // 9 bytes per row, so 58 lands four bytes into the seventh, far enough
         // in that the fragment still reads as a row and a `starts_with` filter
         // cannot quietly drop it.
-        truncate_with_marker(&mut s, 58, |_| None);
+        truncate_with_marker(&mut s, 58, |_, _| None);
 
         let last_row = s
             .lines()
@@ -321,7 +327,7 @@ mod tests {
     fn reports_bytes_when_the_output_has_no_line_break() {
         let mut s = "x".repeat(200);
 
-        truncate_with_marker(&mut s, 50, |_| None);
+        truncate_with_marker(&mut s, 50, |_, _| None);
 
         assert!(
             s.contains("[OMNI: output truncated, 50 of 200 bytes kept]"),
@@ -333,7 +339,7 @@ mod tests {
     fn leaves_output_untouched_when_it_fits() {
         let mut s = String::from("short\noutput\n");
 
-        truncate_with_marker(&mut s, 50_000, |_| None);
+        truncate_with_marker(&mut s, 50_000, |_, _| None);
 
         assert_eq!(s, "short\noutput\n");
     }
