@@ -120,9 +120,75 @@ pub fn exports_directory() -> PathBuf {
     data_home().join("exports")
 }
 
+/// Narrow a path OMNI owns to its owner: `0700` for a directory, `0600` for a
+/// file.
+///
+/// Nothing in the tree asked for a mode before this, so `~/.omni` and the
+/// database inherited the umask and a default 022 left 147 MB of recorded
+/// command output world readable (#631). Redaction does not cover it and is not
+/// meant to: redaction protects what the *model* sees, while the archive keeps
+/// the original on purpose so `omni retrieve` can return it.
+///
+/// Reads the mode before writing it, because this sits on the hook path and a
+/// `stat` is cheaper than a `chmod` on the run where nothing has to change,
+/// which is every run after the first.
+///
+/// Errors are the caller's to ignore. A store that cannot be tightened is still
+/// a store, and `CONTRIBUTING.md` requires hooks to fail open.
+#[cfg(unix)]
+pub fn restrict_to_owner(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let meta = std::fs::metadata(path)?;
+    let want = if meta.is_dir() { 0o700 } else { 0o600 };
+    if meta.permissions().mode() & 0o777 != want {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(want))?;
+    }
+    Ok(())
+}
+
+/// Windows has no umask and no mode bits in this sense, so there is nothing to
+/// narrow and the ACL it inherits is the one the user's profile already carries.
+#[cfg(not(unix))]
+pub fn restrict_to_owner(_path: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #631. Nothing in the tree set a mode, so `~/.omni` and a 147 MB database
+    /// of recorded command output sat at 0755 and 0644 under a default umask.
+    ///
+    /// Driven from deliberately loose modes rather than by setting a umask: the
+    /// umask is process state, `cargo` runs tests in parallel, and a suite that
+    /// mutates it fails a different test on a different machine. This is also
+    /// the half that matters most, since the sensitive bytes are already on disk
+    /// on every existing install.
+    #[cfg(unix)]
+    #[test]
+    fn tightens_a_directory_and_a_file_that_are_already_loose() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sub = dir.path().join("omni-home");
+        std::fs::create_dir(&sub).expect("mkdir");
+        let file = sub.join("omni.db");
+        std::fs::write(&file, b"rows").expect("write");
+
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o777)).expect("chmod dir");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666))
+            .expect("chmod file");
+
+        restrict_to_owner(&sub).expect("dir");
+        restrict_to_owner(&file).expect("file");
+
+        let mode =
+            |p: &std::path::Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode(&sub), 0o700, "a directory OMNI owns is owner only");
+        assert_eq!(mode(&file), 0o600, "a file OMNI owns is owner only");
+    }
 
     /// #307: without an override the suite wrote into the developer's live
     /// `~/.omni`. `.cargo/config.toml` points `OMNI_HOME` at the workspace's
