@@ -98,6 +98,12 @@ impl SqliteBackend {
         let parent = path.parent().unwrap_or_else(|| std::path::Path::new(""));
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).context("Failed to create .omni directory")?;
+            // Only a directory OMNI resolved for itself. `OMNI_DB_PATH` can name
+            // any directory on the machine, and tightening one the user chose
+            // would take access away from whoever else is in it (#631).
+            if parent == paths::data_home() || parent == paths::config_home() {
+                let _ = paths::restrict_to_owner(parent);
+            }
         }
 
         let manager = SqliteConnectionManager::file(path);
@@ -122,6 +128,21 @@ impl SqliteBackend {
 
         let store = Self { pool };
         store.init_schema()?;
+
+        // After the schema, because WAL mode is what creates the sidecars and
+        // they hold committed rows that have not been checkpointed yet. Tighten
+        // the database whatever directory it was asked for: the file is OMNI's
+        // own, unlike the directory above (#631).
+        // The sidecar names append to the whole filename rather than replacing an
+        // extension, which `cli::reset` learned when 4.2 MB of `-wal` survived a
+        // wipe that reported success (#446).
+        let _ = paths::restrict_to_owner(path);
+        for sidecar in ["-wal", "-shm"] {
+            let mut p = path.to_path_buf().into_os_string();
+            p.push(sidecar);
+            let _ = paths::restrict_to_owner(&std::path::PathBuf::from(p));
+        }
+
         Ok(store)
     }
 
@@ -3326,6 +3347,36 @@ mod tests {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("omni.db");
         (Store::open_path(&db_path).unwrap(), dir)
+    }
+
+    /// #631. The database holds raw command output, and it inherited the umask:
+    /// 0644 on the machine that reported it, for 147 MB of it.
+    ///
+    /// Loosened by hand and reopened rather than tested straight after creation,
+    /// for two reasons. A runner with a strict umask would give 0600 anyway and
+    /// the assertion would pass against no code at all, and an existing install
+    /// already has the bytes on disk, so tightening on the next run is the case
+    /// that matters.
+    #[cfg(unix)]
+    #[test]
+    fn a_reopen_tightens_a_database_left_world_readable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("omni.db");
+        drop(Store::open_path(&db_path).unwrap());
+
+        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o666))
+            .expect("loosen the database");
+
+        drop(Store::open_path(&db_path).unwrap());
+
+        let mode = std::fs::metadata(&db_path)
+            .expect("stat")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "recorded output must not stay world readable");
     }
 
     /// #602. `omni_explain_savings` reported "No recent distillations" for a
