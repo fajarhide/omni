@@ -93,6 +93,25 @@ jobs:
         working-directory: plugins/pi
         run: npm run typecheck
 
+  plugin-hermes:
+    name: checks (plugins/hermes)
+    # The plugin used to be a Rust raw string, so no job in this file could see
+    # that every copy OMNI installed was a Python syntax error (#628). It is a
+    # real file now and this is the job that compiles it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Compile
+        run: python -m py_compile plugins/hermes/__init__.py
+
+      - name: Checks
+        run: python plugins/hermes/test_plugin.py
+
   manual-translations:
     name: manual translations in step
     # Seconds of git, so it runs on its own rather than behind thirteen minutes

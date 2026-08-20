@@ -12,7 +12,17 @@ pub enum AgentFormat {
     Aider,          // piped stdin, OMNI_CMD env
     GenericMCP,     // JSON-RPC 2.0 tool result
     Pi,             // camelCase toolName + toolResponse from Pi extension
-    Unknown,        // fallback ke ClaudeCode parser
+    /// `agent: "hermes"` + `exit_code`, sent by the plugin's transform hooks.
+    ///
+    /// Its own arm rather than a reshaped Codex or Claude Code payload, for two
+    /// reasons that both bit this project before. `resolve_agent_id` only lets
+    /// `OMNI_AGENT_ID` override a `ClaudeCode` or `Unknown` format, so borrowing
+    /// Codex's shape would file every Hermes row under `codex_cli`, which is the
+    /// mislabelling #212 traced a wrong headline to. And Claude Code's shape has
+    /// nowhere to put an exit code, so #120's refusal to distill a failed command
+    /// would never fire on this host (#628).
+    Hermes,
+    Unknown, // fallback ke ClaudeCode parser
 }
 
 /// Internal representation setelah normalization
@@ -92,6 +102,13 @@ pub fn detect_agent(input: &str) -> AgentFormat {
         return AgentFormat::Pi;
     }
 
+    // Hermes, before the ClaudeCode test below: its payload also carries
+    // `tool_name`, and the plugin names itself so no other host reaches this by
+    // accident.
+    if obj.get("agent").and_then(|a| a.as_str()) == Some("hermes") {
+        return AgentFormat::Hermes;
+    }
+
     // ClaudeCode / CursorWindsurf: punya "tool_name" dan "tool_response"
     if obj.contains_key("tool_name") && obj.contains_key("tool_response") {
         // Cursor/Windsurf: content field di tool_response adalah array
@@ -148,6 +165,7 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
         AgentFormat::Aider => normalize_aider(input, agent_id),
         AgentFormat::GenericMCP => normalize_generic_mcp(input, agent_id),
         AgentFormat::Pi => normalize_pi(input, agent_id),
+        AgentFormat::Hermes => normalize_hermes(input, agent_id),
     }?;
 
     // Read once here rather than in each of the eight per-agent parsers: the key
@@ -247,6 +265,7 @@ pub fn resolve_agent_id(agent: &AgentFormat, from_env: &str) -> String {
         AgentFormat::Aider => "aider".to_string(),
         AgentFormat::GenericMCP => "mcp_generic".to_string(),
         AgentFormat::Pi => "pi".to_string(),
+        AgentFormat::Hermes => "hermes".to_string(),
         AgentFormat::Unknown => "unknown".to_string(),
     }
 }
@@ -634,6 +653,73 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         agent_id,
         failed: parsed.exit_code.is_some_and(|c| c != 0),
         // Host contract not investigated (#187), keeps the MCP shape.
+        raw_response: None,
+        // Set by `normalize` for every agent; see the field's doc comment.
+        host_session_id: None,
+        host_agent_id: None,
+    })
+}
+
+// ── HERMES AGENT ──────────────────────────────────────────────────────
+/// Hermes' tool names, in the names `post_tool::process_payload` routes on.
+///
+/// Without this the mapping is not "unknown tool, do nothing", it is worse:
+/// `terminal` fell into the `_` arm, was counted by `record_unhandled_tool`, and
+/// every shell command on the host went undistilled while the install reported
+/// success. Confirmed by driving the hook with a Hermes payload.
+///
+/// Only names with a distiller behind them are translated. Anything else keeps
+/// the name Hermes gave it, so `record_unhandled_tool` counts the real thing and
+/// the next map is written from data rather than from a guess.
+fn hermes_tool_name(name: Option<&str>) -> String {
+    match name.unwrap_or("terminal") {
+        "terminal" => "Bash",
+        "read_file" => "Read",
+        "search_files" => "Grep",
+        "web_extract" => "WebFetch",
+        "write_file" => "Write",
+        "patch" => "Edit",
+        other => other,
+    }
+    .to_string()
+}
+
+/// The payload the Hermes plugin's transform hooks send.
+///
+/// ```json
+/// {"agent":"hermes","tool_name":"terminal","command":"cargo test",
+///  "output":"…","exit_code":1,"session_id":"…"}
+/// ```
+///
+/// `tool_name` is carried rather than assumed, because this is the first host
+/// whose replacement hook fires for **every** tool and not only the shell one.
+/// That is what makes the Read, Grep and WebFetch distillers reachable at all;
+/// they have been written and never executed, since Claude Code's PostToolUse
+/// matcher is Bash-only (#172).
+fn normalize_hermes(input: &str, agent_id: String) -> Option<NormalizedInput> {
+    #[derive(Deserialize)]
+    struct HermesInput {
+        tool_name: Option<String>,
+        command: Option<String>,
+        output: Option<String>,
+        exit_code: Option<i64>,
+    }
+
+    let parsed: HermesInput = serde_json::from_str(input).ok()?;
+    let content = parsed.output.filter(|o| !o.is_empty())?;
+
+    Some(NormalizedInput {
+        agent: AgentFormat::Hermes,
+        tool_name: hermes_tool_name(parsed.tool_name.as_deref()),
+        command: parsed.command.unwrap_or_default(),
+        content,
+        agent_id,
+        // The reason this format exists. Hermes hands the plugin a `returncode`,
+        // and no shape OMNI already parsed had anywhere to put it, so #120's
+        // refusal to distill a failed command could not have fired here.
+        failed: parsed.exit_code.is_some_and(|c| c != 0),
+        // The hook returns a bare string to Hermes, so there is no host response
+        // object to echo and the MCP shape is what the plugin reads back.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -1056,5 +1142,56 @@ mod tests {
 
         assert_eq!(detect_agent(claude), AgentFormat::ClaudeCode);
         assert_eq!(detect_agent(pi), AgentFormat::Pi);
+    }
+
+    /// #628. Hermes had no format of its own, and neither shape it could have
+    /// borrowed works: `resolve_agent_id` only lets `OMNI_AGENT_ID` override a
+    /// `ClaudeCode` or `Unknown` payload, so a Codex-shaped one would file every
+    /// row under `codex_cli`, and a Claude-shaped one has nowhere to put the
+    /// exit code Hermes hands the plugin.
+    #[test]
+    fn a_hermes_payload_is_filed_under_hermes_and_carries_its_exit_code() {
+        let payload = |code: i64| {
+            serde_json::json!({
+                "agent": "hermes", "tool_name": "terminal", "command": "cargo test",
+                "output": "one\ntwo\n", "exit_code": code, "session_id": "s1"
+            })
+            .to_string()
+        };
+
+        let ok = normalize(&payload(0)).expect("a hermes payload normalizes");
+        assert_eq!(ok.agent, AgentFormat::Hermes);
+        assert_eq!(
+            ok.agent_id, "hermes",
+            "a row under any other id is a lost row"
+        );
+        assert!(!ok.failed);
+
+        let bad = normalize(&payload(1)).expect("a failing command still normalizes");
+        assert!(
+            bad.failed,
+            "#120 refuses to distill a failed command, and cannot fire without this"
+        );
+    }
+
+    /// The tool name decides which arm of `process_payload` runs, and Hermes
+    /// spells them differently. `terminal` fell into the `_` arm and was counted
+    /// as an unhandled tool, so every shell command on the host went undistilled
+    /// while the install reported success.
+    #[test]
+    fn hermes_tool_names_are_translated_to_the_arms_that_exist() {
+        for (theirs, ours) in [
+            ("terminal", "Bash"),
+            ("read_file", "Read"),
+            ("search_files", "Grep"),
+            ("web_extract", "WebFetch"),
+        ] {
+            assert_eq!(hermes_tool_name(Some(theirs)), ours, "{theirs}");
+        }
+        assert_eq!(
+            hermes_tool_name(Some("kanban_show")),
+            "kanban_show",
+            "an untranslated name has to reach record_unhandled_tool as itself"
+        );
     }
 }
