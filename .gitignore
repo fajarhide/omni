@@ -3,6 +3,11 @@
 *.log
 actual_stdout.txt
 *.py
+# Except the agent-host plugins, which are shipped source: the Hermes one
+# is compiled into the binary with include_str! and a fresh clone cannot
+# build without it (#628).
+!plugins/**/*.py
+__pycache__/
 node_modules/
 # --- Environment & Configuration ---
 .env

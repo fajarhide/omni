@@ -277,6 +277,17 @@ fn configured_compression_in_config(config_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// The plugin source with the binary path substituted in.
+///
+/// The path goes in as a JSON string rather than raw text. JSON string syntax is
+/// a subset of Python's, so this escapes the two characters that would otherwise
+/// produce a file Python cannot read: a quote closes the literal, and a Windows
+/// path's `\U` is a unicode escape (`C:\Users\…` is a syntax error, not a path).
+fn render_plugin(exe_path: &str) -> String {
+    let literal = serde_json::to_string(exe_path).unwrap_or_else(|_| "\"omni\"".to_string());
+    include_str!("../../plugins/hermes/__init__.py").replace("\"{{OMNI_BIN}}\"", &literal)
+}
+
 impl AgentIntegration for HermesIntegration {
     fn id(&self) -> &'static str {
         "hermes"
@@ -298,83 +309,11 @@ version: "1.0"
 description: OMNI Signal Engine integration for Hermes Agent hooks
 "#;
 
-        let init_py_content = format!(
-            r#""""""OMNI Context OS integration for Hermes Agent.
-
-This plugin wires three lifecycle hooks so OMNI can distill
-terminal output, track sessions, and manage context pressure.
-
-It also exposes helper utilities that make the 27 OMNI MCP tools
-(loop_memory, knowledge, retrieve, learn) work seamlessly during
-Hermes autonomous multi-step loops.
-""""""
-import json
-import os
-import subprocess
-import time
-
-_OMNI_BIN = "{}"
-_STEP_COUNTER = 0
-_SESSION_START_TS = None
-
-
-def _omni_env():
-    """Return a copy of the environment with OMNI_AGENT_ID set."""
-    env = os.environ.copy()
-    env["OMNI_AGENT_ID"] = "hermes"
-    # Forward loop control vars when present
-    for var in ("OMNI_LOOP_ID", "OMNI_LOOP_GOAL", "OMNI_LOOP_BUDGET"):
-        if var in os.environ:
-            env[var] = os.environ[var]
-    return env
-
-
-def _run_omni(*args):
-    """Run the OMNI binary with fail-open semantics."""
-    try:
-        return subprocess.run(
-            [_OMNI_BIN] + list(args),
-            env=_omni_env(),
-            capture_output=True,
-            timeout=5,
-        )
-    except Exception:
-        return None  # fail-open: never block Hermes
-
-
-def register(ctx):
-    global _SESSION_START_TS
-    _SESSION_START_TS = time.time()
-
-    def on_post_tool_call(tool_name, params, result):
-        global _STEP_COUNTER
-        _STEP_COUNTER += 1
-        res = _run_omni("--post-hook")
-        
-        # Explicit feedback loop: OMNI pressure -> Hermes compaction
-        if res and res.stdout:
-            out = res.stdout.decode('utf-8', errors='ignore')
-            if "[omni:context pressure: CRITICAL]" in out or "[omni:context pressure: WARNING]" in out:
-                try:
-                    if hasattr(ctx, 'request_compaction'):
-                        ctx.request_compaction("OMNI context pressure threshold reached")
-                    elif hasattr(ctx, 'compact'):
-                        ctx.compact()
-                except Exception:
-                    pass
-
-    def on_pre_tool_call(tool_name, params):
-        _run_omni("--pre-hook")
-
-    def on_session_start():
-        _run_omni("--session-start")
-
-    ctx.register_hook("post_tool_call", on_post_tool_call)
-    ctx.register_hook("pre_tool_call", on_pre_tool_call)
-    ctx.register_hook("on_session_start", on_session_start)
-"#,
-            exe_path
-        );
+        // The plugin is a real Python file in `plugins/hermes/`, compiled by
+        // CI, rather than a Rust string literal. The literal that used to live
+        // here opened with five quote characters, so every `__init__.py` OMNI
+        // wrote was a syntax error and the plugin never loaded once (#628).
+        let init_py_content = render_plugin(exe_path);
 
         fs::write(dest.join("plugin.yaml"), plugin_yaml_content)?;
         fs::write(dest.join("__init__.py"), init_py_content)?;
@@ -956,5 +895,48 @@ plugins:
         if let Some(msg) = &result {
             assert!(msg.contains("OMNI × Hermes") || msg.contains("Startup Validation"));
         }
+    }
+
+    /// #628. The plugin lived in a Rust raw string that opened with five quote
+    /// characters, so every `__init__.py` OMNI wrote was a Python syntax error
+    /// and the plugin never loaded once, while `omni init --hermes` reported
+    /// success. It is a real file under `plugins/hermes/` now, compiled by the
+    /// `plugin-hermes` CI job, and these three properties are what the Rust side
+    /// can still get wrong.
+    #[test]
+    fn the_rendered_plugin_registers_the_hooks_that_replace_a_result() {
+        let src = super::render_plugin("/usr/local/bin/omni");
+
+        for hook in ["transform_terminal_output", "transform_tool_result"] {
+            assert!(
+                src.contains(&format!("ctx.register_hook(\"{hook}\"")),
+                "the only two hooks whose return value Hermes uses: {hook}"
+            );
+        }
+        assert!(
+            !src.contains("{{OMNI_BIN}}"),
+            "the placeholder must not survive into the installed file"
+        );
+        assert!(
+            src.contains("_OMNI_BIN = \"/usr/local/bin/omni\""),
+            "the binary path is what the hooks shell out to: {src:.400}"
+        );
+    }
+
+    /// A Windows path is the case that breaks quietly: `C:\Users\…` puts `\U`
+    /// in a Python string literal, which is a unicode escape and a syntax error,
+    /// so the plugin would fail to import on exactly one platform.
+    #[test]
+    fn a_windows_path_is_escaped_rather_than_pasted() {
+        let src = super::render_plugin(r"C:\Users\dev\.cargo\bin\omni.exe");
+
+        assert!(
+            src.contains(r"C:\\Users\\dev"),
+            "backslashes have to survive as escapes, not as escape sequences"
+        );
+        assert!(
+            !src.contains(r#"= "C:\Users"#),
+            "a raw Windows path in a Python string is a unicode-escape error"
+        );
     }
 }
