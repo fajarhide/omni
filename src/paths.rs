@@ -178,14 +178,14 @@ mod tests {
         std::fs::write(&file, b"rows").expect("write");
 
         std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o777)).expect("chmod dir");
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).expect("chmod file");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666))
+            .expect("chmod file");
 
         restrict_to_owner(&sub).expect("dir");
         restrict_to_owner(&file).expect("file");
 
-        let mode = |p: &std::path::Path| {
-            std::fs::metadata(p).expect("stat").permissions().mode() & 0o777
-        };
+        let mode =
+            |p: &std::path::Path| std::fs::metadata(p).expect("stat").permissions().mode() & 0o777;
         assert_eq!(mode(&sub), 0o700, "a directory OMNI owns is owner only");
         assert_eq!(mode(&file), 0o600, "a file OMNI owns is owner only");
     }
