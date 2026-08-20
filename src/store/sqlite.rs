@@ -1301,7 +1301,13 @@ impl SqliteBackend {
     /// which is the one promise this store exists to keep (#388). Rare while the
     /// archive fired on 139 of 14,962 calls; routine once the ledger records
     /// every emitted block.
-    pub fn store_rewind(&self, content: &str) -> Option<String> {
+    /// `whole_len` is the length of the payload `content` was cut out of, which
+    /// is `content.len()` when the handle holds an entire output. It is the only
+    /// thing that lets `omni retrieve` tell a reader whether it is holding the
+    /// whole answer or one block of it (#627). Before this it was written as
+    /// `content.len()` unconditionally, so the column duplicated the content
+    /// length and could never answer that.
+    pub fn store_rewind(&self, content: &str, whole_len: usize) -> Option<String> {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         // The reserved example handle must never name real content, or the
@@ -1314,12 +1320,19 @@ impl SqliteBackend {
         let conn = self.pool.get().ok()?;
 
         let ts = chrono::Utc::now().timestamp();
-        let original_len = content.len() as i64;
+        // A caller that understates the whole would make `retrieve` claim
+        // completeness for a fragment, which is the defect being fixed, so the
+        // floor is the content itself rather than trust.
+        let original_len = whole_len.max(content.len()) as i64;
 
         conn.execute(
             "INSERT INTO rewind_store (hash, content, ts, original_len, retrieved)
              VALUES (?1, ?2, ?3, ?4, 0)
-             ON CONFLICT(hash) DO UPDATE SET ts = excluded.ts",
+             -- One row per content hash, so the same block can arrive from two
+             -- different wholes. Keep the larger: understating completeness
+             -- costs a reader one check, overstating it is the bug (#627).
+             ON CONFLICT(hash) DO UPDATE SET ts = excluded.ts,
+                 original_len = MAX(rewind_store.original_len, excluded.original_len)",
             params![rewind_key, content, ts, original_len],
         )
         .ok()?;
@@ -1393,17 +1406,32 @@ impl SqliteBackend {
         .unwrap_or(false)
     }
 
+    /// Archive a payload that is the whole of what a marker replaced. Test-only:
+    /// production callers state the whole explicitly, because the interesting
+    /// case is the one where it differs.
+    #[cfg(test)]
+    pub fn store_rewind_whole(&self, content: &str) -> Option<String> {
+        self.store_rewind(content, content.len())
+    }
+
     pub fn retrieve_rewind(&self, hash: &str) -> Option<String> {
+        self.retrieve_rewind_sized(hash).map(|(content, _)| content)
+    }
+
+    /// The archived block and the size of the payload it was cut out of. Equal
+    /// when the handle holds a whole output; `whole_len` is larger when it holds
+    /// one block of one, which is what a ledger fold archives (#627).
+    pub fn retrieve_rewind_sized(&self, hash: &str) -> Option<(String, usize)> {
         let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return None,
         };
 
-        let content: Option<String> = conn
+        let content: Option<(String, i64)> = conn
             .query_row(
-                "SELECT content FROM rewind_store WHERE hash = ?1",
+                "SELECT content, original_len FROM rewind_store WHERE hash = ?1",
                 params![hash],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .unwrap_or(None);
@@ -1415,7 +1443,10 @@ impl SqliteBackend {
             );
         }
 
-        content
+        content.map(|(c, whole)| {
+            let whole = usize::try_from(whole).unwrap_or(0).max(c.len());
+            (c, whole)
+        })
     }
 
     /// Get recent distillation rows for omni_history MCP tool
@@ -4090,8 +4121,8 @@ mod tests {
         let (store, _dir) = get_temp_store();
         let content = "the same 200 lines of output";
 
-        let first = store.store_rewind(content).expect("archived");
-        let second = store.store_rewind(content).expect("archived");
+        let first = store.store_rewind_whole(content).expect("archived");
+        let second = store.store_rewind_whole(content).expect("archived");
 
         assert_eq!(first, second, "the key is the content, so it cannot differ");
         assert_eq!(
@@ -4111,7 +4142,7 @@ mod tests {
     fn a_report_read_does_not_owe_a_delivery() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
-        let handle = store.store_rewind("archived body\n").expect("archived");
+        let handle = store.store_rewind_whole("archived body\n").expect("archived");
 
         store.retrieve_rewind(&handle).expect("content");
 
@@ -4128,7 +4159,7 @@ mod tests {
     fn two_pulls_earn_two_verbatim_deliveries() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
-        let handle = store.store_rewind("archived body\n").expect("archived");
+        let handle = store.store_rewind_whole("archived body\n").expect("archived");
 
         store.record_rewind_pull(&handle);
         store.record_rewind_pull(&handle);
@@ -4154,7 +4185,7 @@ mod tests {
             .execute("DROP TABLE rewind_store", [])
             .expect("drop");
 
-        assert_eq!(store.store_rewind("content nobody can retrieve"), None);
+        assert_eq!(store.store_rewind_whole("content nobody can retrieve"), None);
     }
 
     /// Different content still gets its own row, so the deduplication is by
@@ -4164,10 +4195,10 @@ mod tests {
         let (store, _dir) = get_temp_store();
 
         let a = store
-            .store_rewind("output of the first command")
+            .store_rewind_whole("output of the first command")
             .expect("archived");
         let b = store
-            .store_rewind("output of the second command")
+            .store_rewind_whole("output of the second command")
             .expect("archived");
 
         assert_ne!(a, b);
@@ -4182,7 +4213,7 @@ mod tests {
     fn rewinds_and_retrieves_content() {
         let (store, _dir) = get_temp_store();
         let content = "this is some compressed content";
-        let hash = store.store_rewind(content).expect("archived");
+        let hash = store.store_rewind_whole(content).expect("archived");
 
         // A content address and nothing else. The nanosecond prefix this used to
         // carry is what made `INSERT OR IGNORE` decoration (#274).
@@ -4215,8 +4246,8 @@ mod tests {
         let (store, _dir) = get_temp_store();
         let content = "duplicate me";
 
-        let hash1 = store.store_rewind(content).expect("archived");
-        let hash2 = store.store_rewind(content).expect("archived");
+        let hash1 = store.store_rewind_whole(content).expect("archived");
+        let hash2 = store.store_rewind_whole(content).expect("archived");
 
         assert_eq!(store.retrieve_rewind(&hash1), Some(content.to_string()));
         assert_eq!(store.retrieve_rewind(&hash2), Some(content.to_string()));

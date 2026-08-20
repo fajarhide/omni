@@ -212,7 +212,7 @@ fn rewind_marker(
     // The old code took the key `store_rewind` returned on every path, including
     // a swallowed insert, and printed `omni_retrieve("<key>")` for a row that was
     // never written (#388).
-    match store.and_then(|s| s.store_rewind(content)) {
+    match store.and_then(|s| s.store_rewind(content, content.len())) {
         Some(hash) => (
             format!("\n[OMNI: {lost} omitted, omni retrieve {hash} for full output]\n"),
             hash,
@@ -1103,7 +1103,7 @@ pub fn process_payload(
     crate::util::text::truncate_with_marker(
         &mut final_out,
         crate::guard::limits::MAX_OUTPUT_BYTES,
-        |dropped| store.as_ref().and_then(|s| s.store_rewind(dropped)),
+        |dropped, whole| store.as_ref().and_then(|s| s.store_rewind(dropped, whole)),
     );
 
     // The breakdown counts what the agent was handed, which is neither the

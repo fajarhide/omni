@@ -319,8 +319,8 @@ fn distill(
         // Safety truncation. The marker carries the line count: `ps aux` lost
         // 416 of 556 rows here behind a bare `[OMNI: output truncated]` while
         // the footer reported it as a 62.2% saving (#219).
-        crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES, |dropped| {
-            store.and_then(|s| s.store_rewind(dropped))
+        crate::util::text::truncate_with_marker(&mut out, MAX_OUTPUT_BYTES, |dropped, whole| {
+            store.and_then(|s| s.store_rewind(dropped, whole))
         });
 
         (
@@ -388,7 +388,7 @@ fn distill(
                 input_text.len(),
                 crate::guard::limits::MAX_REWIND_BYTES
             )
-        } else if let Some(hash) = store.and_then(|s| s.store_rewind(&input_text)) {
+        } else if let Some(hash) = store.and_then(|s| s.store_rewind(&input_text, input_text.len())) {
             let marker = if std::io::stdout().is_terminal() {
                 format!(
                     "\n{} {} {} {}. The hash {} stores the full output in RewindStore for retrieval.\n",
@@ -439,8 +439,8 @@ fn distill(
     // Safety truncation. The marker carries the line count: `ps aux` lost 416 of
     // 556 rows here behind a bare `[OMNI: output truncated]` while the footer
     // reported it as a 62.2% saving (#219).
-    crate::util::text::truncate_with_marker(&mut output, MAX_OUTPUT_BYTES, |dropped| {
-        store.and_then(|s| s.store_rewind(dropped))
+    crate::util::text::truncate_with_marker(&mut output, MAX_OUTPUT_BYTES, |dropped, whole| {
+        store.and_then(|s| s.store_rewind(dropped, whole))
     });
 
     PipelineResult {
