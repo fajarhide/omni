@@ -817,7 +817,9 @@ mod tests {
         let first = seen.join("\n");
         let mut both = seen.clone();
         for i in 0..4 {
-            both.push(format!("2026-08-10T00:01:{i:02}Z  a line nobody has seen, number {i}"));
+            both.push(format!(
+                "2026-08-10T00:01:{i:02}Z  a line nobody has seen, number {i}"
+            ));
         }
         let second_input = both.join("\n");
 

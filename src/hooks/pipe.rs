@@ -388,7 +388,8 @@ fn distill(
                 input_text.len(),
                 crate::guard::limits::MAX_REWIND_BYTES
             )
-        } else if let Some(hash) = store.and_then(|s| s.store_rewind(&input_text, input_text.len())) {
+        } else if let Some(hash) = store.and_then(|s| s.store_rewind(&input_text, input_text.len()))
+        {
             let marker = if std::io::stdout().is_terminal() {
                 format!(
                     "\n{} {} {} {}. The hash {} stores the full output in RewindStore for retrieval.\n",

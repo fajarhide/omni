@@ -4142,7 +4142,9 @@ mod tests {
     fn a_report_read_does_not_owe_a_delivery() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
-        let handle = store.store_rewind_whole("archived body\n").expect("archived");
+        let handle = store
+            .store_rewind_whole("archived body\n")
+            .expect("archived");
 
         store.retrieve_rewind(&handle).expect("content");
 
@@ -4159,7 +4161,9 @@ mod tests {
     fn two_pulls_earn_two_verbatim_deliveries() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
-        let handle = store.store_rewind_whole("archived body\n").expect("archived");
+        let handle = store
+            .store_rewind_whole("archived body\n")
+            .expect("archived");
 
         store.record_rewind_pull(&handle);
         store.record_rewind_pull(&handle);
@@ -4185,7 +4189,10 @@ mod tests {
             .execute("DROP TABLE rewind_store", [])
             .expect("drop");
 
-        assert_eq!(store.store_rewind_whole("content nobody can retrieve"), None);
+        assert_eq!(
+            store.store_rewind_whole("content nobody can retrieve"),
+            None
+        );
     }
 
     /// Different content still gets its own row, so the deduplication is by

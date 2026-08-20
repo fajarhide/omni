@@ -204,7 +204,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("omni.db");
         let store = Store::open_path(&db).expect("store");
-        let handle = store.store_rewind_whole("archived output\n").expect("archived");
+        let handle = store
+            .store_rewind_whole("archived output\n")
+            .expect("archived");
 
         // No distillation row names this hash, so the family resolves to
         // `unknown`, which is the key the row lands under.
