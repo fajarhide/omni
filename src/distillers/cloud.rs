@@ -375,20 +375,28 @@ fn distill_terraform(input: &str) -> String {
     for line in input.lines() {
         let trimmed = line.trim();
 
-        // terraform plan lines like: "# aws_instance.web will be created"
-        if trimmed.contains("will be created") {
+        // A plan line is terraform's resource-address comment and nothing else:
+        // "  # aws_instance.web will be created". Matching the verb phrase
+        // anywhere in the line also matched terraform's own error prose, so a
+        // *failing* `terraform validate` came back as "+1 ~0 -0 resources" with
+        // "+ configuration" under it, which is the shape of a clean plan (#633).
+        // The pipe made #120's failed-command guard blind to it: the exit code
+        // the host sees belongs to `tail`, not to terraform.
+        let plan_line = trimmed.strip_prefix("# ").unwrap_or("");
+
+        if plan_line.contains("will be created") {
             parsed = true;
             added += 1;
             if let Some(res) = extract_tf_resource(trimmed) {
                 resources.push(format!("+ {}", res));
             }
-        } else if trimmed.contains("will be updated") || trimmed.contains("must be replaced") {
+        } else if plan_line.contains("will be updated") || plan_line.contains("must be replaced") {
             parsed = true;
             changed += 1;
             if let Some(res) = extract_tf_resource(trimmed) {
                 resources.push(format!("~ {}", res));
             }
-        } else if trimmed.contains("will be destroyed") {
+        } else if plan_line.contains("will be destroyed") {
             parsed = true;
             destroyed += 1;
             if let Some(res) = extract_tf_resource(trimmed) {
@@ -399,7 +407,8 @@ fn distill_terraform(input: &str) -> String {
         let t_lower = trimmed.to_lowercase();
 
         // Also catch the summary line: "Plan: X to add, Y to change, Z to destroy."
-        if t_lower.contains("plan:") {
+        // Anchored for the same reason: prose quoting `terraform plan:` is not one.
+        if t_lower.starts_with("plan:") {
             parsed = true;
             // Parse "Plan: 3 to add, 1 to change, 0 to destroy."
             for part in trimmed.split(',') {
@@ -426,7 +435,7 @@ fn distill_terraform(input: &str) -> String {
         }
 
         // "Apply complete! Resources: X added, Y changed, Z destroyed."
-        if t_lower.contains("apply complete!") {
+        if t_lower.starts_with("apply complete!") {
             return format!(
                 "terraform: apply complete +{} ~{} -{}",
                 added, changed, destroyed
@@ -699,6 +708,21 @@ kube-系统   auth-5d4f6c8b99-abc12    0/1     CrashLoopBackOff   15         2h"
     fn refuses_a_plan_summary_when_no_plan_was_read() {
         let input =
             "Terraform has been successfully initialized!\n\nTry running \"terraform plan\".\n";
+        assert_eq!(distill_as("terraform", input), input);
+    }
+
+    /// #633: a failing `terraform validate` came back as `+1 ~0 -0 resources`
+    /// with `+ configuration` under it, because the error prose says "so if this
+    /// file will be created by a resource in this configuration" and the counter
+    /// matched that phrase anywhere in the line. The rendering is the shape of a
+    /// clean plan, so the failure reads as success. Wrapped exactly as terraform
+    /// wraps it: the phrase and the address token land on different lines.
+    #[test]
+    fn refuses_to_count_resources_out_of_terraform_error_prose() {
+        let input = "function works only with files that are distributed as part of the\n\
+                     configuration source code, so if this file will be created by a resource in\n\
+                     this configuration you must instead obtain this result from an attribute of\n\
+                     that resource.\n";
         assert_eq!(distill_as("terraform", input), input);
     }
 
