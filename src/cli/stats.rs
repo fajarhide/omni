@@ -290,7 +290,7 @@ fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
     // `--since` first, so a caller mixing the new flag with an old one gets the
     // window they named rather than whichever branch is tested first.
-    let named = super::flag_value(args, "--since").map(str::to_ascii_lowercase);
+    let named = value_of(args, "--since").map(str::to_ascii_lowercase);
     let window = match named.as_deref() {
         Some(w) => w,
         None if super::has_any(args, &["--hour", "-H"]) => "hour",
@@ -310,13 +310,24 @@ fn scope(args: &[String]) -> (&'static str, i64) {
     }
 }
 
+/// The value of a flag that takes one, ignoring the next flag.
+///
+/// `flag_value` returns whatever token follows, so `omni stats --since --view
+/// detail` read `--view` as the window, fell back to the default, and then let
+/// `--view` be found again by its own resolver: a malformed command that succeeds
+/// and reports something else. A value starting with `-` is treated as absent,
+/// which puts the caller on the default rather than on a window they did not name.
+fn value_of<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    super::flag_value(args, flag).filter(|v| !v.starts_with('-'))
+}
+
 /// The view to render, from `--view` or from the flag that used to select it.
 ///
 /// `--card` and `--json` are not here. They are output formats, and reading
 /// `--card` as a view meant `--view detail --card` selected the text view and
 /// wrote no image. `renderer` weighs the formats against the view instead.
 fn view(args: &[String]) -> &'static str {
-    if let Some(name) = super::flag_value(args, "--view") {
+    if let Some(name) = value_of(args, "--view") {
         return match name.to_ascii_lowercase().as_str() {
             "detail" => "detail",
             "commands" => "commands",
@@ -327,6 +338,16 @@ fn view(args: &[String]) -> &'static str {
             _ => "summary",
         };
     }
+    // A window flag on its own used to select the detail view, through a
+    // `filter_flag` branch at the end of the old chain, so `omni stats --week`
+    // printed commands, routes and agents. `--since week` means the summary for
+    // that window, which is the sane reading, but the old spellings keep the old
+    // behaviour: a script that says `--week` is asking for what it always got.
+    let legacy_window = super::has_any(args, &["--hour", "-H"])
+        || super::has_any(args, &["--day", "--today", "-d"])
+        || super::has_any(args, &["--week", "-w"])
+        || super::has_any(args, &["--month", "-m"]);
+
     if super::has_flag(args, "--share") {
         "share"
     } else if super::has_flag(args, "--rerun") {
@@ -337,6 +358,8 @@ fn view(args: &[String]) -> &'static str {
         "detail"
     } else if super::has_flag(args, "--project") {
         "project"
+    } else if legacy_window {
+        "detail"
     } else {
         "summary"
     }
@@ -1206,7 +1229,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     // By Command, top 10 (or all if requested), filter 0% savings
     let raw_filters = store.filter_breakdown(since)?;
     // `--limit 0` and the older `--all-commands` say the same thing.
-    let limit = super::flag_value(args, "--limit").and_then(|v| v.parse::<usize>().ok());
+    let limit = value_of(args, "--limit").and_then(|v| v.parse::<usize>().ok());
     let all_flag = super::has_flag(args, "--all-commands") || limit == Some(0);
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
 
@@ -1903,6 +1926,29 @@ mod tests {
         assert_eq!(view(&args(&["--detail"])), "detail");
         assert_eq!(view(&args(&["--all-commands"])), "detail");
         assert_eq!(view(&args(&["--rerun"])), "rerun");
+        assert_eq!(
+            view(&args(&["--week"])),
+            "detail",
+            "a window flag on its own selected the detail view and still does"
+        );
+        assert_eq!(
+            view(&args(&["--since", "week"])),
+            "summary",
+            "the new spelling names a window and nothing else"
+        );
+
+        // A flag that wants a value must not eat the next flag: that turned a
+        // malformed command into a successful one reporting something else.
+        assert_eq!(
+            scope(&args(&["--since", "--week"])).0,
+            "last 7 days",
+            "an empty --since falls through to the flag behind it"
+        );
+        assert_eq!(
+            view(&args(&["--view", "--detail"])),
+            "detail",
+            "an empty --view falls through to the flag behind it"
+        );
 
         assert_eq!(renderer("summary", false, false), "summary");
         assert_eq!(renderer("detail", true, false), "json");
