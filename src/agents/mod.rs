@@ -124,13 +124,17 @@ impl Tier {
         }
     }
 
+    /// What the tier means, without repeating the name `name()` already prints.
+    ///
+    /// It had no caller at all until #685, while `doctor` carried its own copy of
+    /// the same three sentences and hand-wrapped the middle one across two lines.
+    /// Doctor prints these beside `name()` as a two-column legend, so a sentence
+    /// long enough to wrap defeats the alignment: keep each under 45 columns.
     pub fn label(self) -> &'static str {
         match self {
-            Tier::Full => "Full: model-facing distill active",
-            Tier::HandoffFirst => {
-                "Handoff-first: built-in tool output not rewritten; omni_run distils what you route through it"
-            }
-            Tier::McpOnly => "MCP-only: memory and session state, no shell distill",
+            Tier::Full => "model-facing distill active",
+            Tier::HandoffFirst => "nothing is rewritten unless omni_run ran it",
+            Tier::McpOnly => "memory and session state, no shell distill",
         }
     }
 }
