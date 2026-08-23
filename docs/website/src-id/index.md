@@ -157,6 +157,11 @@ File yang berubah di antara dua bacaan tetap dilipat di sekitar perubahannya. Ti
 mempertahankan jumlah baris yang digantikannya, jadi baris yang tidak berpindah tetap ada
 di nomor yang diberikan editor Anda.
 
+Angka-angka itu berasal dari satu minggu, dan log trace hanya menyimpan tujuh hari, jadi
+minggu itu tidak bisa diputar ulang lagi. [Benchmarks](develop/benchmarks.md) memuat tiap
+run beserta korpusnya, dan seberapa berharga angka mana pun bagi Anda bergantung pada
+seberapa banyak minggu Anda sendiri mengulang dirinya.
+
 Ketika tidak ada yang aman untuk diambil, ia tidak mengambil apa pun. `git status`
 dua baris tidak punya basa-basi untuk dibuang dan tidak punya pengulangan untuk
 dilipat, dan payload JSON yang akan diurai langkah berikutnya sama sekali tidak

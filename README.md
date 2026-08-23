@@ -217,6 +217,11 @@ real command executions that reached a model:
   everything here: 286 groups of byte-identical payloads are 80.6% of these bytes, and
   148 of the 5,984 calls carry 64.7% of them. It was a week of building and
   benchmarking OMNI. The same harness over a week of ordinary work reads **14.9%**.
+* **These traces have since been pruned.** `execution_traces` keeps seven days, so this
+  window cannot be replayed again by us or by anyone else. What a later week reads, and
+  why it differs, is in
+  [benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks.html). Run the harness
+  on your own history for a figure about your workload.
 * **It fires where your bytes are.** File re-reads are the largest class in this
   corpus and the ledger takes **89.6%** off them. Where there is nothing safe to
   take, a two-line `git status` or a JSON payload a later step parses, OMNI hands the
