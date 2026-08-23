@@ -278,10 +278,69 @@ pub(crate) fn strip_assignments(command: &str) -> &str {
 /// One function so the loop and the fallback agree on what counts. They did not:
 /// the loop remembered any word containing `$(`, so `A=$( ) B=$(ls)` latched onto
 /// the empty one and the fallback then found nothing to return.
+///
+/// Scanned rather than matched, because `$(` inside quotes is text. `A='foo$(bar)'`
+/// runs nothing, and 886 of the 2,123 recorded commands that contain `$(` also
+/// contain a quote, so treating a quoted one as executable is not a hypothetical.
 fn substitution_body(word: &str) -> &str {
-    word.split_once("$(")
-        .map(|(_, inner)| inner.trim_start().trim_end_matches(')').trim_end())
-        .unwrap_or("")
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut chars = word.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' if quote != Some('\'') => escaped = true,
+            _ if quote == Some(c) => quote = None,
+            // Inside single quotes nothing expands at all; inside double quotes a
+            // substitution still runs, which is why only `'` suppresses it here.
+            _ if quote == Some('\'') => {}
+            '"' | '\'' => quote = Some(c),
+            '$' if matches!(chars.peek(), Some((_, '('))) => {
+                // Scan to the matching paren rather than trimming from the end:
+                // `A="x$(ls)" B=2` ends in a quote, so trimming left `ls)`.
+                //
+                // Over the remainder rather than `skip(i + 2)`: `i` is a byte
+                // offset and `skip` counts chars, so one multibyte character
+                // before the `$(` sent the scan past its own terminator.
+                let Some(body) = word.get(i + 2..) else {
+                    return "";
+                };
+                let mut depth = 1usize;
+                let mut end = body.len();
+                let mut inner_quote: Option<char> = None;
+                let mut inner_escaped = false;
+                for (j, d) in body.char_indices() {
+                    if inner_escaped {
+                        inner_escaped = false;
+                        continue;
+                    }
+                    match d {
+                        '\\' if inner_quote != Some('\'') => inner_escaped = true,
+                        _ if inner_quote == Some(d) => inner_quote = None,
+                        // A paren inside quotes is a character, not structure:
+                        // `A=$(grep "a)b" f)` closes at the second one.
+                        _ if inner_quote.is_some() => {}
+                        '"' | '\'' => inner_quote = Some(d),
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = j;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                return body.get(..end).unwrap_or("").trim();
+            }
+            _ => {}
+        }
+    }
+    ""
 }
 
 /// Words, counting a quoted run as one word.
@@ -564,6 +623,24 @@ mod label_fragments {
         // An empty substitution runs nothing, so it is not the first that ran.
         assert_eq!(producer_label("A=$( ) B=$(ls)"), "ls");
         assert_eq!(producer_label("A=$(ls) B=$( )"), "ls");
+        // Inside single quotes nothing expands, so this runs nothing at all.
+        // 886 of the 2,123 recorded commands holding `$(` also hold a quote.
+        assert_eq!(producer_label("A='foo$(bar)' B=$(ls)"), "ls");
+        // Inside double quotes it does still run, and the body ends at the
+        // matching paren rather than at the end of the word.
+        assert_eq!(producer_label("A=\"x$(ls)\" B=2"), "ls");
+        assert_eq!(producer_label("A=$(a $(b) c)"), "a");
+        // A byte offset is not a character count. One multibyte character before
+        // the `$(` sent the scan past its own terminator.
+        assert_eq!(producer_label("A=ééé$(ls) B=2"), "ls");
+        // A paren inside quotes is a character, not the closing one. Asserted on
+        // the body rather than the label: `grep` is the first word either way, so
+        // the label cannot see where the substitution ended.
+        assert_eq!(
+            super::substitution_body("A=$(grep \"a)b\" f)"),
+            "grep \"a)b\" f"
+        );
+        assert_eq!(producer_label("A=$(grep \"a)b\" f) B=2"), "grep");
     }
 
     /// The substitution is only the producer when nothing follows it. Its output
