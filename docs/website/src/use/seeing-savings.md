@@ -127,8 +127,9 @@ omni patterns --tool cargo
 ```
 
 `omni_history` gives the same per-call rows to an MCP client, on the tiers that advertise
-it. On a Full-tier host it costs more in the prefix than it earns, so `omni stats` is the
-route there. There is no `omni history` subcommand; this page listed one until 0.7.4.
+it. On a Full-tier host it costs more in the prefix than it earns, so the route there is
+`omni stats --view detail`, which folds repeated commands into one row with a count. There
+is no `omni history` subcommand; this page listed one until 0.7.4.
 
 `omni query` speaks a small fixed query language rather than free text. The supported
 forms are listed in its own help.

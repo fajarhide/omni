@@ -41,12 +41,13 @@ use crate::agents::Tier;
 /// What a cut costs is a door, and only on this tier. `router_from` removes an
 /// unadvertised route rather than hiding it, so the tools are gone here until
 /// `OMNI_MCP_TOOLS=all`; what stands in for them is the shell this tier already
-/// hooks, where `omni exec`, `omni remember`, `omni stats` and `omni session`
-/// answer what `omni_run`, `omni_remember`, `omni_history` and
-/// `omni_context_breakdown` answer. `omni_recall` and `omni_find_noise` have no
-/// CLI equivalent and sit behind the override alone; they are 4 calls in the
-/// whole corpus, and `find_noise` writes TOML filters for a layer #449 retired
-/// (#609).
+/// hooks. `omni exec` runs what `omni_run` ran, `omni remember` writes what
+/// `omni_remember` wrote, `omni stats --view context` prints what
+/// `omni_context_breakdown` printed, and `omni stats --view detail` carries
+/// `omni_history`'s rows with repeats folded into one line and a count rather
+/// than listed per call. `omni_recall` and `omni_find_noise` have no CLI
+/// equivalent and sit behind the override alone; they are 4 calls in the whole
+/// corpus, and `find_noise` writes TOML filters for a layer #449 retired (#609).
 pub const FULL: &[&str] = &["omni_retrieve", "omni_explain_savings"];
 // `omni_context` left before the rule was tightened: it was the only advertised
 // tool with zero calls ever across 253 sessions, and the three places OMNI

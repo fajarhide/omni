@@ -134,8 +134,9 @@ omni patterns --tool cargo
 
 `omni_history` memberi baris per panggilan yang sama ke klien MCP, di tier yang
 mengiklankannya. Di host tier Full biayanya di awal request lebih besar daripada
-hasilnya, jadi jalurnya di sana adalah `omni stats`. Tidak ada subperintah
-`omni history`; halaman ini sempat mencantumkannya sampai 0.7.4.
+hasilnya, jadi jalurnya di sana adalah `omni stats --view detail`, yang menggabung
+perintah berulang jadi satu baris berhitung. Tidak ada subperintah `omni history`;
+halaman ini sempat mencantumkannya sampai 0.7.4.
 
 `omni query` berbicara dalam bahasa kueri kecil yang tetap, bukan teks bebas.
 Bentuk yang didukung ada di bantuannya sendiri.

@@ -23,8 +23,16 @@ corpus. A Handoff-first host never has its built-in tool output rewritten, so MC
 only door OMNI has there and nothing is priced away.
 
 An unadvertised tool is not callable on that tier either, so the way back is the CLI or
-the override. `omni exec`, `omni remember`, `omni stats` and `omni session` answer what
-`omni_run`, `omni_remember`, `omni_history` and `omni_context_breakdown` answer.
+the override:
+
+| tool | on a Full-tier host |
+|---|---|
+| `omni_run` | `omni exec <command>` |
+| `omni_remember` | `omni remember '<fact>'` |
+| `omni_context_breakdown` | `omni stats --view context` |
+| `omni_history` | `omni stats --view detail`, which folds repeated commands into one row with a count instead of listing every call |
+| `omni_recall`, `omni_find_noise` | no CLI equivalent; `OMNI_MCP_TOOLS=all` |
+
 `OMNI_MCP_TOOLS=all` advertises all 25, and `omni doctor` says which set is in force and
 which host it resolved:
 

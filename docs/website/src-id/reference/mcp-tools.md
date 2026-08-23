@@ -23,10 +23,18 @@ korpus. Host Handoff-first tidak pernah mendapat penulisan ulang pada output per
 bawaannya, jadi MCP adalah satu-satunya pintu OMNI di sana dan tidak ada yang dipangkas.
 
 Perkakas yang tidak diiklankan juga tidak bisa dipanggil di tier itu, jadi jalan kembalinya
-adalah CLI atau override. `omni exec`, `omni remember`, `omni stats` dan `omni session`
-menjawab hal yang sama seperti `omni_run`, `omni_remember`, `omni_history` dan
-`omni_context_breakdown`. `OMNI_MCP_TOOLS=all` mengiklankan seluruh 25 perkakas, dan
-`omni doctor` menyebutkan set mana yang sedang berlaku serta host mana yang terdeteksi:
+adalah CLI atau override:
+
+| perkakas | di host tier Full |
+|---|---|
+| `omni_run` | `omni exec <perintah>` |
+| `omni_remember` | `omni remember '<fakta>'` |
+| `omni_context_breakdown` | `omni stats --view context` |
+| `omni_history` | `omni stats --view detail`, yang menggabung perintah berulang jadi satu baris berhitung, bukan satu baris per panggilan |
+| `omni_recall`, `omni_find_noise` | tidak ada padanan CLI; `OMNI_MCP_TOOLS=all` |
+
+`OMNI_MCP_TOOLS=all` mengiklankan seluruh 25 perkakas, dan `omni doctor` menyebutkan set
+mana yang sedang berlaku serta host mana yang terdeteksi:
 
 ```
   MCP tools:      2 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
