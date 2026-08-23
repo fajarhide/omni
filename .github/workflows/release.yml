@@ -34,10 +34,16 @@ jobs:
             binary: omni.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The toolchain used to be chosen by the ref (`@stable`). Pinning the
+      # action to a SHA means the version has to be named, and naming it is the
+      # honest form anyway: `rust-toolchain.toml` pins 1.97.0 and rustup prefers
+      # that file, so `@stable` fetched a whole toolchain that was then never
+      # used, and the two could drift apart without anything saying so (#179).
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
+          toolchain: "1.97.0"
           targets: ${{ matrix.target }}
 
       - name: Install musl tools (Linux x86_64)
@@ -46,7 +52,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}
 
@@ -56,7 +62,7 @@ jobs:
 
       - name: Build release (Linux)
         if: runner.os == 'Linux'
-        uses: houseabsolute/actions-rust-cross@v1
+        uses: houseabsolute/actions-rust-cross@85826e468eac832e251ac58f6191ba784db237c8 # v1
         with:
           command: build
           target: ${{ matrix.target }}
@@ -81,7 +87,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: omni-${{ matrix.target }}
           path: dist/omni-${{ github.ref_name }}-${{ matrix.target }}.*
@@ -90,11 +96,20 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    # `id-token` and `attestations` are what let this job sign a statement that
+    # these bytes came from this workflow at this commit. `SHA256SUMS` only says
+    # a file has not changed since it was published; it cannot say who published
+    # it, which is the question that matters for a binary sitting in the hook
+    # path of every command a developer runs (#632).
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
 
@@ -112,8 +127,15 @@ jobs:
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/*.zip
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           generate_release_notes: true
           files: |

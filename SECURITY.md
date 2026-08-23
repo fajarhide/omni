@@ -2,28 +2,29 @@
 
 ## Supported Versions
 
-Security updates are applied to the latest release on the `main` branch.
+Fixes go into the next release off `main`. Only the current minor line gets them.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| v0.5.x  | :white_check_mark: |
-| v0.4.x  | :x:                |
-| v0.3.x  | :x:                |
-| v0.2.x  | :x:                |
+| 0.7.x   | :white_check_mark: |
+| 0.6.x   | :x:                |
+| 0.5.x   | :x:                |
 
 ## Reporting a Vulnerability
 
-We take the security of OMNI seriously. If you discover a vulnerability, you can report it to us through one of the following channels:
+**Do not open a public issue.** OMNI runs in the hook path of every command a
+developer types, so a report needs an embargo until there is a release to upgrade
+to.
 
-1. **GitHub Issues (Recommended)**: Create an issue at [https://github.com/fajarhide/omni/issues](https://github.com/fajarhide/omni/issues). *(If the vulnerability is critical, you can also use GitHub's private vulnerability reporting feature if enabled on the repository).*
-2. **Email us**: Send a detailed report to [security@weekndlabs.com](mailto:security@weekndlabs.com).
+1. **[Report a vulnerability privately](https://github.com/fajarhide/omni/security/advisories/new)**.
+   GitHub's private reporting is enabled on this repository, and the thread stays
+   between you and the maintainer.
+2. **Email** [security@weekndlabs.com](mailto:security@weekndlabs.com) if you would
+   rather not use GitHub.
 
-For either method, please include:
-- A description of the issue.
-- Steps to reproduce.
-- Potential impact.
+Please include a description, steps to reproduce, and what an attacker gets.
 
-We will acknowledge your report within 48 hours and provide a timeline for a fix.
+You will get an acknowledgement within 48 hours and a timeline with it.
 
 ## Security Considerations
 
@@ -31,6 +32,18 @@ We will acknowledge your report within 48 hours and provide a timeline for a fix
 - **Local SQLite Persistence**: Usage stats and archived contexts are stored locally in the SQLite database `~/.omni/omni.db`. **No data ever leaves your machine.**
 - **MCP Server**: The MCP server runs locally via `stdio` transport and does not expose any network ports.
 - **`omni update`**: Only reads the public GitHub Releases API (no authentication required) to download the latest binary. No data is uploaded.
+
+## Verifying a Release
+
+Every release archive carries a signed statement of which workflow built it and
+from which commit. `SHA256SUMS` only proves a file has not changed since it was
+published; provenance is what says who published it.
+
+```bash
+gh attestation verify omni-v0.7.7-aarch64-apple-darwin.tar.gz --repo fajarhide/omni
+```
+
+Releases from 0.7.7 onward are attested. Anything older has `SHA256SUMS` only.
 
 ---
 
