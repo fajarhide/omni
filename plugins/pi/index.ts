@@ -11,10 +11,23 @@ const EXCLUDE_TOOL_NAMES = new Set(["edit", "write"]);
 
 type JsonObject = Record<string, unknown>;
 
+/**
+ * `updatedToolOutput`, not `updatedResponse`. OMNI stopped emitting the second
+ * one in 0.6.5 (#158), and this file kept reading it, so `updated` was always
+ * undefined and Pi received raw output on every call while the hook ran, spawned
+ * the subprocess and did the work (#688). Probed rather than assumed: a Pi-shaped
+ * payload of 29,099 bytes comes back as
+ * `updatedToolOutput: { result: <7,365 chars>, status: "success" }`.
+ *
+ * `result` because that is the field Pi's own `toolResultPayload` sends the text
+ * in, and OMNI echoes the shape it was given. A host whose tool result names the
+ * field differently gets that name back instead, which is why this is typed as a
+ * record and read by key rather than as a string.
+ */
 type OmniHookOutput = {
   hookSpecificOutput?: {
     systemPromptAddition?: string;
-    updatedResponse?: string;
+    updatedToolOutput?: { result?: string; status?: string };
     additionalContext?: string;
   };
 };
@@ -322,7 +335,7 @@ pi.on("session_start", async (event, ctx) => {
         ctx,
       );
 
-      const updated = out?.hookSpecificOutput?.updatedResponse;
+      const updated = out?.hookSpecificOutput?.updatedToolOutput?.result;
       if (typeof updated === "string" && updated.length > 0) {
         return { content: [{ type: "text" as const, text: updated }] };
       }
