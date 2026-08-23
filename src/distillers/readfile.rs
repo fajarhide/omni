@@ -13,7 +13,7 @@ fn distill_readfile(content: &str, filepath: &str) -> Option<String> {
 const MIN_DISTILL_TOKENS: usize = 2000;
 
 /// `imported_by_count`: number of files that import this file (from graph).
-/// When > 3, append a factual warning suggesting omni_context.
+/// When > 3, append a factual warning suggesting `omni context` (#609).
 /// `imported_by` is a closure, not a number, because computing it walks the
 /// repository. It is consulted at one place, the dependents guard below, and
 /// only after two earlier gates have already decided there is something to
@@ -83,7 +83,7 @@ pub fn distill_readfile_with_context(
         let imported_by_count = imported_by();
         if imported_by_count > 3 {
             out.push_str(&format!(
-                "\n[OMNI Guard: {} is imported by {} files, changes here may have wide impact. Call omni_context(\"{}\") for full dependency map.]",
+                "\n[OMNI Guard: {} is imported by {} files, changes here may have wide impact. Run `omni context '{}'` for the full dependency map.]",
                 filepath, imported_by_count, filepath
             ));
         }
@@ -466,6 +466,33 @@ fn distill_log_file(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The guard suggests a command a reader will paste into a shell, so the path
+    /// has to survive being a filename rather than becoming shell syntax. Flagged
+    /// on #609 when the suggestion changed from an MCP call, where the argument
+    /// was already quoted by JSON, to a command line where it is not.
+    #[test]
+    fn the_suggested_command_quotes_the_path() {
+        // Same shape as `the_dependents_guard_still_fires_when_it_is_reached`,
+        // which is the fixture already proven to clear both gates: the token
+        // floor and the 20% compression the guard sits behind.
+        let mut content = String::new();
+        for i in 0..400 {
+            content.push_str(&format!(
+                "// comment line {i} explaining a thing at some length for bulk\n"
+            ));
+            content.push_str(&format!("fn helper_{i}(x: usize) -> usize {{ x + {i} }}\n"));
+        }
+
+        let out = super::distill_readfile_with_context(&content, "src/my file.rs", || 9)
+            .expect("a file this size distils");
+
+        assert!(
+            out.contains("omni context 'src/my file.rs'"),
+            "a path with a space was pasted into a command unquoted, so the \
+             reader is told to run something that means two arguments:\n{out}"
+        );
+    }
 
     /// #320: `hooks::post_tool` built the whole import graph before calling this,
     /// so every hooked `Read` paid 48 ms on this repository, most of them for a

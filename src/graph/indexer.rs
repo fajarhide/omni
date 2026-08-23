@@ -229,15 +229,57 @@ fn normalize_relative(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// One spelling per file, so the graph and anything keyed off it agree.
+///
+/// This only swapped backslashes for slashes, so `./src/x.rs` and `src/x.rs` were
+/// two different keys: the graph answered "imports: none detected" for one of
+/// them, and a hot-file lookup keyed on the result said "no" for a file the
+/// session had touched four times. Found by review on #609 when the tool became
+/// `omni context`, and it was there for as long as the MCP tool was.
+///
+/// `..` is kept. Dropping it would change which file is named, and this function
+/// decides a key rather than resolving a path against the filesystem.
 fn normalize_path_string(path: &str) -> String {
-    let p = PathBuf::from(path);
-    p.to_string_lossy().replace('\\', "/")
+    use std::path::Component;
+
+    let slashed = path.replace('\\', "/");
+    let mut out = PathBuf::new();
+    for component in PathBuf::from(&slashed).components() {
+        match component {
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    let normalized = out.to_string_lossy().replace('\\', "/");
+    if normalized.is_empty() {
+        slashed
+    } else {
+        normalized
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// #609. Two spellings of one file were two keys, so the graph and every
+    /// lookup keyed off its answer disagreed with each other.
+    #[test]
+    fn one_file_has_one_spelling() {
+        for (given, want) in [
+            ("./src/x.rs", "src/x.rs"),
+            ("src/x.rs", "src/x.rs"),
+            ("./src/./x.rs", "src/x.rs"),
+            ("src\\x.rs", "src/x.rs"),
+        ] {
+            assert_eq!(normalize_path_string(given), want, "{given}");
+        }
+        // `..` names a different file, so it survives.
+        assert_eq!(normalize_path_string("../src/x.rs"), "../src/x.rs");
+        // And nothing becomes empty.
+        assert_eq!(normalize_path_string("."), ".");
+    }
 
     #[test]
     fn extracts_rust_imports() {

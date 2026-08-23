@@ -18,7 +18,7 @@ itu OMNI hanya mengiklankan set yang bisa dipakai oleh tier host Anda:
 
 Yang sembilan itu adalah `omni_retrieve`, `omni_explain_savings`, `omni_remember`,
 `omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history`
-dan `omni_context`. Itulah yang benar-benar pernah dipanggil di korpus yang terekam.
+dan `omni_history`. Itulah yang benar-benar pernah dipanggil di korpus yang terekam.
 
 Perkakas lain di halaman ini tetap ada di dalam binary dan hanya berjarak satu setelan.
 `OMNI_MCP_TOOLS=all` mengiklankan seluruh 25 perkakas, dan `omni doctor` menyebutkan set
@@ -83,7 +83,6 @@ angkanya, jangan membentuk kesan.
 | `omni_session` | Keadaan sesi: status, konteks, bersihkan |
 | `omni_search` | Cari di riwayat sesi ini |
 | `omni_query` | Kueri riwayat penyulingan dengan bentuk kueri yang tetap |
-| `omni_context` | Konteks dependensi ringan untuk sebuah berkas |
 | `omni_agents` | Agent lain yang sedang aktif di proyek ini |
 
 ## Penyetelan
@@ -118,3 +117,16 @@ Memanggilnya mengembalikan `-32602 tool not found`.
 Ia pernah salah hitung: `grep` atas kode sumber untuk `"omni_*"` mengembalikan
 27, jadi 27 salah di mana pun ia muncul. Jalankan panggilan `tools/list` di atas
 untuk hitungannya.
+
+## Yang keluar dari permukaan
+
+`omni_context` diiklankan sampai 0.7.7 dan tidak pernah sekali pun dipanggil di 253
+sesi yang terekam, jadi ia memakan 189 byte di prefix setiap request untuk
+kapabilitas yang tidak pernah dijangkau siapa pun. Sekarang ia `omni context
+<file>`, yang tidak memakan biaya per request:
+
+```bash
+omni context src/ledger/mod.rs
+```
+
+Agen tetap bisa menjangkaunya lewat `omni_run`.
