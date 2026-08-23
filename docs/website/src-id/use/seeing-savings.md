@@ -18,10 +18,38 @@ omni stats --project       # dipecah per jalur proyek
 omni stats --json          # bisa dibaca mesin
 ```
 
-Ia memimpin dengan **umur sesi**: berapa perintah yang dibawa sebuah sesi sebelum
-host menutupnya. Itu meteran yang benar-benar diperhatikan pengguna. Persentase
-penyulingan di bawahnya adalah alat diagnosis untuk pipeline satu host, bukan
-klaim produk.
+Ia memimpin dengan byte yang tidak pernah sampai ke model Anda, lalu satu baris
+per mesin:
+
+```
+    5.1 MB  never reached your model
+
+    folded      1.7 MB   41% of what it folded         906 folds
+    distilled   3.4 MB   48% of what it distilled    1,056 calls
+    left alone       0   by design                  15,718 calls
+```
+
+**Kedua persentase itu berasal dari populasi yang berbeda dan tidak boleh
+dijumlahkan atau dirata-ratakan.** Penyuling memangkas 48% dari panggilan yang ia
+suling; ledger memangkas 41% dari muatan yang ia lipat. Total byte boleh dijumlahkan,
+dan itulah yang dilakukan baris utamanya. Sampai 0.7.7 laporan ini hanya membaca
+`distillations` dan tidak pernah membaca ledger sama sekali, jadi mesin yang paling
+banyak membuang byte justru hilang dari laporan, dan satu-satunya persentase yang
+tercetak adalah penyuling dibagi 15.718 panggilan yang sengaja ia lewatkan.
+
+**`left alone` tertulis `0`, bukan 31 MB yang lewat begitu saja.** Byte itu bukan
+kemenangan dan bukan kerugian, dan menaruhnya di kolom penghematan membuat pembaca
+mengira ada yang hilang.
+
+**Persentase lipatan hanya mencakup lipatan yang mencatat muatan asalnya.**
+`payload_bytes` datang lewat migrasi dengan nilai bawaan nol, jadi baris lama membawa
+penghematan tanpa basis. Laporannya menyebut berapa lipatan yang ia bagi, dan tidak
+mencetak persentase sama sekali kalau tidak ada satu pun yang mencatatnya.
+
+Umur sesi, tabel per periode, perintah teratas dan pemecahan per agent semuanya pindah
+ke `--detail`. `--detail` juga menyebut alasan tiap panggilan dilewatkan, dari
+`passthrough_events`, yang mengubah angka passthrough 94% dari tuduhan menjadi
+penjelasan.
 
 ## Angkanya dihitung dalam satuan apa
 

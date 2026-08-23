@@ -18,9 +18,35 @@ omni stats --project       # broken down per project path
 omni stats --json          # machine readable
 ```
 
-It leads with **session lifetime**: how many commands a session carries before the
-host closes it. That is the meter a user actually watches. The distillation
-percentage below it is a diagnostic for one host's pipeline, not a product claim.
+It leads with the bytes that never reached your model, then one line per engine:
+
+```
+    5.1 MB  never reached your model
+
+    folded      1.7 MB   41% of what it folded         906 folds
+    distilled   3.4 MB   48% of what it distilled    1,056 calls
+    left alone       0   by design                  15,718 calls
+```
+
+**The two percentages come from different populations and may never be added or
+averaged.** The distiller took 48% off the calls it distilled; the ledger took 41%
+off the payloads it folded. Byte totals may be summed, which is what the headline
+does. Until 0.7.7 the report read `distillations` alone and never read the ledger at
+all, so the engine removing the most bytes was missing and the one percentage printed
+was the distiller divided by 15,718 calls it had deliberately declined.
+
+**`left alone` reads `0`, not the 31 MB that passed through.** Those bytes are neither
+a win nor a loss, and putting them in the savings column makes a reader think something
+went missing.
+
+**The fold percentage covers the folds that record the payload they came out of.**
+`payload_bytes` arrived in a migration defaulting to zero, so older rows carry a saving
+with no base. The report says how many of the folds it divided, and prints no percentage
+at all when none of them do.
+
+Session lifetime, the per-period table, top commands and the agent split all moved to
+`--detail`. `--detail` also names why each call was declined, out of `passthrough_events`,
+which is what turns a 94% passthrough share from an accusation into an explanation.
 
 ## What the numbers are counted in
 
