@@ -306,8 +306,12 @@ fn condense_agent_report(name: &str, tier: &str, report: &str, detail: bool) -> 
     let row = format!("  {}{tier:<HOST_TIER_W$}{count}", padded.cyan());
     // A host with no count would otherwise end in the tier column's padding.
     let mut out = format!("{}\n", row.trim_end());
+    // Shifted by one space rather than re-indented from the left, because a
+    // report can nest: Pi prints `Duplicates:` at three and a bullet per source
+    // at five, and trimming both to a fixed indent made the sources look like
+    // siblings of the row that counts them.
     for line in kept {
-        out.push_str(&format!("    {}\n", line.trim_start()));
+        out.push_str(&format!(" {line}\n"));
     }
     (out, hidden)
 }
@@ -729,6 +733,24 @@ mod tests {
             short.find("2 checks"),
             long.find("2 checks"),
             "{short}{long}"
+        );
+    }
+
+    /// A report can nest, and the condenser must not flatten it: Pi prints
+    /// `Duplicates:` and then one bullet per source under it, so a fixed indent
+    /// for every kept row turns the sources into siblings of the count.
+    #[test]
+    fn a_nested_row_stays_under_the_row_it_belongs_to() {
+        let report = "  Pi Agent:\n   Duplicates:     2 OMNI sources detected [WARNING]\n     • ~/a\n     • ~/b\n";
+
+        let (out, _) = condense_agent_report("Pi Agent", "MCP-only", report, false);
+
+        let rendered = plain(&out);
+        let lines: Vec<&str> = rendered.lines().map(|l| l.trim_end()).collect();
+        let indent = |l: &str| l.len() - l.trim_start().len();
+        assert!(
+            indent(lines[2]) > indent(lines[1]),
+            "the source lost its parent: {out}"
         );
     }
 
