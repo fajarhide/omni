@@ -173,8 +173,11 @@ check_exit "session start exits cleanly" "$SESSION_EXIT" "0"
 # ─── 7. Stats ────────────────────────────────────────────
 echo "▸ Scenario 7: Stats"
 STATS_OUT=$("$OMNI" stats 2>&1 || true)
-check "stats shows header" "$STATS_OUT" "Signal Report"
-check "stats shows commands" "$STATS_OUT" "commands"
+# #665 renamed the header when the summary became one screen. The check moved
+# with it rather than being deleted: it is the one that catches a report that
+# prints nothing at all.
+check "stats shows header" "$STATS_OUT" "savings"
+check "stats shows commands" "$STATS_OUT" "calls"
 
 # The share card runs against a fresh store here, so it takes the no-data path.
 # Both branches have to exit 0: a growth surface that panics on a new install is
