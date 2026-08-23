@@ -306,6 +306,11 @@ pub struct Ledger<'a> {
     /// replacing came from a different one (#622). Empty means the caller could
     /// not name one, which suppresses the clause rather than guessing.
     source: String,
+    /// Whether the caller's host numbers the lines it is handed, counting from a
+    /// start line the caller controls. A host that does cannot take a view whose
+    /// survivors sit in two blocks, so that view is never built and never booked
+    /// (#657).
+    renumbered: bool,
     /// Who is being shown these lines, recorded and read by nothing (#509).
     ///
     /// The project scope is keyed on the directory alone, so two agents in one
@@ -348,6 +353,7 @@ impl<'a> Ledger<'a> {
             scope: scope.into(),
             project: None,
             source: String::new(),
+            renumbered: false,
             agent: "unknown".to_string(),
         }
     }
@@ -362,6 +368,18 @@ impl<'a> Ledger<'a> {
     /// before claiming a different source in its marker.
     pub fn from(mut self, source: impl Into<String>) -> Self {
         self.source = source.into();
+        self
+    }
+
+    /// Says the host will renumber whatever lines it is handed, which decides
+    /// whether a split view is worth building at all.
+    ///
+    /// Only `Read` does: its payload goes back as `file.content` and the host
+    /// renders it with `cat -n` from `startLine`. One starting number cannot
+    /// describe survivors sitting at two different offsets, so the caller drops
+    /// such a view, and a fold nobody delivers must not reach the books.
+    pub fn renumbered(mut self, yes: bool) -> Self {
+        self.renumbered = yes;
         self
     }
 
@@ -484,6 +502,16 @@ impl<'a> Ledger<'a> {
             .substitute(&lines, &hashes, &origin_of)
             .filter(|(view, _, _)| view.len() < text.len());
 
+        // What the fold did to the numbering below it (#557), read from the folded
+        // indices where the answer is known. Decided here rather than after the
+        // recording below, because a host that renumbers will drop a split view and
+        // the books must not carry a fold the agent never received (#657).
+        let shifts = projected
+            .as_ref()
+            .map(|(_, folded, above)| FoldShift::of(folded, lines.len(), *above))
+            .unwrap_or(FoldShift::None);
+        let projected = projected.filter(|_| !(self.renumbered && shifts == FoldShift::Interior));
+
         // Record what the agent was handed, which is not always what it was
         // given (#465). A run replaced by a marker never reached the context, so
         // recording it here would let the *next* occurrence in this session read
@@ -570,12 +598,6 @@ impl<'a> Ledger<'a> {
                 .ledger_record(p, &delivered, &self.agent, &self.source);
         }
 
-        // What the fold did to the numbering below it (#557). Read from the
-        // folded indices, where the answer is known.
-        let shifts = projected
-            .as_ref()
-            .map(|(_, folded, above)| FoldShift::of(folded, lines.len(), *above))
-            .unwrap_or(FoldShift::None);
         projected.map(|(view, _, _)| (view, shifts))
     }
 
