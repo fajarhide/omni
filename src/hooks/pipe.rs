@@ -88,6 +88,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
                 command_to_use.unwrap_or(""),
                 passthrough.len(),
                 "own recovery command",
+                "",
             );
         }
         return Ok(());
@@ -134,6 +135,10 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
                 command_to_use.unwrap_or(""),
                 input_text.len(),
                 &crate::pipeline::format::passthrough_reason(kind),
+                // Pipe mode has no host session id. Empty says that, where the
+                // `SessionState` fallback would say "whenever OMNI last started"
+                // and group 16 project paths under one id (#118, #672).
+                "",
             );
         }
         return Ok(());

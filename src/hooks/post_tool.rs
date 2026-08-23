@@ -297,6 +297,7 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
                 &normalized.command,
                 normalized.content.len(),
                 "own recovery command",
+                normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
         return true;
@@ -319,6 +320,7 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
                 &normalized.command,
                 normalized.content.len(),
                 &format::passthrough_reason(kind),
+                normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
         return true;
@@ -352,6 +354,7 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
                 &normalized.command,
                 normalized.content.len(),
                 "host output cap",
+                normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
         return true;
@@ -810,6 +813,7 @@ pub fn process_payload(
                 clean_command,
                 content.len(),
                 "would have dropped the failure",
+                normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
         final_out = content.to_string();
@@ -892,7 +896,12 @@ pub fn process_payload(
     if !redacted_here && final_out.len() >= content.len() * 9 / 10 {
         // Record passthrough metric regardless of size
         if let Some(ref s) = store {
-            s.record_passthrough(clean_command, content.len(), "below guardrail");
+            s.record_passthrough(
+                clean_command,
+                content.len(),
+                "below guardrail",
+                normalized.host_session_id.as_deref().unwrap_or(""),
+            );
         }
 
         // Take the route the banner names. Prefixing `Passthrough` onto
