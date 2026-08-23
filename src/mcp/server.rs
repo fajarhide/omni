@@ -1853,6 +1853,11 @@ mod tests {
     /// only advertised tool never called once in 253 sessions, and it cost 189 B
     /// of every request. Kept just above the 2,098 that measures today, for the
     /// same reason: a gate with room in it does not notice a regression.
+    ///
+    /// Ratcheted to 500 when the admission rule stopped being "called at least
+    /// once" and started being priced (#609). On this tier the list is
+    /// `omni_retrieve` and `omni_explain_savings`, which carried 138 of the 149
+    /// calls in the 256-session corpus; the six that left cost 1,631 B for 11.
     #[test]
     fn the_advertised_surface_is_smaller_than_it_was() {
         let router = OmniServer::router_from("claude_code", false);
@@ -1864,13 +1869,13 @@ mod tests {
 
         assert_eq!(
             listed.len(),
-            8,
-            "advertised {} tools, expected eight",
+            2,
+            "advertised {} tools, expected two",
             listed.len()
         );
         assert!(
-            bytes <= 2_200,
-            "advertised surface is {bytes} B, gate is 2200 (it measured 2,098 on #609)"
+            bytes <= 500,
+            "advertised surface is {bytes} B, gate is 500 (it measured 467 on #609)"
         );
     }
 

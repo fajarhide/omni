@@ -42,7 +42,10 @@ omni remember 'The staging database ignores migrations run outside the deploy jo
 
 Agents with MCP wired call `omni_remember` themselves, and pull facts back with
 `omni_recall`, which is a semantic search across engrams, stored knowledge and
-distillation history.
+distillation history. Both are advertised on the MCP-only and Handoff-first tiers.
+A Full-tier host such as Claude Code writes through `omni remember` in the shell OMNI
+already hooks, and reaches `omni_recall`, which has no CLI equivalent, with
+`OMNI_MCP_TOOLS=all`.
 
 Store what is not derivable from the code: a decision and its reason, a gotcha, a
 constraint that no file states. Do not store what the repository already records.
