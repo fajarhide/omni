@@ -3363,11 +3363,13 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
-    /// #657, narrowed by #658. A `Read` whose survivors split now folds its head
-    /// and stops there, so the case that still delivers nothing is the one with no
-    /// head to fold: a payload whose first line is new and whose survivors split
-    /// below it. The books must be empty for it, because the agent received every
-    /// byte.
+    /// #657, narrowed twice. A `Read` whose survivors split folds every run now
+    /// (#664), so the case that still delivers nothing is the one where no run is
+    /// worth its marker: seen lines arriving one at a time between new ones. The
+    /// books must be empty for it, because the agent received every byte.
+    ///
+    /// The fixture is also the cost rule: a padded fold pays for its own filler,
+    /// so a one-line run can never buy a marker plus the lines it replaces.
     ///
     /// Measured before #657: 4 of 17 markdown files read twice unchanged delivered
     /// nothing and recorded 78% to 97% as saved, `CHANGELOG.md` among them at
@@ -3376,17 +3378,14 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
     fn a_refused_read_fold_records_nothing() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
-        let seen = range(100, 200);
-        // The payload opens on a new line, so there is no head to fold, and a
-        // second new line further down splits what is left. Nothing can be
-        // folded here at all, which is the case that must still record nothing.
-        let split = format!(
-            "{}{}{}{}",
-            "    let fresh_one = \"added since the first read\";\n",
-            range(100, 170),
-            "    let fresh_two = \"added since the first read too\";\n",
-            range(170, 200)
-        );
+        let seen = range(100, 145);
+        // Every seen line arrives alone, between lines the session has not been
+        // shown, so no run reaches the size its own marker and filler would cost.
+        // Kept under `MIN_DISTILL_TOKENS` deliberately: a larger payload is taken
+        // by the readfile distiller and never reaches the ledger at all.
+        let split: String = (100..145)
+            .map(|i| format!("{}    let fresh_{i:03} = \"new\";\n", line(i)))
+            .collect();
         let payload = |content: &str| {
             json!({
                 "session_id": "host-657-split",
@@ -3419,18 +3418,15 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
-    /// #658. Refusing the whole view when the survivors split gave up the bytes
-    /// above the first split too: an unchanged re-read of `CONTRIBUTING.md` saved
-    /// nothing, because six lines stating a failure are never folded (#458) and
-    /// each one splits the run around it.
+    /// #658, then #664. Refusing the whole view when the survivors split gave up
+    /// every byte; folding down to the first survivor gave up everything below it,
+    /// which on `CHANGELOG.md` was 4.4% against the 77% its runs were worth.
     ///
-    /// Folding down to the first surviving line leaves everything below it
-    /// contiguous, so `startLine` still describes all of it. Priced over 18
-    /// markdown files read twice: the corpus goes from 23.9% to 27.3%, and
-    /// `CHANGELOG.md` from nothing to 4.4%. The ceiling is structural, since a
-    /// fold that keeps the line count is the only way past it.
+    /// Padding each fold back to its own line count removes the constraint the
+    /// other two worked around: the survivors keep the numbers they came with, so
+    /// every run may fold and `startLine` never moves.
     #[test]
-    fn a_split_read_folds_its_head_and_stops_there() {
+    fn a_split_read_folds_every_run_and_keeps_the_line_count() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let seen = range(100, 200);
@@ -3468,30 +3464,47 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
         let content = file["content"].as_str().expect("content");
 
-        // One marker, at the head, and nothing folded below the first survivor.
-        assert_eq!(
-            content.matches("[OMNI:").count(),
-            1,
-            "only the head may fold, or the survivors split again: {content}"
-        );
+        // Every run folds now, not just the head.
         assert!(
-            content.starts_with("[OMNI:"),
-            "the fold has to be the head for one start line to describe the rest: {content}"
+            content.matches("[OMNI:").count() >= 2,
+            "a split payload folds each of its runs: {content}"
         );
-        assert!(
-            content.contains("let fresh_two") && content.contains("unique_marker_169"),
-            "everything below the first survivor is delivered verbatim: {content}"
-        );
-        // Thirty lines became one marker, so the survivors sit 29 lines higher.
         assert_eq!(
-            file["startLine"], 129,
-            "the survivors keep numbers they are no longer at: {out}"
+            content.lines().count(),
+            split.lines().count(),
+            "the delivered view has to carry the payload's own line count: {content}"
         );
-        // #657: the books say what was delivered, which is the head and only it.
+        assert_eq!(
+            file["startLine"], 100,
+            "the count is preserved, so the starting number does not move: {out}"
+        );
+
+        // The two new lines are still at the offsets the payload had them at,
+        // which is the whole point of paying for the filler.
+        let at = |text: &str, i: usize| text.lines().nth(i).unwrap_or_default().to_string();
+        let first_fresh = split
+            .lines()
+            .position(|l| l.contains("fresh_one"))
+            .expect("fixture");
+        let second_fresh = split
+            .lines()
+            .position(|l| l.contains("fresh_two"))
+            .expect("fixture");
+        assert_eq!(
+            at(content, first_fresh),
+            at(&split, first_fresh),
+            "{content}"
+        );
+        assert_eq!(
+            at(content, second_fresh),
+            at(&split, second_fresh),
+            "{content}"
+        );
+
+        // #657: the books say what was delivered, and now that is every run.
         let folds = store.get_recent_ledger_folds(None, 10);
-        assert_eq!(
-            folds.iter().map(|f| f.lines).sum::<usize>(),
-            30,
+        assert!(
+            folds.iter().map(|f| f.lines).sum::<usize>() >= 90,
             "the fold recorded is not the fold delivered: {folds:?}"
         );
     }
@@ -3644,7 +3657,7 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
     /// corrected by a starting number, because one number cannot describe two
     /// offsets, so the fold is refused and the payload goes back whole.
     #[test]
-    fn refuses_an_interior_fold_that_would_renumber_the_lines_below_it() {
+    fn an_interior_fold_keeps_the_lines_below_it_on_their_own_numbers() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let payload = |from: usize, to: usize| {
@@ -3666,11 +3679,33 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
         let _ = process_payload(&payload(130, 165), Some(store.clone()), None);
-        let out =
-            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
+        let raw = range(100, 200);
+        let out = process_payload(&payload(100, 200), Some(store.clone()), None)
+            .expect("the middle repeats, so it folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let content = file["content"].as_str().expect("content");
+
         assert!(
-            !out.contains("[OMNI:"),
-            "a fold with content on both sides renumbered the lines under it: {out}"
+            content.contains("[OMNI:"),
+            "the middle did not fold: {content}"
+        );
+        assert_eq!(
+            content.lines().count(),
+            raw.lines().count(),
+            "a fold with content under it has to keep the line count: {content}"
+        );
+        assert_eq!(
+            file["startLine"], 100,
+            "the count is preserved, so nothing may move the starting number: {out}"
+        );
+        // The survivor below the fold is still the line the file has at that offset.
+        let at = |text: &str, i: usize| text.lines().nth(i).unwrap_or_default().to_string();
+        assert_eq!(
+            at(content, 70),
+            at(&raw, 70),
+            "the line below the fold moved: {content}"
         );
     }
 
@@ -3928,13 +3963,22 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
         let _ = process_payload(&payload(130, 165), Some(store.clone()), None);
-        let out =
-            process_payload(&payload(100, 200), Some(store.clone()), None).unwrap_or_default();
-        assert!(
-            !out.contains("omni retrieve"),
-            "an interior fold went through because the surviving content was read \
-             as markers: {out}"
+        let raw = range(100, 200);
+        let out = process_payload(&payload(100, 200), Some(store.clone()), None)
+            .expect("the middle repeats, so it folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let content = file["content"].as_str().expect("content");
+
+        assert_eq!(
+            content.lines().count(),
+            raw.lines().count(),
+            "content that reads like a marker still may not move a line: {content}"
         );
+        assert_eq!(file["startLine"], 100, "{out}");
+        let at = |text: &str, i: usize| text.lines().nth(i).unwrap_or_default().to_string();
+        assert_eq!(at(content, 70), at(&raw, 70), "{content}");
     }
 
     #[test]
