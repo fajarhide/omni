@@ -260,7 +260,9 @@ mod tests {
         let mut config = json!({});
         assert!(register_plugin_path(&mut config, DIR));
         assert_eq!(
-            config.pointer("/plugins/load/paths").and_then(|p| p.as_array()),
+            config
+                .pointer("/plugins/load/paths")
+                .and_then(|p| p.as_array()),
             Some(&vec![json!(DIR)]),
             "the whole nesting has to be created, not just the leaf"
         );
@@ -294,7 +296,9 @@ mod tests {
         assert_eq!(config["channels"]["slack"]["token"], json!("keep-me"));
         assert_eq!(config["plugins"]["enabled"], json!(true));
         assert_eq!(
-            config.pointer("/plugins/load/paths").and_then(|p| p.as_array()),
+            config
+                .pointer("/plugins/load/paths")
+                .and_then(|p| p.as_array()),
             Some(&vec![json!("/somewhere/else"), json!(DIR)]),
             "an existing path belongs to another plugin and is not ours to drop"
         );
