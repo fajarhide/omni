@@ -73,7 +73,7 @@ with every other host's and no figure about either is meaningful.
 omni doctor
 
 hermes plugins list | grep omni        # expect: omni-signal-engine enabled
-hermes tools list | grep mcp_omni_     # expect 25 tools, after a restart
+hermes tools list | grep mcp_omni_     # the advertised set, after a restart
 ```
 
 Then a functional check on a real fixture:
@@ -87,9 +87,11 @@ For a live test, run something noisy through Hermes' `terminal` tool
 (`terminal("npm install", timeout=120)`) and compare the tool result size against raw
 npm output. Confirm with `omni stats`.
 
-> Count the tools rather than trusting a number written down. Earlier versions of this
-> guide said 27, which came from grepping the server source; one of those strings is a
-> filter name, not a tool. The `hermes tools list` above is the count.
+> Read the list rather than a number written down. This guide has said 27, which came
+> from grepping the server source and counted a filter name as a tool, and then 25, which
+> is the whole surface and not what a host is told about. Hermes is a Full-tier host, so
+> it is advertised `omni_retrieve` and `omni_explain_savings`, the two that pay for their
+> place in the prefix of every request. `OMNI_MCP_TOOLS=all` serves the whole surface.
 
 ## Where OMNI helps and where it does not
 

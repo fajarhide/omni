@@ -31,9 +31,9 @@ Claude Code, Codex CLI, Gemini CLI에서 명령 출력을 증류합니다. 이 �
 
 | 티어 | 호스트 | 무엇을 얻는가 |
 |---|---|---|
-| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | 호스트가 OMNI의 재작성을 적용하므로 모델은 내장 도구의 증류된 출력을 읽습니다. |
+| **Full** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipe) | 호스트가 OMNI의 재작성을 적용하므로 모델은 내장 도구의 증류된 출력을 읽습니다. |
 | **Handoff-first** | Cursor, Windsurf | 호스트가 내장 도구 출력을 재작성할 수 없습니다. `omni_run`으로 실행한 명령은 증류되며, `omni init --cursor`가 에이전트로 하여금 그것을 선택하게 하는 규칙을 설치합니다. |
-| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | 메모리, 리콜, 세션 상태만. 셸 증류는 없으며 있다고 주장하지도 않습니다. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | 메모리, 리콜, 세션 상태만. 셸 증류는 없으며 있다고 주장하지도 않습니다. |
 
 `omni doctor`가 설치된 호스트마다 티어를 출력합니다. 절감은 모델이 실제로 더 적게 받았을 때만 집계됩니다.
 

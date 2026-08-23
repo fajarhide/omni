@@ -76,7 +76,7 @@ keduanya yang berarti.
 omni doctor
 
 hermes plugins list | grep omni        # harapkan: omni-signal-engine enabled
-hermes tools list | grep mcp_omni_     # harapkan 25 perkakas, setelah restart
+hermes tools list | grep mcp_omni_     # himpunan yang diiklankan, setelah restart
 ```
 
 Lalu satu pemeriksaan fungsional pada fixture sungguhan:
@@ -90,10 +90,13 @@ Untuk uji langsung, jalankan sesuatu yang berisik lewat tool `terminal` milik
 Hermes (`terminal("npm install", timeout=120)`) lalu bandingkan ukuran hasil
 tool-nya dengan keluaran npm mentah. Pastikan dengan `omni stats`.
 
-> Hitung perkakasnya, jangan percaya angka yang tertulis. Versi sebelumnya dari
-> panduan ini menyebut 27, yang datang dari mem-`grep` kode sumber server; salah
-> satu string itu nama penyaring, bukan perkakas. `hermes tools list` di atas
-> yang menjadi hitungannya.
+> Baca daftarnya, jangan percaya angka yang tertulis. Panduan ini pernah
+> menyebut 27, yang datang dari mem-`grep` kode sumber server dan menghitung nama
+> penyaring sebagai perkakas, lalu 25, yang adalah seluruh permukaannya dan bukan
+> yang diberitahukan ke host. Hermes host tingkat Penuh, jadi yang diiklankan
+> kepadanya `omni_retrieve` dan `omni_explain_savings`, dua yang membayar
+> tempatnya di prefiks setiap permintaan. `OMNI_MCP_TOOLS=all` menyajikan seluruh
+> permukaannya.
 
 ## Di mana OMNI membantu dan di mana tidak
 

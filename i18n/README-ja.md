@@ -31,9 +31,9 @@ Claude Code、Codex CLI、Gemini CLI ではコマンド出力を蒸留します�
 
 | ティア | ホスト | 得られるもの |
 |---|---|---|
-| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | ホストが OMNI の書き換えを適用するため、モデルは組み込みツールの蒸留済み出力を読みます。 |
+| **Full** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipe) | ホストが OMNI の書き換えを適用するため、モデルは組み込みツールの蒸留済み出力を読みます。 |
 | **Handoff-first** | Cursor, Windsurf | ホストは組み込みツールの出力を書き換えられません。`omni_run` を通したコマンドは蒸留され、`omni init --cursor` がエージェントにそれを選ばせるルールを導入します。 |
-| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | メモリ、リコール、セッション状態のみ。シェルの蒸留はなく、あるとも主張しません。 |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | メモリ、リコール、セッション状態のみ。シェルの蒸留はなく、あるとも主張しません。 |
 
 `omni doctor` が導入済みホストごとにティアを表示します。削減量はモデルが実際に受け取る量が減った場合にのみ計上されます。
 

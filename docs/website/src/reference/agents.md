@@ -8,9 +8,9 @@ place.
 
 | tier | hosts | what you get |
 |---|---|---|
-| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | The host applies OMNI's rewrite, so the model reads distilled output from its own built-in tools. |
+| **Full** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipe) | The host applies OMNI's rewrite, so the model reads distilled output from its own built-in tools. |
 | **Handoff-first** | Cursor, Windsurf | The host cannot rewrite built-in tool output. `omni_run` distils anything routed through it, and `omni init --cursor` installs the rule that makes the agent reach for it. |
-| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Memory, recall and session state. No shell distillation, and no claim of it. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | Memory, recall and session state. No shell distillation, and no claim of it. |
 
 ```sh
 omni doctor     # prints the tier for every installed host
@@ -49,7 +49,16 @@ execution semantics into OMNI, and bypasses the host's approval flow.
 distillers run at all. Three of them had been fully written and tested and had never
 executed on a real session.
 
-**Hermes** has its own integration page: [Hermes Agent](../integrations/hermes.md).
+**OpenClaw** is Full on a later turn, not the current one. Its `tool_result_persist`
+hook rewrites the tool result OpenClaw persists, so the model reads the distilled bytes
+every time the transcript is re-read, while the turn that ran the command still sees the
+raw output. That is where a tool result's cost sits anyway, since it is re-read many
+times, but it is a narrower Full than Claude Code's.
+
+**Hermes** hands OMNI every tool result, not only the terminal, which is the widest
+reach of any host here: it is what runs the file-read, search and fetch distillers on a
+host that has them. It also has its own integration page:
+[Hermes Agent](../integrations/hermes.md).
 
 **Windows** is supported. Paths, line endings and the `.exe` suffix are handled, and
 the CI matrix includes `windows-latest`.

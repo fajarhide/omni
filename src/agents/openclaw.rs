@@ -61,6 +61,17 @@ fn register_plugin_path(config: &mut Value, dir: &str) -> bool {
 }
 
 impl AgentIntegration for OpenClawIntegration {
+    /// `tool_result_persist` replaces the result of every built-in tool, which
+    /// is the whole point of the plugin #628 shipped. It rewrites the message
+    /// OpenClaw persists rather than the one already in flight, so the model
+    /// reads OMNI's bytes on every turn that re-reads the transcript and the
+    /// current turn still sees the raw output. Narrower than Claude Code's
+    /// `Full`, and nowhere near the default `McpOnly` this inherited for two
+    /// releases while `doctor` told the user there was no shell distill (#687).
+    fn tier(&self) -> crate::agents::Tier {
+        crate::agents::Tier::Full
+    }
+
     fn id(&self) -> &'static str {
         "openclaw"
     }

@@ -31,9 +31,9 @@ Chưng cất đầu ra lệnh trên Claude Code, Codex CLI và Gemini CLI, nhữ
 
 | Tier | Host | Bạn nhận được gì |
 |---|---|---|
-| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | Host áp dụng bản ghi đè của OMNI, nên mô hình đọc đầu ra đã chưng cất từ công cụ tích hợp của chính nó. |
+| **Full** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipe) | Host áp dụng bản ghi đè của OMNI, nên mô hình đọc đầu ra đã chưng cất từ công cụ tích hợp của chính nó. |
 | **Handoff-first** | Cursor, Windsurf | Host không thể ghi đè đầu ra công cụ tích hợp. `omni_run` chưng cất mọi lệnh bạn chạy qua nó, và `omni init --cursor` cài quy tắc khiến agent chọn nó. |
-| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Chỉ bộ nhớ, recall và trạng thái phiên. Không chưng cất shell, và không tuyên bố là có. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | Chỉ bộ nhớ, recall và trạng thái phiên. Không chưng cất shell, và không tuyên bố là có. |
 
 `omni doctor` in ra tier của từng host đã cài. Tiết kiệm chỉ được tính khi mô hình thực sự nhận ít hơn.
 
