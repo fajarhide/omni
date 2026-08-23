@@ -313,6 +313,23 @@ for SUB in diff doctor engram goal init patterns query remember reset session st
     fi
 done
 
+# #667. A flag that takes a value and is given the next flag instead used to run
+# the report on a default the caller never named. The unit tests drive the
+# validator directly, so they stay green when nothing calls it: this is the check
+# that fails when the call site goes missing, which it did once during review.
+for BAD in "--since" "--view" "--limit"; do
+    OUT=$("$OMNI" stats $BAD --json 2>&1) && RC=0 || RC=$?
+    TOTAL=$((TOTAL + 1))
+    if [ "$RC" -ne 0 ]; then
+        echo "  ✓ stats refuses $BAD with no value"
+        PASS=$((PASS + 1))
+    else
+        echo "  ✗ stats refuses $BAD with no value"
+        echo "    exited 0 and reported anyway: $(echo "$OUT" | head -2)"
+        FAIL=$((FAIL + 1))
+    fi
+done
+
 # ─── Results ─────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════"

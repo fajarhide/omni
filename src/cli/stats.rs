@@ -1,7 +1,7 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
 
 use crate::store::sqlite::{EngineTotals, Store};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use colored::*;
 use std::collections::HashMap;
 
@@ -321,6 +321,31 @@ fn value_of<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     super::flag_value(args, flag).filter(|v| !v.starts_with('-'))
 }
 
+/// Refuses a valued flag whose value is missing or unusable.
+///
+/// Treating it as absent was the first fix and it was half of one: the report
+/// still ran, so `omni stats --since --view detail` printed a 30 day detail
+/// report for a window the caller never named. Confident output over an argument
+/// that was never parsed is the defect #151 is about, and the resolvers' own
+/// fallbacks stay for the flags that have no value at all.
+fn require_values(args: &[String]) -> Result<()> {
+    for flag in ["--since", "--view"] {
+        if super::has_flag(args, flag) && value_of(args, flag).is_none() {
+            bail!(
+                "`omni stats {flag}` needs a value, run `omni stats --help` for the accepted ones"
+            );
+        }
+    }
+    if super::has_flag(args, "--limit") {
+        match value_of(args, "--limit") {
+            Some(v) if v.parse::<usize>().is_ok() => {}
+            Some(v) => bail!("`omni stats --limit` needs a whole number, got `{v}`"),
+            None => bail!("`omni stats --limit` needs a whole number, run `omni stats --help`"),
+        }
+    }
+    Ok(())
+}
+
 /// The view to render, from `--view` or from the flag that used to select it.
 ///
 /// `--card` and `--json` are not here. They are output formats, and reading
@@ -435,6 +460,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         return Ok(());
     }
     super::check_flags("stats", args, FLAGS)?;
+    require_values(args)?;
 
     match renderer_for(args) {
         "card" => run_card(store),
@@ -1948,6 +1974,17 @@ mod tests {
             view(&args(&["--view", "--detail"])),
             "detail",
             "an empty --view falls through to the flag behind it"
+        );
+
+        // And the command itself is refused, because falling through quietly
+        // still answers a question nobody asked (#151).
+        assert!(require_values(&args(&["--since", "--week"])).is_err());
+        assert!(require_values(&args(&["--view", "--detail"])).is_err());
+        assert!(require_values(&args(&["--limit", "many"])).is_err());
+        assert!(require_values(&args(&["--since", "week", "--limit", "0"])).is_ok());
+        assert!(
+            require_values(&args(&["--detail"])).is_ok(),
+            "a flag with no value is fine"
         );
 
         assert_eq!(renderer("summary", false, false), "summary");
