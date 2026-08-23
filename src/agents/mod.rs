@@ -134,7 +134,10 @@ impl Tier {
         match self {
             Tier::Full => "model-facing distill active",
             Tier::HandoffFirst => "nothing is rewritten unless omni_run ran it",
-            Tier::McpOnly => "memory and session state, no shell distill",
+            // "no shell distill" until #686 put `omni_run` on this tier. The
+            // host's own tool output is still never rewritten, which is the
+            // difference that matters and the one this has to keep saying.
+            Tier::McpOnly => "memory and session state; only omni_run distils",
         }
     }
 }

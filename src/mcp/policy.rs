@@ -69,13 +69,28 @@ pub const HANDOFF: &[&str] = &[
     "omni_history",
 ];
 
-/// No shell distillation exists on this tier, so the tools that report on it
-/// would describe something that never happens.
+/// An MCP-only host gives OMNI no hook, so the tools that *report* on shell
+/// distillation would describe something that never happens. `omni_run` is not one
+/// of them: it is the tool that performs it, and withholding it was circular. The
+/// tier had no distillation partly because the one tool that could produce any was
+/// held back on the grounds that the tier had no distillation (#686).
+///
+/// `HANDOFF` above already makes the argument, and every word of it applies here:
+/// MCP is the only door OMNI has, `FULL`'s pricing does not transfer because an
+/// unadvertised tool is not one shell command away, it is unreachable. The
+/// difference between the two tiers is that a Handoff-first host has an installed
+/// rule nudging the agent toward `omni_run`. That is a nudge, not a capability.
+///
+/// Only `omni_run`, not the rest of `HANDOFF`. It costs 417 B in the prefix of
+/// every request, and the four reporting tools are 803 B more that this file's own
+/// rule says nobody may add without measuring first. They become arguable once
+/// there are recorded runs on this tier to report on, which today there are none of.
 pub const MEMORY: &[&str] = &[
     "omni_remember",
     "omni_recall",
     "omni_retrieve",
     "omni_knowledge",
+    "omni_run",
 ];
 
 /// Every tool the binary can serve. Kept here so `doctor` does not have to
@@ -188,6 +203,72 @@ mod tests {
             FULL.len() < HANDOFF.len(),
             "FULL is meant to be the cut one"
         );
+    }
+
+    /// #686. The tier with no hook is the one tier where `omni_run` is the only
+    /// way OMNI can shorten anything, and it was the one tier that did not
+    /// advertise it. The reason recorded in the source was circular: no
+    /// distillation exists here, so the tool that would create it is withheld.
+    ///
+    /// Asserted as a property rather than as a list, because a list assertion is
+    /// the same hand-maintenance one layer down. Every tier that cannot rewrite
+    /// built-in tool output has to offer the tool that runs the command itself.
+    #[test]
+    fn every_hookless_tier_offers_the_tool_that_runs_the_command() {
+        for (id, tier) in [
+            ("antigravity", Tier::McpOnly),
+            ("cursor", Tier::HandoffFirst),
+        ] {
+            assert_eq!(tier_for(id), tier, "{id} changed tier");
+            assert!(
+                active_tools(id).contains(&"omni_run"),
+                "{id} is {tier:?} and cannot rewrite its host's tool output, so \
+                 `omni_run` is the only path by which the model reads less. \
+                 Advertised: {:?}",
+                active_tools(id)
+            );
+        }
+    }
+
+    /// #686 made the old label false. `Tier::label()` said "no shell distill" for
+    /// a tier that now advertises the tool that distils, and #684 had just put
+    /// that sentence in front of the user at install time. Two changes landing in
+    /// the same release contradicted each other.
+    ///
+    /// So the label is checked against the tool set rather than being read once
+    /// and trusted: any tier offering `omni_run` may not claim it does not distil.
+    #[test]
+    fn no_tier_offering_omni_run_claims_it_does_not_distil() {
+        for id in ["antigravity", "cursor", "claude_code"] {
+            let tier = tier_for(id);
+            if active_tools(id).contains(&"omni_run") {
+                assert!(
+                    !tier.label().contains("no shell distill"),
+                    "{id} advertises omni_run and its label denies distilling: {:?}",
+                    tier.label()
+                );
+            }
+        }
+    }
+
+    /// The reporting tools stay out of `MEMORY` on purpose, and this is what
+    /// stops that decision drifting into "add them, they seem useful". They cost
+    /// 803 B in the prefix of every request and this file's own rule is that a
+    /// tool added without a measurement has no price behind it.
+    #[test]
+    fn the_mcp_only_tier_gains_the_performer_and_not_the_reporters() {
+        let tools = active_tools("antigravity");
+        for reporter in [
+            "omni_explain_savings",
+            "omni_find_noise",
+            "omni_context_breakdown",
+            "omni_history",
+        ] {
+            assert!(
+                !tools.contains(&reporter),
+                "{reporter} was added to the MCP-only set without a measurement"
+            );
+        }
     }
 
     /// `strategy.md` section 5 makes this product law: on a Handoff-first host
