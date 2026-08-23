@@ -367,12 +367,19 @@ impl SqliteBackend {
     }
 
     /// RewindStore metrics: (total_stored, total_retrieved)
-    /// Archives written since `since`, and how many of those have been pulled.
+    /// Archives whose row was last written since `since`, and how many of those
+    /// rows have ever been pulled. `since` of 0 is all time.
     ///
-    /// The window is the archive's own timestamp, not the pull's: `retrieved` is a
-    /// lifetime counter on the row, so this answers "of what was archived in this
-    /// window, how much has been needed since", which is the question the report
-    /// asks beside it. `since` of 0 is all time.
+    /// Both halves are looser than they look and the wording is exact on purpose.
+    /// `ts` is refreshed when identical content is archived again, so a row can
+    /// enter this window carrying a `retrieved` count from before it; and
+    /// `retrieved` is a lifetime counter, never a pull inside the window. Review
+    /// of #665 found the first of those behind a comment claiming the pair meant
+    /// "needed since it was archived", which it does not.
+    ///
+    /// Resetting the counter on re-archive would make it mean that, and it is not
+    /// this function's call to make: #581 pays a verbatim delivery per recorded
+    /// pull, so zeroing it here would cancel a debt the reader is still owed.
     ///
     /// It took a window because a scoped report was printing an all-time pair
     /// beside scoped figures, caught in review of #665.
@@ -4407,6 +4414,17 @@ mod tests {
             store.rewind_metrics(week).expect("metrics").0,
             1,
             "an archive older than the window is not part of it"
+        );
+        // Re-archiving refreshes `ts`, so the same content moves into the window
+        // and brings whatever `retrieved` it already had. That is what the wording
+        // on the function has to survive, so it is pinned here.
+        store
+            .store_rewind_whole("archived ten days ago")
+            .expect("archived");
+        assert_eq!(
+            store.rewind_metrics(week).expect("metrics").0,
+            2,
+            "content archived again is in the window it was archived again in"
         );
         assert_eq!(
             store.rewind_metrics(0).expect("metrics").0,
