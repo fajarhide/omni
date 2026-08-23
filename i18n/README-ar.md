@@ -30,9 +30,9 @@ brew install fajarhide/tap/omni && omni init
 
 | المستوى | المضيف | ما تحصل عليه |
 |---|---|---|
-| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | المضيف يطبّق إعادة كتابة OMNI، لذا يقرأ النموذج مخرجات مقطّرة من أدواته المدمجة. |
+| **Full** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipe) | المضيف يطبّق إعادة كتابة OMNI، لذا يقرأ النموذج مخرجات مقطّرة من أدواته المدمجة. |
 | **Handoff-first** | Cursor, Windsurf | لا يستطيع المضيف إعادة كتابة مخرجات الأدوات المدمجة. يقطّر `omni_run` أي أمر تمرّره عبره، ويثبّت `omni init --cursor` القاعدة التي تجعل الوكيل يختاره. |
-| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | الذاكرة والاسترجاع وحالة الجلسة فقط. لا تقطير للأوامر، ولا ادّعاء بوجوده. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | الذاكرة والاسترجاع وحالة الجلسة فقط. لا تقطير للأوامر، ولا ادّعاء بوجوده. |
 
 يطبع `omni doctor` المستوى لكل مضيف مثبّت. لا تُحتسب الوفورات إلا عندما يتلقى النموذج فعليًا قدرًا أقل.
 

@@ -289,6 +289,15 @@ fn render_plugin(exe_path: &str) -> String {
 }
 
 impl AgentIntegration for HermesIntegration {
+    /// `transform_tool_result` fires for every tool, not only the terminal, so
+    /// this is the host with the widest reach of any: it is what finally runs
+    /// the Read, Grep and WebFetch distillers that Claude Code's Bash-only
+    /// matcher never reaches (#172). #628 wired it and left the tier at the
+    /// default, so `doctor` reported "no shell distill" for it (#687).
+    fn tier(&self) -> crate::agents::Tier {
+        crate::agents::Tier::Full
+    }
+
     fn id(&self) -> &'static str {
         "hermes"
     }

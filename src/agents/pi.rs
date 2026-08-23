@@ -153,6 +153,14 @@ fn collect_omni_sources_recursive(val: &Value, out: &mut Vec<String>) {
 pub struct PiIntegration;
 
 impl AgentIntegration for PiIntegration {
+    /// Pi's `tool_result` handler returns replacement content, so the model
+    /// reads distilled bytes on the turn it is on. It read the wrong key until
+    /// #688 and applied nothing, which is why the default outlived the hook.
+    /// Derived from the plugin by the test in `mod.rs` now, not remembered.
+    fn tier(&self) -> crate::agents::Tier {
+        crate::agents::Tier::Full
+    }
+
     fn id(&self) -> &'static str {
         "pi"
     }

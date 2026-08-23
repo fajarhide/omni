@@ -8,9 +8,9 @@ sebelum menilai apakah OMNI layak berada di sana.
 
 | tingkat | host | yang Anda dapat |
 |---|---|---|
-| **Penuh** | Claude Code, Codex CLI, Gemini CLI, Aider (pipa) | Host menerapkan tulis ulang OMNI, jadi model membaca keluaran sulingan dari tool bawaannya sendiri. |
+| **Penuh** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipa) | Host menerapkan tulis ulang OMNI, jadi model membaca keluaran sulingan dari tool bawaannya sendiri. |
 | **Handoff dulu** | Cursor, Windsurf | Host tidak bisa menulis ulang keluaran tool bawaannya. `omni_run` menyuling apa pun yang dilewatkan melaluinya, dan `omni init --cursor` memasang aturan yang membuat agent meraihnya. |
-| **MCP saja** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Ingatan, pemanggilan kembali dan keadaan sesi. Tanpa penyulingan shell, dan tanpa klaim soal itu. |
+| **MCP saja** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | Ingatan, pemanggilan kembali dan keadaan sesi. Tanpa penyulingan shell, dan tanpa klaim soal itu. |
 
 ```sh
 omni doctor     # mencetak tingkat untuk setiap host yang terpasang
@@ -53,8 +53,17 @@ berkas, pencarian dan pengambilan web berjalan sama sekali. Tiga di antaranya
 sudah ditulis dan diuji sepenuhnya dan tidak pernah sekali pun berjalan di sesi
 sungguhan.
 
-**Hermes** punya halaman integrasinya sendiri:
-[Hermes Agent](../integrations/hermes.md).
+**OpenClaw** Penuh di giliran berikutnya, bukan giliran saat ini. Hook
+`tool_result_persist`-nya menulis ulang hasil tool yang disimpan OpenClaw, jadi model
+membaca byte sulingan setiap kali transkrip dibaca ulang, sementara giliran yang
+menjalankan perintahnya masih melihat keluaran mentah. Di situlah biaya sebuah hasil
+tool sebenarnya berada, karena ia dibaca ulang berkali-kali, tetapi ini Penuh yang lebih
+sempit daripada milik Claude Code.
+
+**Hermes** menyerahkan setiap hasil tool ke OMNI, bukan hanya terminal, dan itu
+jangkauan terluas di antara host di sini: ia yang menjalankan distiller baca berkas,
+pencarian dan fetch di host yang punya ketiganya. Ia juga punya halaman integrasinya
+sendiri: [Hermes Agent](../integrations/hermes.md).
 
 **Windows** didukung. Jalur, akhiran baris dan imbuhan `.exe` sudah ditangani,
 dan matriks CI-nya menyertakan `windows-latest`.

@@ -31,9 +31,9 @@ Mendistilasi output perintah di Claude Code, Codex CLI, dan Gemini CLI, yaitu ho
 
 | Tier | Host | Yang kamu dapat |
 |---|---|---|
-| **Full** | Claude Code, Codex CLI, Gemini CLI, Aider (pipe) | Host menerapkan penulisan ulang OMNI, jadi model membaca output terdistilasi dari tool bawaannya sendiri. |
+| **Full** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipe) | Host menerapkan penulisan ulang OMNI, jadi model membaca output terdistilasi dari tool bawaannya sendiri. |
 | **Handoff-first** | Cursor, Windsurf | Host tidak bisa menulis ulang output tool bawaan. `omni_run` mendistilasi apa pun yang kamu lewatkan melaluinya, dan `omni init --cursor` memasang aturan yang membuat agent memilihnya. |
-| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity, Hermes, Pi | Memori, recall, dan state sesi. Tidak ada distilasi shell, dan tidak diklaim ada. |
+| **MCP-only** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | Memori, recall, dan state sesi. Tidak ada distilasi shell, dan tidak diklaim ada. |
 
 `omni doctor` mencetak tier tiap host yang terpasang. Penghematan hanya dihitung ketika model benar-benar menerima lebih sedikit.
 

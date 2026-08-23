@@ -279,3 +279,107 @@ mod fix_reporting_tests {
         assert!(warnings.is_empty(), "{warnings:?}");
     }
 }
+
+#[cfg(test)]
+mod tier_tests {
+    use super::{Tier, all_integrations};
+    use std::path::Path;
+
+    /// A plugin source file. Prose is excluded on purpose: a README naming
+    /// `--post-hook` documents the contract, it does not invoke it.
+    fn is_source(path: &Path) -> bool {
+        matches!(
+            path.extension().and_then(|e| e.to_str()).unwrap_or(""),
+            "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" | "py"
+        )
+    }
+
+    /// Whether anything this plugin installs spawns `omni --post-hook`.
+    fn calls_the_post_hook(dir: &Path) -> bool {
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                // Vendored dependencies are not our plugins and contain enough
+                // text to match anything.
+                if path.file_name().is_some_and(|n| n == "node_modules") {
+                    continue;
+                }
+                if path.is_dir() {
+                    stack.push(path);
+                } else if is_source(&path)
+                    && std::fs::read_to_string(&path).is_ok_and(|t| t.contains("--post-hook"))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// #687. The tier is hand-maintained beside the thing it describes, and #628
+    /// moved one without the other: OpenClaw and Hermes gained the post-hook and
+    /// kept the `McpOnly` default, so `doctor` printed "no shell distill" for two
+    /// hosts doing the full job, and `active_tools` withheld exactly the
+    /// reporting tools that had finally acquired something to report.
+    ///
+    /// Asserting "openclaw declares Full" would be the same hand-maintenance one
+    /// layer down. This derives the floor instead: a plugin that spawns
+    /// `--post-hook` is asking OMNI to replace what the model reads, so the
+    /// integration that installs it cannot be the tier whose whole meaning is
+    /// that nothing is replaced. Which of `Full` and `HandoffFirst` it is stays
+    /// a judgement, and is written down in each integration's own `tier`.
+    ///
+    /// Comments are not stripped, unlike the key scan in `post_tool.rs`. A plugin
+    /// whose only mention of the flag is prose would be asked for a tier it has
+    /// not earned, and that direction fails loudly rather than quietly.
+    #[test]
+    fn a_host_whose_plugin_calls_the_post_hook_is_not_mcp_only() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let integrations = all_integrations();
+        let mut checked = Vec::new();
+
+        for entry in std::fs::read_dir(&root)
+            .expect("plugins/ ships with the repo")
+            .flatten()
+        {
+            let path = entry.path();
+            if !path.is_dir() || !calls_the_post_hook(&path) {
+                continue;
+            }
+            let dir = entry.file_name().to_string_lossy().to_string();
+
+            // `plugins/claude-code` belongs to the integration whose id is
+            // `claude`, so a directory carries the id or the id plus a suffix.
+            let hosts: Vec<_> = integrations
+                .iter()
+                .filter(|i| dir == i.id() || dir.starts_with(&format!("{}-", i.id())))
+                .collect();
+            assert_eq!(
+                hosts.len(),
+                1,
+                "plugins/{dir} resolves to {} integrations rather than one, so this \
+                 scan can no longer say whose tier it is checking",
+                hosts.len()
+            );
+
+            assert_ne!(
+                hosts[0].tier(),
+                Tier::McpOnly,
+                "plugins/{dir} spawns `--post-hook`, so {} rewrites what the model \
+                 reads, and `{}` claims it does not (#687)",
+                hosts[0].name(),
+                Tier::McpOnly.label()
+            );
+            checked.push(dir);
+        }
+
+        assert!(
+            !checked.is_empty(),
+            "found no plugin calling `--post-hook`; the scan is looking in the wrong place"
+        );
+    }
+}
