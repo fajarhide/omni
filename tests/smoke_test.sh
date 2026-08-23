@@ -100,7 +100,7 @@ check "doctor shows binary" "$DOCTOR_OUT" "Binary"
 # combination has reddened CI here before. A subprocess has its own environment, so the
 # escape hatch is verified across the boundary that can actually be wrong.
 LEAN_OUT=$(OMNI_AGENT_ID=claude_code "$OMNI" doctor 2>&1 || true)
-check "doctor reports the lean MCP surface" "$LEAN_OUT" "8 of 25"
+check "doctor reports the lean MCP surface" "$LEAN_OUT" "2 of 25"
 ALL_OUT=$(OMNI_AGENT_ID=claude_code OMNI_MCP_TOOLS=all "$OMNI" doctor 2>&1 || true)
 check "OMNI_MCP_TOOLS=all restores every tool" "$ALL_OUT" "25 of 25"
 

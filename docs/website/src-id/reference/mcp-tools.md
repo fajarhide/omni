@@ -12,20 +12,24 @@ itu OMNI hanya mengiklankan set yang bisa dipakai oleh tier host Anda:
 
 | tier | yang diiklankan |
 |---|---|
-| Full, dan host apa pun yang tidak dikenali OMNI | sembilan di bawah ini |
-| Handoff-first | sembilan yang sama, `omni_run` selalu termasuk |
+| Full | `omni_retrieve`, `omni_explain_savings` |
+| Handoff-first, dan host apa pun yang tidak dikenali OMNI | dua itu, ditambah `omni_remember`, `omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` |
 | MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge` |
 
-Yang sembilan itu adalah `omni_retrieve`, `omni_explain_savings`, `omni_remember`,
-`omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history`
-dan `omni_history`. Itulah yang benar-benar pernah dipanggil di korpus yang terekam.
+Host tier Full mendapat daftar terpendek justru karena shell-nya sudah dipasangi hook oleh
+OMNI. Diukur pada 256 sesi yang terekam, dua perkakas itu membawa 138 dari 149 panggilan
+dengan 467 byte, sedangkan enam sisanya memakan 1.631 byte untuk 11 panggilan sepanjang
+korpus. Host Handoff-first tidak pernah mendapat penulisan ulang pada output perkakas
+bawaannya, jadi MCP adalah satu-satunya pintu OMNI di sana dan tidak ada yang dipangkas.
 
-Perkakas lain di halaman ini tetap ada di dalam binary dan hanya berjarak satu setelan.
-`OMNI_MCP_TOOLS=all` mengiklankan seluruh 25 perkakas, dan `omni doctor` menyebutkan set
-mana yang sedang berlaku serta host mana yang terdeteksi:
+Perkakas yang tidak diiklankan juga tidak bisa dipanggil di tier itu, jadi jalan kembalinya
+adalah CLI atau override. `omni exec`, `omni remember`, `omni stats` dan `omni session`
+menjawab hal yang sama seperti `omni_run`, `omni_remember`, `omni_history` dan
+`omni_context_breakdown`. `OMNI_MCP_TOOLS=all` mengiklankan seluruh 25 perkakas, dan
+`omni doctor` menyebutkan set mana yang sedang berlaku serta host mana yang terdeteksi:
 
 ```
-  MCP tools:      9 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
+  MCP tools:      2 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
 ```
 
 Pastikan daftarnya terhadap binary Anda sendiri, bukan terhadap halaman ini:

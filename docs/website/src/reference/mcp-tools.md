@@ -12,20 +12,24 @@ host's tier can use:
 
 | tier | advertised |
 |---|---|
-| Full, and any host OMNI does not recognise | the nine below |
-| Handoff-first | the same nine, with `omni_run` always among them |
+| Full | `omni_retrieve`, `omni_explain_savings` |
+| Handoff-first, and any host OMNI does not recognise | those two, plus `omni_remember`, `omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` |
 | MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge` |
 
-The nine are `omni_retrieve`, `omni_explain_savings`, `omni_remember`, `omni_recall`,
-`omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` and
-`omni_history`. They are the ones that were actually called across the recorded corpus.
+Full-tier hosts get the shortest list because they are the ones whose shell OMNI already
+hooks. Measured across 256 recorded sessions, those two tools carry 138 of the 149 calls
+in 467 bytes, while the other six cost 1,631 bytes for 11 calls in the life of the
+corpus. A Handoff-first host never has its built-in tool output rewritten, so MCP is the
+only door OMNI has there and nothing is priced away.
 
-Every other tool on this page is still in the binary and one setting away.
+An unadvertised tool is not callable on that tier either, so the way back is the CLI or
+the override. `omni exec`, `omni remember`, `omni stats` and `omni session` answer what
+`omni_run`, `omni_remember`, `omni_history` and `omni_context_breakdown` answer.
 `OMNI_MCP_TOOLS=all` advertises all 25, and `omni doctor` says which set is in force and
 which host it resolved:
 
 ```
-  MCP tools:      9 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
+  MCP tools:      2 of 25 advertised to claude_code (OMNI_MCP_TOOLS=all restores the rest)
 ```
 
 Confirm the list against your own binary rather than this page:

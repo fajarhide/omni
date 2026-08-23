@@ -44,7 +44,10 @@ omni remember 'The staging database ignores migrations run outside the deploy jo
 
 Agent yang MCP-nya terpasang memanggil `omni_remember` sendiri, dan menarik fakta
 kembali dengan `omni_recall`, sebuah pencarian semantik lintas engram,
-pengetahuan tersimpan dan riwayat penyulingan.
+pengetahuan tersimpan dan riwayat penyulingan. Keduanya diiklankan di tier MCP-only
+dan Handoff-first. Host tier Full seperti Claude Code menulis lewat `omni remember` di
+shell yang sudah dipasangi hook OMNI, dan mencapai `omni_recall`, yang tidak punya
+padanan CLI, dengan `OMNI_MCP_TOOLS=all`.
 
 Simpan yang tidak bisa diturunkan dari kodenya: sebuah keputusan dan alasannya,
 sebuah jebakan, sebuah batasan yang tidak disebut berkas mana pun. Jangan simpan

@@ -9,7 +9,9 @@
 //!
 //! Moving it here rather than deleting it keeps the capability and stops charging
 //! for it. A CLI subcommand costs nothing per request, and an agent that wants it
-//! still has `omni_run("omni context <file>")`.
+//! runs it in the shell OMNI already hooks. `omni_run` was the door named here
+//! until it was priced off the Full tier too (#609); it still is on a
+//! Handoff-first host, which is the tier that has no shell of its own.
 
 use crate::graph;
 use crate::pipeline::SessionState;
