@@ -1,13 +1,54 @@
 # Benchmarks
 
-One developer's real command history, replayed on 0.7.5. Every figure below comes
-from the same run, including the ones that do not flatter us.
+One developer's real command history, replayed. Every figure in a section comes from the
+same run as the rest of that section, including the ones that do not flatter us.
+
+**Two runs are published here and they disagree by a factor of fifteen.** That is the most
+useful thing on the page: the number OMNI reports is a property of the week it replays, not
+a constant. Read the corpus line before the figure, every time.
+
+## The current run, 2026-08-23
+
+**Corpus**: 8,934 traces, 7,822,947 bytes, 2026-08-17 02:05:18 to 2026-08-23 14:16:41 UTC,
+all `agent_id='claude_code'`, 0 terminal rows, 0 errored. Replayed in 7.5 s on `8a355f9`.
+
+**1.0% from the filters. 4.6% with the ledger.** 98.3% of calls saved nothing, 1.7% shrank,
+and **no call came back larger**.
+
+| class | calls | input | filters | + ledger |
+|---|---|---|---|---|
+| other | 6,050 | 4.45 MB | 0.5% | 4.3% |
+| file read (`cat`, `sed`, `head`, `tail`) | 1,014 | 1.78 MB | 0.0% | 4.5% |
+| search | 788 | 0.73 MB | 2.6% | 3.6% |
+| `git` | 829 | 0.70 MB | 5.0% | 7.9% |
+| infra | 210 | 0.13 MB | 3.3% | 3.9% |
+| build and test | 43 | 0.02 MB | 7.8% | 9.9% |
+| **aggregate** | **8,934** | **7.82 MB** | **1.0%** | **4.6%** |
+
+**Why it is so much lower than the run below: the corpus is mostly one-line shell
+plumbing.** 4,598 of the 8,934 calls begin with `cd`, carrying 3.74 MB at 1.1%, and the
+median repeated run is 10 bytes. This was a week of driving OMNI's own development from a
+terminal, so the payloads are `git`, `gh`, `sed` and `sqlite3` output that is either tiny,
+structured, or seen once. Repetition is 16.3% of raw bytes here against the 80.6% of the
+window below.
+
+**What it does not measure.** The harness replays `execution_traces`, which holds shell
+commands only: zero of these 8,934 rows is a `Read` payload. The ledger's file-read path,
+including the count-preserving fold added in #664, is not exercised by any figure on this
+page. That gap is the honest reason the fold's own numbers live in
+`changelog.d/664.changed.md` with their own corpus instead of here.
+
+## The 0.7.5 run, 2026-08-14, which can no longer be re-derived
+
+`execution_traces` prunes at seven days, so the corpus behind every figure in this section
+is gone. It is kept because deleting a published number is worse than labelling it, and
+because the gap between the two runs is the point.
 
 **Corpus**: 5,984 traces, 23,086,649 bytes, 2026-08-11 11:03:00 to 2026-08-14
 18:11:10 UTC, all `agent_id='claude_code'`, 123 terminal rows excluded from 6,107,
 0 errored. Replayed in 1,238 s.
 
-## The headline
+### That run's headline
 
 **32.6% fewer bytes from the filters. 69.6% with the ledger.**
 23,086,649 to 15,557,823 to 7,026,021.
@@ -34,7 +75,7 @@ repeated to fill. It is the week this machine did nothing but develop and benchm
 OMNI. A corpus of ordinary work reads far lower: the same harness on 6,656 traces in
 August 2026 read 2.7% and 14.9%.
 
-## Which commands benefit
+### Which commands benefit
 
 | class | calls | input | filters | + ledger |
 |---|---:|---:|---:|---:|
@@ -80,7 +121,7 @@ Top commands by input bytes, filters only:
 Byte-sink and token-sink rankings disagree at the tail: `bash` enters the token top
 15 where `kubectl` sits in the byte one.
 
-## Head to head, one corpus
+### Head to head, one corpus
 
 Identical bytes into every arm. Versions: rtk 0.45.0, lean-ctx 3.9.18, caveman 1.1.0
 (binaries `bin-v1.0.0`), headroom at `cross_turn_dedup.py`.
@@ -107,7 +148,7 @@ which is exactly the shape a deep-and-narrow compressor is built for.
 No `lean-ctx + our ledger` row: its preview reports `compressed_bytes` and never emits
 the text, so that row could only be estimated.
 
-## Single fixtures
+### Single fixtures
 
 From `tests/fixtures/`, same build, reproducible by hand. "Delivered" includes the
 marker.
@@ -137,9 +178,19 @@ OMNI_BENCH_DB=~/.omni/omni.db \
   cargo test --release --test bench_replay -- --ignored --nocapture
 ```
 
+Snapshot the database first if the figure has to be quotable: hooks write to it while the
+replay reads, and `execution_traces` prunes at seven days, so a run against the live file
+measures a corpus that is already different from the one anybody else would get.
+
+```sh
+sqlite3 ~/.omni/omni.db ".backup /tmp/bench-corpus.db"
+OMNI_BENCH_DB=/tmp/bench-corpus.db \
+  cargo test --release --test bench_replay -- --ignored --nocapture
+```
+
 | | |
 |---|---|
-| corpus | `execution_traces.raw_input`, real usage, replayed. Not synthetic |
+| corpus | `execution_traces.raw_input`, real usage, replayed. Not synthetic. Shell commands only: no `Read` payload is in this table, so no figure here covers the ledger's file-read path |
 | population | calls whose result reached a model. `OMNI_BENCH_ALL=1` widens it |
 | state | `session: None`, `store: None`, `HOME` at an empty temp dir |
 | path | `run_inner`, the same pipeline the hook and `omni exec` run, markers included |

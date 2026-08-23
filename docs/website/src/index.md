@@ -132,6 +132,10 @@ A file that changed between the two reads still folds around the change. Each fo
 the line count of what it replaced, so the lines you did not see moved stay on the numbers
 your editor gives them.
 
+Those figures come from one week, and the trace log keeps seven days, so that week cannot be
+replayed again. [Benchmarks](develop/benchmarks.md) publishes each run with its corpus, and
+what any of them is worth to you depends on how much your own week repeats itself.
+
 Where there is nothing safe to take it takes nothing. A two-line `git status` has no
 ceremony to drop and no repeats to fold, and a JSON payload a later step parses is never
 touched at all, so OMNI hands those straight back rather than inventing a saving to
