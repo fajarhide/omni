@@ -237,39 +237,49 @@ fn print_separator() {
 
 /// Read by both `print_help` and `super::check_flags`, so this list is what
 /// `omni stats` documents *and* what it accepts (#151).
+/// One flag per dimension, then every older spelling, which still resolves (#667).
+///
+/// The window used to be four flags and six names, and passing two of them took
+/// whichever branch was tested first. `--since` cannot express that. Everything
+/// from `VISIBLE` on keeps working and is absent from `--help` and the manual, so
+/// a script written against the old surface still runs while the help page
+/// documents one way to say each thing. No deprecation notice is printed: the
+/// rename is ours, not the caller's.
+///
+/// One list rather than two, because a second copy of a flag name is a copy that
+/// drifts: #452, #454 and #456 were each one half of a pair being fixed.
 const FLAGS: super::Flags = &[
     (
-        "--detail",
-        "Full technical breakdown (commands, routes, sessions, agents)",
+        "--since <window>",
+        "hour | today | week | month | all (default month)",
     ),
-    ("--hour, -H", "Scope to the last 60 minutes"),
-    // `--day` exists so the window family reads `--day/-d`, `--week/-w`,
-    // `--month/-m`. `-d` was the only member whose long form did not share its
-    // letter, sitting next to a `--detail` that does, which is a collision a
-    // reader hits before the docs do (#428). `--today` still works.
-    ("--day, --today, -d", "Scope to today only"),
-    ("--week, -w", "Scope to last 7 days"),
-    ("--month, -m", "Scope to last 30 days (the default)"),
     (
-        "--all-commands",
-        "List every command, not just the top ones",
+        "--view <name>",
+        "summary | detail | commands | projects | context | rerun | share",
     ),
-    ("--json", "Machine-readable JSON output"),
     (
-        "--share",
-        "A copy-pasteable summary of your own measured savings",
+        "--limit <n>",
+        "Rows in a table view (default 10, 0 for all)",
     ),
+    ("--json", "Machine-readable report, scoped by --since"),
     (
         "--card",
-        "Write that summary as an image, sized for social posts",
+        "Write the summary as an image, sized for social posts",
     ),
-    ("--project", "Display breakdown per project path"),
-    ("--context", "Show context composition signals"),
-    (
-        "--rerun",
-        "Which distillers cost a re-run, the check reduction % cannot make",
-    ),
+    ("--detail", ""),
+    ("--hour, -H", ""),
+    ("--day, --today, -d", ""),
+    ("--week, -w", ""),
+    ("--month, -m", ""),
+    ("--all-commands", ""),
+    ("--share", ""),
+    ("--project", ""),
+    ("--context", ""),
+    ("--rerun", ""),
 ];
+
+/// How many of `FLAGS` the help page shows. The rest are the aliases above.
+const VISIBLE: usize = 5;
 
 /// The time window the scope flags select, as `(label, since_unix)`.
 ///
@@ -278,16 +288,88 @@ const FLAGS: super::Flags = &[
 /// being the fall-through in one of them, and silently ignored in the other.
 fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
-    if super::has_any(args, &["--hour", "-H"]) {
-        ("last hour", now - 3600)
-    } else if super::has_any(args, &["--day", "--today", "-d"]) {
+    // `--since` first, so a caller mixing the new flag with an old one gets the
+    // window they named rather than whichever branch is tested first.
+    let named = super::flag_value(args, "--since").map(str::to_ascii_lowercase);
+    let window = match named.as_deref() {
+        Some(w) => w,
+        None if super::has_any(args, &["--hour", "-H"]) => "hour",
+        None if super::has_any(args, &["--day", "--today", "-d"]) => "today",
+        None if super::has_any(args, &["--week", "-w"]) => "week",
+        None => "month",
+    };
+    match window {
+        "hour" => ("last hour", now - 3600),
         // Calendar day, not a rolling 24h: "today" means since midnight.
-        ("today", now - (now % 86400))
-    } else if super::has_any(args, &["--week", "-w"]) {
-        ("last 7 days", now - 7 * 86400)
+        "today" | "day" => ("today", now - (now % 86400)),
+        "week" => ("last 7 days", now - 7 * 86400),
+        "all" => ("all time", 0),
+        // `month` and anything unrecognised land on the default window rather
+        // than failing: a report is not worth refusing over a typo in a scope.
+        _ => ("last 30 days", now - 30 * 86400),
+    }
+}
+
+/// The view to render, from `--view` or from the flag that used to select it.
+///
+/// `--card` and `--json` are not here. They are output formats, and reading
+/// `--card` as a view meant `--view detail --card` selected the text view and
+/// wrote no image. `renderer` weighs the formats against the view instead.
+fn view(args: &[String]) -> &'static str {
+    if let Some(name) = super::flag_value(args, "--view") {
+        return match name.to_ascii_lowercase().as_str() {
+            "detail" => "detail",
+            "commands" => "commands",
+            "projects" | "project" => "project",
+            "context" => "context",
+            "rerun" => "rerun",
+            "share" => "share",
+            _ => "summary",
+        };
+    }
+    if super::has_flag(args, "--share") {
+        "share"
+    } else if super::has_flag(args, "--rerun") {
+        "rerun"
+    } else if super::has_flag(args, "--context") {
+        "context"
+    } else if super::has_flag(args, "--detail") || super::has_flag(args, "--all-commands") {
+        "detail"
+    } else if super::has_flag(args, "--project") {
+        "project"
     } else {
-        // `--month` / `-m` and the no-flag default are the same window.
-        ("last 30 days", now - 30 * 86400)
+        "summary"
+    }
+}
+
+/// The renderer for one argv, which is the whole decision in one place.
+///
+/// Separated from `renderer` so the wiring is tested and not only the table: the
+/// mistakes here are arguments that never arrive, not rows that are wrong.
+fn renderer_for(args: &[String]) -> &'static str {
+    renderer(
+        view(args),
+        super::has_flag(args, "--json"),
+        super::has_flag(args, "--card"),
+    )
+}
+
+/// Which renderer runs, given the view and the two output formats.
+///
+/// A table rather than an ordered chain, because the order is what goes wrong.
+/// `--card` outranks everything: it writes a file, which is the only thing naming
+/// it can mean. `--json` outranks the view, because there is one machine-readable
+/// report and it is not per view. Everything else is the view.
+fn renderer(view: &str, json: bool, card: bool) -> &'static str {
+    match (view, json, card) {
+        (_, _, true) => "card",
+        (_, true, _) => "json",
+        ("share", ..) => "share",
+        ("rerun", ..) => "rerun",
+        ("context", ..) => "context",
+        ("project", ..) => "project",
+        ("detail" | "commands", ..) => "detail",
+        _ => "summary",
     }
 }
 
@@ -300,19 +382,23 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni {} {}", "stats".cyan(), "[FLAGS]".bright_black());
 
-    super::print_flags(FLAGS);
+    super::print_flags(&FLAGS[..VISIBLE]);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
-        "  omni stats              {} Gain-focused overview",
+        "  omni stats               {} Gain-focused overview",
         "#".bright_black()
     );
     println!(
-        "  omni stats --detail     {} Full breakdown with commands",
+        "  omni stats --since week  {} The last seven days",
         "#".bright_black()
     );
     println!(
-        "  omni stats --json       {} Machine-readable for CI/CD",
+        "  omni stats --view detail {} Commands, routes and agents",
+        "#".bright_black()
+    );
+    println!(
+        "  omni stats --json        {} Machine-readable for CI/CD",
         "#".bright_black()
     );
     println!();
@@ -327,47 +413,14 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     }
     super::check_flags("stats", args, FLAGS)?;
 
-    let detail_flag = super::has_flag(args, "--detail");
-    let json_flag = super::has_flag(args, "--json");
-    let share_flag = super::has_flag(args, "--share");
-    let card_flag = super::has_flag(args, "--card");
-    let project_flag = super::has_flag(args, "--project");
-    let context_flag = super::has_flag(args, "--context");
-    let rerun_flag = super::has_flag(args, "--rerun");
-    let filter_flag = super::has_any(args, &["--hour", "-H"])
-        || super::has_any(args, &["--day", "--today", "-d"])
-        || super::has_any(args, &["--week", "-w"])
-        || super::has_any(args, &["--month", "-m"])
-        || super::has_flag(args, "--all-commands");
-
-    let mode = if card_flag {
-        "card"
-    } else if share_flag {
-        "share"
-    } else if rerun_flag {
-        "rerun"
-    } else if context_flag {
-        "context"
-    } else if detail_flag {
-        "detail"
-    } else if json_flag {
-        "json"
-    } else if project_flag {
-        "project"
-    } else if filter_flag {
-        "detail"
-    } else {
-        "default"
-    };
-
-    match mode {
+    match renderer_for(args) {
         "card" => run_card(store),
         "share" => run_share(store),
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
-        "json" => run_json(store),
+        "json" => run_json(args, store),
         _ => run_default(args, store),
     }
 }
@@ -960,7 +1013,7 @@ fn run_default(args: &[String], store: &Store) -> Result<()> {
     print_separator();
     println!(
         "  {} for full breakdown",
-        "omni stats --detail".bright_cyan()
+        "omni stats --view detail".bright_cyan()
     );
 
     // Update Notification (4h cache)
@@ -991,7 +1044,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     } else {
         0.0
     };
-    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+    let (rewind_stored, rewind_retrieved) = store.rewind_metrics(since)?;
 
     println!();
     print_separator();
@@ -1152,7 +1205,9 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     // By Command, top 10 (or all if requested), filter 0% savings
     let raw_filters = store.filter_breakdown(since)?;
-    let all_flag = super::has_flag(args, "--all-commands");
+    // `--limit 0` and the older `--all-commands` say the same thing.
+    let limit = super::flag_value(args, "--limit").and_then(|v| v.parse::<usize>().ok());
+    let all_flag = super::has_flag(args, "--all-commands") || limit == Some(0);
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
 
     let display_filters: Vec<_> = if all_flag {
@@ -1161,7 +1216,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         grouped_filters
             .iter()
             .filter(|(_, _, pct, _)| *pct > 0.0)
-            .take(10)
+            .take(limit.unwrap_or(10))
             .cloned()
             .collect()
     };
@@ -1527,11 +1582,25 @@ pub struct RewindStat {
     pub retrieved: u64,
 }
 
-fn run_json(store: &Store) -> Result<()> {
+fn run_json(args: &[String], store: &Store) -> Result<()> {
+    let (_, since) = scope(args);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&build_stats_json(store, since)?)?
+    );
+    Ok(())
+}
+
+/// The machine-readable report for one window.
+///
+/// Separated from printing so the window can be tested. `--json` accepted
+/// `--hour`, `--day`, `--week` and `--month` and ignored all four, which is #670,
+/// and a function that only prints cannot be asked what window it used.
+fn build_stats_json(store: &Store, since: i64) -> Result<StatsJson> {
     // All time, like every other field in this document. Reading the window
     // flags here and nowhere else would put two populations in one object and
     // leave a consumer to discover which is which.
-    let t = store.engine_totals(0)?;
+    let t = store.engine_totals(since)?;
     let engines = EngineStats {
         bytes_saved: t.total_saved(),
         distilled: DistilledStat {
@@ -1556,9 +1625,9 @@ fn run_json(store: &Store) -> Result<()> {
     };
 
     let periods = store.multi_period_stats()?;
-    let top_commands = get_top_commands(store, 0, 100);
-    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
-    let (count, _, _, sum_latency, _, _, _) = store.aggregate_stats(0)?;
+    let top_commands = get_top_commands(store, since, 100);
+    let (rewind_stored, rewind_retrieved) = store.rewind_metrics(since)?;
+    let (count, _, _, sum_latency, _, _, _) = store.aggregate_stats(since)?;
 
     let avg_latency = if count > 0 {
         sum_latency as f64 / count as f64
@@ -1606,7 +1675,7 @@ fn run_json(store: &Store) -> Result<()> {
         .collect();
 
     let agent_json: Vec<AgentStat> = store
-        .get_agent_breakdown(0)
+        .get_agent_breakdown(since)
         .unwrap_or_default()
         .iter()
         .map(|r| {
@@ -1639,8 +1708,7 @@ fn run_json(store: &Store) -> Result<()> {
         engines,
     };
 
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    Ok(output)
 }
 
 /// `omni stats --rerun`, the check reduction % cannot make (#109).
@@ -1795,6 +1863,118 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// #667. One dimension, one flag, and every older spelling still resolves.
+    /// `--since` wins over the old flags rather than losing to whichever branch
+    /// was tested first, which is what made two windows ambiguous.
+    #[test]
+    fn since_resolves_the_window_and_the_old_flags_still_work() {
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(scope(&args(&[])).0, "last 30 days");
+        assert_eq!(scope(&args(&["--since", "week"])).0, "last 7 days");
+        assert_eq!(scope(&args(&["--since=today"])).0, "today");
+        assert_eq!(scope(&args(&["--since", "all"])).1, 0);
+        assert_eq!(scope(&args(&["--week"])).0, "last 7 days");
+        assert_eq!(scope(&args(&["-H"])).0, "last hour");
+        assert_eq!(scope(&args(&["--today"])).0, "today");
+        assert_eq!(
+            scope(&args(&["--since", "week", "--hour"])).0,
+            "last 7 days",
+            "the named window decides, not whichever flag is tested first"
+        );
+        assert_eq!(
+            scope(&args(&["--since", "fortnight"])).0,
+            "last 30 days",
+            "an unrecognised window falls back rather than refusing a report"
+        );
+    }
+
+    /// The same for the view, and then for the whole decision. The output formats
+    /// are weighed against the view rather than being views themselves: reading
+    /// `--card` as one meant `--view detail --card` wrote no image.
+    #[test]
+    fn the_renderer_table_settles_the_formats_against_the_view() {
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(view(&args(&[])), "summary");
+        assert_eq!(view(&args(&["--view", "detail"])), "detail");
+        assert_eq!(view(&args(&["--view=projects"])), "project");
+        assert_eq!(view(&args(&["--detail"])), "detail");
+        assert_eq!(view(&args(&["--all-commands"])), "detail");
+        assert_eq!(view(&args(&["--rerun"])), "rerun");
+
+        assert_eq!(renderer("summary", false, false), "summary");
+        assert_eq!(renderer("detail", true, false), "json");
+        assert_eq!(
+            renderer("project", true, false),
+            "json",
+            "one report, so a view beside --json selects nothing"
+        );
+        assert_eq!(
+            renderer("detail", false, true),
+            "card",
+            "--card writes a file, which is the only thing naming it can mean"
+        );
+
+        // And the wiring, since the mistakes here are arguments that never arrive.
+        assert_eq!(renderer_for(&args(&["--view", "detail", "--card"])), "card");
+        assert_eq!(renderer_for(&args(&["--card", "--json"])), "card");
+        assert_eq!(
+            renderer_for(&args(&["--view", "projects", "--json"])),
+            "json"
+        );
+        assert_eq!(renderer_for(&args(&["--view", "projects"])), "project");
+        assert_eq!(renderer_for(&args(&[])), "summary");
+    }
+
+    /// #670. The JSON report accepted `--hour`, `--day`, `--week` and `--month`
+    /// and ignored all four, so it answered about the whole database whatever was
+    /// asked for. A window in the future must come back empty: a hardcoded zero
+    /// returns the rows.
+    #[test]
+    fn the_json_report_honours_its_window() {
+        use crate::pipeline::{DistillResult, Route};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+        store.record_distillation(
+            "s1",
+            &DistillResult {
+                output: String::new(),
+                route: Route::Keep,
+                filter_name: "cat".to_string(),
+                score: 0.0,
+                context_score: 0.0,
+                input_bytes: 1_000,
+                output_bytes: 200,
+                latency_ms: 1,
+                rewind_hash: None,
+                segments_kept: 0,
+                segments_dropped: 0,
+                collapse_savings: None,
+                raw_tokens: 0,
+                filtered_tokens: 0,
+                delivered_bytes: 200,
+            },
+            "cat a.txt",
+            "",
+            "claude_code",
+        );
+
+        let all_time = build_stats_json(&store, 0).expect("json");
+        let future = chrono::Utc::now().timestamp() + 3_600;
+        let empty = build_stats_json(&store, future).expect("json");
+
+        assert!(
+            all_time.commands.iter().any(|c| c.command.contains("cat")),
+            "the fixture has to reach the report for the window to mean anything"
+        );
+        assert!(
+            empty.commands.is_empty(),
+            "the report ignored its window and answered about the whole database"
+        );
+    }
     use super::*;
     use tempfile::NamedTempFile;
 

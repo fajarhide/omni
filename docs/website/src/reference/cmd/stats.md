@@ -14,19 +14,22 @@ pipeline, not a product claim.
 
 | flag | effect |
 |---|---|
-| `--detail` | Full breakdown: commands, routes, sessions, agents |
-| `--hour`, `-H` | Scope to the last 60 minutes |
-| `--day`, `--today`, `-d` | Today only |
-| `--week`, `-w` | Last 7 days |
-| `--month`, `-m` | Last 30 days, the default |
-| `--all-commands` | Every command, not just the top ones |
-| `--project` | Break down per project path |
-| `--context` | Context composition signals |
-| `--rerun` | Which distillers cost a re-run |
-| `--share` | A copy-pasteable summary of your measured savings |
-| `--card` | Write that summary as an image, sized for social posts |
-| `--json` | Machine readable |
+| `--since <window>` | `hour`, `today`, `week`, `month` (default), `all` |
+| `--view <name>` | `summary` (default), `detail`, `commands`, `projects`, `context`, `rerun`, `share` |
+| `--limit <n>` | Rows in a table view, default 10, `0` for all |
+| `--json` | Machine readable, scoped by `--since` |
+| `--card` | Write the summary as an image, sized for social posts |
 | `--help`, `-h` | Help |
+
+Every earlier spelling still resolves: `--detail`, `--today`, `--day`, `-d`, `--week`,
+`-w`, `--month`, `-m`, `--hour`, `-H`, `--all-commands`, `--project`, `--context`,
+`--rerun` and `--share`. They are not listed because there is one way to say each thing
+now, and they print no deprecation notice: the rename was ours, not yours.
+
+`--json` and `--card` are output formats rather than views. `--card` outranks everything,
+since naming it can only mean writing the file; `--json` outranks `--view`, since there is
+one machine-readable report and it is not per view. Both used to be read as views, which is
+how `--view detail --card` came to write no image.
 
 ## `--rerun` is the one to know
 
