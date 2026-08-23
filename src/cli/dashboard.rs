@@ -38,16 +38,15 @@ fn print_help() {
 }
 
 pub fn run(args: &[String], store: &Store) -> Result<()> {
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    if super::has_flag(args, "--help") || super::has_flag(args, "-h") {
         print_help();
         return Ok(());
     }
     super::check_flags("dashboard", args, FLAGS)?;
 
-    let port = args
-        .iter()
-        .position(|a| a == "--port")
-        .and_then(|i| args.get(i + 1))
+    // `--port=8080` used to bind `DEFAULT_PORT` and say nothing: `check_flags`
+    // accepted the argument and the lookup below never matched it (#646).
+    let port = super::flag_value(args, "--port")
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(DEFAULT_PORT);
 

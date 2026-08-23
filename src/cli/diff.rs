@@ -12,10 +12,7 @@ fn print_help() {
 }
 
 pub fn run_diff(args: &[String]) -> Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }

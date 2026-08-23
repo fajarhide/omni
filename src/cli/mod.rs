@@ -112,6 +112,61 @@ pub fn flag_name(arg: &str) -> &str {
     arg.split('=').next().unwrap_or(arg)
 }
 
+/// Is this flag present, in either accepted spelling?
+///
+/// `check_flags` validates `--flag=value` on the name alone, so a caller
+/// comparing the whole argument accepts the input and then behaves as if the
+/// flag were absent. Every command in this CLI had that shape: `omni reset
+/// --openclaw=1` dropped into the interactive menu with the plugin installed,
+/// and `omni init --openclaw=1` exited 0 having installed nothing (#646).
+///
+/// Use this rather than `args.iter().any(|a| a == "--flag")`. There is a test in
+/// this module that fails on the raw form, because sixty of them is what it took
+/// to notice.
+pub fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|a| flag_name(a) == flag)
+}
+
+/// Is any of these spellings present? For a flag that grew alternatives.
+///
+/// `stats` had its own copy of this comparing whole arguments, which is how
+/// `--hour=1` survived the first pass of #646: the source scan below looks for a
+/// flag literal, and a helper comparing against a `&[&str]` parameter has none.
+/// Deleting that copy is the fix, not widening the scan.
+pub fn has_any(args: &[String], flags: &[&str]) -> bool {
+    flags.iter().any(|f| has_flag(args, f))
+}
+
+/// Did the caller ask for help?
+///
+/// `--help`, `-h`, or `help` as the **first argument to the subcommand**. Every
+/// command used to test `help` anywhere in argv, so `omni query how do i get
+/// help` printed the help page instead of answering, and routing that word
+/// through `has_flag` made `help=notes.txt` do it too. Position is what separates
+/// the subcommand from its payload.
+pub fn wants_help(args: &[String]) -> bool {
+    has_flag(args, "--help") || has_flag(args, "-h") || args.get(2).is_some_and(|a| a == "help")
+}
+
+/// The value given to a flag, as `--flag value` or `--flag=value`.
+///
+/// The `=` form used to be accepted by `check_flags` and then never found, so
+/// `omni dashboard --port=8080` bound the default port and said nothing, and
+/// `omni patterns --tool=bash` filtered on nothing. Silently doing something
+/// other than what the argument said is worse here than for a boolean flag: the
+/// command succeeds and the answer is about something else.
+pub fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter().enumerate().find_map(|(i, a)| {
+        if flag_name(a) != flag {
+            return None;
+        }
+        match a.split_once('=') {
+            Some((_, v)) => Some(v),
+            None => args.get(i + 1).map(String::as_str),
+        }
+    })
+}
+
 pub fn check_flags(command: &str, args: &[String], flags: Flags) -> Result<()> {
     let has_shorts = flags
         .iter()
@@ -253,5 +308,156 @@ mod tests {
     #[test]
     fn never_rejects_help() {
         assert!(check_flags("stats", &args(&["omni", "stats", "--help"]), FLAGS).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::{flag_name, flag_value, has_flag};
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// #646. `check_flags` validates `--flag=value` on the name alone, so every
+    /// caller that compared the whole argument accepted the input and then acted
+    /// as if the flag were absent.
+    #[test]
+    fn a_flag_is_found_in_either_spelling() {
+        assert!(has_flag(&argv(&["--json"]), "--json"));
+        assert!(has_flag(&argv(&["--json=1"]), "--json"));
+        assert!(has_flag(&argv(&["--json=true"]), "--json"));
+        assert!(!has_flag(&argv(&["--jsonx"]), "--json"));
+        assert!(!has_flag(&argv(&["--json-lines"]), "--json"));
+    }
+
+    /// The `=` form on a value flag was worse than on a boolean one: the command
+    /// succeeded and answered about something else. `--port=8080` bound the
+    /// default port; `--tool=bash` filtered on nothing.
+    #[test]
+    fn a_value_is_read_from_either_form() {
+        assert_eq!(
+            flag_value(&argv(&["--port", "8080"]), "--port"),
+            Some("8080")
+        );
+        assert_eq!(flag_value(&argv(&["--port=8080"]), "--port"), Some("8080"));
+        assert_eq!(flag_value(&argv(&["--port="]), "--port"), Some(""));
+        assert_eq!(flag_value(&argv(&["--port"]), "--port"), None);
+        assert_eq!(flag_value(&argv(&["--other", "8080"]), "--port"), None);
+    }
+
+    /// A value that itself contains `=` must survive whole.
+    #[test]
+    fn only_the_first_equals_separates_a_value() {
+        assert_eq!(
+            flag_value(&argv(&["--filter=key=value"]), "--filter"),
+            Some("key=value")
+        );
+        assert_eq!(flag_name("--filter=key=value"), "--filter");
+    }
+
+    /// What the scan below looks for, as its own function so it can be tested on
+    /// lines that are not in the tree. Any leading dash, not just `--`: `-h` is a
+    /// flag too and the first pass of this only caught the long form, which no
+    /// current line would have shown.
+    fn compares_an_argument_to_a_flag(line: &str) -> bool {
+        line.contains("== \"-")
+    }
+
+    #[test]
+    fn the_scan_catches_both_flag_spellings_and_leaves_positionals_alone() {
+        for bad in [
+            r#"let is_json = args.iter().any(|a| a == "--json");"#,
+            r#"if args.iter().any(|a| a == "-h") {"#,
+            r#".position(|a| a == "--port")"#,
+        ] {
+            assert!(compares_an_argument_to_a_flag(bad), "missed: {bad}");
+        }
+        for ok in [
+            r#"super::has_flag(args, "--json")"#,
+            r#"args.get(2).is_some_and(|a| a == "help")"#,
+            r#"if name == "help" {"#,
+        ] {
+            assert!(!compares_an_argument_to_a_flag(ok), "false positive: {ok}");
+        }
+    }
+
+    /// `stats` grew `--today` beside `--day` and kept its own matcher for the
+    /// three spellings (#428). That copy compared whole arguments, so `--hour=1`
+    /// selected the default overview, and the source scan could not see it: it
+    /// looks for a flag literal and that helper compared against a parameter.
+    #[test]
+    fn an_alternative_spelling_is_found_in_either_form() {
+        use super::has_any;
+        let names = ["--day", "--today", "-d"];
+        for spelling in ["--day", "--today=1", "-d"] {
+            assert!(
+                has_any(&argv(&[spelling]), &names),
+                "{spelling} did not select the window"
+            );
+        }
+        assert!(!has_any(&argv(&["--week"]), &names));
+    }
+
+    /// `help` is a positional word, not a flag, so it is matched exactly and only
+    /// where a subcommand's first argument sits. Routing it through `has_flag`
+    /// made `help=notes.txt` trigger it, and testing it anywhere in argv made
+    /// `omni query how do i get help` print the help page instead of answering.
+    #[test]
+    fn help_is_positional_and_query_text_does_not_trigger_it() {
+        use super::wants_help;
+        assert!(wants_help(&argv(&["omni", "query", "help"])));
+        assert!(wants_help(&argv(&["omni", "query", "--help"])));
+        assert!(wants_help(&argv(&["omni", "query", "-h"])));
+        assert!(wants_help(&argv(&["omni", "query", "--help=1"])));
+
+        assert!(
+            !wants_help(&argv(&["omni", "query", "how", "do", "i", "get", "help"])),
+            "a query that mentions help is not a request for the help page"
+        );
+        assert!(!wants_help(&argv(&["omni", "query", "help=notes.txt"])));
+        assert!(!wants_help(&argv(&["omni", "query"])));
+    }
+
+    /// The guard, and the reason it is a source scan rather than a lint: sixty
+    /// call sites carried this bug across twelve commands, each one correct in
+    /// isolation and wrong against `check_flags`. Nothing in the type system
+    /// separates "compare an argument" from "test for a flag", so the check is
+    /// that nobody writes the raw form again.
+    #[test]
+    fn no_command_compares_an_argument_to_a_flag_directly() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli");
+        let mut offenders = Vec::new();
+
+        for entry in std::fs::read_dir(&dir).expect("src/cli is readable") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            // `check_flags` and these tests are where the rule is defined, so
+            // they are the two places allowed to spell it out.
+            if path.file_name().and_then(|n| n.to_str()) == Some("mod.rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("readable");
+            for (n, line) in src.lines().enumerate() {
+                if compares_an_argument_to_a_flag(line) {
+                    offenders.push(format!(
+                        "{}:{}: {}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        n + 1,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these compare an argument to a flag directly, so `--flag=value` is \
+             accepted by check_flags and then ignored. Use `has_flag` or \
+             `flag_value`:\n{}",
+            offenders.join("\n")
+        );
     }
 }

@@ -283,23 +283,17 @@ const FLAGS: super::Flags = &[
 /// being the fall-through in one of them, and silently ignored in the other.
 fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
-    if has(args, &["--hour", "-H"]) {
+    if super::has_any(args, &["--hour", "-H"]) {
         ("last hour", now - 3600)
-    } else if has(args, &["--day", "--today", "-d"]) {
+    } else if super::has_any(args, &["--day", "--today", "-d"]) {
         // Calendar day, not a rolling 24h: "today" means since midnight.
         ("today", now - (now % 86400))
-    } else if has(args, &["--week", "-w"]) {
+    } else if super::has_any(args, &["--week", "-w"]) {
         ("last 7 days", now - 7 * 86400)
     } else {
         // `--month` / `-m` and the no-flag default are the same window.
         ("last 30 days", now - 30 * 86400)
     }
-}
-
-/// A slice rather than a `(long, short)` pair, because `--today` gained a
-/// `--day` spelling and the pair could not carry a third name (#428).
-fn has(args: &[String], names: &[&str]) -> bool {
-    args.iter().any(|a| names.iter().any(|n| a == n))
 }
 
 fn print_help() {
@@ -332,27 +326,24 @@ fn print_help() {
 // ─── Main Entry ─────────────────────────────────────────
 
 pub fn run(args: &[String], store: &Store) -> Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }
     super::check_flags("stats", args, FLAGS)?;
 
-    let detail_flag = args.iter().any(|a| a == "--detail");
-    let json_flag = args.iter().any(|a| a == "--json");
-    let share_flag = args.iter().any(|a| a == "--share");
-    let card_flag = args.iter().any(|a| a == "--card");
-    let project_flag = args.iter().any(|a| a == "--project");
-    let context_flag = args.iter().any(|a| a == "--context");
-    let rerun_flag = args.iter().any(|a| a == "--rerun");
-    let filter_flag = has(args, &["--hour", "-H"])
-        || has(args, &["--day", "--today", "-d"])
-        || has(args, &["--week", "-w"])
-        || has(args, &["--month", "-m"])
-        || args.iter().any(|a| a == "--all-commands");
+    let detail_flag = super::has_flag(args, "--detail");
+    let json_flag = super::has_flag(args, "--json");
+    let share_flag = super::has_flag(args, "--share");
+    let card_flag = super::has_flag(args, "--card");
+    let project_flag = super::has_flag(args, "--project");
+    let context_flag = super::has_flag(args, "--context");
+    let rerun_flag = super::has_flag(args, "--rerun");
+    let filter_flag = super::has_any(args, &["--hour", "-H"])
+        || super::has_any(args, &["--day", "--today", "-d"])
+        || super::has_any(args, &["--week", "-w"])
+        || super::has_any(args, &["--month", "-m"])
+        || super::has_flag(args, "--all-commands");
 
     let mode = if card_flag {
         "card"
@@ -1152,7 +1143,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     // By Command, top 10 (or all if requested), filter 0% savings
     let raw_filters = store.filter_breakdown(since)?;
-    let all_flag = args.iter().any(|a| a == "--all-commands");
+    let all_flag = super::has_flag(args, "--all-commands");
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
 
     let display_filters: Vec<_> = if all_flag {

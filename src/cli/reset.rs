@@ -57,7 +57,7 @@ fn targets_from_args(args: &[String]) -> Vec<&'static str> {
         .filter(|(flags, _)| {
             flags
                 .split(',')
-                .any(|alias| args.iter().any(|a| super::flag_name(a) == alias.trim()))
+                .any(|alias| super::has_flag(args, alias.trim()))
         })
         .map(|(flags, _)| target_of(flags))
         .collect()
@@ -81,7 +81,7 @@ fn print_help() {
 pub fn handle_reset() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    if super::has_flag(&args, "--help") || super::has_flag(&args, "-h") {
         print_help();
         return Ok(());
     }
@@ -91,7 +91,7 @@ pub fn handle_reset() -> anyhow::Result<()> {
     // understand, doing something else, and exiting 0.
     super::check_flags("reset", &args, FLAGS)?;
 
-    let is_all = args.iter().any(|a| super::flag_name(a) == "--all");
+    let is_all = super::has_flag(&args, "--all");
     let mut target_ids = targets_from_args(&args);
 
     if target_ids.is_empty() && !is_all {

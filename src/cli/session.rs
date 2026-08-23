@@ -52,24 +52,21 @@ fn print_help() {
 }
 
 pub fn run_session(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }
     super::check_flags("session", args, FLAGS)?;
 
-    let is_history = args.iter().any(|a| a == "--history");
-    let is_clear = args.iter().any(|a| a == "--clear");
-    let is_continue = args.iter().any(|a| a == "--continue");
-    let is_status = args.iter().any(|a| a == "--status");
-    let is_inject = args.iter().any(|a| a == "--inject");
-    let is_resume = args.iter().any(|a| a == "--resume");
-    let is_transcript = args.iter().any(|a| a == "--transcript");
-    let is_health = args.iter().any(|a| a == "--health");
-    let is_json = args.iter().any(|a| a == "--json");
+    let is_history = super::has_flag(args, "--history");
+    let is_clear = super::has_flag(args, "--clear");
+    let is_continue = super::has_flag(args, "--continue");
+    let is_status = super::has_flag(args, "--status");
+    let is_inject = super::has_flag(args, "--inject");
+    let is_resume = super::has_flag(args, "--resume");
+    let is_transcript = super::has_flag(args, "--transcript");
+    let is_health = super::has_flag(args, "--health");
+    let is_json = super::has_flag(args, "--json");
 
     // If no flags, show help
     if !is_history

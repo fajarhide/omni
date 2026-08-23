@@ -6,25 +6,15 @@ use colored::*;
 const FLAGS: super::Flags = &[("--tool", "Scope to one tool family")];
 
 pub fn run_patterns(args: &[String], store: &Store) -> Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }
     super::check_flags("patterns", args, FLAGS)?;
 
-    let mut tool_family = None;
-    let mut i = 2;
-    while i < args.len() {
-        if args[i] == "--tool" && i + 1 < args.len() {
-            tool_family = Some(args[i + 1].as_str());
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
+    // `--tool=bash` used to filter on nothing, since the scan compared the whole
+    // argument while `check_flags` had already accepted it (#646).
+    let tool_family = super::flag_value(args, "--tool");
 
     let patterns = store.get_patterns(tool_family, 20);
 

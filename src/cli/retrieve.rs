@@ -62,7 +62,7 @@ fn frame(handle: &str, content: &str, whole_len: usize) -> String {
 }
 
 pub fn run(args: &[String], store: &Store) -> Result<()> {
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    if super::has_flag(args, "--help") || super::has_flag(args, "-h") {
         print_help();
         return Ok(());
     }

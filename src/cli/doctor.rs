@@ -117,7 +117,7 @@ pub(crate) fn mcp_tool_line(agent_id: &str, keep_everything: bool) -> String {
 }
 
 fn run_json(args: &[String]) -> anyhow::Result<()> {
-    let fix_mode = args.iter().any(|a| a == "--fix");
+    let fix_mode = super::has_flag(args, "--fix");
     let mut checks = Vec::new();
     let mut all_ok = true;
     let mut fix_available = false;
@@ -302,21 +302,18 @@ fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
 }
 
 pub fn run(args: &[String]) -> anyhow::Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }
     super::check_flags("doctor", args, FLAGS)?;
 
-    if args.iter().any(|a| a == "--json") {
+    if super::has_flag(args, "--json") {
         return run_json(args);
     }
 
-    let fix_mode = args.iter().any(|a| a == "--fix");
-    let detail = args.iter().any(|a| a == "--detail");
+    let fix_mode = super::has_flag(args, "--fix");
+    let detail = super::has_flag(args, "--detail");
 
     let mut all_ok = true;
     let mut warnings: Vec<String> = Vec::new();

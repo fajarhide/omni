@@ -12,10 +12,7 @@ pub struct VersionJson {
 const FLAGS: super::Flags = &[("--json", "Machine-readable JSON output")];
 
 pub fn run_version(args: &[String]) {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         println!("\nomni version: Build and feature information\n");
         println!("USAGE:\n  omni version [FLAGS]\n");
         crate::cli::print_flags(FLAGS);
@@ -28,7 +25,7 @@ pub fn run_version(args: &[String]) {
         std::process::exit(1);
     }
 
-    let json_flag = args.iter().any(|a| a == "--json");
+    let json_flag = super::has_flag(args, "--json");
     let version_str = env!("CARGO_PKG_VERSION").to_string();
 
     if json_flag {
