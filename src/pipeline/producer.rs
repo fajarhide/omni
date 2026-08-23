@@ -244,14 +244,18 @@ fn is_silent(segment: &str) -> bool {
 /// is what that buys.
 pub(crate) fn strip_assignments(command: &str) -> &str {
     let mut rest = command.trim_start();
-    // The last assignment consumed, kept only for the case below where every word
-    // is an assignment and there is nothing after them to be the producer.
-    let mut last = "";
+    // The first assignment that runs something, kept for the case below where
+    // every word is an assignment and nothing follows them to be the producer.
+    // First rather than last, because that is execution order, and because
+    // keeping the last one returned an empty label for `A=$(kubectl get pods) B=2`.
+    let mut ran = "";
     while let Some((word, tail)) = split_word(rest) {
         if !is_assignment(word) {
             return rest;
         }
-        last = word;
+        if ran.is_empty() && !substitution_body(word).is_empty() {
+            ran = word;
+        }
         rest = tail.trim_start();
     }
 
@@ -262,13 +266,22 @@ pub(crate) fn strip_assignments(command: &str) -> &str {
     // Only in this branch. `TAG=$(git rev-parse HEAD) docker build .` runs
     // *docker*, and reaching into the substitution there would label and route the
     // command as git.
-    if let Some((_, inner)) = last.split_once("$(") {
-        let inner = inner.trim_start().trim_end_matches(')').trim_end();
-        if !inner.is_empty() {
-            return inner;
-        }
+    let inner = substitution_body(ran);
+    if !inner.is_empty() {
+        return inner;
     }
     rest
+}
+
+/// What a `VAR=$(...)` assignment actually runs, empty when it runs nothing.
+///
+/// One function so the loop and the fallback agree on what counts. They did not:
+/// the loop remembered any word containing `$(`, so `A=$( ) B=$(ls)` latched onto
+/// the empty one and the fallback then found nothing to return.
+fn substitution_body(word: &str) -> &str {
+    word.split_once("$(")
+        .map(|(_, inner)| inner.trim_start().trim_end_matches(')').trim_end())
+        .unwrap_or("")
 }
 
 /// Words, counting a quoted run as one word.
@@ -542,6 +555,15 @@ mod label_fragments {
         assert_eq!(producer_label("A=$(ls -1t /tmp/x.gz | head -1)"), "ls");
         // An empty substitution names nothing, so the next segment stands.
         assert_eq!(producer_label("X=$(  ) echo hi"), "echo");
+        // The one that runs is the producer even when a plain assignment follows
+        // it. Keeping the last assignment instead returned an empty label.
+        assert_eq!(producer_label("A=$(kubectl get pods) B=2"), "kubectl");
+        assert_eq!(producer_label("A=1 B=$(ls -l)"), "ls");
+        // Two of them, and the first is the one that ran first.
+        assert_eq!(producer_label("A=$(aws s3 ls) B=$(git log)"), "aws");
+        // An empty substitution runs nothing, so it is not the first that ran.
+        assert_eq!(producer_label("A=$( ) B=$(ls)"), "ls");
+        assert_eq!(producer_label("A=$(ls) B=$( )"), "ls");
     }
 
     /// The substitution is only the producer when nothing follows it. Its output
