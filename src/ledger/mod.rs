@@ -1085,6 +1085,45 @@ mod tests {
     /// One session's history is not another's. Without this the ledger would
     /// tell a fresh session it had already seen output it never received, which
     /// is the false-claim defect this project is named after.
+    /// #610, the other half. Prompt caching is prefix-matched, so what the model
+    /// already holds has to serialise the same way every time it is replayed. The
+    /// ledger is the only stateful stage here: the same command's output is
+    /// rewritten differently depending on what earlier commands showed, which is
+    /// correct for a new insertion and would be a defect if it were not
+    /// reproducible.
+    ///
+    /// Two stores, same sequence, byte for byte. The fixture asserts the fold
+    /// actually happened first, because three identical passthroughs would
+    /// satisfy the comparison while testing nothing.
+    #[test]
+    fn the_same_sequence_against_the_same_history_replays_byte_for_byte() {
+        fn sequence(store: &Store) -> Vec<Option<String>> {
+            let text = payload();
+            let ledger = Ledger::new(store, "s1").with_project("/repo");
+            (0..3).map(|_| ledger.project(&text)).collect()
+        }
+
+        let (a, _da) = temp_store();
+        let (b, _db) = temp_store();
+        let first = sequence(&a);
+        let second = sequence(&b);
+
+        assert!(
+            first[0].is_none() && first[1].is_some(),
+            "the fixture has to reach the fold: the first sighting stays verbatim \
+             and the repeat folds, got {:?}",
+            first
+                .iter()
+                .map(|t| t.as_ref().map(String::len))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            first, second,
+            "the same history replayed to different bytes, so what the model holds \
+             is not reproducible and cannot be cached"
+        );
+    }
+
     #[test]
     fn never_claims_another_sessions_history() {
         let (store, _d) = temp_store();

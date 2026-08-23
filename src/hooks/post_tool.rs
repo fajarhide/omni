@@ -3082,6 +3082,63 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         }
     }
 
+    /// #610. Prompt caching is prefix-matched, so a tool that rewrites anything
+    /// already in the conversation invalidates every token after the edit. That
+    /// is the standing objection to this whole category of tool, and OMNI's
+    /// answer is structural rather than careful: it can only address the tool
+    /// call it was handed.
+    ///
+    /// This pins the whole set of keys the hook may emit. All three name the
+    /// current call. A fourth appearing here is not a style question, it is
+    /// somebody having found a way to reach back into the prefix, and it should
+    /// fail loudly until that is argued in a PR.
+    #[test]
+    fn the_hook_can_only_address_the_call_it_was_handed() {
+        let noisy: String = (0..400)
+            .map(|i| format!("npm WARN deprecated pkg-{i}@1.0.0: no longer supported\n"))
+            .collect();
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "npm install" },
+            "tool_response": { "stdout": noisy, "stderr": "", "interrupted": false }
+        });
+
+        let out = process_payload(&input.to_string(), None, None).expect("distills");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+
+        let top: Vec<&str> = v
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            top,
+            vec!["hookSpecificOutput"],
+            "a key outside the hook envelope"
+        );
+
+        let mut inner: Vec<&str> = v["hookSpecificOutput"]
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        inner.sort_unstable();
+        for key in &inner {
+            assert!(
+                matches!(
+                    *key,
+                    "hookEventName" | "updatedToolOutput" | "additionalContext"
+                ),
+                "`{key}` is not one of the three keys that address the current \
+                 call. If it edits anything already in the conversation it \
+                 invalidates the prompt cache from that point on, which is the \
+                 failure OMNI exists to avoid (#610): {v}"
+            );
+        }
+    }
+
     #[test]
     fn bash_tool_with_git_diff_output() {
         let diff_str = "diff --git a/test.txt b/test.txt\nindex 123..456 100644\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n+new line 2\n".to_string();
