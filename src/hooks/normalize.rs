@@ -87,6 +87,27 @@ pub struct NormalizedInput {
     pub host_agent_id: Option<String>,
 }
 
+/// Append the `[stderr]` section, when the stream actually carries something.
+///
+/// The test was `!stderr.is_empty()` and `"\n"` passes it, so a command that
+/// wrote a newline was reported as having written to stderr. On a failing
+/// command that header is the first thing a reader goes looking at, and it led
+/// them to a blank section (#635).
+///
+/// One function for both emitters, not two matching predicates. The Claude-shaped
+/// payload and the Codex-shaped one each build this section, and #452, #454 and
+/// #456 were each one copy of a pair being fixed while the other kept the bug.
+///
+/// Trimming decides **whether** there is content, never what it is: a stream with
+/// something in it is appended byte for byte, indentation and all.
+fn push_stderr(s: &mut String, stderr: &str) {
+    if stderr.trim().is_empty() {
+        return;
+    }
+    s.push_str("\n[stderr]\n");
+    s.push_str(stderr);
+}
+
 /// Detect agent format dari raw JSON string
 pub fn detect_agent(input: &str) -> AgentFormat {
     // Coba parse sebagai JSON
@@ -338,11 +359,8 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
             return None;
         }
         let mut s = stdout.to_string();
-        if let Some(stderr) = response.get("stderr").and_then(Value::as_str)
-            && !stderr.is_empty()
-        {
-            s.push_str("\n[stderr]\n");
-            s.push_str(stderr);
+        if let Some(stderr) = response.get("stderr").and_then(Value::as_str) {
+            push_stderr(&mut s, stderr);
         }
         s
     };
@@ -650,11 +668,8 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
     let parsed: CodexInput = serde_json::from_str(input).ok()?;
     let content = parsed.result.or(parsed.output).or_else(|| {
         let mut s = parsed.stdout.unwrap_or_default();
-        if let Some(err) = parsed.stderr
-            && !err.is_empty()
-        {
-            s.push_str("\n[stderr]\n");
-            s.push_str(&err);
+        if let Some(err) = parsed.stderr {
+            push_stderr(&mut s, &err);
         }
         if s.is_empty() { None } else { Some(s) }
     })?;
@@ -1237,6 +1252,59 @@ mod tests {
             AgentFormat::Plugin("not-a-host".to_string()),
             "the allowlist is what stops a payload naming its own bucket"
         );
+    }
+
+    /// #635. `!stderr.is_empty()` passes for `"\n"`, so a command that wrote a
+    /// newline was announced as having written to stderr and the reader was sent
+    /// to a blank section. On a failing command that header is the first thing
+    /// they look at.
+    #[test]
+    fn a_whitespace_only_stderr_is_not_announced() {
+        for blank in ["\n", "   ", "\t\n \r\n", ""] {
+            let mut s = "the real answer\n".to_string();
+            push_stderr(&mut s, blank);
+            assert_eq!(
+                s, "the real answer\n",
+                "a stream carrying only whitespace got a header: {blank:?}"
+            );
+        }
+    }
+
+    /// The other half, and the reason the guard trims rather than the content
+    /// being trimmed: a stream with something in it is appended byte for byte,
+    /// so indentation a compiler emitted survives.
+    #[test]
+    fn a_stderr_with_content_keeps_its_own_bytes() {
+        let mut s = "out\n".to_string();
+        push_stderr(&mut s, "  warning: unused\n");
+        assert_eq!(s, "out\n\n[stderr]\n  warning: unused\n");
+    }
+
+    /// Both payload shapes build this section, and the pair is exactly how #452,
+    /// #454 and #456 each shipped a fix for one door and left the other open.
+    /// Driving the two parsers is what proves they share the predicate.
+    #[test]
+    fn both_payload_shapes_agree_about_a_blank_stderr() {
+        let claude = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "true"},
+            "tool_response": {"stdout": "the real answer\n", "stderr": "\n"}
+        })
+        .to_string();
+        let codex = serde_json::json!({
+            "action": "run", "command": "true",
+            "stdout": "the real answer\n", "stderr": "\n"
+        })
+        .to_string();
+
+        for (name, payload) in [("claude", claude), ("codex", codex)] {
+            let got = normalize(&payload).expect("{name} payload normalizes");
+            assert!(
+                !got.content.contains("[stderr]"),
+                "{name} announced a stderr that held only a newline: {:?}",
+                got.content
+            );
+        }
     }
 
     /// The tool name decides which arm of `process_payload` runs, and the two

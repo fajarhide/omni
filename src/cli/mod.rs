@@ -101,6 +101,17 @@ pub fn print_flag_group(title: &str, flags: &[&(&str, &str)]) {
 /// Long `--flags` are always checked. A single-letter `-x` is checked only when
 /// the subcommand declares at least one short flag, so free-form text keeps
 /// passing through (`omni remember "build with -O2"`, `omni engram list`).
+/// The flag an argument names, ignoring any `=value` attached to it.
+///
+/// `check_flags` accepts `--flag=value` and validates the name alone, so every
+/// consumer that then compares the whole argument silently stops routing it:
+/// `omni reset --openclaw=1` passed validation, matched nothing, and dropped into
+/// the interactive menu with the integration still installed. One function so the
+/// accepted form and the routed form cannot disagree.
+pub fn flag_name(arg: &str) -> &str {
+    arg.split('=').next().unwrap_or(arg)
+}
+
 pub fn check_flags(command: &str, args: &[String], flags: Flags) -> Result<()> {
     let has_shorts = flags
         .iter()
@@ -112,7 +123,7 @@ pub fn check_flags(command: &str, args: &[String], flags: Flags) -> Result<()> {
             continue;
         }
         // `--flag=value` is checked on the name alone.
-        let name = arg.split('=').next().unwrap_or(arg);
+        let name = flag_name(arg);
         if name == "--help"
             || name == "-h"
             || flags
