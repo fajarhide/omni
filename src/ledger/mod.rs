@@ -601,6 +601,22 @@ impl<'a> Ledger<'a> {
         projected.map(|(view, _, _)| (view, shifts))
     }
 
+    /// The marker one run would be replaced by, rendered rather than estimated
+    /// so the test that weighs it and the string that is sent cannot drift (#450).
+    ///
+    /// A run covering every line means the reply is this marker and nothing else,
+    /// which needs different wording (#519), and that wording is longer: an
+    /// earlier draft weighed the short one and emitted the long one.
+    fn marker_for(&self, run: &Run, seen: &Seen, total: usize, handle: &str) -> String {
+        let src = seen.source.as_deref();
+        let lines = run.end - run.start;
+        if run.start == 0 && run.end == total {
+            seen.origin.whole_output_marker(lines, handle, src)
+        } else {
+            seen.origin.marker(lines, handle, src)
+        }
+    }
+
     /// The view, and the indices of the lines it replaced with a marker.
     ///
     /// The caller needs the second half to record only what it delivered (#465);
@@ -654,6 +670,45 @@ impl<'a> Ledger<'a> {
             return None;
         }
 
+        // What every run would do on its own, decided before any of them is
+        // emitted so the shape of the survivors is known in advance. Only the
+        // store can still turn a planned fold back into a verbatim run below,
+        // and that direction is safe: the caller then refuses the view exactly
+        // as it did before any of this existed.
+        let planned: Vec<bool> = runs
+            .iter()
+            .map(|run| {
+                run.seen.as_ref().is_some_and(|seen| {
+                    let marker = self
+                        .marker_for(run, seen, lines.len(), &"0".repeat(HANDLE_LEN))
+                        .len();
+                    lines[run.start..run.end]
+                        .iter()
+                        .map(|l| l.len())
+                        .sum::<usize>()
+                        >= marker + seen.origin.min_gain()
+                })
+            })
+            .collect();
+
+        // #658. A host that renumbers what it is handed cannot take survivors
+        // sitting in two blocks, and refusing the whole view gave up the bytes
+        // above the first split as well. Folding only down to the first run that
+        // survives leaves the rest contiguous, so the head still folds and one
+        // `startLine` still describes everything under it. `markers_above` is
+        // irrelevant to that question, so the plan asks it with zero: the bump is
+        // counted for real during the emit below.
+        let planned_folds: HashSet<usize> = runs
+            .iter()
+            .zip(&planned)
+            .filter(|(_, fold)| **fold)
+            .flat_map(|(run, _)| run.start..run.end)
+            .collect();
+        let cutoff = (self.renumbered
+            && FoldShift::of(&planned_folds, lines.len(), 0) == FoldShift::Interior)
+            .then(|| planned.iter().position(|fold| !fold))
+            .flatten();
+
         let mut out = String::with_capacity(payload_bytes);
         let mut folded: HashSet<usize> = HashSet::new();
         let mut replaced_any = false;
@@ -663,7 +718,7 @@ impl<'a> Ledger<'a> {
         // runs. Every attempt to infer it downstream was wrong (#573).
         let mut markers_above = 0usize;
         let mut still_above = true;
-        for run in runs {
+        for (i, run) in runs.iter().enumerate() {
             let body = lines[run.start..run.end].concat();
             // The only question that decides a fold: does this run save more
             // than the marker replacing it costs. The marker is rendered rather
@@ -676,16 +731,8 @@ impl<'a> Ledger<'a> {
             // longer, and the first draft of this weighed the short one and
             // emitted the long one, which is the drift the rest of this comment
             // exists to prevent.
-            let covers_everything = run.start == 0 && run.end == lines.len();
-            let render = |seen: &Seen, handle: &str| {
-                let src = seen.source.as_deref();
-                if covers_everything {
-                    seen.origin
-                        .whole_output_marker(run.end - run.start, handle, src)
-                } else {
-                    seen.origin.marker(run.end - run.start, handle, src)
-                }
-            };
+            let render =
+                |seen: &Seen, handle: &str| self.marker_for(run, seen, lines.len(), handle);
 
             // Two questions, not one. The first is whether the run outgrows the
             // marker replacing it, which is what every floor here has ever asked.
@@ -700,10 +747,7 @@ impl<'a> Ledger<'a> {
             // payload above: does this run save more than the marker replacing
             // it costs. The marker is rendered rather than estimated, so the
             // test cannot drift from the string it is weighing (#450).
-            let long_enough = run.seen.as_ref().is_some_and(|seen| {
-                let marker = render(seen, &"0".repeat(HANDLE_LEN)).len();
-                body.len() >= marker + seen.origin.min_gain()
-            });
+            let long_enough = planned[i] && cutoff.is_none_or(|c| i < c);
 
             // A handle is only offered for content that is provably retrievable.
             // `store_rewind` returns `None` when the row did not land, and the
