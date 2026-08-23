@@ -1159,6 +1159,60 @@ impl SqliteBackend {
             tx.commit()?;
         }
 
+        // #605. #603 fixed `filter_name` going forward and left every row already
+        // written, so `omni stats` and every workload query still group 16% of
+        // this corpus under an assignment or a binary's full path. 2,892 of
+        // 17,402 rows across 398 names on the machine that measured it, and they
+        // kept accumulating until 0.7.7 was installed, because merging a fix does
+        // not change the binary on disk.
+        //
+        // Not the #163 shape, which is what makes this cheap. There the rows
+        // recorded a saving that never reached an agent, no arithmetic could
+        // recover the truth, and the answer was to exclude them by timestamp and
+        // delete nothing. Here every column is right except a derived one, the
+        // column it derives from is intact on all of them, and `producer_label`
+        // is pure. So the recompute is arithmetic rather than a judgement, and it
+        // needs no timestamp constant: run over a row written after the fix it
+        // returns that row's own label.
+        //
+        // Ordered after #677 deliberately. Recomputing before that landed would
+        // have turned `A=$(ls` into `-1t`, destroying the original label to write
+        // something no more correct.
+        let migration_labels = "2026_08_recompute_filter_name_from_command";
+        let labels_applied: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM schema_migrations WHERE id = ?1 LIMIT 1",
+                params![migration_labels],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if labels_applied.is_none() {
+            let tx = conn.unchecked_transaction()?;
+            let stale: Vec<(i64, String)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id, command FROM distillations
+                     WHERE command IS NOT NULL AND command != ''
+                       AND (filter_name LIKE '%=%' OR filter_name LIKE '/%')",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?;
+                rows.flatten().collect()
+            };
+            for (id, command) in stale {
+                let label = crate::pipeline::producer::producer_label(&command);
+                tx.execute(
+                    "UPDATE distillations SET filter_name = ?1 WHERE id = ?2",
+                    params![label, id],
+                )?;
+            }
+            tx.execute(
+                "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
+                params![migration_labels, chrono::Utc::now().timestamp()],
+            )?;
+            tx.commit()?;
+        }
+
         // `context_turns` was written on every hooked command, carried an index,
         // and had no `SELECT` anywhere in the tree: 5,532 rows paying write
         // latency and disk for a reader that never existed (#270). The in-memory
@@ -5290,5 +5344,109 @@ mod tests {
             "an empty session id answered with the whole table"
         );
         assert_eq!(store.passthrough_reasons_for(0, None).len(), 2);
+    }
+
+    /// #605. #603 fixed the label going forward and left 16% of the recorded
+    /// corpus filed under an assignment or a binary's full path, which every
+    /// workload query groups on equally.
+    ///
+    /// Run twice on purpose. #379 is the precedent for a migration undone by live
+    /// code, and a recompute that is not idempotent is the same hazard wearing a
+    /// different hat: the predicate that selects a stale row must not match the
+    /// row the migration just wrote.
+    #[test]
+    fn the_recompute_fixes_a_stale_label_and_does_not_run_twice() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("omni.db");
+        drop(Store::open_path(&db).expect("first open builds the schema"));
+
+        let seed = [
+            ("A=$(kubectl", "A=$(kubectl get pods -n web)"),
+            ("/bin/ls", "/bin/ls -l /tmp"),
+            ("S=/tmp/x", "S=/tmp/x cargo build --release"),
+            // Already correct, and it must come out unchanged.
+            ("cargo", "cargo build --release"),
+        ];
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open seed db");
+            conn.execute(
+                "DELETE FROM schema_migrations
+                 WHERE id = '2026_08_recompute_filter_name_from_command'",
+                [],
+            )
+            .expect("re-arm migration");
+            for (i, (name, command)) in seed.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO distillations
+                        (id, session_id, ts, filter_name, input_bytes, output_bytes,
+                         route, latency_ms, command)
+                     VALUES (?1, 's1', 1, ?2, 100, 50, 'Keep', 1, ?3)",
+                    params![i as i64 + 1, name, command],
+                )
+                .expect("seed row");
+            }
+        }
+
+        let labels = |db: &std::path::Path| -> Vec<String> {
+            let store = Store::open_path(db).expect("reopen runs the migration");
+            let conn = store.pool.get().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT filter_name FROM distillations ORDER BY id")
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .flatten()
+                .collect()
+        };
+
+        let after = labels(&db);
+        assert_eq!(
+            after,
+            vec![
+                "kubectl".to_string(),
+                "ls".to_string(),
+                "cargo".to_string(),
+                "cargo".to_string()
+            ],
+            "a stale label survived the recompute"
+        );
+
+        // Second open. The migration is recorded, so nothing runs, and even if it
+        // did the recompute is its own fixed point.
+        assert_eq!(labels(&db), after, "a second open changed the labels again");
+    }
+
+    /// The recompute reads `command` and nothing else, so a row that lost its
+    /// command has no arithmetic to recover and is left exactly as it is rather
+    /// than relabelled from a guess.
+    #[test]
+    fn a_row_with_no_command_keeps_its_stale_label() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("omni.db");
+        drop(Store::open_path(&db).expect("first open builds the schema"));
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open seed db");
+            conn.execute(
+                "DELETE FROM schema_migrations
+                 WHERE id = '2026_08_recompute_filter_name_from_command'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO distillations
+                    (id, session_id, ts, filter_name, input_bytes, output_bytes,
+                     route, latency_ms, command)
+                 VALUES (1, 's1', 1, 'A=$(kubectl', 100, 50, 'Keep', 1, '')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let store = Store::open_path(&db).expect("reopen runs the migration");
+        let conn = store.pool.get().unwrap();
+        let name: String = conn
+            .query_row("SELECT filter_name FROM distillations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(name, "A=$(kubectl");
     }
 }
