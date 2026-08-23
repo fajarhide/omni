@@ -220,6 +220,7 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.contains("build error")
         || lower_text.contains("--- fail")
         || mentions_failure_as_a_verdict(lower_text)
+        || states_a_severity(lower_text)
 }
 
 /// Does any line here carry a compiler frame's own pointer?
@@ -264,6 +265,62 @@ const PASS_GLYPHS: &[char] = &['✓', '✔', '✅'];
 fn has_fail_glyph(text: &str) -> bool {
     text.lines()
         .any(|l| l.trim_start().starts_with(FAIL_GLYPHS))
+}
+
+/// Whether a line announces a failure the way a log does, with a level.
+///
+/// The generic markers above match `error:` and a line starting `error `, which
+/// is how a tool writes a one-line message and not how a log writes anything. A
+/// timestamped line, a bracketed level and logfmt were all missed, so a log's
+/// failure lines tiered as context and `GenericDistiller` discarded them with the
+/// tail while keeping a hundred routine ones (#655).
+///
+/// **Position, not presence.** Matching the bare word anywhere is what two
+/// earlier drafts of this did, and both were wrong in a way tests caught:
+/// `Compiling error-chain v0.12.4` is cargo naming a crate, and
+/// `const keys = [...new Set(parsed.error.issues...)]` is source code. A log puts
+/// the level at the front, so only the first few tokens are read, and that is
+/// what separates a report from a mention.
+///
+/// Per line rather than over the block, because a block is mostly routine and the
+/// one line that matters sits inside it.
+fn states_a_severity(lower_text: &str) -> bool {
+    const LEVELS: [&str; 3] = ["error", "errors", "fatal"];
+    // `2026-08-10T00:05:00Z  ERROR upstream ...` puts it third once the two
+    // timestamp halves are counted, and logfmt puts it after a date and a time.
+    const LOOK: usize = 4;
+
+    lower_text.lines().any(|line| {
+        if line.trim_start().starts_with(PASS_GLYPHS) {
+            return false;
+        }
+
+        let mut previous = "";
+        for token in line.split_whitespace().take(LOOK) {
+            let bare = token.trim_matches(|c: char| !c.is_alphanumeric());
+            let is_level = LEVELS.contains(&bare)
+                || token.rsplit_once('=').is_some_and(|(_, value)| {
+                    LEVELS.contains(&value.trim_matches(|c: char| !c.is_alphanumeric()))
+                });
+
+            // The word this token negates is itself, not the line. `no errors
+            // detected` reports an absence, and it is the string a fabricated
+            // summary used in #105, so reading it as a failure would be that
+            // defect answering itself. But `ERROR: no error handler registered`
+            // is a failure whose *message* happens to contain the phrase, and an
+            // exclusion that reads the whole line throws it away.
+            // A count of exactly zero is the same statement in digits, and it is
+            // what every green summary prints: `0 errors found`. `mentions`
+            // carries this rule for the word `failed` for the same reason (#210).
+            let negated =
+                matches!(previous, "no" | "without" | "zero") || previous.parse::<u64>() == Ok(0);
+            if is_level && !negated {
+                return true;
+            }
+            previous = bare;
+        }
+        false
+    })
 }
 
 /// `mentions_failure`, but never for a line that has already announced a pass.
@@ -555,6 +612,58 @@ mod tests {
             assert!(
                 !is_critical(&prose.to_lowercase(), None),
                 "ordinary text tiered Critical by the frame rule: {prose:?}"
+            );
+        }
+    }
+
+    /// #655. `is_critical` matched `error:` and a line starting `error `, which is
+    /// how a one-line message is written and not how a log is. A timestamped
+    /// line, a bracketed level and logfmt were all missed, so the failure lines
+    /// tiered as context and `GenericDistiller` discarded them with the tail
+    /// while keeping a hundred routine ones.
+    ///
+    /// Third instance of one shape, after #425 (a verdict glyph) and #650 (a
+    /// compiler frame's marker): the predicate deciding what is worth keeping did
+    /// not recognise how the tool actually says it failed.
+    #[test]
+    fn a_severity_word_is_a_failure_however_the_log_frames_it() {
+        for line in [
+            "2026-08-10T00:05:00Z  ERROR upstream timed out after 30s",
+            "2026-08-10T00:05:02Z  FATAL giving up after 3 retries",
+            "[ERROR] something broke",
+            "2026-08-10 level=error msg=\"upstream timed out\"",
+            "  2 errors found",
+            "error: something broke",
+            // A failure whose message mentions the absence of something. The
+            // level at the front decides it, not a phrase further along.
+            "ERROR: no error handler registered for /foo",
+            "2026-08-10T00:05:00Z  FATAL exited without errors reported upstream",
+        ] {
+            assert!(
+                is_critical(&line.to_lowercase(), None),
+                "a line stating a failure tiered as context: {line:?}"
+            );
+        }
+
+        // The other direction, which is what makes the word dangerous. Each of
+        // these has cost this project a wrong tier before.
+        for line in [
+            "test error_handling ... ok",
+            "test result: ok. 479 passed; 0 errors",
+            "docker logs: 323 lines, no errors detected",
+            // The same phrasing where position alone would not save it: the word
+            // sits second, well inside the window the rule reads.
+            "no errors detected",
+            "completed without errors",
+            "zero errors",
+            "0 errors found",
+            "check complete: 0 errors, 0 warnings",
+            "2026-08-10T00:00:00Z  worker 1 handled request 1 in 12ms",
+            "Compiling error-chain v0.12.4",
+        ] {
+            assert!(
+                !is_critical(&line.to_lowercase(), None),
+                "ordinary output tiered Critical by the severity rule: {line:?}"
             );
         }
     }
