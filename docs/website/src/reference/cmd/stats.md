@@ -21,6 +21,10 @@ One screen, and it answers one question: how many bytes never reached the model.
       invented, no call came back larger.
 ```
 
+`--json` is one report rather than a renderer per view: it wins over `--view`, and its
+`periods` block stays the three standard windows while everything else in it follows
+`--since`.
+
 **Two stages, two bases, and never one percentage.** The distiller's share is of the
 bytes it distilled; the ledger's is of the payload of the calls it folded. Those are
 different populations, so adding or averaging them produces a figure about neither. The
@@ -43,7 +47,7 @@ claim activity that did not happen.
 | `--view <name>` | `summary` (default), `detail`, `commands`, `projects`, `context`, `rerun`, `share` |
 | `--limit <n>` | Rows in a table view, default 8, `0` for all |
 | `--card` | Write the summary as an image, sized for social posts |
-| `--json` | Machine readable, for the selected view |
+| `--json` | Machine readable, scoped by `--since` |
 | `--help`, `-h` | Help |
 
 Every earlier spelling still resolves: `--detail`, `--today`, `--week`, `--month`,

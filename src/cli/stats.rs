@@ -198,7 +198,7 @@ const FLAGS: super::Flags = &[
         "--view <name>",
         "summary | detail | commands | projects | context | rerun | share",
     ),
-    ("--json", "Machine-readable output for the selected view"),
+    ("--json", "Machine-readable report, scoped by --since"),
     (
         "--card",
         "Write the summary as an image, sized for social posts",
@@ -328,15 +328,18 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     let mode = view(args);
     let json = super::has_flag(args, "--json");
 
+    // `--json` is checked first for every view, which is what it did before this
+    // surface existed. There is one machine-readable report and it is not per
+    // view, so a view flag beside it selects nothing rather than printing a human
+    // table under a machine-readable flag.
     match mode {
+        _ if json => run_json(args, store),
         "card" => run_card(store),
         "share" => run_share(store),
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
-        "detail" | "commands" if json => run_json(store),
         "detail" | "commands" => run_detail(args, store),
-        _ if json => run_json(store),
         _ => run_default(args, store),
     }
 }
@@ -1392,11 +1395,28 @@ pub struct RewindStat {
     pub retrieved: u64,
 }
 
-fn run_json(store: &Store) -> Result<()> {
+fn run_json(args: &[String], store: &Store) -> Result<()> {
+    let (_, since) = scope(args);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&build_stats_json(store, since)?)?
+    );
+    Ok(())
+}
+
+/// The machine-readable report for one window.
+///
+/// Separated from printing so the window can be tested. Review of #665 found
+/// every query here reading all-time whatever `--since` said, and a function that
+/// only prints cannot be asked what window it used.
+fn build_stats_json(store: &Store, since: i64) -> Result<StatsJson> {
+    // `periods` is the exception to the window by definition: it *is* the three
+    // standard windows, and scoping it would leave two of its rows describing a
+    // window they are not named after.
     let periods = store.multi_period_stats()?;
-    let top_commands = get_top_commands(store, 0, 100);
+    let top_commands = get_top_commands(store, since, 100);
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
-    let (count, _, _, sum_latency, _, _, _) = store.aggregate_stats(0)?;
+    let (count, _, _, sum_latency, _, _, _) = store.aggregate_stats(since)?;
 
     let avg_latency = if count > 0 {
         sum_latency as f64 / count as f64
@@ -1404,7 +1424,7 @@ fn run_json(store: &Store) -> Result<()> {
         0.0
     };
 
-    let totals = store.stage_totals(0)?;
+    let totals = store.stage_totals(since)?;
     let stages = StageStats {
         distilled: stage_stat(
             totals.distilled_calls,
@@ -1460,7 +1480,7 @@ fn run_json(store: &Store) -> Result<()> {
         .collect();
 
     let agent_json: Vec<AgentStat> = store
-        .get_agent_breakdown(0)
+        .get_agent_breakdown(since)
         .unwrap_or_default()
         .iter()
         .map(|r| {
@@ -1493,8 +1513,7 @@ fn run_json(store: &Store) -> Result<()> {
         stages,
     };
 
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    Ok(output)
 }
 
 /// `omni stats --rerun`, the check reduction % cannot make (#109).
@@ -1849,6 +1868,52 @@ mod tests {
         assert!(json_str.contains("\"generated_at\":1234567890"));
         assert!(json_str.contains("\"savings_pct\":90.0"));
         assert!(json_str.contains("\"avg_latency_ms\":15.5"));
+    }
+
+    /// Review of #665. Every query in the JSON report read all-time whatever
+    /// `--since` asked for, so `omni stats --since today --json` answered about
+    /// the whole database. A window in the future must therefore come back empty:
+    /// a hardcoded `0` returns the rows instead.
+    #[test]
+    fn the_json_report_honours_its_window() {
+        use crate::pipeline::{DistillResult, Route};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+        store.record_distillation(
+            "s1",
+            &DistillResult {
+                output: String::new(),
+                route: Route::Keep,
+                filter_name: "cat".to_string(),
+                score: 0.0,
+                context_score: 0.0,
+                input_bytes: 1_000,
+                output_bytes: 200,
+                latency_ms: 1,
+                rewind_hash: None,
+                segments_kept: 0,
+                segments_dropped: 0,
+                collapse_savings: None,
+                raw_tokens: 0,
+                filtered_tokens: 0,
+                delivered_bytes: 200,
+            },
+            "cat a.txt",
+            "",
+            "claude_code",
+        );
+
+        let all_time = build_stats_json(&store, 0).expect("json");
+        assert_eq!(all_time.stages.distilled.calls, 1);
+
+        let future = chrono::Utc::now().timestamp() + 3_600;
+        let empty = build_stats_json(&store, future).expect("json");
+        assert_eq!(
+            empty.stages.distilled.calls, 0,
+            "the report ignored its window and answered about the whole database"
+        );
+        assert_eq!(empty.stages.distilled.bytes_removed, 0);
     }
 
     /// #665. A day with no recorded call has to render blank. `▁` is the floor of
