@@ -18,7 +18,7 @@ host's tier can use:
 
 The nine are `omni_retrieve`, `omni_explain_savings`, `omni_remember`, `omni_recall`,
 `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` and
-`omni_context`. They are the ones that were actually called across the recorded corpus.
+`omni_history`. They are the ones that were actually called across the recorded corpus.
 
 Every other tool on this page is still in the binary and one setting away.
 `OMNI_MCP_TOOLS=all` advertises all 25, and `omni doctor` says which set is in force and
@@ -82,7 +82,6 @@ than forming an impression.
 | `omni_session` | Session state: status, context, clear |
 | `omni_search` | Search this session's history |
 | `omni_query` | Query distillation history with the fixed query forms |
-| `omni_context` | Lightweight dependency context for a file |
 | `omni_agents` | Other agents currently active on this project |
 
 ## Tuning
@@ -115,3 +114,16 @@ a filter name passed to the TOML generator. Calling it returns `-32602 tool not 
 
 It has been miscounted before: a source grep for `"omni_*"` returns 27, and 27 is
 therefore wrong wherever it appears. Run the `tools/list` call above for the count.
+
+## What left the surface
+
+`omni_context` was advertised until 0.7.7 and had never been called once across
+253 recorded sessions, so it cost 189 bytes in the prefix of every request for a
+capability nobody reached for. It is `omni context <file>` now, which costs nothing
+per request:
+
+```bash
+omni context src/ledger/mod.rs
+```
+
+An agent can still reach it through `omni_run`.

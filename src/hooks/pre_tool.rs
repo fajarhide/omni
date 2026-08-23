@@ -221,7 +221,7 @@ fn process_payload(
             if hot_count > 2 {
                 let updated_input = parsed.tool_input.clone();
                 let reason = format!(
-                    "OMNI Guard: {} is a hot file (accessed {}x this session). Mutating it may have wide impact. Consider reviewing dependents via omni_context.",
+                    "OMNI Guard: {} is a hot file (accessed {}x this session). Mutating it may have wide impact. Consider reviewing dependents with `omni context <file>`.",
                     target_file, hot_count
                 );
                 let output = PreHookOutput {

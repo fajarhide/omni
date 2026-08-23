@@ -133,6 +133,11 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ),
     ("TUNE IT", "query", "Search past distillations (OmniQL)"),
     ("TUNE IT", "patterns", "Errors that keep coming back"),
+    (
+        "TUNE IT",
+        "context",
+        "Which files import this one, and which it imports",
+    ),
     ("MEMORY", "remember", "Save a fact for future sessions"),
     ("MEMORY", "engram", "Digests of finished subtasks"),
     (
@@ -437,6 +442,17 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
+                "context" => {
+                    // #609 moved this off the MCP surface, where it cost 189 B in
+                    // the prefix of every request and was never once called. The
+                    // session is best effort: it only decides the "hot in session"
+                    // line, so a store that will not open still gives an answer.
+                    let session = Store::open().ok().and_then(|s| s.find_latest_session());
+                    if let Err(e) = cli::context::run_context(&args, session.as_ref()) {
+                        eprintln!("[omni] Context error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
                 "patterns" => match Store::open() {
                     Ok(store) => {
                         if let Err(e) = cli::patterns::run_patterns(&args, &store) {

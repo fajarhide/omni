@@ -24,8 +24,13 @@ pub const FULL: &[&str] = &[
     "omni_find_noise",
     "omni_context_breakdown",
     "omni_history",
-    "omni_context",
 ];
+// `omni_context` was here and failed the rule above. Across 253 recorded sessions
+// it is the only advertised tool with zero calls ever, and the three places OMNI
+// recommended it appear zero times in 10,578 traces. It cost 189 B in the prefix
+// of every request on this tier. The capability moved to `omni context <file>`,
+// which costs nothing per request and is still reachable from an agent through
+// `omni_run` (#609).
 
 /// Same list today, kept separate so a future edit to `FULL` cannot silently
 /// drop `omni_run` from the one tier that has nothing else. The test is what
@@ -155,14 +160,15 @@ mod tests {
     }
 
     /// Measured 2026-08-15: nine tools were called across 228 sessions and the
-    /// other sixteen never were. If this list grows without the probe being
-    /// re-run, the design's own justification has stopped being true.
+    /// other sixteen never were. Re-measured 2026-08-23 over 253 sessions, and
+    /// `omni_context` had still never been called once, so it left too (#609).
+    /// If this list grows without the probe being re-run, the design's own
+    /// justification has stopped being true.
     #[test]
-    fn the_full_set_is_the_nine_that_were_actually_called() {
+    fn the_full_set_is_the_ones_that_were_actually_called() {
         let mut got = active_tools("claude_code").to_vec();
         got.sort_unstable();
         let mut want = vec![
-            "omni_context",
             "omni_context_breakdown",
             "omni_explain_savings",
             "omni_find_noise",

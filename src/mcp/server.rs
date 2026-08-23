@@ -1845,6 +1845,11 @@ mod tests {
     /// `$schema` and `title` keys `schemars` stamps on every parameter struct.
     /// The old 3,000 gate stayed green through that whole regression, which is
     /// what a bound set far above the measurement buys you.
+    ///
+    /// Ratcheted again to 2,200 when `omni_context` left the surface: it was the
+    /// only advertised tool never called once in 253 sessions, and it cost 189 B
+    /// of every request. Kept just above the 2,098 that measures today, for the
+    /// same reason: a gate with room in it does not notice a regression.
     #[test]
     fn the_advertised_surface_is_smaller_than_it_was() {
         let router = OmniServer::router_from("claude_code", false);
@@ -1856,13 +1861,13 @@ mod tests {
 
         assert_eq!(
             listed.len(),
-            9,
-            "advertised {} tools, expected the nine",
+            8,
+            "advertised {} tools, expected eight",
             listed.len()
         );
         assert!(
-            bytes <= 2_500,
-            "advertised surface is {bytes} B, gate is 2500 (it measured 2,286 on #609)"
+            bytes <= 2_200,
+            "advertised surface is {bytes} B, gate is 2200 (it measured 2,098 on #609)"
         );
     }
 

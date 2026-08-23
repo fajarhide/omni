@@ -696,7 +696,7 @@ mod tests {
         let line = super::mcp_tool_line("claude_code", false);
         assert_eq!(
             line,
-            "  MCP tools:      9 of 25 advertised to claude_code \
+            "  MCP tools:      8 of 25 advertised to claude_code \
              (OMNI_MCP_TOOLS=all restores the rest)"
         );
     }
