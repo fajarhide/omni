@@ -1811,8 +1811,15 @@ mod tests {
                     stack.push(path);
                     continue;
                 }
+                // The whole JS and TS family, not the three spellings that
+                // happen to exist today: a plugin written as `.mjs` would have
+                // been skipped in silence, which is the same shape of hole this
+                // test exists to close.
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if !matches!(ext, "ts" | "js" | "py") {
+                if !matches!(
+                    ext,
+                    "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" | "py"
+                ) {
                     continue;
                 }
                 let Ok(text) = std::fs::read_to_string(&path) else {
