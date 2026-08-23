@@ -284,6 +284,28 @@ fn has_fail_glyph(text: &str) -> bool {
 ///
 /// Per line rather than over the block, because a block is mostly routine and the
 /// one line that matters sits inside it.
+///
+/// **Known imprecision, measured rather than guessed.** Reading the first tokens
+/// still matches four shapes that are not reports, found by probing this function
+/// after it shipped:
+///
+/// ```text
+/// {"error": null}                            a JSON object
+///   "error": null,                           a JSON field
+/// fn handle_error(e: Error) -> Result<()> {  `Error)` is the third token
+/// // error handling lives here               a comment
+/// ```
+///
+/// All four cost bytes rather than correctness: a false positive here *keeps* a
+/// line, so nothing is deleted and nothing is invented. Priced before deciding to
+/// leave them: 25 Rust source files, 315 KB through the `Read` path, and 150
+/// recorded payloads through the Bash path, both byte-identical before and after
+/// this function existed. A tightening with no measured effect is not worth the
+/// risk of a new false negative, which would cost the answer instead of bytes.
+///
+/// If that changes, the shape to reach for is what precedes the token, not more
+/// words: a log level is preceded by a timestamp, a bracket or nothing, and none
+/// of the four above is.
 fn states_a_severity(lower_text: &str) -> bool {
     const LEVELS: [&str; 3] = ["error", "errors", "fatal"];
     // `2026-08-10T00:05:00Z  ERROR upstream ...` puts it third once the two
