@@ -2023,8 +2023,13 @@ mod tests {
             let text =
                 std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
             for (n, line) in text.lines().enumerate() {
-                // The quoted literal only. An `is_actual` flag names which figure
-                // to display and says nothing to a reader of the output.
+                // The quoted literal in code only. An `is_actual` flag names
+                // which figure to display and says nothing to a reader of the
+                // output, and prose about this defect has to be able to quote
+                // the word it is about.
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
                 if line.contains("\"actual\"") {
                     offenders.push(format!("{rel}:{}: {}", n + 1, line.trim()));
                 }
