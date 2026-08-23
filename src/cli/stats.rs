@@ -19,13 +19,16 @@ pub fn format_bytes(n: u64) -> String {
     }
 }
 
-pub fn format_exact_tokens(tokens: u64) -> String {
-    if tokens < 1000 {
-        format!("{}", tokens)
-    } else if tokens < 1_000_000 {
-        format!("{:.0}K", tokens as f64 / 1_000.0)
+/// Rounds a count to `12K` or `1.2M`. Named `format_exact_tokens` until #663,
+/// and neither half was true: it rounds, and since #589 half its callers hand it
+/// bytes. The unit belongs to the caller, which is why none is printed here.
+pub fn format_compact(count: u64) -> String {
+    if count < 1000 {
+        format!("{}", count)
+    } else if count < 1_000_000 {
+        format!("{:.0}K", count as f64 / 1_000.0)
     } else {
-        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+        format!("{:.1}M", count as f64 / 1_000_000.0)
     }
 }
 
@@ -73,7 +76,7 @@ struct PeriodRow<'a> {
 
 /// Lays out the overview period rows, padding every numeric column to the widest
 /// value present. The widths have to come from the rows: `format_number` grows a
-/// separator every three digits and `format_exact_tokens` widens as it crosses
+/// separator every three digits and `format_compact` widens as it crosses
 /// into K and M, so any hardcoded width is wrong for some future row and shifts
 /// every column to its right (#209).
 fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
@@ -528,7 +531,7 @@ fn run_share(store: &Store) -> Result<()> {
     // number than `6,253` and this card exists to show the real one.
     println!(
         "OMNI saved me {} {unit} ({pct:.1}%) across {} commands.",
-        format_exact_tokens(saved),
+        format_compact(saved),
         format_number(calls)
     );
     if !top.is_empty() {
@@ -624,7 +627,7 @@ fn card_svg(f: &ShareFigures, w: u32, h: u32) -> String {
         x = pad.round(),
         y = y.round(),
         fs = px(120.0).round(),
-        saved = xml_escape(&format_exact_tokens(f.saved))
+        saved = xml_escape(&format_compact(f.saved))
     ));
     y += px(70.0);
     s.push_str(&format!(
@@ -1487,11 +1490,12 @@ fn run_json(store: &Store) -> Result<()> {
                     input_tokens: *raw_tokens,
                     output_tokens: *filtered_tokens,
                     savings_pct,
-                    measurement_method: if *raw_tokens > 0 {
-                        "actual".to_string()
-                    } else {
-                        "estimated".to_string()
-                    },
+                    // #663. Always an estimate. The branch that stood here
+                    // tested `raw_tokens > 0`, and that column has one writer,
+                    // `estimate_tokens`, so it was never false: 16,405 of
+                    // 16,405 recorded rows called bytes over 3.6 an actual
+                    // count, against GPT's vocabulary rather than Claude's.
+                    measurement_method: "estimated".to_string(),
                 }
             },
         )
@@ -1758,7 +1762,7 @@ mod tests {
 
     /// #589, the last of it. The context breakdown accumulated `size_bytes / 4`
     /// and was labelled a rough estimate because of it. It counts the sizes now,
-    /// so `format_exact_tokens` must not come back to this block: a file length
+    /// so `format_compact` must not come back to this block: a file length
     /// is measured, and dividing it by four to call the result tokens is the
     /// defect this issue is named for.
     #[test]
@@ -1775,7 +1779,7 @@ mod tests {
         assert_eq!(format_bytes(turn.tool_output_bytes), "72.3 KB");
         assert_ne!(
             format_bytes(turn.file_read_bytes),
-            format_exact_tokens(turn.file_read_bytes / 4),
+            format_compact(turn.file_read_bytes / 4),
             "the breakdown went back to a quarter of a file's size called tokens"
         );
     }
@@ -1995,5 +1999,44 @@ mod tests {
         assert!(json_str.contains("\"generated_at\":1234567890"));
         assert!(json_str.contains("\"savings_pct\":90.0"));
         assert!(json_str.contains("\"avg_latency_ms\":15.5"));
+    }
+
+    /// #663. `measurement_method` exists to tell a reader how far to trust the
+    /// number beside it, and it said `actual` for every row ever written:
+    /// `raw_tokens` has exactly one writer, `estimate_tokens`, so the branch
+    /// testing `> 0` was never false. 16,405 of 16,405 recorded rows.
+    ///
+    /// A source scan rather than a constructed struct. Building a `StatsPeriod`
+    /// with `"estimated"` typed in and asserting on it cannot see the caller
+    /// that stops setting it, which is the failure the field itself had.
+    #[test]
+    fn no_reporting_surface_calls_an_estimate_an_actual_count() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut offenders = Vec::new();
+
+        for rel in [
+            "src/cli/stats.rs",
+            "src/mcp/server.rs",
+            "src/cli/dashboard.rs",
+        ] {
+            let path = root.join(rel);
+            let text =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"));
+            for (n, line) in text.lines().enumerate() {
+                // The quoted literal only. An `is_actual` flag names which figure
+                // to display and says nothing to a reader of the output.
+                if line.contains("\"actual\"") {
+                    offenders.push(format!("{rel}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "a reporting surface labels a figure `actual`. Every token figure \
+             here is `estimate_tokens` over a divisor calibrated against GPT's \
+             vocabulary, so `estimated` is the only honest label (#663):\n{}",
+            offenders.join("\n")
+        );
     }
 }
