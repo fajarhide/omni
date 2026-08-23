@@ -158,7 +158,7 @@ mempertahankan jumlah baris yang digantikannya, jadi baris yang tidak berpindah 
 di nomor yang diberikan editor Anda.
 
 Angka-angka itu berasal dari satu minggu, dan log trace hanya menyimpan tujuh hari, jadi
-minggu itu tidak bisa diputar ulang lagi. [Benchmarks](develop/benchmarks.md) memuat tiap
+minggu itu tidak bisa diputar ulang lagi. [Benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat tiap
 run beserta korpusnya, dan seberapa berharga angka mana pun bagi Anda bergantung pada
 seberapa banyak minggu Anda sendiri mengulang dirinya.
 
