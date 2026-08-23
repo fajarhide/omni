@@ -603,21 +603,32 @@ impl<'a> Ledger<'a> {
         // The first draft weighed each run against the payload on its own, which
         // is the wrong denominator and reopens the hole it was closing: three
         // seen blocks of thirty percent, separated by a line or two of new
-        // content, each pass a four fifths test individually and together fold
-        // ninety percent of the reply. The reader is left with markers and the
+        // content, each pass the test individually and together fold ninety
+        // percent of the reply. The reader is left with markers and the
         // separators, which is the reported case wearing three markers instead
         // of one.
         //
         // Coverage is a property of the payload, so it is computed from the
-        // payload. This also subsumes the old whole-output floor exactly: one
-        // run covering everything is a hundred percent coverage, and the byte
-        // test it used to make is the same test this makes.
+        // payload. This also subsumes the whole-output floor exactly: one run
+        // covering everything is a hundred percent coverage, and the byte test
+        // #567 used to make is the same test this makes.
+        //
+        // Three quarters, not four fifths, since #643. That report is a 658 byte
+        // reply whose fourteen lines of `grep` output were the entire question
+        // and whose remaining four lines were shell scaffolding: two `echo`
+        // headers, a version string and an `ls -l`. At 78.7% it cleared four
+        // fifths, so the answer became a handle and the scaffolding was all the
+        // reader got. The number is not derived from anything: the fixtures that
+        // must still fold sit at 72.1% and 63.9%, that report must not, and
+        // three quarters is the only simple fraction in the gap. Priced over the
+        // recorded corpus it refuses 9 more of 108 sub-1 KB calls and gives up
+        // 3,768 bytes across five days.
         let seen_bytes: usize = runs
             .iter()
             .filter(|r| r.seen.is_some())
             .map(|r| lines[r.start..r.end].iter().map(|l| l.len()).sum::<usize>())
             .sum();
-        if payload_bytes < MIN_WHOLE_OUTPUT_FOLD && seen_bytes * 5 >= payload_bytes * 4 {
+        if payload_bytes < MIN_WHOLE_OUTPUT_FOLD && seen_bytes * 4 >= payload_bytes * 3 {
             return None;
         }
 
@@ -1011,7 +1022,7 @@ mod tests {
         );
 
         // Four new lines, not one. #601 widened the floor to cover a fold that
-        // takes four fifths or more of its payload, on the evidence that three
+        // takes three quarters or more of its payload, on the evidence that three
         // surviving lines out of twenty-six were not content anyone could use.
         // One appended line put this fixture on the wrong side of that, so the
         // arm below was asserting the floor rather than the absence of it, which
@@ -1023,8 +1034,8 @@ mod tests {
                 .collect::<String>()
         );
         assert!(
-            text.len() * 5 < extended.len() * 4,
-            "the repeated head must be under four fifths of the payload, or this \
+            text.len() * 4 < extended.len() * 3,
+            "the repeated head must be under three quarters of the payload, or this \
              arm tests the #601 floor instead of a partial fold"
         );
         let partial = ledger
@@ -1451,8 +1462,8 @@ mod tests {
                 .collect::<String>()
         );
         assert!(
-            text.len() * 5 < probe.len() * 4,
-            "the repeat must be under four fifths of the probe, or the #601 floor \
+            text.len() * 4 < probe.len() * 3,
+            "the repeat must be under three quarters of the probe, or the #601 floor \
              decides this before either bar is consulted"
         );
 
@@ -1643,7 +1654,7 @@ mod tests {
     /// this feature exists for.
     ///
     /// Coverage is what the fold takes of the payload; the floor only applies
-    /// once that is four fifths or more **and** the run is under
+    /// once that is three quarters or more **and** the run is under
     /// `MIN_WHOLE_OUTPUT_FOLD`.
     /// The hole the review of #601 found in its first draft, kept as its own
     /// test because the matrix above cannot express it: every row there has one
@@ -1680,11 +1691,11 @@ mod tests {
         );
         let seen = block('a').len() + block('b').len() + block('c').len();
         assert!(
-            seen * 5 >= second.len() * 4,
-            "the three blocks must clear four fifths together"
+            seen * 4 >= second.len() * 3,
+            "the three blocks must clear three quarters together"
         );
         assert!(
-            block('a').len() * 5 < second.len() * 4,
+            block('a').len() * 4 < second.len() * 3,
             "and no single block may clear it alone, or this tests the old rule"
         );
         assert!(
@@ -1701,6 +1712,72 @@ mod tests {
             ledger.project(&second),
             None,
             "three sub-threshold blocks folded to markers and two separators"
+        );
+    }
+
+    /// #643, taken from the row it wrote: `payload_bytes` 695, one project run of
+    /// 527 B over 14 lines, `whole_output` 0. Coverage is 75.8%, which clears the
+    /// old four-fifths test, so the answer folded and the reader kept four lines
+    /// of shell scaffolding: two `echo` headers, a version string and an `ls -l`.
+    ///
+    /// The numbers are the reported ones rather than round ones on purpose. A
+    /// fixture at 50% or at 90% sits on a side of the rule that was already
+    /// decided, and this is the band that was not.
+    #[test]
+    fn refuses_a_fold_that_leaves_only_scaffolding() {
+        let (store, _d) = temp_store();
+        let ledger = Ledger::new(&store, "s1").with_project("/repo");
+
+        // The fourteen lines a `grep -n` returned, which were the whole question.
+        let answer: String = (1..=14)
+            .map(|i| format!("{i:02}:export * from \"./module-name-{i:02}\";\n"))
+            .collect();
+        // What the command printed around them.
+        let scaffolding = "=== versi terpasang:\nomni 0.7.6\n\
+             lrwxr-xr-x@ 1 user  admin  29 Aug 18 16:33 /opt/local/bin/omni\n\
+             === repro 1 (persis yang tadi, urutan sort):\n";
+        let payload = format!("{scaffolding}{answer}");
+
+        assert!(
+            payload.len() < MIN_WHOLE_OUTPUT_FOLD && payload.len() > MIN_LEDGER_INPUT,
+            "the fixture has to sit under the whole-output floor and above the \
+             input floor, or it tests an early return: {} bytes",
+            payload.len()
+        );
+        // The fixture has to sit in the gap between the two bars, or it proves
+        // nothing: above three quarters so the current rule refuses it, below
+        // four fifths so the rule it replaced did not.
+        assert!(
+            answer.len() * 4 >= payload.len() * 3,
+            "the answer must clear three quarters, or something other than this \
+             rule is refusing the fold: {} of {}",
+            answer.len(),
+            payload.len()
+        );
+        assert!(
+            answer.len() * 5 < payload.len() * 4,
+            "the answer must NOT clear four fifths, or the old rule already \
+             refused this and the fixture proves nothing: {} of {}",
+            answer.len(),
+            payload.len()
+        );
+        assert!(
+            payload.len() - answer.len() < MIN_LEDGER_INPUT,
+            "what survives has to be too small to stand alone, which is the claim"
+        );
+
+        // Seen in the project scope, from another session, as a project fold needs.
+        Ledger::new(&store, "s0")
+            .with_project("/repo")
+            .project(&format!(
+                "{answer}{}",
+                (0..40).map(|i| row('p', i)).collect::<String>()
+            ));
+
+        assert_eq!(
+            ledger.project(&payload),
+            None,
+            "the answer folded and left the reader four lines of shell scaffolding"
         );
     }
 
