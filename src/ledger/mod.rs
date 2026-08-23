@@ -297,6 +297,12 @@ pub fn session_of(scope: &str) -> &str {
 /// because the plan asks for it and because the data is what settles whether the
 /// trade is worth taking.
 pub struct Ledger<'a> {
+    /// Fold rows built by the last projection and not yet written.
+    ///
+    /// Written by `commit_folds`, which the caller calls once it has accepted the
+    /// view. Anything still here when the `Ledger` is dropped describes a fold
+    /// that never reached an agent (#657).
+    pending_folds: std::cell::RefCell<Vec<crate::store::sqlite::FoldRecord>>,
     store: &'a Store,
     scope: String,
     /// `None` disables project scope entirely, which is what every caller that
@@ -349,6 +355,7 @@ impl<'a> Ledger<'a> {
             project: None,
             source: String::new(),
             agent: "unknown".to_string(),
+            pending_folds: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -385,7 +392,33 @@ impl<'a> Ledger<'a> {
     /// asks for, and it is why the recording is unconditional while the
     /// substitution is not.
     pub fn project(&self, text: &str) -> Option<String> {
-        self.project_reporting_shift(text).map(|(view, _)| view)
+        let out = self.project_reporting_shift(text).map(|(view, _)| view);
+        // This caller has no way to refuse the view, so accepting it is the same
+        // moment as producing it.
+        if out.is_some() {
+            self.commit_folds();
+        }
+        out
+    }
+
+    /// Write the fold rows the last projection produced.
+    ///
+    /// Separate from producing them because a caller may still discard the view,
+    /// and a row for a fold nobody received is a saving this project did not make
+    /// (#657). Idempotent: the rows are taken, so calling it twice writes once.
+    pub fn commit_folds(&self) {
+        let folds = self.pending_folds.take();
+        if folds.is_empty() {
+            return;
+        }
+        // Keyed on the project when there is one: the question is about a
+        // repository two agents share, and a session scope cannot be compared
+        // across agents by definition.
+        let scope = self.project.as_deref().unwrap_or(&self.scope);
+        // `scope` above is the project when there is one, so the session has to
+        // travel separately or the row cannot answer for itself.
+        self.store
+            .ledger_record_folds(scope, &self.agent, session_of(&self.scope), &folds);
     }
 
     /// The view, and what the fold did to the numbering of the lines under it.
@@ -549,14 +582,18 @@ impl<'a> Ledger<'a> {
                     },
                 )
                 .collect();
-            // Keyed on the project when there is one: the question is about a
-            // repository two agents share, and a session scope cannot be compared
-            // across agents by definition.
-            let scope = self.project.as_deref().unwrap_or(&self.scope);
-            // `scope` above is the project when there is one, so the session
-            // has to travel separately or the row cannot answer for itself.
-            self.store
-                .ledger_record_folds(scope, &self.agent, session_of(&self.scope), &folds);
+            // Held rather than written. A caller can still refuse this view: a
+            // `Read` whose survivors sit in two blocks is discarded whole,
+            // because one `startLine` cannot renumber both (#557), and the row
+            // used to stay behind. `omni_explain_savings` reads that table, so
+            // the tool answering "did this route pay for itself" was quoting
+            // 341 KB saved on a CHANGELOG the agent received whole (#657).
+            //
+            // `ledger_record` below is deliberately not deferred with it. It
+            // records only the lines that were *delivered*, so a discarded view
+            // under-records and costs a later fold, which is the safe direction
+            // and the one #465 asks for.
+            self.pending_folds.replace(folds);
         }
 
         self.store

@@ -427,14 +427,14 @@ fn fold_cross_turn(
     let project = std::env::current_dir()
         .map(|p| crate::paths::project_key(&p))
         .unwrap_or_else(|_| "unknown".to_string());
-    let folded = crate::ledger::Ledger::new(s, scope)
+    let ledger = crate::ledger::Ledger::new(s, scope)
         .with_project(&project)
         // What this payload is answering, so a fold drawing on a different
         // command can say so instead of silently replacing one file's block with
         // another's (#622). For a `Read` this is the path, for Bash the command.
         .from(normalized.command.as_str())
-        .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
-        .project_reporting_shift(&text);
+        .by(crate::hooks::normalize::stats_agent_id(&normalized.agent));
+    let folded = ledger.project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host
     // renders it with `cat -n` numbering counted from `startLine`, so it numbers
@@ -449,16 +449,30 @@ fn fold_cross_turn(
     // `Grep` carries its positions inside the text, where a fold cannot move
     // them, and `Bash` output is not numbered at all.
     use crate::ledger::FoldShift;
+    // `commit_folds` in the arms that keep the view, and nowhere else. The rows
+    // used to be written when the view was built, so the arm below that discards
+    // it left a fold behind: `omni_explain_savings` then quoted 341 KB saved on a
+    // CHANGELOG the agent had received whole (#657).
     match folded {
         // Not a `Read`: nothing downstream renumbers, so any fold is fine.
-        Some((view, _)) if normalized.tool_name != "Read" => (view, 0),
-        Some((view, FoldShift::None)) => (view, 0),
+        Some((view, _)) if normalized.tool_name != "Read" => {
+            ledger.commit_folds();
+            (view, 0)
+        }
+        Some((view, FoldShift::None)) => {
+            ledger.commit_folds();
+            (view, 0)
+        }
         // The host counts from `startLine`, so moving it by the size of the run
         // minus the marker's own line puts every surviving number back where the
         // file has it. Verified against live transcripts before relying on it: a
         // `Read` requested at offset 215 renders its first line as `215`.
-        Some((view, FoldShift::Leading { bump })) => (view, bump),
-        // Content above and below: one starting number cannot describe both.
+        Some((view, FoldShift::Leading { bump })) => {
+            ledger.commit_folds();
+            (view, bump)
+        }
+        // Content above and below: one starting number cannot describe both, so
+        // the view is dropped and its folds are never written.
         _ => (text, 0),
     }
 }
@@ -3135,6 +3149,64 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
                  call. If it edits anything already in the conversation it \
                  invalidates the prompt cache from that point on, which is the \
                  failure OMNI exists to avoid (#610): {v}"
+            );
+        }
+    }
+
+    /// #657. `ledger_folds` is what `omni_explain_savings` reads to answer "did
+    /// this route pay for itself". The rows were written when the view was built,
+    /// and a `Read` whose survivors sit in two blocks is discarded whole, because
+    /// one `startLine` cannot renumber both (#557). The row stayed behind, so the
+    /// tool quoted 341 KB saved on a CHANGELOG the agent had received in full.
+    ///
+    /// A saving recorded for bytes nobody received is the `est_cost_usd` defect
+    /// wearing a different column.
+    #[test]
+    fn a_discarded_read_fold_records_no_saving() {
+        // Content, a run that repeats, then more content: the survivors land
+        // above *and* below the fold, which is the shape the `Read` arm refuses.
+        let head: String = (0..40)
+            .map(|i| format!("head line {i} of the file\n"))
+            .collect();
+        let middle: String = (0..60)
+            .map(|i| format!("shared line {i} that repeats\n"))
+            .collect();
+        let tail: String = (0..40)
+            .map(|i| format!("tail line {i} of the file\n"))
+            .collect();
+        let body = format!("{head}{middle}{tail}");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = std::sync::Arc::new(Store::open_path(&dir.path().join("o.db")).expect("store"));
+
+        let read = |content: &str| {
+            json!({
+                "session_id": "r657", "tool_name": "Read",
+                "tool_input": {"file_path": "notes.md"},
+                "tool_response": {"type": "text", "file": {
+                    "filePath": "notes.md", "content": content,
+                    "numLines": content.lines().count(), "startLine": 1,
+                    "totalLines": content.lines().count()
+                }}
+            })
+            .to_string()
+        };
+
+        // First sighting records the lines; the repeat is what would fold.
+        process_payload(&read(&middle), Some(store.clone()), None);
+        let delivered = process_payload(&read(&body), Some(store.clone()), None);
+
+        let recorded: usize = store
+            .get_recent_ledger_folds(None, 100)
+            .iter()
+            .map(|row| row.bytes)
+            .sum();
+
+        if delivered.is_none() {
+            assert_eq!(
+                recorded, 0,
+                "the view was refused and the agent got its own bytes, so a fold \
+                 of {recorded} B is a saving that never happened"
             );
         }
     }
