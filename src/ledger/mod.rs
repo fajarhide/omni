@@ -780,9 +780,14 @@ impl<'a> Ledger<'a> {
             };
             let long_enough = planned[i]
                 && run.seen.as_ref().is_some_and(|seen| {
+                    // The marker is rendered without its terminator and the emit
+                    // adds one back for a run that ended a line, so the test has to
+                    // count it: at the boundary a run folded one byte short of the
+                    // gain it is required to make (review of #664).
                     let marker = self
                         .marker_for(run, seen, lines.len(), &"0".repeat(HANDLE_LEN))
-                        .len();
+                        .len()
+                        + usize::from(body.ends_with('\n'));
                     body.len() >= marker + padding + seen.origin.min_gain()
                 });
 
