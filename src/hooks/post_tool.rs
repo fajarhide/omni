@@ -3363,6 +3363,66 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
+    /// #664's cost rule, which the books test above cannot reach: its runs are one
+    /// line each, and one line pays no filler.
+    ///
+    /// A run of twenty short lines clears the marker and the session's gain on its
+    /// own, and does not clear them once it also has to buy nineteen `⋮`. It stays
+    /// verbatim, which is the honest answer: folding it would spend more on the
+    /// padding than the lines were worth.
+    #[test]
+    fn a_run_pays_for_its_own_filler_before_it_folds() {
+        let short = |i: usize| format!("  x{i:02} = 1;\n");
+        let wide = |i: usize| format!("    let brand_new_line_{i:03} = \"never seen before\";\n");
+        let run: String = (0..20).map(short).collect();
+        let payload = |content: String| {
+            json!({
+                "session_id": "host-664-cost",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": content,
+                    "startLine": 1,
+                    "numLines": 60,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // The short run is shown first, padded past `MIN_LEDGER_INPUT` with lines
+        // that appear nowhere else: at 220 bytes on its own the first read is
+        // under the floor and nothing is recorded at all, which makes the second
+        // read a fold against an empty scope and the test green either way.
+        let first_only = |i: usize| format!("    let only_in_the_first_read_{i:03} = 0;\n");
+        let seeded = format!("{}{}", run, (0..10).map(first_only).collect::<String>());
+        assert!(
+            seeded.len() > 264,
+            "the first read has to clear MIN_LEDGER_INPUT"
+        );
+        let _ = process_payload(&payload(seeded), Some(store.clone()), None);
+        let split = format!(
+            "{}{}{}",
+            (0..20).map(wide).collect::<String>(),
+            run,
+            (20..40).map(wide).collect::<String>()
+        );
+        let out = process_payload(&payload(split), Some(store.clone()), None);
+
+        let content = out
+            .as_deref()
+            .and_then(|o| serde_json::from_str::<serde_json::Value>(o).ok())
+            .map(|v| v["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"].to_string())
+            .unwrap_or_default();
+        assert!(
+            !content.contains("[OMNI:"),
+            "the run folded without paying for the filler it needs: {content}"
+        );
+    }
+
     /// #657, narrowed twice. A `Read` whose survivors split folds every run now
     /// (#664), so the case that still delivers nothing is the one where no run is
     /// worth its marker: seen lines arriving one at a time between new ones. The
