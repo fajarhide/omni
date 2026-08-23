@@ -37,15 +37,6 @@ pub fn format_bar(pct: f64, width: usize) -> String {
     let filled = filled.min(width);
     "█".repeat(filled)
 }
-
-fn format_bar_with_empty(pct: f64) -> String {
-    let width = 20;
-    let filled = ((pct / 100.0) * width as f64).round() as usize;
-    let filled = filled.min(width);
-    let empty = width - filled;
-    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
-}
-
 fn format_number(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::new();
@@ -56,61 +47,6 @@ fn format_number(n: u64) -> String {
         result.push(c);
     }
     result.chars().rev().collect()
-}
-
-/// One period row of the overview, before layout.
-struct PeriodRow<'a> {
-    label: &'a str,
-    count: u64,
-    /// Bytes, which `distillations` counts exactly. This column used to hold a
-    /// token figure that was these same bytes over 3.6, a constant calibrated
-    /// against `cl100k_base` (#589). The percentage beside it is unaffected
-    /// either way, since the divisor cancels in a ratio.
-    raw_bytes: u64,
-    filtered_bytes: u64,
-    reduction_pct: f64,
-}
-
-/// Lays out the overview period rows, padding every numeric column to the widest
-/// value present. The widths have to come from the rows: `format_number` grows a
-/// separator every three digits and `format_exact_tokens` widens as it crosses
-/// into K and M, so any hardcoded width is wrong for some future row and shifts
-/// every column to its right (#209).
-fn format_period_rows(rows: &[PeriodRow<'_>]) -> Vec<String> {
-    let labels: Vec<String> = rows.iter().map(|r| format!("{}:", r.label)).collect();
-    let counts: Vec<String> = rows.iter().map(|r| format_number(r.count)).collect();
-    let inputs: Vec<String> = rows.iter().map(|r| format_bytes(r.raw_bytes)).collect();
-    let outputs: Vec<String> = rows
-        .iter()
-        .map(|r| format_bytes(r.filtered_bytes))
-        .collect();
-
-    let w_label = max_width(&labels).max(12);
-    let w_count = max_width(&counts);
-    let w_in = max_width(&inputs);
-    let w_out = max_width(&outputs);
-
-    rows.iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let pct = format!("{:.1}% saved", r.reduction_pct);
-            let pct_colored = if r.reduction_pct > 70.0 {
-                pct.bright_green()
-            } else if r.reduction_pct > 40.0 {
-                pct.bright_yellow()
-            } else {
-                pct.bright_red()
-            };
-            format!(
-                "  {:<w_label$} {:>w_count$} commands │ {:>w_in$} → {:<w_out$} │  {}",
-                labels[i].as_str().bright_white().bold(),
-                counts[i].as_str().cyan(),
-                inputs[i].as_str().red(),
-                outputs[i].as_str().green(),
-                pct_colored,
-            )
-        })
-        .collect()
 }
 
 /// Widest entry, in characters. Bars and CJK are not involved in these columns,
@@ -242,39 +178,46 @@ fn print_separator() {
 
 /// Read by both `print_help` and `super::check_flags`, so this list is what
 /// `omni stats` documents *and* what it accepts (#151).
+/// One flag per dimension, then every older spelling, which still resolves (#667).
+///
+/// The window used to be four flags and six names, and passing two of them took
+/// whichever branch came first. `--since` cannot express that. Everything from
+/// `VISIBLE` on keeps working and is absent from `--help` and from the manual, so
+/// a script written against the old surface still runs while the help page
+/// documents one way to say each thing. No deprecation notice is printed: the
+/// rename is ours, not the caller's.
+///
+/// One list rather than two, because a second copy of a flag name is a copy that
+/// drifts: #452, #454 and #456 were each one half of a pair being fixed.
 const FLAGS: super::Flags = &[
     (
-        "--detail",
-        "Full technical breakdown (commands, routes, sessions, agents)",
+        "--since <window>",
+        "hour | today | week | month | all (default month)",
     ),
-    ("--hour, -H", "Scope to the last 60 minutes"),
-    // `--day` exists so the window family reads `--day/-d`, `--week/-w`,
-    // `--month/-m`. `-d` was the only member whose long form did not share its
-    // letter, sitting next to a `--detail` that does, which is a collision a
-    // reader hits before the docs do (#428). `--today` still works.
-    ("--day, --today, -d", "Scope to today only"),
-    ("--week, -w", "Scope to last 7 days"),
-    ("--month, -m", "Scope to last 30 days (the default)"),
     (
-        "--all-commands",
-        "List every command, not just the top ones",
+        "--view <name>",
+        "summary | detail | commands | projects | context | rerun | share",
     ),
-    ("--json", "Machine-readable JSON output"),
-    (
-        "--share",
-        "A copy-pasteable summary of your own measured savings",
-    ),
+    ("--json", "Machine-readable output for the selected view"),
     (
         "--card",
-        "Write that summary as an image, sized for social posts",
+        "Write the summary as an image, sized for social posts",
     ),
-    ("--project", "Display breakdown per project path"),
-    ("--context", "Show context composition signals"),
-    (
-        "--rerun",
-        "Which distillers cost a re-run, the check reduction % cannot make",
-    ),
+    ("--limit <n>", "Rows in a table view (default 8, 0 for all)"),
+    ("--detail", ""),
+    ("--hour, -H", ""),
+    ("--day, --today, -d", ""),
+    ("--week, -w", ""),
+    ("--month, -m", ""),
+    ("--all-commands", ""),
+    ("--share", ""),
+    ("--project", ""),
+    ("--context", ""),
+    ("--rerun", ""),
 ];
+
+/// How many of `FLAGS` the help page shows. The rest are the aliases above.
+const VISIBLE: usize = 5;
 
 /// The time window the scope flags select, as `(label, since_unix)`.
 ///
@@ -283,16 +226,59 @@ const FLAGS: super::Flags = &[
 /// being the fall-through in one of them, and silently ignored in the other.
 fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
-    if super::has_any(args, &["--hour", "-H"]) {
-        ("last hour", now - 3600)
-    } else if super::has_any(args, &["--day", "--today", "-d"]) {
+    // `--since` first, so a caller mixing the new flag with an old one gets the
+    // one they wrote most recently rather than whichever branch came first.
+    let named = super::flag_value(args, "--since").map(str::to_ascii_lowercase);
+    let window = match named.as_deref() {
+        Some(w) => w,
+        None if super::has_any(args, &["--hour", "-H"]) => "hour",
+        None if super::has_any(args, &["--day", "--today", "-d"]) => "today",
+        None if super::has_any(args, &["--week", "-w"]) => "week",
+        None => "month",
+    };
+    match window {
+        "hour" => ("last hour", now - 3600),
         // Calendar day, not a rolling 24h: "today" means since midnight.
-        ("today", now - (now % 86400))
-    } else if super::has_any(args, &["--week", "-w"]) {
-        ("last 7 days", now - 7 * 86400)
+        "today" | "day" => ("today", now - (now % 86400)),
+        "week" => ("last 7 days", now - 7 * 86400),
+        "all" => ("all time", 0),
+        // `month` and anything unrecognised land on the default window rather
+        // than failing: a report is not worth refusing over a typo in a scope.
+        _ => ("last 30 days", now - 30 * 86400),
+    }
+}
+
+/// The view to render, from `--view` or from the flag that used to select it.
+///
+/// Order matters only for a caller passing several: `--view` wins, then the old
+/// flags in the order they were resolved before, so nothing changes underneath a
+/// script that passed two.
+fn view(args: &[String]) -> &'static str {
+    if let Some(name) = super::flag_value(args, "--view") {
+        return match name.to_ascii_lowercase().as_str() {
+            "detail" => "detail",
+            "commands" => "commands",
+            "projects" | "project" => "project",
+            "context" => "context",
+            "rerun" => "rerun",
+            "share" => "share",
+            _ => "summary",
+        };
+    }
+    if super::has_flag(args, "--card") {
+        "card"
+    } else if super::has_flag(args, "--share") {
+        "share"
+    } else if super::has_flag(args, "--rerun") {
+        "rerun"
+    } else if super::has_flag(args, "--context") {
+        "context"
+    } else if super::has_flag(args, "--detail") || super::has_flag(args, "--all-commands") {
+        "detail"
+    } else if super::has_flag(args, "--project") {
+        "project"
     } else {
-        // `--month` / `-m` and the no-flag default are the same window.
-        ("last 30 days", now - 30 * 86400)
+        "summary"
     }
 }
 
@@ -305,7 +291,7 @@ fn print_help() {
     println!("\n{}", "USAGE:".bold().bright_white());
     println!("  omni {} {}", "stats".cyan(), "[FLAGS]".bright_black());
 
-    super::print_flags(FLAGS);
+    super::print_flags(&FLAGS[..VISIBLE]);
 
     println!("\n{}", "EXAMPLES:".bold().bright_white());
     println!(
@@ -313,7 +299,11 @@ fn print_help() {
         "#".bright_black()
     );
     println!(
-        "  omni stats --detail     {} Full breakdown with commands",
+        "  omni stats --since week {} The last seven days",
+        "#".bright_black()
+    );
+    println!(
+        "  omni stats --view detail {} Commands, routes and agents",
         "#".bright_black()
     );
     println!(
@@ -332,38 +322,11 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     }
     super::check_flags("stats", args, FLAGS)?;
 
-    let detail_flag = super::has_flag(args, "--detail");
-    let json_flag = super::has_flag(args, "--json");
-    let share_flag = super::has_flag(args, "--share");
-    let card_flag = super::has_flag(args, "--card");
-    let project_flag = super::has_flag(args, "--project");
-    let context_flag = super::has_flag(args, "--context");
-    let rerun_flag = super::has_flag(args, "--rerun");
-    let filter_flag = super::has_any(args, &["--hour", "-H"])
-        || super::has_any(args, &["--day", "--today", "-d"])
-        || super::has_any(args, &["--week", "-w"])
-        || super::has_any(args, &["--month", "-m"])
-        || super::has_flag(args, "--all-commands");
-
-    let mode = if card_flag {
-        "card"
-    } else if share_flag {
-        "share"
-    } else if rerun_flag {
-        "rerun"
-    } else if context_flag {
-        "context"
-    } else if detail_flag {
-        "detail"
-    } else if json_flag {
-        "json"
-    } else if project_flag {
-        "project"
-    } else if filter_flag {
-        "detail"
-    } else {
-        "default"
-    };
+    // `--json` is an output format, not a view: it applies to whatever view was
+    // selected. `--card` is the one exception, since an image of the summary is
+    // the only thing it can render.
+    let mode = view(args);
+    let json = super::has_flag(args, "--json");
 
     match mode {
         "card" => run_card(store),
@@ -371,9 +334,10 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
-        "detail" => run_detail(args, store),
-        "json" => run_json(store),
-        _ => run_default(store),
+        "detail" | "commands" if json => run_json(store),
+        "detail" | "commands" => run_detail(args, store),
+        _ if json => run_json(store),
+        _ => run_default(args, store),
     }
 }
 
@@ -804,252 +768,156 @@ fn run_card(store: &Store) -> Result<()> {
     Ok(())
 }
 
-fn run_default(store: &Store) -> Result<()> {
-    let periods = store.multi_period_stats()?;
-    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
-
-    let has_data = periods.iter().any(|(_, count, _, _, _, _)| *count > 0);
+fn run_default(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
+    let totals = store.stage_totals(since)?;
+    let removed = totals.distilled_removed + totals.folded_bytes;
+    let calls = totals.distilled_calls + totals.folded_calls + totals.passthrough_calls;
 
     println!();
     print_separator();
-    println!(" {}", "OMNI Signal Report".bold().bright_white());
+    println!(
+        " {} {}{:>width$}",
+        format!("OMNI {}", env!("CARGO_PKG_VERSION"))
+            .bold()
+            .bright_white(),
+        "· savings".bright_black(),
+        format!("{period_label} · {} calls", format_number(calls)).bright_black(),
+        width = SUMMARY_WIDTH.saturating_sub(24)
+    );
     print_separator();
 
-    if !has_data {
+    if calls == 0 {
         println!(
             "  {}",
-            "No data yet! OMNI tracks savings automatically as you work."
+            "No data yet. OMNI records savings as you work."
                 .bright_black()
                 .italic()
         );
-        println!("  {}", "Try: ls -la | omni".bright_cyan().italic());
         print_separator();
         println!();
         return Ok(());
     }
 
-    // #435. The headline is session lifetime, because that is the meter #357
-    // promoted and `CONTRIBUTING.md` calls the number that decides progress. The
-    // distillation percentage below it is a diagnostic for one host's pipeline
-    // and says so, which is the whole of the correction: it was never wrong, it
-    // was presented as the product number after the project stopped treating it
-    // as one.
-    let (sessions, median_cmds, longest, compacted) = store.session_lifetime(0);
-    println!("  {}", "Session lifetime:".bold().bright_white());
-    if sessions == 0 {
+    // The headline says what happened to the bytes, never that they were "saved":
+    // a currency figure is not computable here (#589's `est_cost_usd` lesson), the
+    // marker costs a few bytes back, and a pulled handle returns some of them.
+    // "Not sent" is checkable against the host's own transcript, line by line.
+    println!(
+        "\n  {} {}   {}  {}",
+        format_bytes(removed).bold().yellow(),
+        "not sent to the model".bright_white(),
+        sparkline(&store.daily_removed_bytes(14), 14).cyan(),
+        "last 14 days".bright_black()
+    );
+    println!();
+
+    // Two stages, two bases, printed apart. The ledger's base exists only for rows
+    // written since `payload_bytes` landed, so its share is omitted rather than
+    // computed over a population the column does not cover (#665).
+    let mut shares = false;
+    if totals.folded_calls > 0 {
+        shares |= print_stage_row(
+            "folded",
+            totals.folded_bytes,
+            share(totals.folded_priced, totals.folded_payload),
+            totals.folded_calls,
+        );
+    }
+    if totals.distilled_calls > 0 {
+        shares |= print_stage_row(
+            "distilled",
+            totals.distilled_removed,
+            share(totals.distilled_removed, totals.distilled_input),
+            totals.distilled_calls,
+        );
+    }
+    if shares {
         println!(
-            "  {}",
-            "  not measurable yet: no session has been closed by a host that reports one"
+            "    {}",
+            "each % is of that stage's own bytes"
                 .bright_black()
                 .italic()
         );
-    } else {
+    }
+
+    // A no-op is a feature, so it reads as one. It left the table because a row
+    // whose only honest values are `0` and a dash draws the eye to the least
+    // interesting line on the screen.
+    if totals.passthrough_calls > 0 {
         println!(
-            "  {} commands median, {} longest, across {} closed sessions",
-            median_cmds.to_string().bright_green().bold(),
-            longest.to_string().cyan(),
-            format_number(sessions).cyan()
+            "\n    {} {}",
+            format!("{} calls", format_number(totals.passthrough_calls)).bright_white(),
+            "passed through untouched. Nothing deleted, nothing".bright_black()
         );
-        let compaction_line = if compacted == 0 {
-            "  none ended at a compaction, so this measures sessions, not the window".to_string()
-        } else {
-            format!("  {compacted} of them ended at a compaction, which is what the window costs")
-        };
-        println!("  {}", compaction_line.bright_black().italic());
-    }
-    println!();
-    println!(
-        "  {} {}",
-        "Pipeline diagnostic:".bold().bright_white(),
-        "one host's tool output, not a product claim"
-            .bright_black()
-            .italic()
-    );
-
-    // Multi-period rows
-    let period_rows: Vec<PeriodRow<'_>> = periods
-        .iter()
-        .filter(|(label, count, ..)| *count > 0 || label == "All Time")
-        .map(
-            |(label, count, input, output, _raw_tokens, _filtered_tokens)| PeriodRow {
-                label,
-                count: *count,
-                raw_bytes: *input,
-                filtered_bytes: *output,
-                reduction_pct: if *input > 0 {
-                    100.0 * (1.0 - *output as f64 / *input as f64)
-                } else {
-                    0.0
-                },
-            },
-        )
-        .collect();
-
-    for line in format_period_rows(&period_rows) {
-        println!("{}", line);
-    }
-
-    // #212: say what the number is a number *of*. It counts only calls whose
-    // result reached a model's context; `omni exec` and pipe output read at a
-    // terminal is compression a human sees, not tokens anyone was billed for,
-    // and folding the two together is what made the all-time headline 66.3%
-    // when the model-facing figure was 29.3%.
-    println!(
-        "  {}",
-        "Counts calls whose result reached a model. Terminal output is excluded:\n  no context holds it."
-            .bright_black()
-            .italic()
-    );
-
-    // #173 asked for a second, cache-discounted figure beside this one, because a
-    // distilled tool result is re-sent on every later turn and OMNI counts the
-    // saving once. `Store::token_savings_with_reuse` computes it and is tested,
-    // and it is deliberately not printed yet.
-    //
-    // Run against the maintainer's database it reports 17.0M at insertion and
-    // 469.3M with re-use, a 27.6x multiplier. The multiplier is wrong, and it is
-    // wrong because of #118 item 1: until #259 every distillation was filed under
-    // a wall-clock id, so one "session" covers 3,739 commands across 16 project
-    // paths and hands its first row a 374x credit. The arithmetic is right and
-    // the input is not.
-    //
-    // Publishing it would be a bigger number that is less true, which is the
-    // defect this tracker exists to fight. It goes in once enough history exists
-    // under real host session ids to make `turns_after` mean what it says.
-
-    let top_commands = get_top_commands(store, 0, 8);
-
-    if !top_commands.is_empty() {
-        println!("\n  {}", "Top Commands:".bold().bright_white());
-        let w_count = max_width(
-            top_commands
-                .iter()
-                .map(|(_, count, _, _)| count.to_string()),
-        );
-        for (cmd, count, pct, bytes_saved) in &top_commands {
-            let short_cmd = shorten_command(cmd, 18);
-            let bar = format_bar_with_empty(*pct);
-            let bar_colored = if *pct > 80.0 {
-                bar.bright_green()
-            } else if *pct > 40.0 {
-                bar.bright_yellow()
-            } else {
-                bar.bright_red()
-            };
-
-            let tokens_str = if *bytes_saved > 0 {
-                format!("(-{})", format_bytes(*bytes_saved)).bright_black()
-            } else {
-                "".bright_black()
-            };
-
-            println!(
-                "    {:<18} {}  {:>5.1}%  ({:>w_count$}x)  {}",
-                short_cmd.bright_cyan(),
-                bar_colored,
-                pct,
-                count,
-                tokens_str,
-            );
-        }
-    }
-
-    // Agent Distribution
-    let agent_data = store.get_agent_breakdown(0).unwrap_or_default();
-
-    // Group by display name
-    let mut grouped_agents: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for r in &agent_data {
-        if r.agent_id == "unknown" || r.agent_id == "terminal" || r.agent_id.is_empty() {
-            continue;
-        }
-        let name = agent_display_name(&r.agent_id).to_string();
-        let entry = grouped_agents.entry(name).or_insert((0, 0, 0));
-        entry.0 += r.calls;
-        entry.1 += r.input_bytes;
-        entry.2 += r.output_bytes;
-    }
-
-    if !grouped_agents.is_empty() {
-        let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
-        println!("\n  {}", "Agent Distribution:".bold().bright_white());
-
-        let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
-        sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.1.0));
-
-        let w_name = max_width(sorted_agents.iter().map(|(name, _)| name.as_str())).max(18);
-        let w_count = max_width(
-            sorted_agents
-                .iter()
-                .map(|(_, (count, _, _))| count.to_string()),
-        );
-
-        for (name, (count, input, output)) in sorted_agents {
-            let pct = if total_cmds > 0 {
-                count as f64 / total_cmds as f64 * 100.0
-            } else {
-                0.0
-            };
-            let savings = if input > 0 {
-                100.0 * (1.0 - output as f64 / input as f64)
-            } else {
-                0.0
-            };
-            let bar = format_bar_with_empty(pct);
-            println!(
-                "   {:<w_name$} {}  {:>5.1}%  ({:>w_count$}x)  {:>5.1}% saved",
-                name.bright_cyan(),
-                bar.bright_blue(),
-                pct,
-                count,
-                savings,
-            );
-        }
-    }
-
-    // RewindStore
-    println!(
-        "\n  {:<20} {}",
-        "RewindStore:".bright_black(),
-        format!(
-            "{} archived │ {} retrieved",
-            rewind_stored, rewind_retrieved
-        )
-        .bright_magenta()
-    );
-
-    // The fidelity alarm. An expansion request is an agent saying the view it
-    // was given was not enough, so a rising share of archived blocks being
-    // fetched back means the projection is cutting too much. The number was
-    // already being acted on silently: `post_tool` raises the route thresholds
-    // once a command family passes 25%. This makes the same signal visible
-    // rather than only effective.
-    if let Some(rate) = (100 * rewind_retrieved).checked_div(rewind_stored)
-        && rate >= 25
-    {
         println!(
-            "  {:<20} {}",
-            "Fidelity:".bright_black(),
-            format!(
-                "{rate}% of archived blocks were fetched back, so distillation is cutting too much"
-            )
-            .yellow()
+            "    {}",
+            "invented, no call came back larger.".bright_black()
         );
     }
 
     print_separator();
     println!(
-        "  {} for full breakdown",
-        "omni stats --detail".bright_cyan()
+        "  {} for commands, routes and agents",
+        "omni stats --view commands".bright_cyan()
     );
 
-    // Update Notification (4h cache)
     if let Some(latest) = crate::guard::update::check() {
         crate::guard::update::print_notification(&latest);
     }
 
     println!();
     Ok(())
+}
+
+/// Width the summary aligns its right-hand scope label to.
+const SUMMARY_WIDTH: usize = 74;
+
+/// One stage row, right-aligned so two rows read as one table whatever units the
+/// numbers land in. Returns whether it printed a share, so the footnote about
+/// denominators appears only when there is a percentage to explain.
+fn print_stage_row(label: &str, bytes: u64, share: Option<f64>, calls: u64) -> bool {
+    let pct = match share {
+        Some(p) => format!("{p:>3.0}%"),
+        None => "   -".to_string(),
+    };
+    println!(
+        "    {:<11} {:>8}  {}   {:>6} calls",
+        label.bright_white(),
+        format_bytes(bytes).yellow(),
+        pct.cyan(),
+        format_number(calls).bright_black()
+    );
+    share.is_some()
+}
+
+/// A stage's share of its own bytes, or `None` when the base is unknown.
+fn share(part: u64, whole: u64) -> Option<f64> {
+    (whole > 0).then(|| 100.0 * part as f64 / whole as f64)
+}
+
+/// One column per day, scaled to the busiest day in the window.
+///
+/// A day with no recorded call renders blank rather than at the floor, because
+/// `▁` on an idle day claims activity that did not happen. The glyphs are the
+/// ones the bars already use, so this adds no rendering assumption.
+fn sparkline(daily: &[(String, u64)], days: usize) -> String {
+    const GLYPHS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let max = daily.iter().map(|(_, b)| *b).max().unwrap_or(0);
+    if max == 0 {
+        return " ".repeat(days);
+    }
+    let today = chrono::Utc::now().date_naive();
+    (0..days)
+        .map(|i| {
+            let day = today - chrono::Duration::days((days - 1 - i) as i64);
+            let key = day.format("%Y-%m-%d").to_string();
+            match daily.iter().find(|(d, _)| *d == key) {
+                Some((_, b)) => GLYPHS[((*b as u128 * 8 / max as u128) as usize).min(7)],
+                None => ' ',
+            }
+        })
+        .collect()
 }
 
 // ─── Detail Mode: Current View (Improved) ───────────────
@@ -1080,6 +948,28 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         format!("OMNI Signal Report: Detail ({})", period_label.bold()).bright_white()
     );
     print_separator();
+
+    // Session lifetime lives here since #665 moved the summary to one screen. It
+    // is the meter #357 promoted and it answers a question about the window, not
+    // about a call, so it belongs beside the rest of the technical breakdown.
+    let (sessions, median_cmds, longest, compacted) = store.session_lifetime(since);
+    if sessions > 0 {
+        println!(
+            "  {:<20} {} median, {} longest, {} closed",
+            "Session lifetime:".bright_black(),
+            median_cmds.to_string().bold().cyan(),
+            longest.to_string().cyan(),
+            format_number(sessions).cyan()
+        );
+        if compacted > 0 {
+            println!(
+                "  {}",
+                format!("  {compacted} ended at a compaction, which is what the window costs")
+                    .bright_black()
+                    .italic()
+            );
+        }
+    }
 
     println!(
         "  {:<20} {}",
@@ -1143,7 +1033,9 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     // By Command, top 10 (or all if requested), filter 0% savings
     let raw_filters = store.filter_breakdown(since)?;
-    let all_flag = super::has_flag(args, "--all-commands");
+    // `--limit 0` and the older `--all-commands` say the same thing.
+    let limit = super::flag_value(args, "--limit").and_then(|v| v.parse::<usize>().ok());
+    let all_flag = super::has_flag(args, "--all-commands") || limit == Some(0);
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
 
     let display_filters: Vec<_> = if all_flag {
@@ -1152,7 +1044,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         grouped_filters
             .iter()
             .filter(|(_, _, pct, _)| *pct > 0.0)
-            .take(10)
+            .take(limit.unwrap_or(10))
             .cloned()
             .collect()
     };
@@ -1415,6 +1307,34 @@ pub struct StatsJson {
     pub agents: Vec<AgentStat>,
     pub rewind: RewindStat,
     pub avg_latency_ms: f64,
+    /// The two stages, side by side and never averaged (#665). `periods` above
+    /// counts the distiller alone, which is what made the ledger invisible to
+    /// anything reading this.
+    pub stages: StageStats,
+}
+
+/// What each stage took off, with the base each ratio is over.
+///
+/// Two objects rather than one summed pair, so a consumer cannot produce the
+/// combined percentage this project refuses to publish: the ledger's base exists
+/// only for folds recorded since `payload_bytes` landed, and the folded calls are
+/// largely absent from `distillations`, so a union denominator is not available.
+#[derive(serde::Serialize)]
+pub struct StageStats {
+    pub distilled: StageStat,
+    pub folded: StageStat,
+    pub passed_through_calls: u64,
+}
+
+#[derive(serde::Serialize)]
+pub struct StageStat {
+    pub calls: u64,
+    pub bytes_removed: u64,
+    /// Bytes this stage saw for the calls it acted on, or `null` when the store
+    /// does not record one for every row.
+    pub base_bytes: Option<u64>,
+    /// `bytes_removed` over `base_bytes`, absent for the same reason.
+    pub share_pct: Option<f64>,
 }
 
 #[derive(serde::Serialize)]
@@ -1467,6 +1387,31 @@ fn run_json(store: &Store) -> Result<()> {
         sum_latency as f64 / count as f64
     } else {
         0.0
+    };
+
+    let totals = store.stage_totals(0)?;
+    let stage = |calls: u64, removed: u64, base: Option<u64>, priced: u64| StageStat {
+        calls,
+        bytes_removed: removed,
+        base_bytes: base,
+        share_pct: base
+            .filter(|b| *b > 0)
+            .map(|b| (1000.0 * priced as f64 / b as f64).round() / 10.0),
+    };
+    let stages = StageStats {
+        distilled: stage(
+            totals.distilled_calls,
+            totals.distilled_removed,
+            (totals.distilled_input > 0).then_some(totals.distilled_input),
+            totals.distilled_removed,
+        ),
+        folded: stage(
+            totals.folded_calls,
+            totals.folded_bytes,
+            (totals.folded_payload > 0).then_some(totals.folded_payload),
+            totals.folded_priced,
+        ),
+        passed_through_calls: totals.passthrough_calls,
     };
 
     let periods_json: Vec<StatsPeriod> = periods
@@ -1538,6 +1483,7 @@ fn run_json(store: &Store) -> Result<()> {
             retrieved: rewind_retrieved,
         },
         avg_latency_ms: (avg_latency * 10.0).round() / 10.0,
+        stages,
     };
 
     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -1783,78 +1729,6 @@ mod tests {
     /// #589. The alignment test beside this one does not guard the unit: it
     /// stayed green with the byte formatter replaced by raw digits, which is how
     /// this hole was found. The period summary used to print a byte count over
-    /// 3.6 and call it tokens, so what needs pinning is that the column carries
-    /// a counted unit and not a derived one.
-    #[test]
-    fn the_period_summary_reports_bytes_and_not_a_derived_unit() {
-        let rows = [PeriodRow {
-            label: "Today",
-            count: 118,
-            raw_bytes: 137_000,
-            filtered_bytes: 74_000,
-            reduction_pct: 46.0,
-        }];
-
-        let line = format_period_rows(&rows).join("\n");
-
-        // 137,000 B is 133.8 KB by `format_bytes`, written out by hand from its
-        // rules rather than by calling it.
-        assert!(
-            line.contains("133.8 KB") && line.contains("72.3 KB"),
-            "the summary must print the bytes it counted: {line}"
-        );
-        assert!(
-            !line.contains("tokens"),
-            "the summary went back to a unit calibrated against another vendor's \
-             tokenizer: {line}"
-        );
-    }
-
-    #[test]
-    fn aligns_period_columns_across_mixed_number_widths() {
-        // Arrange: the widths that broke the old hardcoded layout, a 3-digit
-        // count beside a 5-digit one, and a K-scale total beside an M-scale one.
-        let rows = [
-            PeriodRow {
-                label: "Today",
-                count: 118,
-                raw_bytes: 137_000,
-                filtered_bytes: 74_000,
-                reduction_pct: 46.2,
-            },
-            PeriodRow {
-                label: "This Week",
-                count: 1_218,
-                raw_bytes: 10_200_000,
-                filtered_bytes: 647_000,
-                reduction_pct: 93.6,
-            },
-            PeriodRow {
-                label: "All Time",
-                count: 5_047,
-                raw_bytes: 21_200_000,
-                filtered_bytes: 4_800_000,
-                reduction_pct: 77.2,
-            },
-        ];
-
-        // Act
-        let lines = format_period_rows(&rows);
-
-        // Assert: every row starts its labels at the same offset.
-        // `tokens` left this line with #589; the columns it aligned are still here.
-        for word in ["commands", "saved"] {
-            let offsets: Vec<_> = lines
-                .iter()
-                .map(|l| l.find(word).unwrap_or_else(|| panic!("{word} missing")))
-                .collect();
-            assert!(
-                offsets.windows(2).all(|w| w[0] == w[1]),
-                "`{word}` drifts between rows: {offsets:?}\n{}",
-                lines.join("\n")
-            );
-        }
-    }
 
     #[test]
     fn test_format_bytes_handles_all_ranges() {
@@ -1917,48 +1791,6 @@ mod tests {
     /// on screen misses a key that is present. That is #471, and writing the fix
     /// reintroduced it once: `cat package.json` is 16 characters, survives the
     /// key intact, renders as `cat package.jso...`, and the row came back
-    /// `Unknown` against a database with no unknown rows in it.
-    #[test]
-    fn the_rendered_name_is_not_the_lookup_key() {
-        let key = shorten_command("cat package.json", CMD_KEY_WIDTH);
-        let rendered = crate::util::text::display_truncate_with_ellipsis(&key, CMD_KEY_WIDTH - 3);
-
-        assert_eq!(
-            key, "cat package.json",
-            "the key is the whole short command"
-        );
-        assert_ne!(
-            key, rendered,
-            "if these were ever equal the conflation would stop being visible, \
-             and the lookup must still use the key"
-        );
-
-        let mut agents: HashMap<String, HashMap<String, u64>> = HashMap::new();
-        agents
-            .entry(key.clone())
-            .or_default()
-            .insert("claude_code".to_string(), 1);
-
-        assert!(agents.contains_key(&key), "keyed lookup resolves");
-        assert!(
-            !agents.contains_key(&rendered),
-            "the rendered cell is not a key and must never be used as one"
-        );
-    }
-
-    #[test]
-    fn test_format_bar() {
-        assert_eq!(format_bar(100.0, 20), "████████████████████");
-        assert_eq!(format_bar(50.0, 20), "██████████");
-        assert_eq!(format_bar(0.0, 20), "");
-    }
-
-    #[test]
-    fn test_format_bar_with_empty() {
-        assert_eq!(format_bar_with_empty(100.0), "████████████████████");
-        assert_eq!(format_bar_with_empty(50.0), "██████████░░░░░░░░░░");
-        assert_eq!(format_bar_with_empty(0.0), "░░░░░░░░░░░░░░░░░░░░");
-    }
 
     #[test]
     fn test_format_number() {
@@ -1988,6 +1820,21 @@ mod tests {
                 retrieved: 5,
             },
             avg_latency_ms: 15.5,
+            stages: StageStats {
+                distilled: StageStat {
+                    calls: 3,
+                    bytes_removed: 900,
+                    base_bytes: Some(1000),
+                    share_pct: Some(90.0),
+                },
+                folded: StageStat {
+                    calls: 2,
+                    bytes_removed: 400,
+                    base_bytes: None,
+                    share_pct: None,
+                },
+                passed_through_calls: 5,
+            },
         };
 
         let json_str = serde_json::to_string(&json_struct).unwrap();
@@ -1995,5 +1842,115 @@ mod tests {
         assert!(json_str.contains("\"generated_at\":1234567890"));
         assert!(json_str.contains("\"savings_pct\":90.0"));
         assert!(json_str.contains("\"avg_latency_ms\":15.5"));
+    }
+
+    /// #665. A day with no recorded call has to render blank. `▁` is the floor of
+    /// a scale, so drawing it for an idle day claims activity that did not happen,
+    /// and a reader cannot tell the two apart afterwards.
+    #[test]
+    fn an_idle_day_is_blank_and_the_busiest_day_is_full() {
+        let today = chrono::Utc::now().date_naive();
+        let day = |back: i64| {
+            (today - chrono::Duration::days(back))
+                .format("%Y-%m-%d")
+                .to_string()
+        };
+
+        let line = sparkline(&[(day(3), 10), (day(1), 400)], 4);
+
+        let cells: Vec<char> = line.chars().collect();
+        assert_eq!(cells.len(), 4, "one column per day: {line:?}");
+        assert_eq!(cells[0], '▁', "the quiet day sits at the floor: {line:?}");
+        assert_eq!(cells[1], ' ', "a day with no data is blank: {line:?}");
+        assert_eq!(cells[2], '█', "the busiest day fills the cell: {line:?}");
+        assert_eq!(cells[3], ' ', "today has no rows in this fixture: {line:?}");
+    }
+
+    /// A window with nothing in it is blank rather than a row of floors, for the
+    /// same reason.
+    #[test]
+    fn an_empty_window_draws_nothing() {
+        assert_eq!(sparkline(&[], 5), "     ");
+    }
+
+    /// #667. One dimension, one flag, and every older spelling still resolves.
+    /// `--since` wins over the old flags rather than losing to whichever branch
+    /// was tested first, which is the behaviour that made two windows ambiguous.
+    #[test]
+    fn since_resolves_the_window_and_the_old_flags_still_work() {
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(scope(&args(&[])).0, "last 30 days");
+        assert_eq!(scope(&args(&["--since", "week"])).0, "last 7 days");
+        assert_eq!(scope(&args(&["--since=today"])).0, "today");
+        assert_eq!(scope(&args(&["--since", "all"])).1, 0);
+        assert_eq!(scope(&args(&["--week"])).0, "last 7 days");
+        assert_eq!(scope(&args(&["-H"])).0, "last hour");
+        assert_eq!(scope(&args(&["--today"])).0, "today");
+        assert_eq!(
+            scope(&args(&["--since", "week", "--hour"])).0,
+            "last 7 days",
+            "the named window decides, not whichever flag is tested first"
+        );
+        assert_eq!(
+            scope(&args(&["--since", "fortnight"])).0,
+            "last 30 days",
+            "an unrecognised window falls back rather than refusing a report"
+        );
+    }
+
+    /// The same, for the view. `--json` is not in here on purpose: it is an output
+    /// format applied to whatever view was selected.
+    #[test]
+    fn view_resolves_from_the_new_flag_and_the_old_ones() {
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(view(&args(&[])), "summary");
+        assert_eq!(view(&args(&["--view", "detail"])), "detail");
+        assert_eq!(view(&args(&["--view=projects"])), "project");
+        assert_eq!(view(&args(&["--detail"])), "detail");
+        assert_eq!(view(&args(&["--project"])), "project");
+        assert_eq!(view(&args(&["--rerun"])), "rerun");
+        assert_eq!(view(&args(&["--all-commands"])), "detail");
+        assert_eq!(
+            view(&args(&["--view", "commands", "--detail"])),
+            "commands",
+            "the named view decides"
+        );
+    }
+
+    /// #665. The two stages travel as two objects, so a consumer cannot average
+    /// them into the combined percentage this project has no denominator for. A
+    /// stage whose base is unknown says `null` rather than reporting a share over
+    /// a population its column does not cover.
+    #[test]
+    fn the_json_keeps_the_two_stages_apart() {
+        let stages = StageStats {
+            distilled: StageStat {
+                calls: 3,
+                bytes_removed: 900,
+                base_bytes: Some(1000),
+                share_pct: Some(90.0),
+            },
+            folded: StageStat {
+                calls: 2,
+                bytes_removed: 400,
+                base_bytes: None,
+                share_pct: None,
+            },
+            passed_through_calls: 5,
+        };
+
+        let json = serde_json::to_string(&stages).unwrap();
+        assert!(json.contains("\"distilled\""), "{json}");
+        assert!(json.contains("\"folded\""), "{json}");
+        assert!(
+            json.contains("\"base_bytes\":null") && json.contains("\"share_pct\":null"),
+            "an unknown base must read as null, not as a computed share: {json}"
+        );
+        assert!(
+            !json.contains("total_pct") && !json.contains("combined"),
+            "no field may offer the two populations as one figure: {json}"
+        );
     }
 }

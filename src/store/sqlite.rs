@@ -1854,6 +1854,97 @@ impl SqliteBackend {
         Ok(periods)
     }
 
+    /// What each stage took off, for the summary the CLI leads with (#665).
+    ///
+    /// Two engines write to two tables and neither knows about the other, so the
+    /// caller gets both sets of raw counts and does no arithmetic across them.
+    /// `folded_priced` and `folded_payload` cover only the fold rows that carry a
+    /// payload size: the column landed on 2026-08-18, so older rows have none and
+    /// a ratio over the whole table would be a ratio over two populations.
+    pub fn stage_totals(&self, since: i64) -> Result<StageTotals> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        let mut totals = StageTotals::default();
+
+        let mut stmt = conn.prepare(&format!(
+            "SELECT route = 'Passthrough', COUNT(*), SUM(input_bytes),
+                    SUM(input_bytes - output_bytes)
+             FROM distillations WHERE ts >= ?1 AND {}
+             GROUP BY route = 'Passthrough'",
+            applied_only()
+        ))?;
+        let rows = stmt.query_map(params![since], |r| {
+            Ok((
+                r.get::<_, i64>(0)? != 0,
+                r.get::<_, u64>(1)?,
+                r.get::<_, i64>(2)?.max(0) as u64,
+                r.get::<_, i64>(3)?.max(0) as u64,
+            ))
+        })?;
+        for row in rows.flatten() {
+            let (is_passthrough, calls, input, removed) = row;
+            if is_passthrough {
+                totals.passthrough_calls = calls;
+            } else {
+                totals.distilled_calls = calls;
+                totals.distilled_input = input;
+                totals.distilled_removed = removed;
+            }
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), COALESCE(SUM(bytes), 0),
+                    COALESCE(SUM(CASE WHEN payload_bytes > 0 THEN bytes END), 0),
+                    COALESCE(SUM(payload_bytes), 0)
+             FROM ledger_folds WHERE ts >= ?1",
+        )?;
+        if let Ok((calls, bytes, priced, payload)) = stmt.query_row(params![since], |r| {
+            Ok((
+                r.get::<_, u64>(0)?,
+                r.get::<_, u64>(1)?,
+                r.get::<_, u64>(2)?,
+                r.get::<_, u64>(3)?,
+            ))
+        }) {
+            totals.folded_calls = calls;
+            totals.folded_bytes = bytes;
+            totals.folded_priced = priced;
+            totals.folded_payload = payload;
+        }
+
+        Ok(totals)
+    }
+
+    /// Bytes both stages took off per calendar day, oldest first, for the
+    /// sparkline. A day with no recorded call is absent rather than zero, so the
+    /// caller can render it blank instead of at the floor: `▁` on an idle day
+    /// claims activity that did not happen.
+    pub fn daily_removed_bytes(&self, days: i64) -> Vec<(String, u64)> {
+        let Ok(conn) = self.pool.get() else {
+            return vec![];
+        };
+        let since = chrono::Utc::now().timestamp() - days * 86_400;
+        let sql = format!(
+            "SELECT day, SUM(b) FROM (
+               SELECT date(ts, 'unixepoch') AS day, SUM(input_bytes - output_bytes) AS b
+                 FROM distillations WHERE ts >= ?1 AND {} GROUP BY day
+               UNION ALL
+               SELECT date(ts, 'unixepoch') AS day, SUM(bytes) AS b
+                 FROM ledger_folds WHERE ts >= ?1 GROUP BY day
+             ) GROUP BY day ORDER BY day",
+            applied_only()
+        );
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            return vec![];
+        };
+        let rows = stmt.query_map(params![since], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.max(0) as u64))
+        });
+        match rows {
+            Ok(iter) => iter.flatten().collect(),
+            Err(_) => vec![],
+        }
+    }
+
     pub fn get_project_stats(&self, since: i64) -> Result<Vec<(String, u64, f64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         let mut stmt = conn.prepare(&format!(
@@ -2853,6 +2944,26 @@ pub struct SeenLine {
     pub source: String,
 }
 
+/// What the two stages took off in one window, kept apart on purpose (#665).
+///
+/// Nothing here is a ratio. The distiller's base is the bytes it distilled and the
+/// ledger's is the payload of the calls it folded, so one percentage over the two
+/// would be a percentage over two populations, which is the error that put a wrong
+/// figure in #533's thread.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StageTotals {
+    pub distilled_calls: u64,
+    pub distilled_input: u64,
+    pub distilled_removed: u64,
+    pub passthrough_calls: u64,
+    pub folded_calls: u64,
+    pub folded_bytes: u64,
+    /// Bytes folded on the rows that carry a payload size, so `folded_priced`
+    /// over `folded_payload` is the one honest ledger ratio available.
+    pub folded_priced: u64,
+    pub folded_payload: u64,
+}
+
 #[derive(Debug)]
 pub struct LedgerFoldRow {
     pub origin: String,
@@ -3634,6 +3745,97 @@ mod tests {
     }
 
     /// A row for these two tests; the values are irrelevant, only that it lands.
+    /// #665. The summary reads both stages from here, and the ledger's half was
+    /// the one nothing had ever read: `omni stats` computed everything from
+    /// `distillations`, so the engine that removed 1.6x more bytes in a week was
+    /// absent from every line of the report.
+    ///
+    /// The two are kept apart deliberately. The distiller's base is the bytes it
+    /// distilled; the ledger's is the payload of the calls it folded, and only the
+    /// rows written since `payload_bytes` landed carry one.
+    #[test]
+    fn stage_totals_reads_both_engines_and_keeps_their_bases_apart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+
+        let row = |route: crate::pipeline::Route, input: usize, output: usize| DistillResult {
+            output: String::new(),
+            route,
+            filter_name: "cat".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: input,
+            output_bytes: output,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
+            delivered_bytes: output,
+        };
+        store.record_distillation(
+            "s1",
+            &row(crate::pipeline::Route::Keep, 1_000, 200),
+            "cat a.txt",
+            "",
+            "claude_code",
+        );
+        store.record_distillation(
+            "s1",
+            &row(crate::pipeline::Route::Passthrough, 500, 500),
+            "cat b.json",
+            "",
+            "claude_code",
+        );
+        store.ledger_record_folds(
+            "/repo",
+            "claude_code",
+            "s1",
+            &[
+                FoldRecord {
+                    source_agent: "claude_code".to_string(),
+                    origin: "session",
+                    lines: 40,
+                    bytes: 600,
+                    whole_output: false,
+                    payload_bytes: 2_000,
+                },
+                // An older row, written before the payload column existed.
+                FoldRecord {
+                    source_agent: "claude_code".to_string(),
+                    origin: "project",
+                    lines: 10,
+                    bytes: 150,
+                    whole_output: false,
+                    payload_bytes: 0,
+                },
+            ],
+        );
+
+        let totals = store.stage_totals(0).expect("totals");
+
+        assert_eq!(totals.distilled_calls, 1);
+        assert_eq!(totals.distilled_input, 1_000);
+        assert_eq!(totals.distilled_removed, 800);
+        assert_eq!(
+            totals.passthrough_calls, 1,
+            "a declined call is not a saving"
+        );
+
+        assert_eq!(totals.folded_calls, 2, "the ledger is read at all");
+        assert_eq!(
+            totals.folded_bytes, 750,
+            "every fold counts toward the bytes"
+        );
+        assert_eq!(
+            (totals.folded_priced, totals.folded_payload),
+            (600, 2_000),
+            "only the row carrying a payload may price a share"
+        );
+    }
+
     fn any_distillation() -> DistillResult {
         DistillResult {
             output: String::new(),
