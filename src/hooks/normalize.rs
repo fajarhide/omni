@@ -12,16 +12,22 @@ pub enum AgentFormat {
     Aider,          // piped stdin, OMNI_CMD env
     GenericMCP,     // JSON-RPC 2.0 tool result
     Pi,             // camelCase toolName + toolResponse from Pi extension
-    /// `agent: "hermes"` + `exit_code`, sent by the plugin's transform hooks.
+    /// `agent: "<host>"` + `exit_code`, sent by a plugin this repo writes.
+    ///
+    /// Hermes and OpenClaw both reach OMNI through our own plugin rather than a
+    /// host format OMNI has to reverse-engineer, so they send one shape and the
+    /// variant carries the name. It carries it because that name is the only
+    /// thing that differs and it decides `agent_id`, which is the bucket every
+    /// per-host figure is computed from.
     ///
     /// Its own arm rather than a reshaped Codex or Claude Code payload, for two
     /// reasons that both bit this project before. `resolve_agent_id` only lets
     /// `OMNI_AGENT_ID` override a `ClaudeCode` or `Unknown` format, so borrowing
-    /// Codex's shape would file every Hermes row under `codex_cli`, which is the
+    /// Codex's shape would file every row under `codex_cli`, which is the
     /// mislabelling #212 traced a wrong headline to. And Claude Code's shape has
     /// nowhere to put an exit code, so #120's refusal to distill a failed command
-    /// would never fire on this host (#628).
-    Hermes,
+    /// would never fire on either host (#628).
+    Plugin(String),
     Unknown, // fallback ke ClaudeCode parser
 }
 
@@ -102,11 +108,13 @@ pub fn detect_agent(input: &str) -> AgentFormat {
         return AgentFormat::Pi;
     }
 
-    // Hermes, before the ClaudeCode test below: its payload also carries
-    // `tool_name`, and the plugin names itself so no other host reaches this by
-    // accident.
-    if obj.get("agent").and_then(|a| a.as_str()) == Some("hermes") {
-        return AgentFormat::Hermes;
+    // Our own plugins, before the ClaudeCode test below: their payloads also
+    // carry `tool_name`, and a plugin names itself so no other host reaches this
+    // by accident.
+    if let Some(host) = obj.get("agent").and_then(|a| a.as_str())
+        && is_plugin_host(host)
+    {
+        return AgentFormat::Plugin(host.to_string());
     }
 
     // ClaudeCode / CursorWindsurf: punya "tool_name" dan "tool_response"
@@ -165,7 +173,7 @@ pub fn normalize(input: &str) -> Option<NormalizedInput> {
         AgentFormat::Aider => normalize_aider(input, agent_id),
         AgentFormat::GenericMCP => normalize_generic_mcp(input, agent_id),
         AgentFormat::Pi => normalize_pi(input, agent_id),
-        AgentFormat::Hermes => normalize_hermes(input, agent_id),
+        AgentFormat::Plugin(ref host) => normalize_plugin(input, host.clone(), agent_id),
     }?;
 
     // Read once here rather than in each of the eight per-agent parsers: the key
@@ -243,6 +251,16 @@ fn names_a_host(from_env: &str) -> bool {
     !matches!(from_env.trim(), "" | "unknown" | "terminal")
 }
 
+/// The hosts `plugins/` ships a plugin for, and the only names `agent` may take.
+///
+/// An allowlist rather than "whatever the payload calls itself", because that
+/// string becomes `agent_id` and therefore the bucket every per-host saving is
+/// attributed to. Taking it on trust would let one malformed payload invent a
+/// host that never existed, which is the accounting error #212 was.
+fn is_plugin_host(name: &str) -> bool {
+    matches!(name, "hermes" | "openclaw")
+}
+
 pub fn resolve_agent_id(agent: &AgentFormat, from_env: &str) -> String {
     // `detect_agent_id` never answers "unknown": its last resort is "terminal"
     // (see `agents::multiagent`). The old guard therefore never fired, and a
@@ -265,7 +283,7 @@ pub fn resolve_agent_id(agent: &AgentFormat, from_env: &str) -> String {
         AgentFormat::Aider => "aider".to_string(),
         AgentFormat::GenericMCP => "mcp_generic".to_string(),
         AgentFormat::Pi => "pi".to_string(),
-        AgentFormat::Hermes => "hermes".to_string(),
+        AgentFormat::Plugin(host) => host.clone(),
         AgentFormat::Unknown => "unknown".to_string(),
     }
 }
@@ -660,66 +678,89 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
     })
 }
 
-// ── HERMES AGENT ──────────────────────────────────────────────────────
-/// Hermes' tool names, in the names `post_tool::process_payload` routes on.
+// ── OUR OWN PLUGINS: HERMES AND OPENCLAW ──────────────────────────────
+/// Plugin tool names, in the names `post_tool::process_payload` routes on.
 ///
 /// Without this the mapping is not "unknown tool, do nothing", it is worse:
 /// `terminal` fell into the `_` arm, was counted by `record_unhandled_tool`, and
 /// every shell command on the host went undistilled while the install reported
 /// success. Confirmed by driving the hook with a Hermes payload.
 ///
+/// One map for both hosts because their vocabularies are disjoint: Hermes says
+/// `terminal` and `read_file`, OpenClaw says `bash` and `read`, and no name
+/// means different things on the two. Splitting it would duplicate the arms that
+/// matter and give the next host two places to forget.
+///
 /// Only names with a distiller behind them are translated. Anything else keeps
-/// the name Hermes gave it, so `record_unhandled_tool` counts the real thing and
-/// the next map is written from data rather than from a guess.
-fn hermes_tool_name(name: Option<&str>) -> String {
+/// the name the host gave it, so `record_unhandled_tool` counts the real thing
+/// and the next map is written from data rather than from a guess.
+fn plugin_tool_name(name: Option<&str>) -> String {
     match name.unwrap_or("terminal") {
+        // Hermes
         "terminal" => "Bash",
         "read_file" => "Read",
         "search_files" => "Grep",
         "web_extract" => "WebFetch",
         "write_file" => "Write",
         "patch" => "Edit",
+        // OpenClaw. These are the names it advertises to the model, captured
+        // from a real turn rather than read out of its bundle: the bundle has a
+        // tool literally named `bash` and the name that arrives at the hook is
+        // `exec`. Mapping the bundle names instead left every shell result
+        // unrecognised, which distils through the generic path and files no
+        // `distillations` row at all.
+        //
+        // The full advertised set is 34 names. Only these carry a distiller;
+        // the rest stay as themselves so `record_unhandled_tool` counts what is
+        // really being missed. There is no search tool in it, so no `Grep`.
+        "exec" => "Bash",
+        "read" => "Read",
+        "web_fetch" => "WebFetch",
+        "file_write" => "Write",
+        "edit" | "apply_patch" => "Edit",
         other => other,
     }
     .to_string()
 }
 
-/// The payload the Hermes plugin's transform hooks send.
+/// The payload the Hermes and OpenClaw plugins' replacement hooks send.
 ///
 /// ```json
 /// {"agent":"hermes","tool_name":"terminal","command":"cargo test",
 ///  "output":"…","exit_code":1,"session_id":"…"}
 /// ```
 ///
-/// `tool_name` is carried rather than assumed, because this is the first host
+/// `tool_name` is carried rather than assumed, because these are the first hosts
 /// whose replacement hook fires for **every** tool and not only the shell one.
 /// That is what makes the Read, Grep and WebFetch distillers reachable at all;
 /// they have been written and never executed, since Claude Code's PostToolUse
 /// matcher is Bash-only (#172).
-fn normalize_hermes(input: &str, agent_id: String) -> Option<NormalizedInput> {
+fn normalize_plugin(input: &str, host: String, agent_id: String) -> Option<NormalizedInput> {
     #[derive(Deserialize)]
-    struct HermesInput {
+    struct PluginInput {
         tool_name: Option<String>,
         command: Option<String>,
         output: Option<String>,
         exit_code: Option<i64>,
     }
 
-    let parsed: HermesInput = serde_json::from_str(input).ok()?;
+    let parsed: PluginInput = serde_json::from_str(input).ok()?;
     let content = parsed.output.filter(|o| !o.is_empty())?;
 
     Some(NormalizedInput {
-        agent: AgentFormat::Hermes,
-        tool_name: hermes_tool_name(parsed.tool_name.as_deref()),
+        agent: AgentFormat::Plugin(host),
+        tool_name: plugin_tool_name(parsed.tool_name.as_deref()),
         command: parsed.command.unwrap_or_default(),
         content,
         agent_id,
-        // The reason this format exists. Hermes hands the plugin a `returncode`,
-        // and no shape OMNI already parsed had anywhere to put it, so #120's
-        // refusal to distill a failed command could not have fired here.
+        // The reason this format exists. Hermes hands the plugin a `returncode`
+        // and OpenClaw an `isError`, and no shape OMNI already parsed had
+        // anywhere to put either, so #120's refusal to distill a failed command
+        // could not have fired on these hosts.
         failed: parsed.exit_code.is_some_and(|c| c != 0),
-        // The hook returns a bare string to Hermes, so there is no host response
-        // object to echo and the MCP shape is what the plugin reads back.
+        // Both hooks take a replacement string from the plugin, so there is no
+        // host response object to echo and the MCP shape is what the plugin
+        // reads back.
         raw_response: None,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -1144,52 +1185,83 @@ mod tests {
         assert_eq!(detect_agent(pi), AgentFormat::Pi);
     }
 
-    /// #628. Hermes had no format of its own, and neither shape it could have
-    /// borrowed works: `resolve_agent_id` only lets `OMNI_AGENT_ID` override a
-    /// `ClaudeCode` or `Unknown` payload, so a Codex-shaped one would file every
-    /// row under `codex_cli`, and a Claude-shaped one has nowhere to put the
-    /// exit code Hermes hands the plugin.
+    /// #628. Neither host had a format of its own, and neither shape they could
+    /// have borrowed works: `resolve_agent_id` only lets `OMNI_AGENT_ID`
+    /// override a `ClaudeCode` or `Unknown` payload, so a Codex-shaped one would
+    /// file every row under `codex_cli`, and a Claude-shaped one has nowhere to
+    /// put the exit code the plugin is handed.
+    ///
+    /// Both hosts are asserted here rather than only Hermes, because the whole
+    /// point of one shared shape is that the name in `agent` is the only thing
+    /// separating them. A test on one arm would not notice the other collapsing
+    /// into it.
     #[test]
-    fn a_hermes_payload_is_filed_under_hermes_and_carries_its_exit_code() {
-        let payload = |code: i64| {
+    fn a_plugin_payload_is_filed_under_its_own_host_and_carries_the_exit_code() {
+        let payload = |host: &str, code: i64| {
             serde_json::json!({
-                "agent": "hermes", "tool_name": "terminal", "command": "cargo test",
+                "agent": host, "tool_name": "terminal", "command": "cargo test",
                 "output": "one\ntwo\n", "exit_code": code, "session_id": "s1"
             })
             .to_string()
         };
 
-        let ok = normalize(&payload(0)).expect("a hermes payload normalizes");
-        assert_eq!(ok.agent, AgentFormat::Hermes);
-        assert_eq!(
-            ok.agent_id, "hermes",
-            "a row under any other id is a lost row"
-        );
-        assert!(!ok.failed);
+        for host in ["hermes", "openclaw"] {
+            let ok = normalize(&payload(host, 0)).expect("a plugin payload normalizes");
+            assert_eq!(ok.agent, AgentFormat::Plugin(host.to_string()));
+            assert_eq!(
+                ok.agent_id, host,
+                "a row under any other id is a lost row: {host}"
+            );
+            assert!(!ok.failed);
 
-        let bad = normalize(&payload(1)).expect("a failing command still normalizes");
-        assert!(
-            bad.failed,
-            "#120 refuses to distill a failed command, and cannot fire without this"
+            let bad = normalize(&payload(host, 1)).expect("a failing command still normalizes");
+            assert!(
+                bad.failed,
+                "#120 refuses to distill a failed command, and cannot fire without this: {host}"
+            );
+        }
+    }
+
+    /// The name in `agent` becomes `agent_id`, so an unrecognised one would
+    /// invent a host bucket every per-host figure is then computed against.
+    #[test]
+    fn an_unknown_agent_name_does_not_become_a_host() {
+        let payload = serde_json::json!({
+            "agent": "not-a-host", "tool_name": "terminal", "command": "ls",
+            "output": "one\n", "exit_code": 0
+        })
+        .to_string();
+
+        assert_ne!(
+            detect_agent(&payload),
+            AgentFormat::Plugin("not-a-host".to_string()),
+            "the allowlist is what stops a payload naming its own bucket"
         );
     }
 
-    /// The tool name decides which arm of `process_payload` runs, and Hermes
-    /// spells them differently. `terminal` fell into the `_` arm and was counted
-    /// as an unhandled tool, so every shell command on the host went undistilled
-    /// while the install reported success.
+    /// The tool name decides which arm of `process_payload` runs, and the two
+    /// hosts spell them differently. `terminal` fell into the `_` arm and was
+    /// counted as an unhandled tool, so every shell command on Hermes went
+    /// undistilled while the install reported success.
     #[test]
-    fn hermes_tool_names_are_translated_to_the_arms_that_exist() {
+    fn plugin_tool_names_are_translated_to_the_arms_that_exist() {
         for (theirs, ours) in [
+            // Hermes
             ("terminal", "Bash"),
             ("read_file", "Read"),
             ("search_files", "Grep"),
             ("web_extract", "WebFetch"),
+            // OpenClaw
+            ("exec", "Bash"),
+            ("read", "Read"),
+            ("web_fetch", "WebFetch"),
+            ("file_write", "Write"),
+            ("apply_patch", "Edit"),
         ] {
-            assert_eq!(hermes_tool_name(Some(theirs)), ours, "{theirs}");
+            assert_eq!(plugin_tool_name(Some(theirs)), ours, "{theirs}");
         }
         assert_eq!(
-            hermes_tool_name(Some("kanban_show")),
+            plugin_tool_name(Some("kanban_show")),
             "kanban_show",
             "an untranslated name has to reach record_unhandled_tool as itself"
         );

@@ -93,6 +93,32 @@ jobs:
         working-directory: plugins/pi
         run: npm run typecheck
 
+  plugin-openclaw:
+    name: typecheck (plugins/openclaw)
+    # Nothing in this file had ever compiled the OpenClaw plugin, and it did not
+    # compile: a TypeBox object where the host wants a JSON Schema, a tool cast
+    # to a factory, and an errno string typed as a number. All three were
+    # assertions hiding a mismatch with the real SDK, which is the shape #628 is
+    # about. `openclaw` is a devDependency so this checks against the host's own
+    # types rather than a hand-copied stub.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/openclaw/package-lock.json
+
+      - name: Install
+        working-directory: plugins/openclaw
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: plugins/openclaw
+        run: npm run typecheck
+
   plugin-hermes:
     name: checks (plugins/hermes)
     # The plugin used to be a Rust raw string, so no job in this file could see
