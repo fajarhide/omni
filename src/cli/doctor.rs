@@ -246,24 +246,39 @@ fn run_json(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Columns for the host list, so name, tier and count line up down the page
+/// without anyone measuring the terminal.
+///
+/// `Antigravity IDE` is the longest name at 15 and `Handoff-first` the longest
+/// tier at 13, both left two clear spaces at their widest. 16 was tried and
+/// aligns the whole page on one column stop, since the blocks above use a
+/// 15-wide label and a space, but it leaves `Antigravity IDE MCP-only` with a
+/// single space and the two read as one token. A list that scans beats a page
+/// that shares a column stop across a blank line and a heading.
+const HOST_NAME_W: usize = 17;
+const HOST_TIER_W: usize = 15;
+
 /// One host's report, trimmed to what a diagnostic is read for.
 ///
 /// #426: doctor answered one question in a hundred lines, 34 of which said
 /// `[OK]`. A row confirming that something is fine is not what a diagnostic is
-/// read for. A host with nothing wrong collapses to a single line naming its
-/// distill tier and how many checks passed; a host with anything to say keeps
-/// its heading, every row that is not `[OK]`, and the same count. `--detail`
-/// returns the whole report, and a row that is not `[OK]` is never hidden in
-/// either mode.
-fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
-    let heading = report
-        .lines()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("")
-        .to_string();
-    let tier_row = format!("   {:<15} {}\n", "Distill tier:", tier);
+/// read for. A host with nothing wrong is one line; a host with something to say
+/// keeps every row that is not `[OK]` under that same line. `--detail` returns
+/// the whole report, and a row that is not `[OK]` is never hidden in either mode.
+///
+/// #685 made the line a fixed three columns and took the name from
+/// `AgentIntegration::name()` rather than from the report's own heading, which
+/// carries colour escapes that no padding can measure. That also settles two
+/// hosts that printed one name here and another in `init` and `reset`.
+///
+/// Returns the block and how many `[OK]` rows it swallowed, because the offer to
+/// see them belongs once under the whole list and not once per host.
+fn condense_agent_report(name: &str, tier: &str, report: &str, detail: bool) -> (String, usize) {
     if detail {
-        return format!("{report}{tier_row}");
+        // Nothing is being lined up in this mode, so the integration's own
+        // heading and row widths are left exactly as it wrote them.
+        let tier_row = format!("   {:<15} {}\n", "Distill tier:", tier);
+        return (format!("{report}{tier_row}"), 0);
     }
 
     let body: Vec<&str> = report
@@ -272,33 +287,29 @@ fn condense_agent_report(report: &str, tier: &str, detail: bool) -> String {
         .skip(1)
         .collect();
     let hidden = body.iter().filter(|l| l.contains("[OK]")).count();
-    let kept: Vec<&&str> = body
+    let kept = body
         .iter()
-        .filter(|l| !l.contains("[OK]") && !l.trim().is_empty())
-        .collect();
+        .filter(|l| !l.contains("[OK]") && !l.trim().is_empty());
 
-    if kept.is_empty() {
+    // A host with no passing checks is not the same as one with none to run, and
+    // "0 checks [OK]" reads like a failure. `Pi` with no config is the case.
+    let count = if hidden == 0 {
+        String::new()
+    } else {
         let checks = if hidden == 1 { "check" } else { "checks" };
-        return format!("{heading} {tier}, {hidden} {checks} [OK]\n");
-    }
+        format!("{:<9}{}", format!("{hidden} {checks}"), "[OK]".green())
+    };
 
-    // The tier goes on the heading here too. The `kept.is_empty()` branch above
-    // already writes it inline, so appending a separate `Distill tier:` row only
-    // in this branch gave the list two shapes: a one-liner for a clean host and
-    // a block with a trailing row for any host with a note (#463). One shape.
-    let mut out = format!("{heading} {tier}\n");
+    // Padded before colouring: `{:<17}` counts the escape bytes otherwise, and
+    // every coloured name would sit at its own column.
+    let padded = format!("{name:<HOST_NAME_W$}");
+    let row = format!("  {}{tier:<HOST_TIER_W$}{count}", padded.cyan());
+    // A host with no count would otherwise end in the tier column's padding.
+    let mut out = format!("{}\n", row.trim_end());
     for line in kept {
-        out.push_str(line);
-        out.push('\n');
+        out.push_str(&format!("    {}\n", line.trim_start()));
     }
-    if hidden > 0 {
-        let checks = if hidden == 1 { "check" } else { "checks" };
-        out.push_str(&format!(
-            "   {:<15} {hidden} more {checks} [OK], omni doctor --detail to see them\n",
-            ""
-        ));
-    }
-    out
+    (out, hidden)
 }
 
 pub fn run(args: &[String]) -> anyhow::Result<()> {
@@ -561,6 +572,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     println!("\n {}", "Agent Integrations:".bold().bright_white());
     let integrations = crate::agents::all_integrations();
     let mut any_agent_ok = false;
+    let mut hidden_total = 0usize;
     for agent in integrations {
         // #426. doctor answered one question in a hundred lines, 34 of which
         // said [OK]. A row that says a thing is fine is not what a diagnostic is
@@ -576,27 +588,38 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         // installed" and "the model reads less" are different claims, and three
         // integrations shipped the first while delivering none of the second
         // (#351). It survives the condensing for that reason.
-        print!(
-            "{}",
-            condense_agent_report(&report, agent.tier().name(), detail)
-        );
+        let (block, hidden) =
+            condense_agent_report(agent.name(), agent.tier().name(), &report, detail);
+        print!("{block}");
+        hidden_total += hidden;
         // Note: integrations are optional; "not configured" should not fail doctor
+    }
+    // Once, under the list. It used to print under every host that hid a row,
+    // which on this machine was the same 32 characters three times (#685).
+    if hidden_total > 0 && !detail {
+        println!(
+            "   {}",
+            format!("omni doctor --detail also prints the {hidden_total} checks that passed")
+                .bright_black()
+        );
     }
     // The three tier sentences, once. They used to arrive in full on every host
     // line, which on this machine meant the MCP-only explanation ten times in a
     // block of a hundred lines (#426). The per-host line above still names the
     // tier, so nothing #351 asked for is lost.
-    // One line per tier. As a single sentence it ran to 206 columns from an
-    // empty 15-wide label, so it wrapped mid-word in any normal terminal and
-    // sat under a rule a third of its length (#463). The `·` separators were
-    // already doing the splitting; this just believes them.
+    // One row per tier, in the same two columns as the list above it. The
+    // sentences were hardcoded here and hand-wrapped, which is how the middle one
+    // ended up as a continuation line indented to nothing (#463, then #685). They
+    // live on `Tier` now, beside the names, so there is one copy of each.
     for tier in [
-        "Full = model-facing distill active",
-        "Handoff-first = built-in tool output not rewritten, omni_run distils",
-        "                what you route through it",
-        "MCP-only = memory and session state, no shell distill",
+        crate::agents::Tier::Full,
+        crate::agents::Tier::HandoffFirst,
+        crate::agents::Tier::McpOnly,
     ] {
-        println!("   {}", tier.bright_black());
+        println!(
+            "   {}",
+            format!("{:<HOST_TIER_W$}{}", tier.name(), tier.label()).bright_black()
+        );
     }
 
     // The tools this host is told about, not the host's own agent list above:
@@ -655,13 +678,79 @@ mod tests {
 
     const REPORT: &str = "  Claude Code:\n   PreToolUse      [OK] installed\n   MCP Server:     ~/.claude.json [OK]\n";
 
+    /// Colour is decided by whether stdout is a terminal, which it is not under
+    /// the test harness and is under a user's shell. Asserting on columns means
+    /// asserting on what is left when the escapes are gone, in both worlds.
+    fn plain(s: &str) -> String {
+        let mut out = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\u{1b}' {
+                for c in chars.by_ref() {
+                    if c == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
     /// #426: 34 of doctor's hundred lines said [OK]. A host with nothing to
     /// report is one line now, and the tier #351 asked for is still on it.
     #[test]
     fn collapses_a_healthy_host_to_one_line() {
-        let out = condense_agent_report(REPORT, "Full", false);
+        let (out, hidden) = condense_agent_report("Claude Code", "Full", REPORT, false);
 
-        assert_eq!(out, "  Claude Code: Full, 2 checks [OK]\n");
+        assert_eq!(
+            plain(&out),
+            "  Claude Code      Full           2 checks [OK]\n"
+        );
+        assert_eq!(hidden, 2);
+    }
+
+    /// The point of the columns: the tier and the count start where the eye
+    /// expects them whatever the name is. `Antigravity IDE` is the longest name
+    /// shipped and `Pi Agent` among the shortest, so if these two agree the list
+    /// agrees (#685).
+    #[test]
+    fn every_name_puts_the_tier_at_the_same_column() {
+        let short = plain(&condense_agent_report("Pi Agent", "MCP-only", REPORT, false).0);
+        let long = plain(&condense_agent_report("Antigravity IDE", "MCP-only", REPORT, false).0);
+
+        assert_eq!(
+            short.find("MCP-only"),
+            long.find("MCP-only"),
+            "{short}{long}"
+        );
+        assert_eq!(
+            short.find("2 checks"),
+            long.find("2 checks"),
+            "{short}{long}"
+        );
+    }
+
+    /// A host that ran no passing check gets no count rather than `0 checks
+    /// [OK]`, which reads as a failure. `Pi` with no config is the live case.
+    #[test]
+    fn a_host_with_nothing_to_count_says_nothing() {
+        let report = "  Pi Agent:\n   Config:         not configured\n";
+
+        let (out, hidden) = condense_agent_report("Pi Agent", "MCP-only", report, false);
+
+        assert_eq!(hidden, 0);
+        assert!(!out.contains("0 check"), "{out}");
+        assert!(
+            plain(&out)
+                .lines()
+                .next()
+                .unwrap()
+                .trim_end()
+                .ends_with("MCP-only"),
+            "{out}"
+        );
     }
 
     /// The rows that matter are never the ones hidden.
@@ -669,23 +758,25 @@ mod tests {
     fn keeps_every_row_that_is_not_ok() {
         let report = format!("{REPORT}   Plugin:         not installed\n");
 
-        let out = condense_agent_report(&report, "MCP-only", false);
+        let (out, hidden) = condense_agent_report("Claude Code", "MCP-only", &report, false);
 
         assert!(out.contains("Plugin:         not installed"), "{out}");
-        assert!(out.contains("2 more checks [OK]"), "{out}");
-        // The tier rides the heading, the same shape the clean-host one-liner
-        // uses. A trailing `Distill tier:` row here was the second shape (#463).
-        assert!(out.lines().next().unwrap().ends_with("MCP-only"), "{out}");
+        // The offer to see the passing ones is the caller's line now, printed
+        // once under the whole list instead of once per host (#685).
+        assert_eq!(hidden, 2);
+        assert!(!out.contains("--detail"), "{out}");
         assert!(!out.contains("Distill tier:"), "{out}");
     }
 
     #[test]
     fn detail_returns_the_whole_report() {
-        let out = condense_agent_report(REPORT, "Full", true);
+        let (out, hidden) = condense_agent_report("Claude Code", "Full", REPORT, true);
 
         assert!(out.contains("PreToolUse"), "{out}");
         assert!(out.contains("MCP Server:"), "{out}");
         assert!(out.contains("Distill tier:"), "{out}");
+        // Nothing is hidden here, so the caller must not offer to unhide it.
+        assert_eq!(hidden, 0);
     }
 
     /// The cut has to be visible and reversible from the same line, because the

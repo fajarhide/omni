@@ -47,8 +47,12 @@ fn stays_parseable_when_fix_runs_the_installers() {
 fn still_prints_the_report_without_json() {
     let stdout = doctor_stdout(&["doctor"]);
 
-    assert!(
-        stdout.contains("Claude Code:"),
-        "human doctor lost its per-agent report: {stdout:.200}"
-    );
+    // The heading carried a colon until #685 gave the list fixed columns and took
+    // the name from `AgentIntegration::name()`, so the row is asserted by what it
+    // is for: this host, and what OMNI is allowed to do on it.
+    let row = stdout
+        .lines()
+        .find(|l| l.contains("Claude Code"))
+        .unwrap_or_else(|| panic!("human doctor lost its per-agent report: {stdout:.200}"));
+    assert!(row.contains("Full"), "row lost its tier: {row}");
 }
