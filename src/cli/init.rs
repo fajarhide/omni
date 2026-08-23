@@ -426,8 +426,24 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         if target_ids.contains(&agent.id()) {
             println!("{}", format!("🤖 {} Setup", agent.name()).bold().cyan());
 
-            if let Err(e) = agent.install(&exe_path) {
-                eprintln!("  {} Failed: {}", "✗".red(), e);
+            match agent.install(&exe_path) {
+                Err(e) => eprintln!("  {} Failed: {}", "✗".red(), e),
+                // #684. The success line was the same shape on every host, so
+                // configuring an MCP-only one read as "OMNI is now shortening
+                // your tool output". It is not, and the user found out from an
+                // empty `omni stats` days later. `doctor` says this correctly and
+                // is the wrong place to say it first: installation is the moment
+                // the expectation is set.
+                //
+                // Printed for every tier, not only the one that disappoints. A
+                // line that appears only on bad news is a line users learn to
+                // read as bad news, and `Full` is worth confirming.
+                Ok(()) => println!(
+                    "  {} {}: {}",
+                    "ℹ".blue(),
+                    agent.tier().name().bold(),
+                    agent.tier().label().bright_black()
+                ),
             }
 
             if agent.id() == "claude" {
@@ -479,6 +495,41 @@ mod tests {
         for agent in ["terminal", "windsurf", "aider", "vscode_continue"] {
             assert_eq!(init_id_for_agent(agent), None, "{agent}");
         }
+    }
+
+    /// #684. `omni init --antigravity` printed a green tick and nothing else, so
+    /// the expectation it set was distillation. Antigravity has no hook, records
+    /// nothing, and the user found out from an empty `omni stats` twelve days
+    /// later. `doctor` had said so all along, correctly, and is the wrong place
+    /// to say it first: installation is when the expectation is formed.
+    ///
+    /// Asserted on the source of the install loop rather than on a `Tier` value,
+    /// because the thing that broke was a caller that never asked. A test that
+    /// calls `tier()` itself passes while the loop ignores it, which is the same
+    /// shape as #663's `measurement_method` and #688's plugin key: the contract
+    /// holds and nobody reads it.
+    #[test]
+    fn the_install_loop_reports_the_tier_it_already_knows() {
+        let src = include_str!("init.rs");
+        let loop_start = src
+            .find("for agent in integrations {")
+            .expect("the install loop moved; this test is looking for the wrong thing");
+        let loop_body = src.get(loop_start..).unwrap_or("");
+        let install = loop_body
+            .find("agent.install(&exe_path)")
+            .expect("the install call moved");
+        // Everything the loop does after installing, up to its own end.
+        let after = loop_body.get(install..).unwrap_or("");
+        let reports = after
+            .split("\n    }\n")
+            .next()
+            .unwrap_or(after)
+            .contains("agent.tier()");
+        assert!(
+            reports,
+            "the install loop does not consult `agent.tier()` after installing, \
+             so every host gets the same success line whatever OMNI can do there"
+        );
     }
 
     /// `AGENT_FLAGS` is a hand-maintained index into `FLAGS`. Getting it wrong
