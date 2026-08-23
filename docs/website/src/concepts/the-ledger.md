@@ -21,6 +21,22 @@ the count and a handle. Everything else passes through byte for byte.
 [OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
+In a `Read`, the marker is followed by one `⋮` per line it replaced:
+
+```
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
+⋮
+⋮      (38 more)
+⋮
+```
+
+That looks like padding and it is doing real work. The editor numbers whatever it is
+handed, counting from the line the read started at, so a view with fewer lines than the
+file puts every surviving line on a number it is not at. Keeping the count means the
+survivors keep their own numbers, which is what lets a fold sit in the middle of a file at
+all. Without it a fold had to stop at the first line that survived, and on this repo's
+`CHANGELOG.md` that was 4.4% against the 76.5% its runs were worth.
+
 It reaches the class nothing else can. File reads are the largest class in the
 corpus, and the filters save **0.0%** of them, correctly: you cannot strip lines from
 a file the agent asked to see without guessing which parts it meant. The ledger takes

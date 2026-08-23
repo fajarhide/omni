@@ -128,6 +128,10 @@ command corpus replayed on 0.7.5, that class is the largest by bytes and the led
 takes **89.6%** off it. A file your agent reads twice comes back **97.2%** smaller the
 second time.
 
+A file that changed between the two reads still folds around the change. Each fold keeps
+the line count of what it replaced, so the lines you did not see moved stay on the numbers
+your editor gives them.
+
 Where there is nothing safe to take it takes nothing. A two-line `git status` has no
 ceremony to drop and no repeats to fold, and a JSON payload a later step parses is never
 touched at all, so OMNI hands those straight back rather than inventing a saving to

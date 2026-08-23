@@ -346,6 +346,19 @@ struct Run {
     seen: Option<Seen>,
 }
 
+/// One folded line, kept so the delivered line count matches the file's.
+///
+/// A host that numbers what it is handed cannot take a view with fewer lines than
+/// the payload, and folding to a single marker is exactly that. Emitting the
+/// marker plus one of these per remaining line keeps every survivor on its own
+/// number without a `startLine` bump, which is what makes an interior fold legal
+/// at all (#664).
+///
+/// `⋮` and not a blank or a tilde: editors already read it as elided content, so a
+/// reader who skips the marker above does not take it for a line of the file. It
+/// costs 4 bytes against the ~50 a real line of source runs to.
+const PAD_LINE: &str = "⋮\n";
+
 impl<'a> Ledger<'a> {
     pub fn new(store: &'a Store, scope: impl Into<String>) -> Self {
         Self {
@@ -500,15 +513,23 @@ impl<'a> Ledger<'a> {
         // deterministic for a caller replaying the same session.
         let projected = self
             .substitute(&lines, &hashes, &origin_of)
-            .filter(|(view, _, _)| view.len() < text.len());
+            .filter(|(view, _, _, _)| view.len() < text.len());
 
         // What the fold did to the numbering below it (#557), read from the folded
         // indices where the answer is known. Decided here rather than after the
         // recording below, because a host that renumbers will drop a split view and
         // the books must not carry a fold the agent never received (#657).
+        // A padded view has the payload's own line count, so every survivor is
+        // already where the file has it and no starting number moves (#664).
         let shifts = projected
             .as_ref()
-            .map(|(_, folded, above)| FoldShift::of(folded, lines.len(), *above))
+            .map(|(_, folded, above, padded)| {
+                if *padded {
+                    FoldShift::None
+                } else {
+                    FoldShift::of(folded, lines.len(), *above)
+                }
+            })
             .unwrap_or(FoldShift::None);
         let projected = projected.filter(|_| !(self.renumbered && shifts == FoldShift::Interior));
 
@@ -524,7 +545,7 @@ impl<'a> Ledger<'a> {
         // the gain filter above, the caller emits `text` verbatim and every line
         // was delivered. That is the empty-set case and needs no special arm.
         let delivered: Vec<String> = match &projected {
-            Some((_, folded, _)) => hashes
+            Some((_, folded, _, _)) => hashes
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !folded.contains(i))
@@ -536,7 +557,7 @@ impl<'a> Ledger<'a> {
         // like this session's (#533). `PROJECT_FLOOR_MULT` prices cross-agent
         // reuse and was calibrated on the single-agent case, and nothing recorded
         // enough to tell the two apart after the fact.
-        if let Some((_, folded, _)) = &projected {
+        if let Some((_, folded, _, _)) = &projected {
             // Every line folded means the agent holds markers and nothing else,
             // which is the case `MIN_WHOLE_OUTPUT_FOLD` refuses below 1 KB. Read
             // here rather than threaded out of `substitute`, because that flag is
@@ -598,7 +619,7 @@ impl<'a> Ledger<'a> {
                 .ledger_record(p, &delivered, &self.agent, &self.source);
         }
 
-        projected.map(|(view, _, _)| (view, shifts))
+        projected.map(|(view, _, _, _)| (view, shifts))
     }
 
     /// The marker one run would be replaced by, rendered rather than estimated
@@ -627,7 +648,7 @@ impl<'a> Ledger<'a> {
         lines: &[&str],
         hashes: &[String],
         origin_of: &dyn Fn(&String) -> Option<Seen>,
-    ) -> Option<(String, HashSet<usize>, usize)> {
+    ) -> Option<(String, HashSet<usize>, usize, bool)> {
         let runs = group_runs(hashes, origin_of);
         if !runs.iter().any(|r| r.seen.is_some()) {
             return None;
@@ -691,23 +712,24 @@ impl<'a> Ledger<'a> {
             })
             .collect();
 
-        // #658. A host that renumbers what it is handed cannot take survivors
-        // sitting in two blocks, and refusing the whole view gave up the bytes
-        // above the first split as well. Folding only down to the first run that
-        // survives leaves the rest contiguous, so the head still folds and one
-        // `startLine` still describes everything under it. `markers_above` is
-        // irrelevant to that question, so the plan asks it with zero: the bump is
-        // counted for real during the emit below.
+        // #658, then #664. A host that renumbers what it is handed cannot take
+        // survivors sitting in two blocks. #658 answered that by folding only down
+        // to the first survivor, which left everything below the first change on
+        // the table: 4.4% of a 434 KB CHANGELOG against the 77% its runs were
+        // worth. Padding each fold back to its own line count removes the
+        // constraint instead of working around it, since the survivors then keep
+        // the numbers they came with and no bump is needed.
+        //
+        // `markers_above` is irrelevant to the question the plan asks, so it asks
+        // with zero; the bump is counted for real during the emit below.
         let planned_folds: HashSet<usize> = runs
             .iter()
             .zip(&planned)
             .filter(|(_, fold)| **fold)
             .flat_map(|(run, _)| run.start..run.end)
             .collect();
-        let cutoff = (self.renumbered
-            && FoldShift::of(&planned_folds, lines.len(), 0) == FoldShift::Interior)
-            .then(|| planned.iter().position(|fold| !fold))
-            .flatten();
+        let pad =
+            self.renumbered && FoldShift::of(&planned_folds, lines.len(), 0) == FoldShift::Interior;
 
         let mut out = String::with_capacity(payload_bytes);
         let mut folded: HashSet<usize> = HashSet::new();
@@ -718,6 +740,7 @@ impl<'a> Ledger<'a> {
         // runs. Every attempt to infer it downstream was wrong (#573).
         let mut markers_above = 0usize;
         let mut still_above = true;
+        let mut padded_any = false;
         for (i, run) in runs.iter().enumerate() {
             let body = lines[run.start..run.end].concat();
             // The only question that decides a fold: does this run save more
@@ -747,7 +770,26 @@ impl<'a> Ledger<'a> {
             // payload above: does this run save more than the marker replacing
             // it costs. The marker is rendered rather than estimated, so the
             // test cannot drift from the string it is weighing (#450).
-            let long_enough = planned[i] && cutoff.is_none_or(|c| i < c);
+            // Padding is part of what the fold costs, so the run has to beat it
+            // as well as the marker. Without this a short run "saves" bytes it
+            // then spends on its own filler.
+            let padding = if pad {
+                PAD_LINE.len() * (run.end - run.start - 1)
+            } else {
+                0
+            };
+            let long_enough = planned[i]
+                && run.seen.as_ref().is_some_and(|seen| {
+                    // The marker is rendered without its terminator and the emit
+                    // adds one back for a run that ended a line, so the test has to
+                    // count it: at the boundary a run folded one byte short of the
+                    // gain it is required to make (review of #664).
+                    let marker = self
+                        .marker_for(run, seen, lines.len(), &"0".repeat(HANDLE_LEN))
+                        .len()
+                        + usize::from(body.ends_with('\n'));
+                    body.len() >= marker + padding + seen.origin.min_gain()
+                });
 
             // A handle is only offered for content that is provably retrievable.
             // `store_rewind` returns `None` when the row did not land, and the
@@ -775,6 +817,12 @@ impl<'a> Ledger<'a> {
                     if body.ends_with('\n') {
                         out.push('\n');
                     }
+                    if pad {
+                        for _ in 1..(run.end - run.start) {
+                            out.push_str(PAD_LINE);
+                        }
+                        padded_any = true;
+                    }
                     folded.extend(run.start..run.end);
                     replaced_any = true;
                     if still_above {
@@ -787,7 +835,7 @@ impl<'a> Ledger<'a> {
                 }
             }
         }
-        replaced_any.then_some((out, folded, markers_above))
+        replaced_any.then_some((out, folded, markers_above, padded_any))
     }
 }
 

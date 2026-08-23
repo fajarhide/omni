@@ -153,6 +153,10 @@ korpus 5.984 perintah yang diputar ulang di 0.7.5, kelas itu yang terbesar menur
 byte dan ledger memangkas **89,6%** darinya. File yang dibaca agent Anda dua kali
 kembali **97,2%** lebih kecil pada bacaan keduanya.
 
+File yang berubah di antara dua bacaan tetap dilipat di sekitar perubahannya. Tiap lipatan
+mempertahankan jumlah baris yang digantikannya, jadi baris yang tidak berpindah tetap ada
+di nomor yang diberikan editor Anda.
+
 Ketika tidak ada yang aman untuk diambil, ia tidak mengambil apa pun. `git status`
 dua baris tidak punya basa-basi untuk dibuang dan tidak punya pengulangan untuk
 dilipat, dan payload JSON yang akan diurai langkah berikutnya sama sekali tidak

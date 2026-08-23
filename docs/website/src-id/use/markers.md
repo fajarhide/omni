@@ -47,6 +47,19 @@ baris di tempat run ulang akan mencetak ratusan baris yang sama. Apa pun yang
 kurang dari seluruh jawaban memakai kalimat di atasnya.
 
 ```
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
+⋮
+⋮
+```
+
+Di pembacaan file, dan hanya di situ, markernya diikuti satu `⋮` untuk tiap baris yang
+digantikannya. Editor menomori baris yang diterimanya, dihitung dari baris tempat
+pembacaan dimulai, jadi tampilan yang lebih pendek akan menaruh tiap baris yang selamat di
+nomor yang bukan miliknya. Mempertahankan jumlah baris itulah yang membuat sebuah lipatan
+boleh berada di antara dua bagian yang masih Anda butuhkan. Baris pengisi itu bukan konten
+yang bisa diambil: `omni retrieve` pada handle di atas mencetak baris aslinya.
+
+```
 [OMNI: 40 lines already shown from charlie.tf, omni retrieve 0000000000000000]
 ```
 

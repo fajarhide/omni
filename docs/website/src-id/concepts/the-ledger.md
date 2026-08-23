@@ -23,6 +23,23 @@ byte.
 [OMNI: 40 lines already shown, omni retrieve 0000000000000000]
 ```
 
+Di sebuah `Read`, markernya diikuti satu `⋮` untuk tiap baris yang digantikannya:
+
+```
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
+⋮
+⋮      (38 baris lagi)
+⋮
+```
+
+Itu terlihat seperti pengisi dan sebenarnya bekerja. Editor menomori apa pun yang
+diterimanya, dihitung dari baris tempat pembacaan dimulai, jadi tampilan dengan baris
+lebih sedikit daripada filenya menaruh tiap baris yang selamat di nomor yang bukan
+miliknya. Mempertahankan jumlah baris berarti yang selamat tetap di nomornya sendiri, dan
+itulah yang membuat sebuah lipatan boleh berada di tengah file. Tanpa itu lipatan harus
+berhenti di baris pertama yang selamat, dan di `CHANGELOG.md` repo ini angkanya 4,4%
+melawan 76,5% yang sebenarnya bisa didapat.
+
 Ia menjangkau kelas yang tidak bisa dijangkau apa pun. Pembacaan berkas adalah
 kelas terbesar di korpus, dan penyaring menghemat **0,0%** darinya, dan itu
 benar: Anda tidak bisa membuang baris dari berkas yang diminta agent tanpa
