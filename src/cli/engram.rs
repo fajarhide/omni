@@ -27,10 +27,7 @@ pub struct EngramJson {
 const FLAGS: super::Flags = &[("--json", "Machine-readable JSON output")];
 
 pub fn run_engram(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         println!("\nomni engram: View engrams (subtask digests)\n");
         println!("USAGE:\n  omni engram [list] [FLAGS]\n");
         super::print_flags(FLAGS);
@@ -38,8 +35,8 @@ pub fn run_engram(args: &[String], store: Arc<Store>) -> anyhow::Result<()> {
     }
     super::check_flags("engram", args, FLAGS)?;
 
-    let is_json = args.iter().any(|a| a == "--json");
-    let is_list = args.iter().any(|a| a == "list");
+    let is_json = super::has_flag(args, "--json");
+    let is_list = super::has_flag(args, "list");
 
     if is_json && is_list {
         let state = match store.find_latest_session() {

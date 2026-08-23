@@ -23,10 +23,7 @@ pub fn print_help() {
 const FLAGS: super::Flags = &[];
 
 pub fn run(args: &[String]) -> Result<(), String> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }

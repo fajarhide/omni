@@ -4,10 +4,7 @@ use anyhow::Result;
 use colored::*;
 
 pub fn run_query(args: &[String], store: &Store) -> Result<()> {
-    if args
-        .iter()
-        .any(|a| a == "--help" || a == "-h" || a == "help")
-    {
+    if super::wants_help(args) {
         print_help();
         return Ok(());
     }
@@ -20,7 +17,7 @@ pub fn run_query(args: &[String], store: &Store) -> Result<()> {
         return Ok(());
     };
 
-    let json_mode = args.iter().any(|a| a == "--json");
+    let json_mode = super::has_flag(args, "--json");
 
     match store.execute_omni_query(&raw_query) {
         Ok(result) => {
