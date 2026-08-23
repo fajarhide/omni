@@ -368,10 +368,14 @@ fn view(args: &[String]) -> &'static str {
     // printed commands, routes and agents. `--since week` means the summary for
     // that window, which is the sane reading, but the old spellings keep the old
     // behaviour: a script that says `--week` is asking for what it always got.
-    let legacy_window = super::has_any(args, &["--hour", "-H"])
+    // The old chain tested these last, after `--project`, so `--all-commands
+    // --project` gave the project breakdown. Grouping `--all-commands` with
+    // `--detail` reversed that for a script passing both (#672).
+    let legacy_detail = super::has_any(args, &["--hour", "-H"])
         || super::has_any(args, &["--day", "--today", "-d"])
         || super::has_any(args, &["--week", "-w"])
-        || super::has_any(args, &["--month", "-m"]);
+        || super::has_any(args, &["--month", "-m"])
+        || super::has_flag(args, "--all-commands");
 
     if super::has_flag(args, "--share") {
         "share"
@@ -379,11 +383,11 @@ fn view(args: &[String]) -> &'static str {
         "rerun"
     } else if super::has_flag(args, "--context") {
         "context"
-    } else if super::has_flag(args, "--detail") || super::has_flag(args, "--all-commands") {
+    } else if super::has_flag(args, "--detail") {
         "detail"
     } else if super::has_flag(args, "--project") {
         "project"
-    } else if legacy_window {
+    } else if legacy_detail {
         "detail"
     } else {
         "summary"
@@ -1956,6 +1960,17 @@ mod tests {
             view(&args(&["--week"])),
             "detail",
             "a window flag on its own selected the detail view and still does"
+        );
+        assert_eq!(view(&args(&["--all-commands"])), "detail");
+        assert_eq!(
+            view(&args(&["--all-commands", "--project"])),
+            "project",
+            "the old chain tested --project first, and a script passing both got it"
+        );
+        assert_eq!(
+            view(&args(&["--week", "--project"])),
+            "project",
+            "same for a window flag beside it"
         );
         assert_eq!(
             view(&args(&["--since", "week"])),
