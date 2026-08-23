@@ -518,17 +518,27 @@ mod tests {
         let install = loop_body
             .find("agent.install(&exe_path)")
             .expect("the install call moved");
-        // Everything the loop does after installing, up to its own end.
         let after = loop_body.get(install..).unwrap_or("");
-        let reports = after
-            .split("\n    }\n")
-            .next()
-            .unwrap_or(after)
-            .contains("agent.tier()");
+
+        // The success arm alone, not "anywhere after the install call". A scan
+        // that wide passes with the tier reported from an unrelated branch, and
+        // the branch next door is `if agent.id() == "claude"`, so the hole is not
+        // hypothetical: the line could report the tier for one host and stay
+        // silent for the other thirteen.
+        let ok_arm = after
+            .find("Ok(())")
+            .map(|i| after.get(i..).unwrap_or(""))
+            .expect("the install call no longer matches on its result");
+        let ok_arm = ok_arm.split("\n            }").next().unwrap_or(ok_arm);
+
         assert!(
-            reports,
-            "the install loop does not consult `agent.tier()` after installing, \
-             so every host gets the same success line whatever OMNI can do there"
+            ok_arm.contains("agent.tier()"),
+            "the success arm does not consult `agent.tier()`, so every host gets \
+             the same line whatever OMNI can do there. Arm: {ok_arm}"
+        );
+        assert!(
+            ok_arm.contains("println!"),
+            "the success arm consults the tier and prints nothing. Arm: {ok_arm}"
         );
     }
 
