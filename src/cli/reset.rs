@@ -22,7 +22,46 @@ const FLAGS: super::Flags = &[
     ("--antigravity", "Uninstall Antigravity IDE"),
     ("--hermes", "Uninstall Hermes Agent"),
     ("--pi", "Uninstall Pi Agent"),
+    ("--openclaw", "Uninstall OpenClaw"),
+    ("--vscode", "Uninstall VS Code"),
 ];
+
+/// The integration a flag entry names: its last alias with the dashes off, so
+/// `"--roo, --roo-code"` is `roo-code`.
+fn target_of(flags: &'static str) -> &'static str {
+    flags
+        .rsplit(',')
+        .next()
+        .unwrap_or(flags)
+        .trim()
+        .trim_start_matches("--")
+}
+
+/// The integrations named on the command line, in `FLAGS` order.
+///
+/// One table rather than a boolean per host. The list used to be repeated four
+/// times in this file, as a `let mut is_x`, a term of a fourteen-way `no_flags`
+/// chain, a menu arm and an `if is_x { push }`, and #640 is what that costs:
+/// OpenClaw and VS Code were in the registry with no flag at all, and the second
+/// one went unnoticed even in the report.
+///
+/// Deriving the id from `FLAGS` is also what lets the test below check routing
+/// instead of spelling. Greptile's review of the first draft was right that a
+/// test comparing registry ids to flag *names* passes while a flag selects
+/// nothing, which is #143's guard answering a question nobody asked all over
+/// again.
+fn targets_from_args(args: &[String]) -> Vec<&'static str> {
+    FLAGS
+        .iter()
+        .filter(|(flags, _)| *flags != "--all")
+        .filter(|(flags, _)| {
+            flags
+                .split(',')
+                .any(|alias| args.iter().any(|a| super::flag_name(a) == alias.trim()))
+        })
+        .map(|(flags, _)| target_of(flags))
+        .collect()
+}
 
 fn print_help() {
     println!(
@@ -52,36 +91,10 @@ pub fn handle_reset() -> anyhow::Result<()> {
     // understand, doing something else, and exiting 0.
     super::check_flags("reset", &args, FLAGS)?;
 
-    let is_all = args.iter().any(|a| a == "--all");
+    let is_all = args.iter().any(|a| super::flag_name(a) == "--all");
+    let mut target_ids = targets_from_args(&args);
 
-    let mut is_claude = args.iter().any(|a| a == "--claude");
-    let mut is_cursor = args.iter().any(|a| a == "--cursor");
-    let mut is_zed = args.iter().any(|a| a == "--zed");
-    let mut is_cline = args.iter().any(|a| a == "--cline");
-    let mut is_roo = args.iter().any(|a| a == "--roo" || a == "--roo-code");
-    let mut is_copilot = args.iter().any(|a| a == "--copilot");
-    let mut is_gemini = args.iter().any(|a| a == "--gemini");
-    let mut is_opencode = args.iter().any(|a| a == "--opencode");
-    let mut is_codex = args.iter().any(|a| a == "--codex");
-    let mut is_antigravity = args.iter().any(|a| a == "--antigravity");
-    let mut is_hermes = args.iter().any(|a| a == "--hermes");
-    let mut is_pi = args.iter().any(|a| a == "--pi");
-
-    // Check if no flags
-    let no_flags = !is_claude
-        && !is_cursor
-        && !is_zed
-        && !is_cline
-        && !is_roo
-        && !is_copilot
-        && !is_gemini
-        && !is_opencode
-        && !is_codex
-        && !is_antigravity
-        && !is_hermes
-        && !is_pi;
-
-    if no_flags && !is_all {
+    if target_ids.is_empty() && !is_all {
         println!(
             "\n{} {}",
             "OMNI RESET".bold().red(),
@@ -104,68 +117,34 @@ pub fn handle_reset() -> anyhow::Result<()> {
         println!("  [{}] Antigravity IDE", "11".cyan());
         println!("  [{}] Hermes Agent", "12".cyan());
         println!("  [{}] Pi Agent", "13".cyan());
+        println!("  [{}] OpenClaw", "14".cyan());
+        println!("  [{}] VS Code", "15".cyan());
         println!("  [{}] Cancel\n", "q".yellow());
 
-        print!("Select an option [1-13, q]: ");
+        print!("Select an option [1-15, q]: ");
         std::io::stdout().flush()?;
 
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
         match input.trim() {
             "1" => return perform_reset(true, vec![]),
-            "2" => is_claude = true,
-            "3" => is_cursor = true,
-            "4" => is_zed = true,
-            "5" => is_cline = true,
-            "6" => is_roo = true,
-            "7" => is_copilot = true,
-            "8" => is_gemini = true,
-            "9" => is_opencode = true,
-            "10" => is_codex = true,
-            "11" => is_antigravity = true,
-            "12" => is_hermes = true,
-            "13" => is_pi = true,
+            "2" => target_ids.push("claude"),
+            "3" => target_ids.push("cursor"),
+            "4" => target_ids.push("zed"),
+            "5" => target_ids.push("cline"),
+            "6" => target_ids.push("roo-code"),
+            "7" => target_ids.push("copilot"),
+            "8" => target_ids.push("gemini"),
+            "9" => target_ids.push("opencode"),
+            "10" => target_ids.push("codex"),
+            "11" => target_ids.push("antigravity"),
+            "12" => target_ids.push("hermes"),
+            "13" => target_ids.push("pi"),
+            "14" => target_ids.push("openclaw"),
+            "15" => target_ids.push("vscode"),
             _ => return Ok(()),
         }
         println!();
-    }
-
-    let mut target_ids = Vec::new();
-    if is_claude {
-        target_ids.push("claude");
-    }
-    if is_cursor {
-        target_ids.push("cursor");
-    }
-    if is_zed {
-        target_ids.push("zed");
-    }
-    if is_cline {
-        target_ids.push("cline");
-    }
-    if is_roo {
-        target_ids.push("roo-code");
-    }
-    if is_copilot {
-        target_ids.push("copilot");
-    }
-    if is_gemini {
-        target_ids.push("gemini");
-    }
-    if is_opencode {
-        target_ids.push("opencode");
-    }
-    if is_codex {
-        target_ids.push("codex");
-    }
-    if is_antigravity {
-        target_ids.push("antigravity");
-    }
-    if is_hermes {
-        target_ids.push("hermes");
-    }
-    if is_pi {
-        target_ids.push("pi");
     }
 
     perform_reset(is_all, target_ids)
@@ -236,4 +215,79 @@ fn perform_reset(is_all: bool, target_ids: Vec<&str>) -> anyhow::Result<()> {
 
     println!("\n{} Selected integrations have been reset.", "✓".green());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    /// #640. `omni reset` kept its own hand-written list of hosts beside the
+    /// registry, and the list fell behind: OpenClaw shipped with no flag, so its
+    /// `uninstall` was reachable only through `--all`. Checking the registry
+    /// against `FLAGS` while writing that fix found `vscode` missing too, which
+    /// the issue had not noticed because it compared only the first-party ids.
+    ///
+    /// A list that has to be edited in seven places when a host is added will
+    /// fall behind again. This is the check that says so at `cargo test` time
+    /// rather than when a user tries the flag.
+    #[test]
+    fn every_integration_can_be_uninstalled_by_its_own_flag() {
+        // Driven through the real routing, not through the flag names. The first
+        // draft compared registry ids against strings parsed out of `FLAGS`,
+        // which Greptile pointed out passes while a flag selects nothing: the
+        // same shape as #143's guard, which reported "parsed" for a payload that
+        // had matched the wrong tool.
+        let missing: Vec<&str> = crate::agents::all_integrations()
+            .iter()
+            .map(|a| a.id())
+            .filter(|id| {
+                let args = vec![format!("--{id}")];
+                !super::targets_from_args(&args).contains(id)
+            })
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "these integrations cannot be selected by their own flag, so they can \
+             only be removed by uninstalling everything: {missing:?}"
+        );
+    }
+
+    /// `--roo` is an alias for `--roo-code` and has been since before the table
+    /// existed. Deriving the id from the *last* alias is what keeps it working,
+    /// and getting that backwards would silently rename the target to `roo`.
+    #[test]
+    fn an_alias_selects_the_same_integration_as_its_canonical_flag() {
+        assert_eq!(
+            super::targets_from_args(&["--roo".to_string()]),
+            vec!["roo-code"]
+        );
+        assert_eq!(
+            super::targets_from_args(&["--roo-code".to_string()]),
+            vec!["roo-code"]
+        );
+    }
+
+    /// `--all` is not an integration, and routing it as one would ask the
+    /// registry for a host called `all`.
+    #[test]
+    fn all_is_not_a_target() {
+        assert!(super::targets_from_args(&["--all".to_string()]).is_empty());
+    }
+
+    /// `check_flags` accepts `--flag=value` and validates the name alone, so a
+    /// consumer comparing the whole argument accepts the input and then routes
+    /// nothing. `omni reset --openclaw=1` passed validation, selected no
+    /// integration, and fell into the interactive menu with the plugin still on
+    /// disk. Confident behaviour over an argument that was never really parsed is
+    /// #151 wearing a different flag.
+    #[test]
+    fn a_flag_carrying_a_value_still_selects_its_integration() {
+        assert_eq!(
+            super::targets_from_args(&["--openclaw=1".to_string()]),
+            vec!["openclaw"]
+        );
+        assert_eq!(
+            super::targets_from_args(&["--roo=yes".to_string()]),
+            vec!["roo-code"]
+        );
+    }
 }
