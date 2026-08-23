@@ -73,6 +73,11 @@ it is ever needed.
 This is the half a filter cannot reach. No pattern in that file is noise, so nothing
 in it can be dropped on its own merits. It goes because the agent has already seen it.
 
+**And when the file has changed since?** The parts already seen still fold, in place,
+around the parts that have not. Each fold keeps the line count of what it replaced, so
+every surviving line stays on the number your editor gives it and the agent can still act
+on those numbers.
+
 ## The same `git log`, side by side
 
 Without OMNI, one commit's `Author` / `Date` / body already fills the screen. With

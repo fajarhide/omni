@@ -45,6 +45,18 @@ every line, the marker is the whole output rather than a gap inside it, so it sa
 hundreds. Anything less than the whole reply keeps the wording above.
 
 ```
+[OMNI: 40 lines already shown, omni retrieve 0000000000000000]
+⋮
+⋮
+```
+
+In a file read, and only there, the marker is followed by one `⋮` per line it replaced.
+Your editor numbers the lines it is handed, counting from the line the read began at, so a
+shorter view would put every surviving line on a number it is not at. Keeping the count is
+what lets a fold sit between two pieces of content you still need. The filler is never
+retrievable content: `omni retrieve` on the handle above prints the real lines.
+
+```
 [OMNI: 40 lines already shown from charlie.tf, omni retrieve 0000000000000000]
 ```
 
