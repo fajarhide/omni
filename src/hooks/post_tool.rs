@@ -434,6 +434,10 @@ fn fold_cross_turn(
         // another's (#622). For a `Read` this is the path, for Bash the command.
         .from(normalized.command.as_str())
         .by(crate::hooks::normalize::stats_agent_id(&normalized.agent))
+        // Only `Read` hands its payload back as numbered content, so only `Read`
+        // refuses a view it cannot renumber. Saying so here keeps the refusal and
+        // the bookkeeping in one place (#657).
+        .renumbered(normalized.tool_name == "Read")
         .project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host
@@ -3356,6 +3360,61 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             file["startLine"],
             100 + 30 - above,
             "the middle block keeps numbers it is no longer at: {out}"
+        );
+    }
+
+    /// #657. A `Read` whose survivors sit in two blocks cannot be renumbered, so
+    /// the view is dropped and the host keeps its own bytes. The fold was recorded
+    /// before that decision was taken, so `ledger_folds` kept a row for bytes the
+    /// agent received in full, and `omni_explain_savings` reads that table.
+    ///
+    /// Measured before the fix: 4 of 17 markdown files read twice unchanged
+    /// delivered nothing and recorded 78% to 97% as saved, `CHANGELOG.md` among
+    /// them at 341 KB.
+    #[test]
+    fn a_refused_read_fold_records_nothing() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let seen = range(100, 200);
+        // Two new lines with a folded run between them: the survivors are in two
+        // blocks, and one starting number cannot describe both.
+        let split = format!(
+            "{}{}{}{}{}",
+            range(100, 130),
+            "    let fresh_one = \"added since the first read\";\n",
+            range(130, 170),
+            "    let fresh_two = \"added since the first read too\";\n",
+            range(170, 200)
+        );
+        let payload = |content: &str| {
+            json!({
+                "session_id": "host-657-split",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": content,
+                    "startLine": 100,
+                    "numLines": content.lines().count(),
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&seen), Some(store.clone()), None);
+        let out = process_payload(&payload(&split), Some(store.clone()), None);
+
+        assert!(
+            out.is_none(),
+            "split survivors cannot be renumbered, so nothing may be rewritten: {out:?}"
+        );
+        let folds = store.get_recent_ledger_folds(None, 10);
+        assert!(
+            folds.is_empty(),
+            "the fold was refused, so the books must not carry it: {folds:?}"
         );
     }
 
