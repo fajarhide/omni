@@ -8,6 +8,1135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-08-24
+
+### Changed
+**OMNI's MCP surface is 23.1% smaller, with every tool still advertised.** The
+tool definitions sit in the prefix of every request for the life of a session, so
+each byte is re-read once per request rather than once. `schemars` was stamping
+every parameter struct with two keys a caller never uses: `$schema`, a 56 byte URL
+naming the JSON Schema draft, and `title`, which is the Rust struct name
+(`OmniRunParams`). Over the nine tools that is 686 B of 2,972 B, now 2,286 B.
+
+Nothing was removed to get it. No tool dropped, no description shortened, no
+parameter changed, and `omni_retrieve` still parses its argument from the trimmed
+schema. `title` was also leaking an internal type name onto the wire, which is not
+something a caller should be reading.
+
+Two tests hold it: one asserts neither key is advertised on either policy arm, the
+other ratchets the total byte size so a schema growing back fails rather than
+being noticed later.
+
+This is the cheap half of #609. The expensive half stands: 37 of 260 sessions in
+the measured corpus ever call an omni tool, so 86% still carry a surface they never
+use, and `omni_context` has never been called once.
+**`omni_context` is now `omni context`, and the MCP surface every request carries
+is 8 tools instead of 9.** `mcp::policy::FULL` admits a tool on one stated rule,
+"called at least once in the corpus". Re-measured over 253 recorded sessions,
+`omni_context` was the only advertised tool with **zero** calls ever, and the three
+places OMNI recommended it appear zero times in 10,578 traces, so this is not an
+agent ignoring advice.
+
+It cost 189 B in the prefix of every request on a Full-tier host. Measured through
+the real server over stdio: **2,296 B to 2,098 B**.
+
+Nothing is removed. `omni context <file>` prints the same report, costs nothing per
+request, and an agent that wants it still has `omni_run("omni context <file>")`.
+The two Guard strings that used to recommend the tool now name the command.
+
+The surface gate is ratcheted from 2,500 to 2,200, just above what measures today,
+because a bound with room in it does not notice a regression: the old 3,000 gate
+stayed green through the whole 7,912 B era.
+
+This still does not settle what #609 was filed for. 86% of sessions carry a surface
+they never call, and that is a question about advertising 2,098 B rather than about
+any one tool.
+
+Review found two more while checking this. `omni context ./src/x.rs` and `omni
+context src/x.rs` were two different keys: `normalize_path_string` only swapped
+backslashes, so the graph answered "imports: none detected" for one spelling and a
+hot-file lookup keyed on its result said "no" for a file the session had touched.
+That was true for as long as the MCP tool existed and is fixed at the normaliser,
+where every caller routes through. And the Guard string that suggests the command
+now quotes the path, since a filename with a space in it was being pasted into
+something a reader would run.
+**A Full-tier host is now told about two tools instead of eight, and the surface it
+carries in every request drops from 2,098 B to 467 B.** The rule that picked the set
+was "called at least once in the corpus", and one call is not a price. Measured over
+256 recorded sessions with `mcp_surface.py`:
+
+| tool | bytes | calls | sessions |
+| --- | ---: | ---: | ---: |
+| `omni_retrieve` | 207 | 109 | 24 |
+| `omni_explain_savings` | 260 | 29 | 27 |
+| the other six | 1,631 | 11 | 7 |
+
+The six cost 77.7% of the surface for 7.4% of the calls, in the prefix of every
+request of every session, while 214 of the 256 sessions called nothing at all.
+
+The cut is only on the tier whose shell OMNI already hooks, which is why it is
+affordable there: `omni exec` runs what `omni_run` ran, `omni remember` writes what
+`omni_remember` wrote, `omni stats --view context` prints what
+`omni_context_breakdown` printed, and `omni stats --view detail` carries
+`omni_history`'s rows with repeats folded into a count. `OMNI_MCP_TOOLS=all` puts the
+tools themselves back. `omni_recall` and
+`omni_find_noise` have no CLI equivalent and are behind the override alone. On a
+Handoff-first host nothing changes: MCP is the only door OMNI has there, so all eight
+stay advertised.
+
+An unregistered host now takes the Handoff-first list rather than the Full one. The
+guarantee that being wrong about a host costs a flag and not a capability did not
+change; the list holding it did, because `FULL` is now priced for a host with a
+hooked shell and an unrecognised id is exactly the case where nobody knows.
+
+This is what #609 was filed to decide. What it does not do is take the surface to
+zero for the 84% of sessions that never call a tool; that needs an opt-in default,
+which would cost the other 16% their tools with no signal.
+**Two guards for the property that makes OMNI cache-safe.** Prompt caching is
+prefix-matched, so a tool that rewrites anything already in the conversation
+invalidates every token after the edit. OMNI's answer is structural: the only
+thing it can rewrite is the newest tool result.
+
+The post-tool hook may emit exactly three keys and all three name the call it was
+handed. A fourth is somebody having found a way to reach into the prefix, and the
+test now fails the build saying so.
+
+And an identical ledger sequence replayed against identical history has to produce
+identical bytes. The ledger is the only stateful stage, so the same command is
+rewritten differently depending on what earlier commands showed, and a prefix that
+cannot be reproduced cannot be cached. The fixture asserts it reached the fold
+before comparing, because three identical passthroughs would satisfy the
+comparison while testing nothing.
+
+No claim is published yet. The measurement that would support one is not settled;
+see #610.
+**The `string_slice` deny is live in every file again.** `src/lib.rs` has denied it
+for a long time, and six files switched it off for their whole contents with a
+module-level allow. That is where all 23 of #619's panicking cuts lived, including
+one that crashed `infer_domain` outright, so the guard existed and was disabled in
+exactly the places that needed it.
+
+The 38 remaining slices are safe, and now say why one function at a time: each
+index comes from `find` or `rfind` on an ASCII needle, with any offset added to it
+being that needle's own byte length, or from a `char_indices` walk. A blanket
+allow covers whatever gets written into a file next; a targeted one covers the
+code someone actually looked at.
+
+One was not safe. `parse_query` tested `to_lowercase().starts_with("context for ")`
+and then sliced the **original** string at a hard-coded 12. Lowercasing can change
+a string's byte length, so the two are not the same offset and the cut could land
+inside a character. It now asks `get(..12)`, which answers `None` on a
+non-boundary instead of panicking, so it needs no exemption at all.
+
+`src/util/text.rs` keeps its file-level allow, which is the one place it is
+honest: every function in it verifies a boundary before indexing, and that is the
+file's whole job.
+**A fold in the middle of a `Read` keeps the file's line count, so it may fold at all.**
+The editor numbers whatever it is handed, counting from the line the read started at, so a
+view with fewer lines than the payload puts every surviving line on a number it is not at
+(#557). #658 worked around that by folding only down to the first line that survives, which
+left everything below the first change on the table. A marker followed by one `⋮` per line
+it replaced removes the constraint instead: the survivors keep their own numbers and no
+starting number moves.
+
+Measured over 20 markdown files read twice with no edit between the reads, 615 KB:
+
+| | #658 | now |
+| --- | --- | --- |
+| corpus | 27.3% | **82.3%** |
+| `CHANGELOG.md`, 434 KB | 4.4% | 76.5% |
+| `CONTRIBUTING.md` | 8.3% | 84.9% |
+| `docs/website/src/develop/index.md` | 7.8% | 84.0% |
+| files that already folded whole | 95.4% to 99.6% | unchanged |
+
+Every one of the 20 delivers a fold now; four of them delivered nothing before #658 and
+little after it.
+
+`⋮` rather than a blank or a tilde, because editors already read it as elided content, so a
+reader who skips the marker above does not take it for a line of the file. It costs 4 bytes
+against the ~50 a line of source runs to, and the run has to beat that filler as well as its
+marker before it folds: a seen line arriving alone between new ones is left verbatim, where
+before it could buy a marker it never paid for.
+
+The padding is only used where the survivors would otherwise be split. A fold with nothing
+under it, or one whose survivors are already contiguous, keeps its `startLine` bump and
+emits no filler.
+**`omni stats` reads both engines now, each percentage against its own base.**
+
+The report computed everything from `distillations` and never read `ledger_folds`,
+so the engine that removed the most bytes was absent. On the maintainer's machine,
+over one week:
+
+```
+distiller   309,429 B removed   the whole of what the report showed
+ledger      501,385 B removed   not mentioned on any line
+```
+
+The ledger took out 1.6 times what the distiller did and the report said 4.5%,
+because that 4.5% was the distiller's saving divided by 15,718 calls OMNI had
+deliberately declined. The default view now leads with the bytes and gives each
+engine its own row:
+
+```
+    5.1 MB  never reached your model
+
+    folded      1.7 MB   41% of what it folded         906 folds
+    distilled   3.4 MB   48% of what it distilled    1,056 calls
+    left alone       0   by design                  15,718 calls
+```
+
+The two percentages come from different populations and are never added: bytes are
+summed, ratios are not. `left alone` reads `0` rather than the 31 MB that passed
+through, because those bytes are neither a win nor a loss.
+
+The fold figures count fold operations rather than `ledger_folds` rows: one fold
+writes a row per (origin, source agent) pair and repeats the payload size on each,
+so summing rows divided by the same payload several times and reported 31% where
+the real figure is 41%.
+
+`ledger_folds` gains a `fold_id` for this, because nothing in the table said which
+rows belonged together and every way of inferring it merges some pair of folds.
+Rows written before the column are backfilled from (second, session, agent, scope,
+payload size), which is the best the surviving data supports, so a count over
+history is a lower bound and its ratio a slight overstatement. Anything written
+since is exact. It is taken over the folds that record a payload at
+all, and says how many that was. `payload_bytes` arrived in a migration defaulting
+to zero, so the rest carry a saving with no base to divide it by; where none do,
+no percentage is printed at all.
+
+`--json` gains an `engines` object naming the two separately, so nothing downstream
+can average them.
+
+Session lifetime, the per-period table, top commands and the agent split moved to
+`--detail`, which also names why each call was declined out of `passthrough_events`.
+That column has been recorded since #533 and nothing printed it, which left a 94%
+passthrough share looking like an accusation instead of an explanation.
+**`omni stats` has five flags instead of twelve.** Four of them selected one thing, the
+window, under six names, and passing two took whichever branch was tested first. That
+collapses into `--since hour|today|week|month|all`, and the view flags into
+`--view summary|detail|commands|projects|context|rerun|share`, with `--limit` replacing
+`--all-commands`.
+
+`--json` and `--card` are output formats rather than views now. `--card` outranks
+everything, since naming it can only mean writing the file, and `--json` outranks the view,
+since there is one machine-readable report and it is not per view. Reading them as views is
+how `--view detail --card` came to write no image at all. The decision is a table over
+(view, json, card) with the argument wiring tested separately, because the mistakes there
+are arguments that never arrive rather than rows that are wrong.
+
+Every earlier spelling still resolves, absent from `--help` and from the manual: `--detail`,
+`--today`, `--day`, `-d`, `--week`, `-w`, `--month`, `-m`, `--hour`, `-H`, `--all-commands`,
+`--share`, `--project`, `--context` and `--rerun`. Nothing in a script breaks and no
+deprecation notice is printed, because the rename is ours and not the caller's. `-d` reads
+as detail and means day, which is why it keeps working and is never shown again.
+
+A window flag on its own still selects the detail view, as it did through the old chain's
+last branch, so `omni stats --week` prints what it always printed. `--since week` names a
+window and nothing else, which is the reading the new flag is for.
+
+A flag that takes a value no longer eats the flag behind it, and the command is refused
+rather than run on a default. `omni stats --since --view detail` used to read `--view` as
+the window, fall back to thirty days, and then let `--view` be found again by its own
+resolver, so a malformed invocation succeeded and reported something else. It exits 1 with
+the flag named. Treating the value as merely absent was the first attempt and was half a
+fix: the report still ran.
+
+The accepted names live in one list with a count of how many the help page shows, rather
+than in a visible list and a hidden one. A second copy of a flag name is a copy that drifts,
+and #452, #454 and #456 were each one half of a pair being fixed.
+**The benchmark page publishes two runs, and says why they disagree by a factor of
+fifteen.** Every figure on it came from one replay of one week, 2026-08-11 to 08-14, and
+`execution_traces` prunes at seven days, so that corpus is gone and nobody can re-derive
+those numbers, us included. Re-running the same harness on 2026-08-23 over the following
+week reads **1.0% from the filters and 4.6% with the ledger**, against 32.6% and 69.6%.
+
+Neither figure is wrong and the gap is the useful part: that week was 80.6% duplicate bytes
+from a fortnight of building OMNI, and this one is shell plumbing, 4,598 of 8,934 calls
+beginning with `cd` and a median repeated run of 10 bytes. Both runs are on the page with
+their corpus lines, the older one labelled as unreproducible rather than deleted.
+
+Two things the page now says that it did not. The harness replays `execution_traces`, which
+holds shell commands only, so **no figure on it covers the ledger's file-read path**,
+including the count-preserving fold from #664. And the method snapshots the database before
+replaying, since hooks write to it while the replay reads.
+
+The README and both index pages keep the figures they published and gain one line saying
+those traces have since been pruned, so that window cannot be replayed. The percentages
+there do not move: the later run is lower because its week barely repeats itself, not
+because anything got worse, and swapping one week's corpus for another's on a marketing
+surface would say something the measurement does not.
+**`omni doctor`'s agent list is one shape in three columns, and the offer to see the
+passing checks is printed once instead of once per host.** Fourteen hosts rendered as
+twenty lines in two different shapes: a clean host was `Claude Code: Full, 5 checks
+[OK]` and a host with anything to say became a block, so name, tier and count started
+at a different column on every row. `omni doctor --detail to see them` appeared three
+times for one fact.
+
+```
+  Claude Code      Full           5 checks [OK]
+  Cline            MCP-only       1 check  [OK]
+    Distill:        MCP tier: no per-tool hook on this host
+  Pi Agent         MCP-only
+    Config:         not configured
+```
+
+The name now comes from `AgentIntegration::name()` rather than the report's own
+heading, which carries colour escapes that no padding can measure. Two hosts printed
+one name here and another in `init` and `reset`; they agree now, so the list says
+`Cline` and `Pi Agent`.
+
+A host with no passing check shows no count rather than `0 checks [OK]`, which reads
+as a failure when it means "nothing configured to check".
+
+The tier legend was four lines because one sentence was hand-wrapped onto a
+continuation indented to nothing above it. It is three aligned rows now, and the
+sentences moved to `Tier::label()`, which existed with no caller at all while `doctor`
+kept its own copy.
+
+Nothing is hidden that was not hidden before, no row that is not `[OK]` stops
+printing in either mode, and `--json` is untouched.
+**The one tier that cannot hook a shell now gets the tool that runs one.** An
+MCP-only host gave OMNI no hook, so nothing was ever distilled there, and
+`omni_run` was withheld with this reason:
+
+```rust
+/// No shell distillation exists on this tier, so the tools that report on it
+/// would describe something that never happens.
+```
+
+That is right about `omni_explain_savings` and the other three reporters. It was
+circular about `omni_run`, which does not report distillation, it performs it: the
+tier had no distillation partly because the only tool that could produce any was
+held back on the grounds that the tier had no distillation.
+
+The file already made the argument one tier up, for Handoff-first, and every word
+of it applies: MCP is the only door OMNI has there, and an unadvertised tool is not
+one shell command away, it is unreachable. The difference between the two tiers is
+an installed rule nudging the agent toward `omni_run`, which is a nudge and not a
+capability.
+
+Only `omni_run`. It costs 417 B in the prefix of every request; the four reporting
+tools are 803 B more, and this file's own rule is that a tool added without a
+measurement has no price behind it. They become arguable once there are recorded
+runs on this tier to report on.
+
+The tier's own description moves with it. `Tier::label()` said "no shell distill",
+which #684 had just started printing at install time, so two changes in this release
+would have contradicted each other. A test now checks the label against the tool set
+rather than trusting it: a tier offering `omni_run` may not claim it does not distil.
+The manual's tool table moves too, in both languages.
+
+Cross-turn folding still does not reach these hosts, because the ledger runs in the
+hooks and `omni_run` never builds one. That half of #686 stays open: it needs a
+session identity MCP does not carry, and inventing one is how #118 happened.
+**The README and manual stopped leading with a number that talks a reader out of
+the tool.** Four user-facing places opened with "97.3% of calls saved nothing at
+all" and one with 96.1%. Every word was true and it was the wrong sentence to put
+first: it averages the payloads OMNI deliberately declines, the small ones, the
+structured ones, the enumerations whose rows are the answer, into the calls that
+win, and reports the result as performance. A reader takes it as "this tool does
+nothing", which the table two lines below disproves.
+
+This project polices overstating and had no rule against understating, so the copy
+had drifted into apologetics: "we publish that because it tells you what the rest
+are worth", "it does nothing most of the time and a great deal occasionally".
+Understating is a different way of being wrong about your own numbers.
+
+The replacement leads with the class where the bytes are, using figures already
+verified with their corpus and window rather than any new arithmetic: file
+re-reads are the largest class and the ledger takes 89.6% off them, a file read
+twice comes back 97.2% smaller, and the restraint is stated as the guarantee it is,
+nothing deleted, nothing invented, no call comes back larger. The aggregate stays,
+as the floor of what the tool does rather than the headline.
+
+Every unflattering figure, 96.1% included, stays on `develop/benchmarks.md`, which
+is where an auditor looks. The mechanism sentences in `how-it-decides` and
+`pipeline` that say a block is recorded even when the projection saved nothing are
+untouched: those describe behaviour, not performance.
+
+Seven READMEs and both manual trees, English and Indonesian.
+**The README published a corpus the manual replaced two releases ago.** `README.md`
+and its six translations carried 6,656 traces replayed on 0.7.3 while
+`docs/website/src/develop/benchmarks.md` carried 5,984 replayed on 0.7.5, so the
+repository disagreed with itself on every figure the two shared: 2.7% against 32.6%
+from the filters, 14.9% against 69.6% with the ledger, and 35.9% against 98.9% on the
+`docker build` fixture.
+
+Two of those were reversed claims rather than stale numbers. The head-to-head conceded
+the filter row to rtk, 6.2% against our 2.7%, and on this corpus ours read 32.6% while
+the row we actually lose is lean-ctx at 49.4%. And "file re-reads: 0.0% from the
+filters" was the argument for the ledger; that class reads 39.2% from the filters now,
+so the argument is made from the gap that remains.
+
+Every README also carries the manual's own caveat next to the headline, because a
+number travels and the sentence qualifying it does not: 286 groups of byte-identical
+payloads are 80.6% of these bytes, and the same harness over a week of ordinary work
+reads 14.9%. The six translations additionally lose a marker-accounting paragraph the
+English README dropped in #325 and they kept, which cited a `git diff` figure the table
+had already stopped printing.
+
+### Fixed
+**The release script builds the binary it smoke-tests.** `scripts/omni-release.sh`
+ran `tests/smoke_test.sh ./target/release/omni` and never built that file, so the
+last gate before a tag validated whatever binary happened to be on disk. Cutting
+0.7.6 stopped at `Results: 44/46 passed, 2 failed` against a `target/release/omni`
+two days old, minutes after `make binary-check` passed 46/46 against a freshly
+built `target/ci/omni`. The two gates disagreed because they test different files
+and only one of them built what it tested.
+
+Failing loudly was the lucky direction. The same staleness passes silently
+whenever the old binary still satisfies the checks, and it does today: the
+two-day-old 0.7.6 binary in this tree passes 46 of 46. A gate that can go green on
+a build nobody made is not a gate. `smoke_test.sh` also falls back to
+`./target/debug/omni` when the release path is missing, so a machine that has
+never built release validated a debug binary and said nothing about it; building
+first removes that fallback's ability to fire during a release.
+**The `Read` skeleton stopped advertising a recovery route that cannot work.** It
+ended `Re-read with offset/limit for the full file.`, and a re-read is a fresh
+`Read` of the same file, so it reaches the same distiller and returns the same
+skeleton. Following the instruction verbatim on a 303 line file returned the
+identical summary a second time, and a third identical request folded to a single
+ledger marker with no content at all.
+
+The route that does work was already one line below it, and every `omni retrieve`
+handle in the report resolved. So the note now counts what was dropped and names
+nothing, because the handle is minted after that string is built and cannot be
+reached from it.
+
+Its number also read as a contradiction next to that marker and was not one. It
+counts file lines the skeleton does not render, while the marker counts reply
+lines cut from what was about to be sent, so the two differ legitimately on the
+same read. Both stay, each now saying which denominator it used. The note is 41
+bytes shorter as a result, which is worth almost nothing at 8 distilled reads a
+week and is not the reason for the change.
+**A small fold that would leave the reader nothing to read is refused.**
+Resolving a merge conflict and re-reading the same window folded 23 of 26 lines
+and delivered three that had nothing to do with the edit, under a marker reading
+`23 lines already shown`. An agent verifying a deletion reads that as nothing
+changed. The fold was right about every line it counted: a deletion and a
+reorder produce no new line, so there was nothing for it to emit, and absence is
+the one thing a set keyed on line hashes cannot represent.
+
+`MIN_WHOLE_OUTPUT_FOLD` already refuses this trade when a fold covers the payload
+exactly, on the argument that a handle and nothing else is a round trip the agent
+has no say in. Three surviving lines out of twenty-six is that same situation, so
+the floor now covers any call whose folds take four fifths or more of the payload
+between them. Coverage is asked once for the payload, not once per run: review
+caught the first draft weighing each run against the whole reply, which let three
+seen blocks of thirty percent, separated by a new line each, fold ninety percent
+of a small payload and leave the reader three markers and two separators. The
+wording does not move: a partial fold still says `N lines already shown`, because
+it still is one.
+
+Priced before the fraction was chosen, and the first price was wrong in the way
+this project keeps warning about. `ledger_folds.payload_bytes` only exists since
+#560, so 41 of the recorded calls carry it and the rest read zero. Dividing the
+refused bytes by the whole table's total gave 0.12%, a figure whose numerator and
+denominator came from different populations. Against the 41 calls that can
+actually answer, the guard refuses 3 of them and 1,748 bytes of 54,400, or 3.2%
+of what the ledger folded in that window. The all-time figure cannot be computed
+and is not quoted.
+
+It still cannot reach a large payload, where a 90% fold is the case the feature
+exists for and the floor is met many times over.
+
+Three cheaper designs were measured and dropped. Reporting `N removed` in the
+marker needs the previous payload, which no table stores. Ordering or gap
+detection over `ledger_lines` cannot tell a deletion from `grep` printing three
+matching lines out of a file, which is most of what the ledger folds. Keying the
+previous run by command needs a per-hook lookup and a column, against a 10 ms
+budget, to catch what a floor already covers.
+**`omni_explain_savings` can see cross-turn folds.** It read the `distillations`
+table; the ledger writes to `ledger_folds`, and nothing had ever read that one. So
+a session whose compression was entirely folding answered "No recent distillations
+found in current session" while its own markers carried live retrieve handles. On
+the machine that confirmed it: 936 folds recorded, none visible to the tool.
+
+That was the worst case to be blind to. This is the tool the docs point at for
+judging whether a route paid for itself, and folding is exactly where a marker plus
+a 16 character handle can cost more than the lines it replaced. It also made a
+defect report harder to write, because route and byte counts had to be guessed
+rather than quoted.
+
+The report now carries both, and only says nothing happened when both are empty.
+
+The filter that never matched came first. `SessionState` mints its own id every
+time it is constructed, `{millis}-{pid}-{counter}`, while the hook keys its rows on
+the id the **host** supplied: 11,281 rows here carry a host UUID against 892 minted
+ones. The MCP server cannot see the host id, so filtering on the one it holds
+matched nothing, and that was true of the distillations half too, before any of
+this touched it. Both tools now ask by recency and say so.
+
+Folds record which session made them, because the table could not say. Its `scope`
+column holds the **project** whenever there is one, deliberately, so the
+cross-agent question it was built for stays askable, and every one of those 936
+rows carries a filesystem path there. Asking it for a session id returns nothing,
+which is what the first attempt at this fix did.
+
+Folds are reported in lines and bytes with their scope, and without a command: the
+ledger keys lines by scope and hash, so the bytes a fold replaced may have been
+shown by a different command than the one being answered, and naming the current
+one would be a guess dressed as attribution.
+**A recorded row is named after its program again, and this time in both of the
+places that write the name.** #339 taught `sole_output_command` to strip a
+`VAR=value` prefix and closed. Routing was fixed and `distillations.filter_name`
+was not, because neither writer of that column went through there: `hooks::pipe`
+took the first token of the raw command and had never received the fix at all,
+and `hooks::post_tool` reached it through `.unwrap_or(clean_command)`, which
+hands the raw chain straight back for any command with two producers.
+
+Measured on 0.7.6 on a database whose oldest row postdates #339: 1,525 of 11,335
+rows were filed under an assignment and 291 under a binary's full path, 16.0% of
+the corpus, against the 1,079 rows #339 measured before it was closed. So the
+rate had not moved. Every aggregate keyed on that column was wrong by that much,
+and those aggregates are what a distiller gets sized from here.
+
+One `producer_label` both doors call, with `resolve_profile`'s private copy of
+the basename logic folded in beside it. Writing the test as a matrix of command
+shapes rather than one case immediately found a second defect in the new
+fallback, which was naming a chain after its `cd` instead of after the first
+segment that produces output.
+**Rows written before the label fix are corrected rather than waited out.** #603
+fixed `filter_name` going forward and left everything already recorded, so 2,892
+of 17,402 rows on the machine that measured it, 16.6% across 398 distinct names,
+were still filed under an assignment or a binary's full path. They kept
+accumulating until this release was *installed*, because merging a fix does not
+change the binary on disk.
+
+A migration recomputes them from the command each row still carries.
+`producer_label` is a pure function and every stale row kept its command, so this
+is arithmetic rather than a judgement about which rows are real, which is what
+separates it from #163: there the truth was unrecoverable and the answer was to
+exclude by timestamp and delete nothing. It needs no timestamp constant either,
+because recomputing a row written after the fix returns that row's own label.
+
+A row that lost its command is left exactly as it is. The migration runs once,
+records itself in `schema_migrations`, and is its own fixed point if it runs again.
+**The `git diff` summary is measured from the diff, and a decorative hunk no
+longer disappears under it.** The `git diff: N files changed, X+, Y-` line counted
+the `+` and `-` lines that survived the scorer rather than the ones in the payload
+it replaces, so it reported a diffstat for the filtered output while reading as a
+diffstat for the commit.
+
+One tier turns that into a false claim on its own. `is_blank_or_decorative` tiers
+a block whose lines carry only `-`, `=`, `*` or `_` as Noise, and a hunk removing
+a rule of `=====` characters is exactly that once each line carries its `-`
+marker. The whole segment was skipped before the emit and before the count, so a
+diff adding one line and removing five came back as
+`git diff: 1 files changed, 0+, 0-` with no hunk under it. A reader concludes the
+commit changed nothing.
+
+The counts now come from the payload, and position decides what counts rather
+than the leading character: `+` and `-` lines inside a hunk, nothing outside one.
+That was the other half of the same defect. `git show --format=%B -p` prints the
+commit body unindented, so a body line opening with `-` read as a removal and a
+60+/60- diff came out as `61+, 62-`. Position also settles a case a prefix test
+gets wrong in the opposite direction: a removed line whose own text starts with
+`--` renders as `--- …`, so excluding `---` dropped a real removal from the
+output while the summary still counted it. Shown and counted now follow one rule.
+
+A tier may only drop a segment that carries no hunk. The per-line filter below it
+already decided what a hunk contributes.
+
+Worth saying because the report that found this described a different mechanism:
+its own `git show … | sed … | head -40` had cut the removal hunk before OMNI saw
+it, and the `1+, 0-` in that transcript was true about every byte OMNI received.
+The defect above was found while failing to reproduce that one.
+**Cuts at a byte index no longer panic on non-ASCII text.** `String::truncate` and
+a `&s[..n]` slice both panic when the index lands inside a multi-byte character,
+and twenty-three cuts took a fixed or length-clamped index on text OMNI does not
+control: error messages, recorded commands, session payloads, task and goal
+strings. Two sat in the MCP server, where the panic takes down a tool call, and
+`CONTRIBUTING.md` requires a hook never to crash its host.
+
+They now go through the `util::text` helpers that were already in the tree and
+already doing this correctly, so an accented path or a CJK identifier costs a
+character off a preview rather than the process.
+
+One of them was reachable rather than theoretical. `infer_domain` walks byte
+indices to find the common prefix of two directories and sliced at every one of
+them, so two hot files under a directory whose name carries any multi-byte
+character panicked outright.
+
+`src/lib.rs` has denied `clippy::string_slice` all along, and thirteen files
+switched it off wholesale with a module-level allow, which is where every one of
+these lived. Six of those files no longer need the exemption. `infer_domain` keeps
+a function-scoped one that says which three slices are proven safe and why,
+because a blanket allow is what hid the wrong one.
+**A fold says when it is replacing bytes from a different command.** The ledger
+keyed shown lines by scope and hash alone, so reading file B could have a block
+elided because file A showed an identical one earlier, and the marker named
+neither file nor line range. Comparing two files to check a shared block matches
+is exactly that case, and the dedup answered it by deleting the evidence.
+
+Lines now record the command that first showed them, and a marker carries
+`from <source>` when the fold draws on a different one:
+`[OMNI: 22 lines already shown from charlie.tf, omni retrieve …]`.
+
+The clause is absent when the source is the same, which is the common case of
+re-reading one file, and that is deliberate rather than an optimisation. Marker
+length gates folding: the gate weighs the rendered string, so every byte added
+here is a byte a run must beat before folding is worth it, and trimming this
+marker by 22 bytes was worth 0.3 points of aggregate savings on its own (#450). A
+clause on every fold would have paid that back the wrong way. The decision lives
+in the run's grouping key, so a stretch whose lines came from two commands now
+splits into two runs rather than picking one of them to name.
+
+A source is a raw command, and 46.9% of recorded commands carry a newline, so the
+marker takes the first line only with control characters dropped and whitespace
+collapsed. A marker is a single line and the count of markers above the first
+surviving line is derived from that, so a command able to split it would corrupt
+both the framing and that accounting.
+
+Rows written before this keep an empty source, which reads as unrecorded and
+suppresses the clause rather than guessing. The column is also what makes the
+frequency measurable: nothing in the corpus could say how often a fold draws on a
+different source, because there was nowhere to record it.
+**`omni retrieve` framed one block of an output as the whole output.** A reader
+followed a `[OMNI: 10 lines already shown, omni retrieve …]` marker and got ten
+lines under `10 lines · 227 B`, for a command that had produced fourteen. Nothing
+was lost: the other four were on screen, and a ledger fold archives the run it
+replaced rather than the reply. The frame is what was wrong, and it reads as a
+measurement of the whole, so a short file listing looked complete and the reader
+nearly designed a dependency layering off it.
+
+`rewind_store.original_len` was written as `content.len()` on every insert, so the
+one column that could have answered "is this all of it" duplicated the content
+length instead. It now carries the size of the payload the block was cut from, and
+`omni retrieve` says `· one block of a 797 B output` when the two differ. A handle
+that does hold an entire output keeps the short frame, so nothing is added to the
+common case.
+
+Rows written before this ship with the old value and read as whole; they age out
+with the 30 day retention window. The MCP `omni_retrieve` tool is deliberately
+unchanged: its result is a single string the agent may paste or parse, and the CLI
+keeps its frame on stderr for the same reason.
+**The Hermes plugin was a Python syntax error and had never loaded.** It lived in
+a Rust raw string that opened with five quote characters, so every `__init__.py`
+`omni init --hermes` ever wrote failed to parse at line 32. The install printed
+`✓ Installed Hermes plugin` and the host has produced zero rows since 2026-08-11.
+Nothing caught it because nothing could: a Rust string literal is not Python to
+any tool in this repo.
+
+Even with the quoting fixed the three handlers would not have run. Hermes calls a
+hook as `cb(**kwargs)` and passes thirteen keys, so `def on_post_tool_call(tool_name,
+params, result)` raises TypeError on every call and `invoke_hook` swallows it into
+a debug log.
+
+The plugin is now a real file at `plugins/hermes/__init__.py`, compiled and
+exercised by a `checks (plugins/hermes)` CI job, and it registers the two hooks
+whose return value Hermes actually uses: `transform_terminal_output` and
+`transform_tool_result`. The second fires for **every** tool, which makes the
+Read, Grep and WebFetch distillers reachable for the first time; they have been
+written since #172 and never executed, because Claude Code's PostToolUse matcher
+is Bash-only.
+
+Hermes also gets its own payload format rather than borrowing one. `OMNI_AGENT_ID`
+can only override a Claude-Code-shaped payload, so reusing Codex's shape would
+have filed every Hermes row under `codex_cli`, and Claude Code's shape has nowhere
+to put an exit code, which is what #120 needs to refuse a failed command. Hermes'
+tool names are translated to the arms that exist: `terminal` used to fall into the
+unhandled-tool bucket, so even a loading plugin would have distilled nothing.
+
+Measured end to end through the installed plugin, driven with the kwargs Hermes
+really passes: 790 B to 283 B, two `hermes` rows in `distillations` and one ledger
+fold, on a host whose lifetime total was zero. A failing command is left alone.
+
+**OpenClaw's plugin was never loaded either, and the reason was one line of
+config.** OpenClaw does not scan `~/.openclaw/plugins/`. A directory is loaded
+only when `plugins.load.paths` names it, and `omni init --openclaw` copied files
+in and printed a tick without touching the config, so `openclaw plugins list`
+never showed the plugin at all. The install writes that key now, preserving
+everything else in a file that holds the user's channels and credentials, and it
+is idempotent across upgrades. `omni doctor` checks the key rather than the files
+and warns when the plugin is on disk but unreachable.
+
+Behind that sat two more defects, each enough on its own. `api.registerHook` and
+`api.on` are different buses: the first files a handler in the internal hook
+registry and wraps it in an `async` function, while `runToolResultPersist` reads
+`registry.typedHooks`, which only `api.on` writes, and discards anything that
+returns a Promise. Registering the right hook name on the wrong bus loads clean,
+reports no error and rewrites nothing. And the plugin's only tool shelled
+`omni exec -- <cmd>`, the argument form that fails with `No such file or
+directory`.
+
+The tool names came from a real turn rather than from the bundle, after the
+bundle's names turned out to be wrong: it has a tool literally called `bash` and
+the name arriving at the hook is `exec`. Mapping the bundle names left every
+shell result unrecognised, which distils through the generic path and files no
+`distillations` row.
+
+`tool_result_persist` rewrites what OpenClaw persists to its session transcript,
+not the payload of the turn that produced the output. So the first read of a
+command is raw and every replay after it is distilled, which is where a tool
+result is re-read a median of 129 times.
+
+Measured against a real OpenClaw 2026.7.1-2 with an OpenAI-compatible stub in
+place of a model, over three turns of one session: 29,442 B on the first turn,
+7,374 B with an OMNI marker on the second and third, and one `openclaw` row in
+`distillations` on a host whose lifetime total was zero. `plugins/openclaw` also
+gets a `typecheck (plugins/openclaw)` CI job, which is what caught a TypeBox
+object where the host wants a JSON Schema, a tool cast to a factory, and an errno
+string typed as a number.
+**`~/.omni` and the database were left at whatever the umask gave them.** Nothing
+in the tree ever called `set_permissions`, so a default umask of 022 produced a
+0755 directory holding a 0644 database: on the machine that found it, 147 MB of
+recorded command output readable by every other local account. Redaction does not
+cover this and is not meant to, since the archive keeps the original on purpose so
+`omni retrieve` can return it.
+
+The directory is now 0700 and the database, including its `-wal` and `-shm`
+sidecars, is 0600. Set explicitly rather than left to the umask, and applied on
+every open, so an existing install is tightened on the next run instead of keeping
+the modes it already has.
+
+A directory named by `OMNI_DB_PATH` is left alone, because it can be any directory
+on the machine and narrowing one the user chose would take access away from
+whoever else is in it. The database file itself is tightened wherever it lives.
+Windows has no umask or mode bits in this sense, so that path is unchanged.
+**Every workflow action was pinned to a mutable ref, so a compromise upstream
+would have been published under our name.** `dtolnay/rust-toolchain@master` is a
+branch, and a tag like `actions/checkout@v7` can be repointed at will. That is the
+`tj-actions/changed-files` shape, and `release.yml` is what builds the binaries
+Homebrew then distributes. All 22 `uses:` lines across the workflows are full
+commit SHAs now, with the version in a trailing comment so Dependabot still opens
+the bump PRs.
+
+Pinning `dtolnay/rust-toolchain` is not a pure rename: that action chooses the
+toolchain from its own ref, and at the pinned commit `toolchain` is a **required
+input**, so a SHA with no input fails the build outright. Every call names
+`1.97.0` now, which is what `rust-toolchain.toml` pins anyway. `release.yml` used
+to ask for `stable` and then have rustup switch to the pinned channel underneath
+it, which is the mismatch that produced no binaries at all for v0.6.2 (#179).
+
+**Releases carry build provenance.** `SHA256SUMS` proves a file has not changed
+since publication and says nothing about who published it, which is the question
+that matters for a binary in the hook path of every command. The release job
+attests its archives, and `SECURITY.md` documents the one-line
+`gh attestation verify` a user runs. Releases from 0.7.7 onward are attested.
+
+**`SECURITY.md` told reporters to open a public issue**, listed as "Recommended",
+and claimed 0.5.x was the supported line while 0.7.6 was out. A reader taking it
+at its word would publish a working exploit against a tool sitting in front of
+every shell command, with no embargo and no release to upgrade to. Private
+reporting is first and the public-issue route is gone; the table names 0.7.x.
+**A failing `terraform validate` was rendered as a clean plan.** The terraform
+summariser counted a resource for any line containing `will be created`, and
+terraform's own error prose contains it: "so if this file will be created by a
+resource in this configuration". A validate that exited 1 came back as
+`terraform: +1 ~0 -0 resources` with `+ configuration` under it, the `configuration`
+being the first word of the next wrapped line. That is the shape of a clean plan,
+nothing in it says the command failed, and the reporter read it as "validate
+passed, one resource to add" and moved on.
+
+Plan lines are now matched only on terraform's resource-address comment
+(`  # aws_instance.web will be created`), and the `Plan:` and `Apply complete!`
+summaries only at the start of a line. A real plan distills exactly as before, and
+the fixture proves it: `+2 ~1 -1` with all four addresses.
+
+The guard that should have caught this is #120, which refuses to distill a command
+that exited non-zero. It was blind here because the reported command ended in
+`| tail -4`, so the exit code the host reports belongs to `tail`. A summariser
+cannot rely on the exit code reaching it, and has to be anchored to syntax the
+output it claims to read actually uses.
+**A command that wrote a newline to stderr was announced as having written to
+stderr.** The reader got a `[stderr]` header with nothing under it, and on a
+failing command that header is the first thing they go looking at. The guard was
+`!stderr.is_empty()`, which `"\n"` and `"   "` both pass.
+
+Both payload shapes built that section and both had the same wrong predicate, so
+they are one function now. #452, #454 and #456 were each one copy of a pair being
+fixed while the other kept the bug, and this is the same pair.
+
+Trimming decides whether there is content, never what it is: a stream with
+something in it is still appended byte for byte, so indentation a compiler emitted
+survives.
+**`omni reset` had no `--openclaw` flag**, so the OpenClaw integration could only
+be removed by uninstalling every other one with `--all`. Checking the registry
+against the flag table while fixing it found `--vscode` missing too, which the
+report had not noticed: it compared only the first-party integrations and missed
+the MCP hosts.
+
+Both flags exist now, in the table, the interactive menu and the argument parse.
+
+The real fault is that the host list was written out four times in one file, as a
+boolean, a term of a fourteen-way condition, a menu arm and a push. It is one
+table now, derived from the flag table itself, and `omni reset` is 13 lines
+shorter for it.
+
+A test walks `all_integrations()` and fails on any id its own flag does not
+select. It drives the real routing rather than comparing flag names, after review
+pointed out that a name-only check passes while a flag selects nothing, which is
+#143's guard answering a question nobody asked all over again.
+
+Review also caught that `check_flags` accepts `--flag=value` and validates the
+name alone, so `omni reset --openclaw=1` was accepted, selected nothing and fell
+into the interactive menu with the plugin still installed. `cli::flag_name` is the
+one place that rule lives now and `reset` routes through it. Twelve other modules
+still compare the whole argument; that is #646.
+**A 527 byte `grep` came back with no content lines at all.** Fourteen lines were
+folded into one project-scope handle and the four lines left standing were shell
+scaffolding: two `echo` headers, a version string and an `ls -l`. The command had
+been run to check where a new export had landed in a sorted list, so the sort
+order was the whole answer, and the reply read as "no matches" rather than
+"matches withheld".
+
+The sub-1 KB coverage bar was four fifths. This reply was 78.7% covered, which
+cleared it, and the payload was not folded whole so the #567 whole-output floor
+did not apply either. Both guards were built for this exact case and neither
+reached it.
+
+The bar is three quarters now. The number is not derived from anything: the
+fixtures that must still fold sit at 72.1% and 63.9%, this report must not at
+78.7%, and three quarters is the only simple fraction in the gap. Priced over the
+recorded corpus it refuses 9 more of 108 sub-1 KB calls and gives up 3,768 bytes
+across five days, against a 13.3% retrieve rate on blocks that size.
+
+Reproduced from the row the report wrote (`payload_bytes` 695, one project run of
+527 B over 14 lines, `whole_output` 0) rather than from the prose, after a
+synthetic repro at 100% coverage came back clean on 0.7.6 and on `main` alike.
+**`--flag=value` was accepted and then ignored, in every command.** `check_flags`
+validates that form on the flag name alone, and all sixty call sites compared the
+whole argument, so the flag passed validation and the command behaved as if it
+were absent.
+
+For a boolean flag that means the wrong mode: `omni version --json=1` printed the
+human banner, and `omni init --openclaw=1` exited 0 having installed nothing.
+
+For a flag that takes a value it is worse, because the command succeeds and
+answers about something else:
+
+```
+$ omni dashboard --port=18877
+  OMNI dashboard http://127.0.0.1:7717     # before
+  OMNI dashboard http://127.0.0.1:18877    # after
+```
+
+`omni patterns --tool=bash` filtered on nothing the same way.
+
+Two helpers now hold the rule, `has_flag` and `flag_value`, and every command uses
+them. `flag_value` reads both `--port 8080` and `--port=8080`, and splits on the
+first `=` only, so a value containing one survives.
+
+A test scans `src/cli/` and fails on any argument compared to a flag directly.
+Sixty sites across twelve commands is what it took to notice, and each was correct
+on its own and wrong against `check_flags`, so the guard is that nobody writes the
+raw form again. It found one leftover while being written.
+
+Review found two the first pass missed, both now covered. `stats` kept its own
+matcher for the windows that grew alternative spellings (`--day` / `--today`), and
+because it compared against a parameter rather than a flag literal the source scan
+could not see it, so `--hour=1` still selected the default overview. That copy is
+deleted and the shared `has_any` replaces it.
+
+And routing the positional word `help` through `has_flag` widened it: `help=x`
+started triggering the help page. `help` is now matched exactly and only as a
+subcommand's first argument, which also fixes something older than this change,
+`omni query how do i get help` printed the help page instead of answering.
+**The distiller dropped the line a bundler marked as the one that threw, and kept
+the unmarked source around it.** In a compiler frame the leading `>` and the `^`
+under it are the entire answer, and they carried no failure signal at all, so they
+tiered as ordinary context while lines 49, 51 and 53 survived. The reader was left
+with five lines of source, none of which is the one that failed, and the
+`12 lines omitted` label gave no hint that the marked line was among them.
+
+Two shapes are Critical now, kept narrow because a leading `>` is also a markdown
+quote and a shell redirection, and tiering those Critical would stop a document
+being distilled at all:
+
+* `> 50 |  throw ...`, which needs the `|` gutter after the marker to tell it
+  apart from quoted prose.
+* `|      ^^^^`, a row of nothing but gutter, carets, tildes and space.
+
+`> Build error occurred` is prose with no colon for the `error:` rule to catch, so
+`build error` joins the generic markers where it belongs.
+
+Same shape as #425 one layer up, where a runner's verdict glyph tiered as context
+and the distiller kept three passing tests while dropping the failing one.
+
+The report's second finding, `omni_explain_savings` answering "No recent
+distillations found in current session", is already fixed on `main` by #625 and
+only waiting on a release: v0.7.6 still carries the old wording.
+**A blanket `*.py` ignore had kept an announced file out of every release.** The
+0.5.2 changelog says `scripts/seed_marketing.py` was added; `.gitignore` ignores
+every Python file outside `plugins/`, so it has never been in the repository and
+no user has ever had it. That changelog line is corrected in place rather than
+quietly dropped.
+
+`scripts/*.py` is exempt now, because that directory is tooling a reader is told
+to run. The same rule was about to swallow a reproduction script the README
+pointed at, which would have shipped an instruction nobody could follow.
+
+The seeder itself is archived rather than committed. It opens `~/.omni/omni.db`,
+runs `DELETE FROM distillations`, and refills it with randomised rows under a
+comment reading "make it look real". That database is where every published figure
+here is measured from, so the script fabricates the evidence this project exists to
+keep honest. It also names a `content_type` column that no longer exists, which is
+the only reason it has not already done the damage.
+
+A test walks README, `CONTRIBUTING.md` and both manuals, and fails on any
+`scripts/...` path that is not in the repository. It also refuses to pass by not
+looking: a manual directory that moved, or a document it cannot read, fails rather
+than being skipped. `CHANGELOG.md` is exempt: history legitimately names files
+that were removed later, which is a different thing from a live instruction naming
+a file that never existed.
+**A log's failure lines were tiered as ordinary context and dropped, while a
+hundred routine lines were kept.** `is_critical` matched `error:` and a line
+starting `error `, which is how a tool writes a one-line message and not how a log
+writes anything. A timestamped line, a bracketed level and logfmt were all missed,
+so `GenericDistiller` selected the routine lines first and discarded the failures
+with the tail.
+
+Driven through the hook against a build of `main`, on 300 routine lines followed
+by two `ERROR` and one `FATAL`:
+
+```
+                            before              after
+zzunknowncommand --flag     5993 B, 0 of 3      5991 B, 3 of 3
+sort -u app.log             1824 B, 0 of 3       246 B, 3 of 3
+LOG_LEVEL=debug ./run.sh    5993 B, 0 of 3      5991 B, 3 of 3
+```
+
+`sort` gets seven times smaller *and* keeps the answer, because the lines that
+matter are now the ones selected.
+
+The rule reads position, not presence. Two earlier drafts matched the bare word
+anywhere and both were caught by their own tests: `Compiling error-chain v0.12.4`
+is cargo naming a crate, and `const keys = [...new Set(parsed.error.issues)]` is
+source code. A log puts its level in the first few tokens, so only those are read.
+`no errors detected` is excluded, but only when the negated word is the matched
+one: `ERROR: no error handler registered` is a failure whose message happens to
+contain the phrase, and an exclusion that read the whole line threw it away. A
+count of exactly zero is the same statement in digits, so `0 errors found` is
+excluded too, which is the rule `mentions` already carries for `failed` (#210).
+
+Third instance of one shape, after #425 (a runner's verdict glyph) and #650 (a
+compiler frame's own marker): the predicate that decides what is worth keeping did
+not recognise how the tool actually says it failed.
+
+Measured for regression over 150 recorded payloads through the real hook path:
+identical bytes delivered before and after, so nothing that was being distilled
+changed.
+
+`LOG_LEVEL=debug ./run.sh` is in the table because an env-var prefix defeats
+profile routing (#339), and #605 measures that shape at 16.5% of recorded rows.
+**A `Read` fold the pipeline refuses is no longer recorded as a saving.** The ledger
+wrote its fold into `ledger_folds` while building the view, and the `Read` path decides
+afterwards whether it can use that view at all: survivors sitting in two blocks cannot
+be renumbered from one `startLine`, so the view is dropped and the host keeps its own
+bytes (#557). The row stayed. `omni_explain_savings` reads that table, so the tool that
+answers "did this route pay for itself" was quoting folds that were reverted.
+
+Measured on `97a8da2` by reading 17 markdown files twice with no edit between the reads:
+13 delivered a fold, 4 delivered nothing and recorded one anyway. `CHANGELOG.md`
+recorded 78.4% of 434,639 bytes, `CONTRIBUTING.md` 95.9% of 15,340, and the agent
+received both in full.
+
+The ledger is now told when the caller's host renumbers what it is handed, so the
+refusal happens before the view is built and the books never see it. `ledger_record` is
+untouched and now reads the situation correctly on this path as a side effect: with no
+view to deliver, every line counts as delivered, which is what the agent received.
+Before, a refused view recorded only the survivors, so those lines stayed foldable for a
+later read that had already been shown them.
+
+Why those four payloads refuse the fold in the first place is a separate defect (#658);
+this change is only about the accounting.
+**A `Read` whose survivors split now folds its head instead of nothing.** The fold was
+all or nothing: survivors sitting in two blocks cannot be renumbered from one `startLine`,
+so the whole view was dropped and the agent paid for every byte again (#557). Two things
+split the survivors far more often than an edit does. A second change anywhere is one, and
+a line stating a failure is the other, since it is marked unseen so it never folds (#458)
+and that splits the run around it. Six such lines are scattered through this repo's own
+`CONTRIBUTING.md`, which is why an unchanged re-read of it saved nothing at all.
+
+Folding down to the first line that survives leaves everything below it contiguous, so the
+existing `startLine` bump still describes all of it and no number moves. Runs are now
+planned before any of them is emitted, which is what makes the shape of the survivors
+knowable in advance; only the store can still turn a planned fold back into a verbatim run,
+and that direction is the safe one.
+
+Priced over 18 markdown files read twice with no edit between the reads, 611 KB:
+
+| | before | after |
+| --- | --- | --- |
+| corpus | 23.9% | 27.3% |
+| `CHANGELOG.md`, 434 KB | 0.0% | 4.4% |
+| `CONTRIBUTING.md` | 0.0% | 8.3% |
+| `docs/website/src/develop/index.md` | 0.0% | 7.8% |
+| files that already folded | 95.4% to 99.6% | unchanged |
+
+The ceiling is structural rather than a tuning choice: while the line count has to survive,
+only a fold at an edge can keep the numbering true, so the head is all there is to take. A
+fold that preserves the line count prices at 82.8% on the same corpus and was refused for
+now, because it inserts lines the file does not contain.
+**`omni stats --json` and the MCP session surface called an estimate an actual
+count, on every row ever written.** `measurement_method` exists to tell a reader
+how far to trust the number beside it, and the branch deciding it tested
+`raw_tokens > 0`. That column has exactly one writer:
+
+```rust
+// src/hooks/post_tool.rs
+// Reporting columns, so the calibrated central estimate.
+let raw_tokens = estimate_tokens(content.len(), ContentHint::Mixed);
+```
+
+So the branch was never false. 16,405 of 16,405 recorded rows reported `actual`
+for bytes divided by 3.6, a constant calibrated against `cl100k_base`, which is
+GPT's vocabulary rather than Claude's. A field whose whole job is to qualify the
+figure was answering the question wrongly, which is worse than not answering it.
+
+Both surfaces say `estimated` now, and a test scans them and fails on the literal.
+
+`format_exact_tokens` is `format_compact`. Neither half of the old name was true:
+it rounds to `12K`, and since #589 its callers pass bytes as often as tokens,
+because the share card's unit is chosen by the caller.
+
+This is the half of #584 that needed no calibration run and no API key. The other
+half, a divisor measured against Claude's tokenizer, is still open there.
+**`omni stats --json` honours the window it is given.** It accepted `--hour`, `--day`,
+`--week` and `--month` and ignored all four, so a scoped request answered about the whole
+database. The window now reaches the engines, the commands, the agents, the archive counts
+and the latency. `periods` keeps its three standard windows, because scoping it would leave
+two of its rows describing a window they are not named after.
+
+`--since` replaces those four flags (#667), so the fix and the flag they came from ship
+together. The report assembly takes a window as an argument now, which is what makes it
+testable: a window in the future has to come back empty, and a hardcoded zero returns the
+rows.
+
+`rewind_metrics` took a window in the same change, since `--detail` prints its archive pair
+under a header naming one. The pair means "archives whose row was last written in this
+window, and how many of those rows have ever been pulled": `ts` is refreshed when identical
+content is archived again, and `retrieved` is a lifetime counter. Resetting that counter
+would make the looser reading true and is deliberately not done, because #581 pays a
+verbatim delivery per recorded pull.
+**The passthrough log outlived every retention window.** `cleanup_old` prunes
+`sessions`, `distillations`, `file_access`, `rewind_store`, `session_events`,
+`ledger_folds`, `ledger_lines`, `loop_memory` and `execution_traces`.
+`passthrough_events` was not on that list and never had been, so the one table
+holding a command string for every declined call kept it forever while everything
+else rolled off. A user who shortens retention got it everywhere except there.
+
+It also had no session key, so a declined call could not be attributed to the
+session that made it and the reason breakdown could only ever be global. A time
+window is not a substitute: a third of the sessions on the machine this was
+measured on overlap another. `passthrough_reasons_for(since, session)` narrows it
+now, and asking for an empty session id returns nothing rather than everything:
+empty means the host sent no id, so it is shared by every pipe-mode row in the table
+and cannot identify a session. The reader that uses this is #612.
+**`omni stats --all-commands --project` gives the project breakdown again.** The old flag
+chain tested `--all-commands` last, after `--project`, so a script passing both got the
+project view. #667 grouped it with `--detail` while collapsing that chain, which reversed
+the precedence and handed those callers the detail report instead.
+
+Fourth finding on that refactor and the third of the same shape: collapsing an ordered chain
+into a resolver drops the order, and the order was the contract. Each of the legacy branches
+carries an assertion for both orders now, the way the output-format table already did.
+**A producer label could be a fragment of your own command line.** `filter_name`
+is what `omni stats` groups on, and it is derived by stripping leading `VAR=value`
+words off the command. The strip cut on whitespace, and both a command
+substitution and a quoted value are wider than one word:
+
+```
+A=$(kubectl get pods -n web) && echo done   ->  "get"        want kubectl
+A=$(ls -1t /tmp/x.gz | head -1)             ->  "-1t"        want ls
+C="--context abc"; kubectl get pods         ->  "abc"        want kubectl
+```
+
+`-1t` is not a program, and the third line is worse than untidy: a column sized
+for `cargo` and `kubectl` was absorbing whatever word happened to sit inside a
+quoted flag. `is_silent` had the same whitespace split, which is why that segment
+was picked as the producer at all, so both now read one shared quote-aware word
+splitter rather than two copies of the same wrong one.
+
+An assignment whose value opens `$(` names the program inside the substitution,
+but only when nothing follows it. `TAG=$(git rev-parse HEAD) docker build .` runs
+docker, and a substitution's output is captured into the variable rather than
+written to stdout, so as soon as a real command comes after, that command is what
+produced the payload.
+
+When every word is an assignment, the producer is the first one that actually ran
+something: `A=$(kubectl get pods) B=2` is `kubectl`, and keeping the last one
+instead returned an empty label. An empty substitution has not run anything, so
+`A=$( ) B=$(ls)` is `ls`. Nor does a quoted one: `$(` inside single quotes is text,
+and 886 of the 2,123 recorded commands containing `$(` also contain a quote. The
+body ends at the matching paren, skipping parens that are inside quotes, and the
+scan indexes by byte rather than by character count.
+
+The scanner balances `$( )` and honours backslash escapes, so a nested substitution
+and `FOO="a\"b c" kubectl` both stay one word.
+**`omni init` says what the host lets OMNI do, instead of a green tick that means
+different things.** Configuring an MCP-only host printed the same success as a Full
+one:
+
+```
+🤖 Antigravity IDE Setup
+  ✓ Configured MCP Server in Antigravity IDE settings
+```
+
+Antigravity exposes no hook, so nothing is ever distilled and no row is ever
+recorded there. On the machine that hit it the config had been in place twelve days
+and every table held zero rows under that host. The user's conclusion was that
+`omni stats` was broken.
+
+The tier is now printed on every successful install, on every tier rather than only
+the disappointing one:
+
+```
+  ✓ Configured MCP Server in Antigravity IDE settings
+  ℹ MCP-only: memory and session state, no shell distill
+
+  ℹ Full: model-facing distill active
+```
+
+`AgentIntegration::tier()` has carried this since #351 and `doctor` has printed it
+correctly all along. Installation is simply where the expectation is formed, and it
+was the one surface that never asked.
+**OMNI told three hosts it could not do the thing it was already doing.** OpenClaw,
+Hermes and Pi all hand every tool result to `omni --post-hook`, which is the path that
+applies the ledger, so the model reads distilled bytes on all three. None of them
+overrode the tier, so `doctor` printed "memory and session state, no shell distill"
+under their names and the MCP surface was cut to the memory tools, withholding
+`omni_explain_savings` from the hosts that had finally acquired something to explain.
+
+The default is deliberate and stays: a new integration has to claim distillation rather
+than inherit the claim, after three of them printed `[OK] installed` and recorded
+nothing (#351). This is the same root failing the other way, so the guard is not "check
+that OpenClaw declares Full", which is the same hand-maintenance one layer down. A test
+derives the floor from the plugin sources in the tree: anything that spawns
+`--post-hook` is asking OMNI to replace what the model reads, so the integration that
+installs it cannot be the tier whose whole meaning is that nothing is replaced.
+
+OpenClaw's Full is narrower than Claude Code's and the docs now say so.
+`tool_result_persist` rewrites the result OpenClaw persists rather than the one in
+flight, so the saving lands on every later turn that re-reads the transcript while the
+turn that ran the command still sees the raw bytes.
+
+The Hermes guide's "expect 25 tools" went with it. That was the whole surface, not the
+advertised one, and the advertised set has been priced since #609.
+**The Pi plugin threw away every distillation it asked for.** It spawned
+`omni --post-hook`, waited for the answer, and then read
+`hookSpecificOutput.updatedResponse`, a key OMNI stopped emitting in 0.6.5 (#158).
+`updated` was always `undefined`, so the handler always returned `undefined` and Pi
+received raw output on every single tool result while the hook ran and did the work.
+
+Probed rather than reasoned about. A Pi-shaped payload of 29,099 bytes comes back as
+
+```
+updatedToolOutput: { result: <7,365 chars>, status: "success" }
+```
+
+so 74.7% was being removed and discarded, every time, for the whole life of the
+plugin. The `OmniHookOutput` type declared the wrong key too, which is why the
+TypeScript check on that plugin passed: the contract was wrong in the place that
+would otherwise have caught it.
+
+The Rust side has asserted the key it writes since #158. Nothing asserted that
+anyone reads it, and that is the boundary #158 was about. A test scans every plugin
+that spawns `--post-hook` and fails unless it names `updatedToolOutput` and does not
+name `updatedResponse`. Comments are stripped first: the doc comment on this fix
+names both keys, and without stripping, prose about the bug satisfied the guard.
+
 ## [0.7.6] - 2026-08-17
 
 ### Added
