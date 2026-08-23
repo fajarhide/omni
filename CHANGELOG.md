@@ -1311,6 +1311,8 @@ what a visitor's agent sees is deleted rather than repaired.
 - **Rewind Management**: Added `omni rewind list` and `omni rewind show <hash>` for local exploration of the RewindStore archive.
 - **Real-time ROI Indicator**: New `[OMNI Active]` terminal status line providing immediate feedback on token reduction and latency.
 - **Marketing Data Seeding**: New `scripts/seed_marketing.py` for generating high-impact, realistic demonstration data.
+  *(Corrected 2026-08-23: this file never reached the repository. A blanket `*.py`
+  ignore rule swallowed it, so no release has ever contained it. See #651.)*
 
 ### Improved
 - **Analytics UI**: Refined `omni stats` with professional English headers, better alignment, and improved financial impact estimation.
