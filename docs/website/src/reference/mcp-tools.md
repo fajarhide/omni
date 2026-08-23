@@ -14,7 +14,7 @@ host's tier can use:
 |---|---|
 | Full | `omni_retrieve`, `omni_explain_savings` |
 | Handoff-first, and any host OMNI does not recognise | those two, plus `omni_remember`, `omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` |
-| MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge` |
+| MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge`, plus `omni_run`: no hook means the host's own tool output is never rewritten, so `omni_run` is the only path by which the model reads less |
 
 Full-tier hosts get the shortest list because they are the ones whose shell OMNI already
 hooks. Measured across 256 recorded sessions, those two tools carry 138 of the 149 calls

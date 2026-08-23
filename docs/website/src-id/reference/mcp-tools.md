@@ -14,7 +14,7 @@ itu OMNI hanya mengiklankan set yang bisa dipakai oleh tier host Anda:
 |---|---|
 | Full | `omni_retrieve`, `omni_explain_savings` |
 | Handoff-first, dan host apa pun yang tidak dikenali OMNI | dua itu, ditambah `omni_remember`, `omni_recall`, `omni_run`, `omni_find_noise`, `omni_context_breakdown`, `omni_history` |
-| MCP-only | `omni_remember`, `omni_recall`, `omni_retrieve`, `omni_knowledge` |
+| MCP-only | keempatnya, ditambah `omni_run`: tanpa hook, output tool milik host tidak pernah ditulis ulang, jadi `omni_run` satu-satunya jalan agar model membaca lebih sedikit |
 
 Host tier Full mendapat daftar terpendek justru karena shell-nya sudah dipasangi hook oleh
 OMNI. Diukur pada 256 sesi yang terekam, dua perkakas itu membawa 138 dari 149 panggilan
