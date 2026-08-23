@@ -1732,6 +1732,124 @@ mod tests {
         assert!(marker.contains("bytes omitted"), "got: {marker}");
     }
 
+    /// Line and block comments removed, so the scan sees code rather than prose
+    /// about code. `//` and `/* */` for TypeScript, `#` for Python. Python
+    /// docstrings are left standing, which is a known hole and a smaller one than
+    /// matching on raw text.
+    fn strip_comments(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut in_block = false;
+        for line in text.lines() {
+            let mut rest = line;
+            loop {
+                if in_block {
+                    match rest.find("*/") {
+                        Some(i) => {
+                            in_block = false;
+                            rest = rest.get(i + 2..).unwrap_or("");
+                        }
+                        None => {
+                            rest = "";
+                            break;
+                        }
+                    }
+                } else {
+                    match rest.find("/*") {
+                        Some(i) => {
+                            out.push_str(rest.get(..i).unwrap_or(""));
+                            in_block = true;
+                            rest = rest.get(i + 2..).unwrap_or("");
+                        }
+                        None => break,
+                    }
+                }
+            }
+            let code = match (rest.find("//"), rest.find('#')) {
+                (Some(a), Some(b)) => rest.get(..a.min(b)).unwrap_or(""),
+                (Some(a), None) => rest.get(..a).unwrap_or(""),
+                (None, Some(b)) => rest.get(..b).unwrap_or(""),
+                (None, None) => rest,
+            };
+            out.push_str(code);
+            out.push('\n');
+        }
+        out
+    }
+
+    /// #688. The sibling of the test below, on the far side of the boundary.
+    ///
+    /// That one proves OMNI *writes* `updatedToolOutput`. It cannot prove anyone
+    /// *reads* it, and `plugins/pi/index.ts` read `updatedResponse` for the whole
+    /// life of the plugin: the hook ran, the subprocess was spawned, the work was
+    /// done, and the result was dropped on the floor because the key it looked for
+    /// no longer exists. That is #158 shipped a second time, in a file the Rust
+    /// tests do not compile.
+    ///
+    /// So this scans the plugin sources themselves. Any plugin that spawns
+    /// `--post-hook` is a consumer of that contract and has to name the key OMNI
+    /// actually emits. Cheap, and it covers a plugin written in any language,
+    /// which matters because the three that exist are TypeScript and Python.
+    #[test]
+    fn every_plugin_that_calls_the_hook_reads_the_key_it_writes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let mut consumers = Vec::new();
+        let mut offenders = Vec::new();
+
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                // Vendored dependencies are not our plugins and contain enough
+                // text to match anything.
+                if path.file_name().is_some_and(|n| n == "node_modules") {
+                    continue;
+                }
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if !matches!(ext, "ts" | "js" | "py") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                if !text.contains("--post-hook") && !text.contains("\"post-hook\"") {
+                    continue;
+                }
+                let rel = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                consumers.push(rel.clone());
+                // Comments are stripped first. The doc comment on this very fix
+                // names both keys, so a scan over raw text is satisfied by prose
+                // about the bug: patching the Pi handler back to `updatedResponse`
+                // left the file still containing the right key and this guard
+                // still green. A guard a comment can satisfy is decorative.
+                let code = strip_comments(&text);
+                if !code.contains("updatedToolOutput") || code.contains("updatedResponse") {
+                    offenders.push(rel);
+                }
+            }
+        }
+
+        assert!(
+            !consumers.is_empty(),
+            "found no plugin calling `--post-hook`; the scan is looking in the wrong place"
+        );
+        assert!(
+            offenders.is_empty(),
+            "these plugins spawn `--post-hook` and never read `updatedToolOutput`, \
+             so whatever OMNI returns is discarded (#688): {offenders:?}"
+        );
+    }
+
     /// #158. The host replaces what the model sees only when it finds
     /// `updatedToolOutput`; any other key is dropped without a word, and the
     /// agent silently keeps the raw output while OMNI records the saving.
