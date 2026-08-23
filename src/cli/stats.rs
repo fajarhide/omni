@@ -1298,6 +1298,21 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
 // ─── JSON Mode: Machine-Readable ────────────────────────
 
+/// One stage as the machine-readable surface reports it.
+///
+/// `base` of zero means the store does not record one for every row of this
+/// stage, which is the ledger's situation before `payload_bytes` existed. It
+/// reports `null` rather than a share computed over the rows that happen to carry
+/// one, because that share would be presented as the stage's own (#665).
+fn stage_stat(calls: u64, removed: u64, base: u64, priced: u64) -> StageStat {
+    StageStat {
+        calls,
+        bytes_removed: removed,
+        base_bytes: (base > 0).then_some(base),
+        share_pct: (base > 0).then(|| (1000.0 * priced as f64 / base as f64).round() / 10.0),
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct StatsJson {
     pub version: String,
@@ -1390,25 +1405,17 @@ fn run_json(store: &Store) -> Result<()> {
     };
 
     let totals = store.stage_totals(0)?;
-    let stage = |calls: u64, removed: u64, base: Option<u64>, priced: u64| StageStat {
-        calls,
-        bytes_removed: removed,
-        base_bytes: base,
-        share_pct: base
-            .filter(|b| *b > 0)
-            .map(|b| (1000.0 * priced as f64 / b as f64).round() / 10.0),
-    };
     let stages = StageStats {
-        distilled: stage(
+        distilled: stage_stat(
             totals.distilled_calls,
             totals.distilled_removed,
-            (totals.distilled_input > 0).then_some(totals.distilled_input),
+            totals.distilled_input,
             totals.distilled_removed,
         ),
-        folded: stage(
+        folded: stage_stat(
             totals.folded_calls,
             totals.folded_bytes,
-            (totals.folded_payload > 0).then_some(totals.folded_payload),
+            totals.folded_payload,
             totals.folded_priced,
         ),
         passed_through_calls: totals.passthrough_calls,
@@ -1940,6 +1947,16 @@ mod tests {
             },
             passed_through_calls: 5,
         };
+
+        // The mapping is what decides `null`, so it is what the test drives.
+        let unpriced = stage_stat(2, 400, 0, 0);
+        assert_eq!(unpriced.base_bytes, None);
+        assert_eq!(
+            unpriced.share_pct, None,
+            "a stage with no recorded base must not report a share"
+        );
+        let priced = stage_stat(3, 900, 1_000, 900);
+        assert_eq!(priced.share_pct, Some(90.0));
 
         let json = serde_json::to_string(&stages).unwrap();
         assert!(json.contains("\"distilled\""), "{json}");
