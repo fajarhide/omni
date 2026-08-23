@@ -253,6 +253,10 @@ fn scope(args: &[String]) -> (&'static str, i64) {
 /// Order matters only for a caller passing several: `--view` wins, then the old
 /// flags in the order they were resolved before, so nothing changes underneath a
 /// script that passed two.
+///
+/// `--card` is not here. It is an output format like `--json`, and reading it as a
+/// view meant `--view detail --card` selected the text view and wrote no image
+/// (review of #665). `renderer` weighs the formats against the view instead.
 fn view(args: &[String]) -> &'static str {
     if let Some(name) = super::flag_value(args, "--view") {
         return match name.to_ascii_lowercase().as_str() {
@@ -265,9 +269,7 @@ fn view(args: &[String]) -> &'static str {
             _ => "summary",
         };
     }
-    if super::has_flag(args, "--card") {
-        "card"
-    } else if super::has_flag(args, "--share") {
+    if super::has_flag(args, "--share") {
         "share"
     } else if super::has_flag(args, "--rerun") {
         "rerun"
@@ -322,10 +324,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     }
     super::check_flags("stats", args, FLAGS)?;
 
-    let mode = view(args);
-    let json = super::has_flag(args, "--json");
-
-    match renderer(mode, json) {
+    match renderer_for(args) {
         "card" => run_card(store),
         "json" => run_json(args, store),
         "share" => run_share(store),
@@ -337,26 +336,39 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     }
 }
 
-/// Which renderer runs, given the view and whether `--json` was asked for.
+/// The renderer for one argv, which is the whole decision in one place.
 ///
-/// A table rather than an ordered `match` on two variables, because the order is
-/// where this goes wrong: review of #665 caught `--json` printing a human table
-/// for `--view projects`, and then caught the fix printing JSON instead of
-/// writing the card for `--card --json`.
+/// Separated from `renderer` so the wiring is testable and not only the table:
+/// the bug review found was `view()` answering before the card flag was read,
+/// and a table test cannot see an argument that never arrives.
+fn renderer_for(args: &[String]) -> &'static str {
+    renderer(
+        view(args),
+        super::has_flag(args, "--json"),
+        super::has_flag(args, "--card"),
+    )
+}
+
+/// Which renderer runs, given the view and the two output formats.
 ///
-/// There is one machine-readable report and it is not per view, so `--json` wins
-/// over a view flag rather than that flag selecting a text renderer under it.
-/// `--card` outranks both: it writes a file, which is the only thing the caller
-/// can have asked for by naming it.
-fn renderer(view: &str, json: bool) -> &'static str {
-    match (view, json) {
-        ("card", _) => "card",
-        (_, true) => "json",
-        ("share", _) => "share",
-        ("rerun", _) => "rerun",
-        ("context", _) => "context",
-        ("project", _) => "project",
-        ("detail" | "commands", _) => "detail",
+/// A table rather than an ordered chain, because the order is where this keeps
+/// going wrong: review of #665 caught `--json` printing a human table for
+/// `--view projects`, then the fix printing JSON instead of writing the card for
+/// `--card --json`, then `--view detail --card` writing no card at all because
+/// `view()` had answered first.
+///
+/// `--card` outranks everything: it writes a file, which is the only thing naming
+/// it can mean. `--json` outranks the view, because there is one machine-readable
+/// report and it is not per view. Everything else is the view.
+fn renderer(view: &str, json: bool, card: bool) -> &'static str {
+    match (view, json, card) {
+        (_, _, true) => "card",
+        (_, true, _) => "json",
+        ("share", ..) => "share",
+        ("rerun", ..) => "rerun",
+        ("context", ..) => "context",
+        ("project", ..) => "project",
+        ("detail" | "commands", ..) => "detail",
         _ => "summary",
     }
 }
@@ -1893,21 +1905,37 @@ mod tests {
     /// image the caller named. The order is the bug both times, so it is a table.
     #[test]
     fn the_renderer_table_settles_json_against_a_view() {
-        assert_eq!(renderer("summary", false), "summary");
-        assert_eq!(renderer("summary", true), "json");
-        assert_eq!(renderer("detail", true), "json");
+        assert_eq!(renderer("summary", false, false), "summary");
+        assert_eq!(renderer("summary", true, false), "json");
+        assert_eq!(renderer("detail", true, false), "json");
         assert_eq!(
-            renderer("project", true),
+            renderer("project", true, false),
             "json",
             "one report, so a view beside --json selects nothing"
         );
-        assert_eq!(renderer("commands", false), "detail");
+        assert_eq!(renderer("commands", false, false), "detail");
         assert_eq!(
-            renderer("card", true),
+            renderer("summary", true, true),
             "card",
             "--card writes a file, which is the only thing naming it can mean"
         );
-        assert_eq!(renderer("card", false), "card");
+        assert_eq!(
+            renderer("detail", false, true),
+            "card",
+            "a view beside --card does not suppress the file"
+        );
+
+        // And the wiring, since the bug was an argument that never arrived rather
+        // than a row in the table above.
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+        assert_eq!(renderer_for(&args(&["--view", "detail", "--card"])), "card");
+        assert_eq!(renderer_for(&args(&["--card", "--json"])), "card");
+        assert_eq!(
+            renderer_for(&args(&["--view", "projects", "--json"])),
+            "json"
+        );
+        assert_eq!(renderer_for(&args(&["--view", "projects"])), "project");
+        assert_eq!(renderer_for(&args(&[])), "summary");
     }
 
     /// Review of #665. Every query in the JSON report read all-time whatever
