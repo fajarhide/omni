@@ -196,6 +196,17 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         return true;
     }
 
+    // The line a compiler or bundler marked as the one that threw, and the caret
+    // row pointing at the column. In a frame those two tokens are the entire
+    // answer, and without this they carried no failure signal at all: the
+    // distiller dropped `> 50 | throw ...` and its `^` and kept lines 49, 51 and
+    // 53 around them, leaving five lines of source and not the one that failed
+    // (#650). Same shape as #425 one layer up, where a runner's verdict glyph
+    // tiered as ordinary context.
+    if marks_the_offending_line(lower_text) {
+        return true;
+    }
+
     // Generic critical markers
     lower_text.contains("error:")
         || lower_text.contains("error[")
@@ -204,8 +215,38 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.contains("panic:")
         || lower_text.starts_with("error ")
         || lower_text.contains("build failed")
+        // `> Build error occurred` is what the bundler prints above the frame,
+        // and it has no colon for the `error:` rule to catch (#650).
+        || lower_text.contains("build error")
         || lower_text.contains("--- fail")
         || mentions_failure_as_a_verdict(lower_text)
+}
+
+/// Does any line here carry a compiler frame's own pointer?
+///
+/// Deliberately narrow, because a leading `>` is also a markdown quote and a
+/// shell redirection, and tiering those Critical would stop a document being
+/// distilled at all. Two shapes only:
+///
+/// * `> 50 |  throw ...`, the marked source line, which needs the `|` gutter
+///   after the marker to tell it apart from quoted prose.
+/// * `|      ^^^^`, the caret row, which is nothing but gutter, carets, tildes
+///   and space.
+///
+/// `> Build error occurred` is prose and is not matched here; `build error` is a
+/// generic marker below instead, where it belongs.
+fn marks_the_offending_line(text: &str) -> bool {
+    text.lines().any(|line| {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix('>') {
+            // `> 50 |` and `>50 |`: a gutter follows, which prose does not have.
+            let rest = rest.trim_start();
+            return rest.split_once('|').is_some_and(|(num, _)| {
+                !num.is_empty() && num.trim().chars().all(|c| c.is_ascii_digit())
+            });
+        }
+        t.contains('^') && t.chars().all(|c| matches!(c, '^' | '~' | '|' | ' '))
+    })
 }
 
 /// The verdict glyphs runners print instead of words.
@@ -463,6 +504,57 @@ mod tests {
             assert!(
                 is_critical(&red.to_lowercase(), Some("cargo")),
                 "real failure not classified Critical: {red}"
+            );
+        }
+    }
+
+    /// #650. A bundler marks the line that threw with a leading `>` and points at
+    /// the column with `^`. Those two tokens are the whole answer in a compiler
+    /// frame, and they carried no failure signal, so the distiller dropped them
+    /// and kept the unmarked context around them. The reader was left with five
+    /// lines of source, none of which is the one that failed.
+    ///
+    /// Same shape as #425, one layer up: there a runner's verdict glyph tiered as
+    /// ordinary context, here the marker that says which line the verdict is
+    /// about.
+    #[test]
+    fn a_compiler_frame_marker_is_the_answer_not_context() {
+        for marked in [
+            "  > 50 |   throw new Error(`invalid configuration: ${keys.join(', ')}`)",
+            "  |         ^",
+            "     ^^^^^^",
+            "> Build error occurred",
+            "  > 12 | const x: string = 1",
+        ] {
+            assert!(
+                is_critical(&marked.to_lowercase(), None),
+                "the marked line of a compiler frame tiered as context: {marked:?}"
+            );
+        }
+
+        // The neighbours it kept while dropping the above. They are context and
+        // must stay context, or the frame has no signal to rank against.
+        for context in [
+            "  49 |   const keys = [...new Set(parsed.error.issues.map((i) => i.path))]",
+            "  51 | }",
+            "  53 | export const env: Env = parsed.data",
+        ] {
+            assert!(
+                !is_critical(&context.to_lowercase(), None),
+                "an unmarked context line tiered Critical: {context:?}"
+            );
+        }
+
+        // Not every `>` is a compiler frame. A quoted line in a README read
+        // through `cat`, and a shell redirection in a transcript, are prose.
+        for prose in [
+            "> a blockquote in some markdown a tool printed",
+            "$ cargo build > build.log 2>&1",
+            "  -> resolved 41 packages",
+        ] {
+            assert!(
+                !is_critical(&prose.to_lowercase(), None),
+                "ordinary text tiered Critical by the frame rule: {prose:?}"
             );
         }
     }
