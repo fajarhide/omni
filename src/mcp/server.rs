@@ -1105,8 +1105,11 @@ impl OmniServer {
             0.0
         };
 
+        // `raw_tokens` is `estimate_tokens` output and nothing else, so this was
+        // reporting `actual` for every row ever written (#663). The flag still
+        // decides which figure to show; only the label was a claim.
         let is_actual = raw_tokens > 0;
-        let method = if is_actual { "actual" } else { "estimated" };
+        let method = "estimated";
 
         // Fallback for legacy
         let display_raw = if is_actual {

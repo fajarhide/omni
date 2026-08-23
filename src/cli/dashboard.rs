@@ -143,8 +143,8 @@ fn page(store: &Store) -> String {
         rows.push_str(&format!(
             "<tr><td>{}</td><td class=\"n\">{calls}</td><td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{pct:.1}%</td></tr>",
             escape(label),
-            super::stats::format_exact_tokens(*raw_tokens),
-            super::stats::format_exact_tokens(*filtered_tokens)
+            super::stats::format_compact(*raw_tokens),
+            super::stats::format_compact(*filtered_tokens)
         ));
     }
 
