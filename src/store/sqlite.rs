@@ -351,6 +351,98 @@ impl SqliteBackend {
         Ok(rows)
     }
 
+    /// Both engines, each against its own base (#665). `omni stats` computed
+    /// everything from `distillations` and never read `ledger_folds`, so the
+    /// engine that removed the most bytes was absent from the report, and the
+    /// one percentage printed was the distiller averaged over every call OMNI
+    /// deliberately declined.
+    pub fn engine_totals(&self, since: i64) -> Result<EngineTotals> {
+        let conn = self.pool.get().context("DB pool exhausted")?;
+        let mut t = EngineTotals::default();
+
+        let mut stmt = conn.prepare(&format!(
+            "SELECT route, COUNT(*), COALESCE(SUM(input_bytes),0), COALESCE(SUM(output_bytes),0)
+             FROM distillations WHERE ts >= ?1 AND {} GROUP BY route",
+            applied_only()
+        ))?;
+        let rows = stmt.query_map(params![since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+                row.get::<_, u64>(3)?,
+            ))
+        })?;
+        for (route, calls, input, output) in rows.flatten() {
+            // A declined call contributes no saving and no base. Averaging it in
+            // is what turned 48% into 9%, and putting its 31 MB in the same
+            // column as the savings reads as bytes that went missing.
+            if route == "Passthrough" {
+                t.declined_calls += calls;
+            } else {
+                t.distilled_calls += calls;
+                t.distilled_input += input;
+                t.distilled_output += output;
+            }
+        }
+
+        // One fold writes one row per (origin, source agent) pair and repeats
+        // the same `payload_bytes` on each, so rows are not folds. Counting rows
+        // inflates the population and, below, sums one payload several times:
+        // 479 priced rows on the maintainer's machine are 406 folds, and the
+        // difference took a real 41% down to a reported 31%. `bytes` is the one
+        // column that is genuinely per-row and stays a plain sum.
+        //
+        // `fold_id` is exact for anything written since the migration that added
+        // it. Rows older than that were backfilled from (second, session, agent,
+        // scope, payload size), which merges two folds that share all five, so a
+        // historical count is a lower bound and a historical ratio a slight
+        // overstatement.
+        let folds = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(bytes),0), MIN(ts) FROM (
+                 SELECT SUM(bytes) AS bytes, MIN(ts) AS ts FROM ledger_folds
+                 WHERE ts >= ?1 GROUP BY fold_id)",
+            params![since],
+            |row| {
+                Ok((
+                    row.get::<_, u64>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            },
+        );
+        if let Ok((count, bytes, first)) = folds {
+            t.folds = count;
+            t.fold_bytes = bytes;
+            t.first_fold_ts = first;
+        }
+
+        // `payload_bytes` arrived in a migration defaulting to 0, so most rows
+        // carry a saving with no base to divide it by. Counting them separately
+        // is the difference between a ratio and the two-population error that
+        // put a wrong figure in #533's thread.
+        let priced = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(bytes),0), COALESCE(SUM(payload),0) FROM (
+                 SELECT SUM(bytes) AS bytes, MAX(payload_bytes) AS payload FROM ledger_folds
+                 WHERE ts >= ?1 AND payload_bytes > 0 GROUP BY fold_id)",
+            params![since],
+            |row| {
+                Ok((
+                    row.get::<_, u64>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                ))
+            },
+        );
+        if let Ok((count, bytes, payload)) = priced {
+            t.priced_folds = count;
+            t.priced_fold_bytes = bytes;
+            t.priced_payload = payload;
+        }
+
+        Ok(t)
+    }
+
     /// Route distribution: (route, count)
     pub fn route_distribution(&self, since: i64) -> Result<Vec<(String, u64)>> {
         let conn = self.pool.get().context("DB pool exhausted")?;
@@ -834,6 +926,36 @@ impl SqliteBackend {
             "ALTER TABLE ledger_folds ADD COLUMN session TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // #665. One fold writes a row per (origin, source agent) pair, and until
+        // this column nothing recorded which rows belonged together. Reporting
+        // had to infer it from (second, session, agent, scope, payload size),
+        // which merges two folds that land in one second on a payload of the
+        // same size.
+        //
+        // Rows written before the column get that same inference as a backfill,
+        // because the information is genuinely gone: the smallest `id` in each
+        // inferred group, which is stable and matches what a new fold gets.
+        let fresh_fold_id = conn
+            .execute(
+                "ALTER TABLE ledger_folds ADD COLUMN fold_id INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .is_ok();
+        if fresh_fold_id {
+            let _ = conn.execute(
+                "UPDATE ledger_folds SET fold_id = (
+                     SELECT MIN(f.id) FROM ledger_folds f
+                     WHERE f.ts = ledger_folds.ts AND f.session = ledger_folds.session
+                       AND f.agent_id = ledger_folds.agent_id AND f.scope = ledger_folds.scope
+                       AND f.payload_bytes = ledger_folds.payload_bytes)",
+                [],
+            );
+        }
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ledger_folds_fold ON ledger_folds(fold_id)",
+            [],
+        );
+
         // #581. Set when a handle is pulled and cleared by the delivery that
         // answers it, so the content a marker sent the reader to fetch is not
         // folded back into that same marker on its way in. Separate from
@@ -2076,12 +2198,23 @@ impl SqliteBackend {
         let Ok(tx) = conn.transaction() else {
             return;
         };
+        // Every row of this call carries it, so reporting can group by fold
+        // instead of inferring one from a timestamp (#665). `id` is the rowid,
+        // so `MAX` is a lookup rather than a scan, and the value it picks is the
+        // id the first row is about to get.
+        let fold_id: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(id), 0) + 1 FROM ledger_folds",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
         {
             let Ok(mut stmt) = tx.prepare_cached(
                 "INSERT INTO ledger_folds
                      (ts, scope, agent_id, source_agent, origin, lines, bytes, whole_output,
-                      payload_bytes, session)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                      payload_bytes, session, fold_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             ) else {
                 return;
             };
@@ -2096,7 +2229,8 @@ impl SqliteBackend {
                     f.bytes as i64,
                     i64::from(f.whole_output),
                     f.payload_bytes as i64,
-                    session
+                    session,
+                    fold_id
                 ]);
             }
         }
@@ -2792,6 +2926,54 @@ impl SqliteBackend {
 /// Grouped by the caller so a payload folding twenty runs from one agent writes
 /// one row rather than twenty. The recipient is on the call, not the row, since
 /// it is the same for every fold in a payload.
+/// What each engine removed, and the base each removed it from (#665).
+///
+/// The two ratios come from different populations and may never be added or
+/// averaged together. Bytes may be summed; percentages may not.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EngineTotals {
+    pub distilled_calls: u64,
+    pub distilled_input: u64,
+    pub distilled_output: u64,
+    /// Calls OMNI declined. They save nothing and cost nothing, and they are the
+    /// 15,395 that dragged a 48% distiller down to a reported 9%.
+    pub declined_calls: u64,
+    /// Fold operations, not `ledger_folds` rows. One fold writes a row per
+    /// (origin, source agent) pair carrying the same payload size.
+    pub folds: u64,
+    pub fold_bytes: u64,
+    /// Folds recording the payload they came out of, which is the only base the
+    /// fold ratio may be taken against. Calls, for the same reason as above.
+    pub priced_folds: u64,
+    pub priced_fold_bytes: u64,
+    pub priced_payload: u64,
+    pub first_fold_ts: Option<i64>,
+}
+
+impl EngineTotals {
+    pub fn distilled_saved(&self) -> u64 {
+        self.distilled_input.saturating_sub(self.distilled_output)
+    }
+
+    /// Bytes neither engine let through. Absolute, because summing the two
+    /// percentages is the error this whole type exists to prevent.
+    pub fn total_saved(&self) -> u64 {
+        self.distilled_saved() + self.fold_bytes
+    }
+
+    pub fn distilled_pct(&self) -> Option<f64> {
+        (self.distilled_input > 0)
+            .then(|| 100.0 * self.distilled_saved() as f64 / self.distilled_input as f64)
+    }
+
+    /// `None` when no fold in the window records a payload size, because a
+    /// ratio over a base that does not exist is a guess wearing a percent sign.
+    pub fn fold_pct(&self) -> Option<f64> {
+        (self.priced_payload > 0)
+            .then(|| 100.0 * self.priced_fold_bytes as f64 / self.priced_payload as f64)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FoldRecord {
     /// The agent that was shown these lines first, from `ledger_lines.agent_id`.
@@ -3652,6 +3834,148 @@ mod tests {
             filtered_tokens: 25,
             delivered_bytes: 100,
         }
+    }
+
+    /// #665. The one percentage `omni stats` printed was the distiller averaged
+    /// over every call OMNI deliberately declined, and `ledger_folds` was not
+    /// read at all. On the maintainer's machine that reported 4.5% for a week in
+    /// which the distiller took 48% off what it was given and the ledger removed
+    /// 1.6 times as many bytes again.
+    ///
+    /// Both halves are here because either one alone passes with the other
+    /// broken: a base that includes the declined calls still reads folds, and a
+    /// reader that ignores the ledger still gets the distiller ratio right.
+    #[test]
+    fn the_declined_calls_stay_out_of_the_base_and_the_folds_are_counted() {
+        let (store, _dir) = get_temp_store();
+
+        let mut distilled = any_distillation();
+        distilled.input_bytes = 1_000;
+        distilled.output_bytes = 200;
+        distilled.delivered_bytes = 200;
+        store.record_distillation("s1", &distilled, "cargo build", "", "claude_code");
+
+        // Nine declined calls, each larger than the distilled one. Averaged in
+        // they drag 80% down to 8%, which is the shape of the defect.
+        let mut declined = any_distillation();
+        declined.route = crate::pipeline::Route::Passthrough;
+        declined.input_bytes = 10_000;
+        declined.output_bytes = 10_000;
+        declined.delivered_bytes = 10_000;
+        for _ in 0..9 {
+            store.record_distillation("s1", &declined, "kubectl get pods", "", "claude_code");
+        }
+
+        // One fold, two rows: the lines came from two agents, and every row of a
+        // fold repeats the same payload size. Summing `payload_bytes` over rows
+        // therefore divides 500 saved bytes by 4,000 instead of 2,000.
+        store.ledger_record_folds(
+            "/proj",
+            "claude_code",
+            "s1",
+            &[
+                FoldRecord {
+                    source_agent: "claude_code".to_string(),
+                    origin: "project",
+                    lines: 40,
+                    bytes: 400,
+                    whole_output: false,
+                    payload_bytes: 2_000,
+                },
+                FoldRecord {
+                    source_agent: "codex".to_string(),
+                    origin: "project",
+                    lines: 10,
+                    bytes: 100,
+                    whole_output: false,
+                    payload_bytes: 2_000,
+                },
+            ],
+        );
+
+        // A second fold, same second, same session, same payload size, and it
+        // repeats a (origin, source agent) pair the first one already used. The
+        // table has no fold id, so nothing but that repeat distinguishes the two.
+        store.ledger_record_folds(
+            "/proj",
+            "claude_code",
+            "s1",
+            &[FoldRecord {
+                source_agent: "claude_code".to_string(),
+                origin: "project",
+                lines: 40,
+                bytes: 400,
+                whole_output: false,
+                payload_bytes: 2_000,
+            }],
+        );
+
+        // A third fold sharing the second, the session, the agent, the scope and
+        // the payload size, and overlapping the first two in no (origin, source
+        // agent) pair at all. Nothing outside `fold_id` separates it from them.
+        store.ledger_record_folds(
+            "/proj",
+            "claude_code",
+            "s1",
+            &[FoldRecord {
+                source_agent: "codex".to_string(),
+                origin: "session",
+                lines: 10,
+                bytes: 100,
+                whole_output: false,
+                payload_bytes: 2_000,
+            }],
+        );
+
+        // A fourth fold with no payload size: summable, never divisible.
+        store.ledger_record_folds(
+            "/proj",
+            "claude_code",
+            "s1",
+            &[FoldRecord {
+                source_agent: "claude_code".to_string(),
+                origin: "session",
+                lines: 5,
+                bytes: 50,
+                whole_output: false,
+                payload_bytes: 0,
+            }],
+        );
+
+        // Force every row into one second. The recorder stamps wall clock, so a
+        // test cannot otherwise decide whether two folds land together, and the
+        // collision these three are here to prove would appear or not by timing.
+        store
+            .pool
+            .get()
+            .unwrap()
+            .execute("UPDATE ledger_folds SET ts = 1000", [])
+            .unwrap();
+
+        let t = store.engine_totals(0).unwrap();
+
+        assert_eq!(t.distilled_calls, 1);
+        assert_eq!(t.declined_calls, 9);
+        assert_eq!(t.distilled_input, 1_000, "a declined call is not a base");
+        assert_eq!(t.distilled_pct().map(|p| p.round()), Some(80.0));
+
+        assert_eq!(t.folds, 4, "four folds across five rows");
+        assert_eq!(
+            t.fold_bytes, 1_050,
+            "bytes are per row and all of them count"
+        );
+        assert_eq!(t.priced_folds, 3, "three of them record a base");
+        assert_eq!(
+            t.priced_payload, 6_000,
+            "one payload per fold, not one per row"
+        );
+        // 1,000 removed from 6,000. Two rows deep it would be 1,000 from 2,000,
+        // and one row per payload would make it 1,000 from 8,000.
+        assert_eq!(t.fold_pct().map(|p| (p * 10.0).round()), Some(167.0));
+
+        // 800 from the distiller, 1,050 from the ledger. Bytes may be summed;
+        // the two percentages above may not.
+        assert_eq!(t.total_saved(), 1_850);
     }
 
     /// #118: the "Last distill" reading came from `rewind_store`, which only

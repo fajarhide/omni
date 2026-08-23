@@ -173,8 +173,16 @@ check_exit "session start exits cleanly" "$SESSION_EXIT" "0"
 # ─── 7. Stats ────────────────────────────────────────────
 echo "▸ Scenario 7: Stats"
 STATS_OUT=$("$OMNI" stats 2>&1 || true)
-check "stats shows header" "$STATS_OUT" "Signal Report"
-check "stats shows commands" "$STATS_OUT" "commands"
+check "stats names its window" "$STATS_OUT" "last 30 days"
+# #665: the default view leads with what never reached the model and names both
+# engines. A fresh store here takes the no-data path, same as the share card.
+if echo "$STATS_OUT" | grep -q "No data yet"; then
+    check "stats says so when there is no data" "$STATS_OUT" "No data yet"
+else
+    check "stats leads with the bytes" "$STATS_OUT" "never reached your model"
+    check "stats names the ledger" "$STATS_OUT" "folded"
+    check "stats names the declined calls" "$STATS_OUT" "left alone"
+fi
 
 # The share card runs against a fresh store here, so it takes the no-data path.
 # Both branches have to exit 0: a growth surface that panics on a new install is

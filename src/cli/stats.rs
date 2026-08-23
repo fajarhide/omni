@@ -1,6 +1,6 @@
 // Safety: String slicing uses ASCII delimiter positions or boundary-checked safe utilities.
 
-use crate::store::sqlite::Store;
+use crate::store::sqlite::{EngineTotals, Store};
 use anyhow::{Context, Result};
 use colored::*;
 use std::collections::HashMap;
@@ -39,14 +39,6 @@ pub fn format_bar(pct: f64, width: usize) -> String {
     let filled = ((pct / 100.0) * width as f64).round() as usize;
     let filled = filled.min(width);
     "█".repeat(filled)
-}
-
-fn format_bar_with_empty(pct: f64) -> String {
-    let width = 20;
-    let filled = ((pct / 100.0) * width as f64).round() as usize;
-    let filled = filled.min(width);
-    let empty = width - filled;
-    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
 }
 
 fn format_number(n: u64) -> String {
@@ -376,7 +368,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
         "json" => run_json(store),
-        _ => run_default(store),
+        _ => run_default(args, store),
     }
 }
 
@@ -807,18 +799,131 @@ fn run_card(store: &Store) -> Result<()> {
     Ok(())
 }
 
-fn run_default(store: &Store) -> Result<()> {
-    let periods = store.multi_period_stats()?;
-    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+/// One line per engine, each percentage against its own base (#665).
+///
+/// Split out from the printing so the arithmetic can be driven directly: the
+/// defect this replaces was a ratio taken over the wrong population, and a test
+/// that has to reach through a terminal to see one cannot check it.
+fn engine_rows(t: &EngineTotals) -> Vec<String> {
+    let rows: [(&str, u64, String, u64, &str); 3] = [
+        (
+            "folded",
+            t.fold_bytes,
+            match t.fold_pct() {
+                Some(p) => format!("{p:.0}% of what it folded"),
+                // No fold in the window records the payload it came out of, so
+                // there is no base. A ratio invented for the column would be a
+                // guess wearing a percent sign.
+                None => "of what it folded".to_string(),
+            },
+            t.folds,
+            "folds",
+        ),
+        (
+            "distilled",
+            t.distilled_saved(),
+            match t.distilled_pct() {
+                Some(p) => format!("{p:.0}% of what it distilled"),
+                None => "of what it distilled".to_string(),
+            },
+            t.distilled_calls,
+            "calls",
+        ),
+        // Declined calls saved nothing and lost nothing. Their 31 MB is not a
+        // number in this column: putting it here reads as bytes that went
+        // missing, and averaging their zero in is what reported a 48% distiller
+        // as 9%.
+        (
+            "left alone",
+            0,
+            "by design".to_string(),
+            t.declined_calls,
+            "calls",
+        ),
+    ];
 
-    let has_data = periods.iter().any(|(_, count, _, _, _, _)| *count > 0);
+    let saved: Vec<String> = rows
+        .iter()
+        .map(|(_, b, ..)| {
+            if *b == 0 {
+                "0".to_string()
+            } else {
+                format_bytes(*b)
+            }
+        })
+        .collect();
+    let counts: Vec<String> = rows
+        .iter()
+        .map(|(_, _, _, n, _)| format_number(*n))
+        .collect();
+
+    let w_label = max_width(rows.iter().map(|(l, ..)| *l));
+    let w_saved = max_width(&saved);
+    let w_base = max_width(rows.iter().map(|(_, _, b, _, _)| b.as_str()));
+    let w_count = max_width(&counts);
+
+    rows.iter()
+        .enumerate()
+        .map(|(i, (label, _, base, _, unit))| {
+            format!(
+                "    {:<w_label$}  {:>w_saved$}   {:<w_base$}   {:>w_count$} {}",
+                label, saved[i], base, counts[i], unit
+            )
+        })
+        .collect()
+}
+
+/// The lines that qualify the numbers above them, empty when nothing needs
+/// qualifying. Every one of them names a population, because both defects this
+/// report has shipped were ratios over a population the reader could not see.
+fn engine_caveats(t: &EngineTotals, since: i64) -> Vec<String> {
+    let mut out = Vec::new();
+
+    if t.folds > 0 {
+        if t.fold_pct().is_none() {
+            out.push(
+                "no fold in this window records the payload it came out of, so the fold column has no percentage"
+                    .to_string(),
+            );
+        } else if t.priced_folds < t.folds {
+            out.push(format!(
+                "fold percentage is measured over the {} of {} folds that record a payload size",
+                format_number(t.priced_folds),
+                format_number(t.folds)
+            ));
+        }
+    }
+
+    // `ledger_folds` is pruned, and it is younger than the distiller table on
+    // every machine that upgraded into it. A window the ledger does not cover is
+    // a window where its bytes are missing rather than zero.
+    if let Some(first) = t.first_fold_ts
+        && first > since
+        && let Some(d) = chrono::DateTime::from_timestamp(first, 0)
+    {
+        out.push(format!(
+            "folds recorded from {}, so this window is longer than the ledger's history",
+            d.format("%Y-%m-%d")
+        ));
+    }
+
+    out
+}
+
+fn run_default(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
+    let t = store.engine_totals(since)?;
 
     println!();
     print_separator();
-    println!(" {}", "OMNI Signal Report".bold().bright_white());
+    println!(
+        " {} {}",
+        "OMNI".bold().bright_white(),
+        format!("· {period_label}").bright_black()
+    );
     print_separator();
 
-    if !has_data {
+    if t.distilled_calls == 0 && t.declined_calls == 0 && t.folds == 0 {
         println!(
             "  {}",
             "No data yet! OMNI tracks savings automatically as you work."
@@ -831,213 +936,25 @@ fn run_default(store: &Store) -> Result<()> {
         return Ok(());
     }
 
-    // #435. The headline is session lifetime, because that is the meter #357
-    // promoted and `CONTRIBUTING.md` calls the number that decides progress. The
-    // distillation percentage below it is a diagnostic for one host's pipeline
-    // and says so, which is the whole of the correction: it was never wrong, it
-    // was presented as the product number after the project stopped treating it
-    // as one.
-    let (sessions, median_cmds, longest, compacted) = store.session_lifetime(0);
-    println!("  {}", "Session lifetime:".bold().bright_white());
-    if sessions == 0 {
-        println!(
-            "  {}",
-            "  not measurable yet: no session has been closed by a host that reports one"
-                .bright_black()
-                .italic()
-        );
-    } else {
-        println!(
-            "  {} commands median, {} longest, across {} closed sessions",
-            median_cmds.to_string().bright_green().bold(),
-            longest.to_string().cyan(),
-            format_number(sessions).cyan()
-        );
-        let compaction_line = if compacted == 0 {
-            "  none ended at a compaction, so this measures sessions, not the window".to_string()
-        } else {
-            format!("  {compacted} of them ended at a compaction, which is what the window costs")
-        };
-        println!("  {}", compaction_line.bright_black().italic());
+    println!();
+    println!(
+        "    {}  {}",
+        format_bytes(t.total_saved()).bold().bright_green(),
+        "never reached your model".bright_white()
+    );
+    println!();
+    for line in engine_rows(&t) {
+        println!("{}", line);
     }
     println!();
     println!(
-        "  {} {}",
-        "Pipeline diagnostic:".bold().bright_white(),
-        "one host's tool output, not a product claim"
+        "    {}",
+        "nothing deleted, nothing invented, no call came back larger"
             .bright_black()
             .italic()
     );
-
-    // Multi-period rows
-    let period_rows: Vec<PeriodRow<'_>> = periods
-        .iter()
-        .filter(|(label, count, ..)| *count > 0 || label == "All Time")
-        .map(
-            |(label, count, input, output, _raw_tokens, _filtered_tokens)| PeriodRow {
-                label,
-                count: *count,
-                raw_bytes: *input,
-                filtered_bytes: *output,
-                reduction_pct: if *input > 0 {
-                    100.0 * (1.0 - *output as f64 / *input as f64)
-                } else {
-                    0.0
-                },
-            },
-        )
-        .collect();
-
-    for line in format_period_rows(&period_rows) {
-        println!("{}", line);
-    }
-
-    // #212: say what the number is a number *of*. It counts only calls whose
-    // result reached a model's context; `omni exec` and pipe output read at a
-    // terminal is compression a human sees, not tokens anyone was billed for,
-    // and folding the two together is what made the all-time headline 66.3%
-    // when the model-facing figure was 29.3%.
-    println!(
-        "  {}",
-        "Counts calls whose result reached a model. Terminal output is excluded:\n  no context holds it."
-            .bright_black()
-            .italic()
-    );
-
-    // #173 asked for a second, cache-discounted figure beside this one, because a
-    // distilled tool result is re-sent on every later turn and OMNI counts the
-    // saving once. `Store::token_savings_with_reuse` computes it and is tested,
-    // and it is deliberately not printed yet.
-    //
-    // Run against the maintainer's database it reports 17.0M at insertion and
-    // 469.3M with re-use, a 27.6x multiplier. The multiplier is wrong, and it is
-    // wrong because of #118 item 1: until #259 every distillation was filed under
-    // a wall-clock id, so one "session" covers 3,739 commands across 16 project
-    // paths and hands its first row a 374x credit. The arithmetic is right and
-    // the input is not.
-    //
-    // Publishing it would be a bigger number that is less true, which is the
-    // defect this tracker exists to fight. It goes in once enough history exists
-    // under real host session ids to make `turns_after` mean what it says.
-
-    let top_commands = get_top_commands(store, 0, 8);
-
-    if !top_commands.is_empty() {
-        println!("\n  {}", "Top Commands:".bold().bright_white());
-        let w_count = max_width(
-            top_commands
-                .iter()
-                .map(|(_, count, _, _)| count.to_string()),
-        );
-        for (cmd, count, pct, bytes_saved) in &top_commands {
-            let short_cmd = shorten_command(cmd, 18);
-            let bar = format_bar_with_empty(*pct);
-            let bar_colored = if *pct > 80.0 {
-                bar.bright_green()
-            } else if *pct > 40.0 {
-                bar.bright_yellow()
-            } else {
-                bar.bright_red()
-            };
-
-            let tokens_str = if *bytes_saved > 0 {
-                format!("(-{})", format_bytes(*bytes_saved)).bright_black()
-            } else {
-                "".bright_black()
-            };
-
-            println!(
-                "    {:<18} {}  {:>5.1}%  ({:>w_count$}x)  {}",
-                short_cmd.bright_cyan(),
-                bar_colored,
-                pct,
-                count,
-                tokens_str,
-            );
-        }
-    }
-
-    // Agent Distribution
-    let agent_data = store.get_agent_breakdown(0).unwrap_or_default();
-
-    // Group by display name
-    let mut grouped_agents: HashMap<String, (u64, u64, u64)> = HashMap::new();
-    for r in &agent_data {
-        if r.agent_id == "unknown" || r.agent_id == "terminal" || r.agent_id.is_empty() {
-            continue;
-        }
-        let name = agent_display_name(&r.agent_id).to_string();
-        let entry = grouped_agents.entry(name).or_insert((0, 0, 0));
-        entry.0 += r.calls;
-        entry.1 += r.input_bytes;
-        entry.2 += r.output_bytes;
-    }
-
-    if !grouped_agents.is_empty() {
-        let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
-        println!("\n  {}", "Agent Distribution:".bold().bright_white());
-
-        let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
-        sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.1.0));
-
-        let w_name = max_width(sorted_agents.iter().map(|(name, _)| name.as_str())).max(18);
-        let w_count = max_width(
-            sorted_agents
-                .iter()
-                .map(|(_, (count, _, _))| count.to_string()),
-        );
-
-        for (name, (count, input, output)) in sorted_agents {
-            let pct = if total_cmds > 0 {
-                count as f64 / total_cmds as f64 * 100.0
-            } else {
-                0.0
-            };
-            let savings = if input > 0 {
-                100.0 * (1.0 - output as f64 / input as f64)
-            } else {
-                0.0
-            };
-            let bar = format_bar_with_empty(pct);
-            println!(
-                "   {:<w_name$} {}  {:>5.1}%  ({:>w_count$}x)  {:>5.1}% saved",
-                name.bright_cyan(),
-                bar.bright_blue(),
-                pct,
-                count,
-                savings,
-            );
-        }
-    }
-
-    // RewindStore
-    println!(
-        "\n  {:<20} {}",
-        "RewindStore:".bright_black(),
-        format!(
-            "{} archived │ {} retrieved",
-            rewind_stored, rewind_retrieved
-        )
-        .bright_magenta()
-    );
-
-    // The fidelity alarm. An expansion request is an agent saying the view it
-    // was given was not enough, so a rising share of archived blocks being
-    // fetched back means the projection is cutting too much. The number was
-    // already being acted on silently: `post_tool` raises the route thresholds
-    // once a command family passes 25%. This makes the same signal visible
-    // rather than only effective.
-    if let Some(rate) = (100 * rewind_retrieved).checked_div(rewind_stored)
-        && rate >= 25
-    {
-        println!(
-            "  {:<20} {}",
-            "Fidelity:".bright_black(),
-            format!(
-                "{rate}% of archived blocks were fetched back, so distillation is cutting too much"
-            )
-            .yellow()
-        );
+    for line in engine_caveats(&t, since) {
+        println!("    {}", line.bright_black().italic());
     }
 
     print_separator();
@@ -1141,6 +1058,95 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 events
             )
             .bright_green()
+        );
+    }
+
+    // #665 moved these three out of the default view. They answer "what did the
+    // pipeline do", which is a maintainer's question; the default answers "what
+    // did this save me", which is the user's.
+
+    // The fidelity alarm. An expansion request is an agent saying the view it
+    // was given was not enough, so a rising share of archived blocks being
+    // fetched back means the projection is cutting too much. The number was
+    // already being acted on silently: `post_tool` raises the route thresholds
+    // once a command family passes 25%. This makes the same signal visible
+    // rather than only effective.
+    if let Some(rate) = (100 * rewind_retrieved).checked_div(rewind_stored)
+        && rate >= 25
+    {
+        println!(
+            "  {:<20} {}",
+            "Fidelity:".bright_black(),
+            format!(
+                "{rate}% of archived blocks were fetched back, so distillation is cutting too much"
+            )
+            .yellow()
+        );
+    }
+
+    // #435. Session lifetime is the meter `CONTRIBUTING.md` calls the number
+    // that decides progress, and it is all-time by design: a 30 day window over
+    // closed sessions says less than every session ever closed.
+    let (sessions, median_cmds, longest, compacted) = store.session_lifetime(0);
+    println!("\n {}", "Session lifetime:".bold().bright_white());
+    if sessions == 0 {
+        println!(
+            "  {}",
+            "not measurable yet: no session has been closed by a host that reports one"
+                .bright_black()
+                .italic()
+        );
+    } else {
+        println!(
+            "  {} commands median, {} longest, across {} closed sessions",
+            median_cmds.to_string().bright_green().bold(),
+            longest.to_string().cyan(),
+            format_number(sessions).cyan()
+        );
+        let compaction_line = if compacted == 0 {
+            "none ended at a compaction, so this measures sessions, not the window".to_string()
+        } else {
+            format!("{compacted} of them ended at a compaction, which is what the window costs")
+        };
+        println!("  {}", compaction_line.bright_black().italic());
+    }
+
+    // #212: say what the number is a number *of*. It counts only calls whose
+    // result reached a model's context; `omni exec` and pipe output read at a
+    // terminal is compression a human sees, not tokens anyone was billed for,
+    // and folding the two together is what made the all-time headline 66.3%
+    // when the model-facing figure was 29.3%.
+    let periods = store.multi_period_stats()?;
+    let period_rows: Vec<PeriodRow<'_>> = periods
+        .iter()
+        .filter(|(label, count, ..)| *count > 0 || label == "All Time")
+        .map(
+            |(label, count, input, output, _raw_tokens, _filtered_tokens)| PeriodRow {
+                label,
+                count: *count,
+                raw_bytes: *input,
+                filtered_bytes: *output,
+                reduction_pct: if *input > 0 {
+                    100.0 * (1.0 - *output as f64 / *input as f64)
+                } else {
+                    0.0
+                },
+            },
+        )
+        .collect();
+    if !period_rows.is_empty() {
+        println!(
+            "\n {}",
+            "Every recorded call, by period:".bold().bright_white()
+        );
+        for line in format_period_rows(&period_rows) {
+            println!("{}", line);
+        }
+        println!(
+            "  {}",
+            "Declined calls are in this base, which is why it is far under the distiller's own\n  figure above. Counts calls whose result reached a model: terminal output is excluded,\n  no context holds it."
+                .bright_black()
+                .italic()
         );
     }
 
@@ -1299,6 +1305,20 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 cnt,
                 pct
             );
+
+            // #665. Passthrough is most of the table and was one bucket, which
+            // reads as OMNI doing nothing to 94% of calls. `passthrough_events`
+            // has recorded why since #533; nothing printed it.
+            if route.eq_ignore_ascii_case("passthrough") {
+                for (reason, n) in store.passthrough_reasons(since).iter().take(6) {
+                    println!(
+                        "  {:<17}{}  {}",
+                        "",
+                        format!("{n:>6}").bright_black(),
+                        reason.bright_black()
+                    );
+                }
+            }
         }
     }
 
@@ -1418,6 +1438,53 @@ pub struct StatsJson {
     pub agents: Vec<AgentStat>,
     pub rewind: RewindStat,
     pub avg_latency_ms: f64,
+    /// #665. Both engines, each ratio against its own base and named separately
+    /// so nothing downstream can average them. `periods` above is the distiller
+    /// alone and was the whole of this document while the ledger removed more.
+    pub engines: EngineStats,
+}
+
+/// All time, like the rest of `StatsJson`. `folded.first_fold_ts` is the only
+/// window any of it has, and it is there because the ledger table is younger
+/// than the distiller one and is pruned.
+#[derive(serde::Serialize)]
+pub struct EngineStats {
+    pub bytes_saved: u64,
+    pub distilled: DistilledStat,
+    pub folded: FoldedStat,
+    pub declined: DeclinedStat,
+}
+
+#[derive(serde::Serialize)]
+pub struct DistilledStat {
+    pub calls: u64,
+    pub input_bytes: u64,
+    pub output_bytes: u64,
+    pub bytes_saved: u64,
+    /// Against the bytes this engine was given, not against every recorded call.
+    pub pct_of_own_input: Option<f64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct FoldedStat {
+    pub folds: u64,
+    pub bytes_saved: u64,
+    /// Folds recording the payload they came out of. `pct_of_own_input` covers
+    /// these and only these; the rest carry a saving with no base.
+    pub priced_folds: u64,
+    pub priced_payload_bytes: u64,
+    pub pct_of_own_input: Option<f64>,
+    /// `ledger_folds` is pruned and younger than `distillations` on any machine
+    /// that upgraded into it, so a window can be older than every fold in it.
+    pub first_fold_ts: Option<i64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct DeclinedStat {
+    pub calls: u64,
+    /// Always zero. A declined call is a no-op by design, and the bytes that
+    /// passed through it are neither saved nor lost.
+    pub bytes_saved: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -1461,6 +1528,33 @@ pub struct RewindStat {
 }
 
 fn run_json(store: &Store) -> Result<()> {
+    // All time, like every other field in this document. Reading the window
+    // flags here and nowhere else would put two populations in one object and
+    // leave a consumer to discover which is which.
+    let t = store.engine_totals(0)?;
+    let engines = EngineStats {
+        bytes_saved: t.total_saved(),
+        distilled: DistilledStat {
+            calls: t.distilled_calls,
+            input_bytes: t.distilled_input,
+            output_bytes: t.distilled_output,
+            bytes_saved: t.distilled_saved(),
+            pct_of_own_input: t.distilled_pct(),
+        },
+        folded: FoldedStat {
+            folds: t.folds,
+            bytes_saved: t.fold_bytes,
+            priced_folds: t.priced_folds,
+            priced_payload_bytes: t.priced_payload,
+            pct_of_own_input: t.fold_pct(),
+            first_fold_ts: t.first_fold_ts,
+        },
+        declined: DeclinedStat {
+            calls: t.declined_calls,
+            bytes_saved: 0,
+        },
+    };
+
     let periods = store.multi_period_stats()?;
     let top_commands = get_top_commands(store, 0, 100);
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
@@ -1542,6 +1636,7 @@ fn run_json(store: &Store) -> Result<()> {
             retrieved: rewind_retrieved,
         },
         avg_latency_ms: (avg_latency * 10.0).round() / 10.0,
+        engines,
     };
 
     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -1958,13 +2053,6 @@ mod tests {
     }
 
     #[test]
-    fn test_format_bar_with_empty() {
-        assert_eq!(format_bar_with_empty(100.0), "████████████████████");
-        assert_eq!(format_bar_with_empty(50.0), "██████████░░░░░░░░░░");
-        assert_eq!(format_bar_with_empty(0.0), "░░░░░░░░░░░░░░░░░░░░");
-    }
-
-    #[test]
     fn test_format_number() {
         assert_eq!(format_number(0), "0");
         assert_eq!(format_number(999), "999");
@@ -1992,6 +2080,28 @@ mod tests {
                 retrieved: 5,
             },
             avg_latency_ms: 15.5,
+            engines: EngineStats {
+                bytes_saved: 5_354_232,
+                distilled: DistilledStat {
+                    calls: 1_041,
+                    input_bytes: 7_453_169,
+                    output_bytes: 3_849_739,
+                    bytes_saved: 3_603_430,
+                    pct_of_own_input: Some(48.3),
+                },
+                folded: FoldedStat {
+                    folds: 1_269,
+                    bytes_saved: 1_750_802,
+                    priced_folds: 468,
+                    priced_payload_bytes: 1_160_138,
+                    pct_of_own_input: Some(31.1),
+                    first_fold_ts: Some(1_786_712_874),
+                },
+                declined: DeclinedStat {
+                    calls: 15_443,
+                    bytes_saved: 0,
+                },
+            },
         };
 
         let json_str = serde_json::to_string(&json_struct).unwrap();
@@ -1999,6 +2109,109 @@ mod tests {
         assert!(json_str.contains("\"generated_at\":1234567890"));
         assert!(json_str.contains("\"savings_pct\":90.0"));
         assert!(json_str.contains("\"avg_latency_ms\":15.5"));
+        // #665. The two engines are separate objects with separate bases, so a
+        // consumer can sum the bytes and cannot average the percentages.
+        assert!(json_str.contains("\"folded\":{\"folds\":1269"));
+        assert!(json_str.contains("\"priced_folds\":468"));
+        assert!(json_str.contains("\"declined\":{\"calls\":15443,\"bytes_saved\":0}"));
+    }
+
+    /// The maintainer's own week, as #665 recorded it: the distiller took 48%
+    /// off the 1,041 calls it was given, and `omni stats` printed 4.5% because
+    /// it divided that saving by 15,443 calls it had deliberately declined.
+    fn a_real_week() -> EngineTotals {
+        EngineTotals {
+            distilled_calls: 1_041,
+            distilled_input: 7_453_169,
+            distilled_output: 3_849_739,
+            declined_calls: 15_443,
+            folds: 1_269,
+            fold_bytes: 1_750_802,
+            priced_folds: 468,
+            priced_fold_bytes: 360_739,
+            priced_payload: 1_160_138,
+            // 2026-08-14 13:07:54Z, the first fold this machine ever recorded.
+            first_fold_ts: Some(1_786_712_874),
+        }
+    }
+
+    /// #665. Two engines, two populations, and the report has to keep them
+    /// apart: the declined calls are neither a saving nor a base, and the byte
+    /// totals are the only thing the two engines may share a column with.
+    #[test]
+    fn no_row_takes_a_ratio_over_a_population_it_did_not_come_from() {
+        let out = engine_rows(&a_real_week()).join("\n");
+
+        assert!(out.contains("48% of what it distilled"), "{out}");
+        assert!(out.contains("31% of what it folded"), "{out}");
+        // What the old report said, from the same rows.
+        assert!(
+            !out.contains("9%"),
+            "distiller averaged over declined calls: {out}"
+        );
+        assert!(
+            !out.contains("4%"),
+            "distiller averaged over declined calls: {out}"
+        );
+
+        let declined = out
+            .lines()
+            .find(|l| l.contains("left alone"))
+            .expect("a row for the calls OMNI declined");
+        assert!(!declined.contains('%'), "a no-op has no ratio: {declined}");
+        assert!(
+            !declined.contains("MB") && !declined.contains("KB"),
+            "declined bytes are neither saved nor lost: {declined}"
+        );
+        assert!(declined.contains("15,443 calls"), "{declined}");
+    }
+
+    /// A fold row carries `payload_bytes` only since the migration that added
+    /// it, so most of them record a saving with no base. Dividing by the ones
+    /// that do and presenting it as the whole is the two-population error that
+    /// put a wrong figure in #533's thread.
+    #[test]
+    fn a_percentage_appears_only_where_a_base_exists() {
+        let mut t = a_real_week();
+        t.priced_folds = 0;
+        t.priced_fold_bytes = 0;
+        t.priced_payload = 0;
+
+        let rows = engine_rows(&t).join("\n");
+        let folded = rows.lines().find(|l| l.contains("folded")).unwrap();
+        assert!(!folded.contains('%'), "no base, no ratio: {folded}");
+        assert!(
+            folded.contains("1.7 MB"),
+            "the bytes are still known: {folded}"
+        );
+
+        let caveats = engine_caveats(&t, 0).join("\n");
+        assert!(
+            caveats.contains("no fold in this window records"),
+            "{caveats}"
+        );
+    }
+
+    /// Both caveats name a population or a date. A number printed without the
+    /// window it came from is the defect #665 was filed against, one layer down.
+    #[test]
+    fn the_caveats_name_the_population_and_the_window() {
+        let t = a_real_week();
+        // A window opening well before the first recorded fold.
+        let caveats = engine_caveats(&t, 1_700_000_000).join("\n");
+
+        assert!(
+            caveats.contains("468 of 1,269 folds"),
+            "the priced population is not named: {caveats}"
+        );
+        assert!(
+            caveats.contains("2026-08-14"),
+            "the ledger's first day is not named: {caveats}"
+        );
+
+        // A window opening after the first fold needs no date caveat.
+        let inside = engine_caveats(&t, 1_800_000_000).join("\n");
+        assert!(!inside.contains("2026-08-14"), "{inside}");
     }
 
     /// #663. `measurement_method` exists to tell a reader how far to trust the
