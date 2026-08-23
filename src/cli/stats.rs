@@ -322,25 +322,42 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     }
     super::check_flags("stats", args, FLAGS)?;
 
-    // `--json` is an output format, not a view: it applies to whatever view was
-    // selected. `--card` is the one exception, since an image of the summary is
-    // the only thing it can render.
     let mode = view(args);
     let json = super::has_flag(args, "--json");
 
-    // `--json` is checked first for every view, which is what it did before this
-    // surface existed. There is one machine-readable report and it is not per
-    // view, so a view flag beside it selects nothing rather than printing a human
-    // table under a machine-readable flag.
-    match mode {
-        _ if json => run_json(args, store),
+    match renderer(mode, json) {
         "card" => run_card(store),
+        "json" => run_json(args, store),
         "share" => run_share(store),
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
-        "detail" | "commands" => run_detail(args, store),
+        "detail" => run_detail(args, store),
         _ => run_default(args, store),
+    }
+}
+
+/// Which renderer runs, given the view and whether `--json` was asked for.
+///
+/// A table rather than an ordered `match` on two variables, because the order is
+/// where this goes wrong: review of #665 caught `--json` printing a human table
+/// for `--view projects`, and then caught the fix printing JSON instead of
+/// writing the card for `--card --json`.
+///
+/// There is one machine-readable report and it is not per view, so `--json` wins
+/// over a view flag rather than that flag selecting a text renderer under it.
+/// `--card` outranks both: it writes a file, which is the only thing the caller
+/// can have asked for by naming it.
+fn renderer(view: &str, json: bool) -> &'static str {
+    match (view, json) {
+        ("card", _) => "card",
+        (_, true) => "json",
+        ("share", _) => "share",
+        ("rerun", _) => "rerun",
+        ("context", _) => "context",
+        ("project", _) => "project",
+        ("detail" | "commands", _) => "detail",
+        _ => "summary",
     }
 }
 
@@ -1868,6 +1885,29 @@ mod tests {
         assert!(json_str.contains("\"generated_at\":1234567890"));
         assert!(json_str.contains("\"savings_pct\":90.0"));
         assert!(json_str.contains("\"avg_latency_ms\":15.5"));
+    }
+
+    /// Review of #665, twice. `--json` beside a view that has no machine-readable
+    /// renderer used to print a human table under a machine-readable flag, and the
+    /// fix for that then printed JSON for `--card --json` instead of writing the
+    /// image the caller named. The order is the bug both times, so it is a table.
+    #[test]
+    fn the_renderer_table_settles_json_against_a_view() {
+        assert_eq!(renderer("summary", false), "summary");
+        assert_eq!(renderer("summary", true), "json");
+        assert_eq!(renderer("detail", true), "json");
+        assert_eq!(
+            renderer("project", true),
+            "json",
+            "one report, so a view beside --json selects nothing"
+        );
+        assert_eq!(renderer("commands", false), "detail");
+        assert_eq!(
+            renderer("card", true),
+            "card",
+            "--card writes a file, which is the only thing naming it can mean"
+        );
+        assert_eq!(renderer("card", false), "card");
     }
 
     /// Review of #665. Every query in the JSON report read all-time whatever
