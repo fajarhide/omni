@@ -6,27 +6,31 @@ Analitik penghematan token, dibaca dari basis data Anda sendiri.
 omni stats
 ```
 
-Memimpin dengan **umur sesi**, berapa perintah yang dibawa sebuah sesi sebelum
-host menutupnya. Persentase penyulingan di bawahnya adalah alat diagnosis untuk
-pipeline satu host, bukan klaim produk.
+Satu layar, dan menjawab satu pertanyaan: berapa byte yang tidak pernah sampai ke
+model. Umur sesi, perintah teratas, rute dan agent pindah ke `--view detail`.
 
 ## Flag
 
 | flag | efeknya |
 |---|---|
-| `--detail` | Rincian penuh: perintah, rute, sesi, agent |
-| `--hour`, `-H` | Batasi ke 60 menit terakhir |
-| `--day`, `--today`, `-d` | Hari ini saja |
-| `--week`, `-w` | 7 hari terakhir |
-| `--month`, `-m` | 30 hari terakhir, bawaannya |
-| `--all-commands` | Semua perintah, bukan cuma yang teratas |
-| `--project` | Pecah per jalur proyek |
-| `--context` | Sinyal komposisi konteks |
-| `--rerun` | Distiller mana yang berongkos satu run ulang |
-| `--share` | Ringkasan siap tempel dari penghematan terukur Anda |
-| `--card` | Tulis ringkasan itu sebagai gambar, berukuran untuk unggahan media sosial |
-| `--json` | Bisa dibaca mesin |
+| `--since <jendela>` | `hour`, `today`, `week`, `month` (bawaan), `all` |
+| `--view <nama>` | `summary` (bawaan), `detail`, `commands`, `projects`, `context`, `rerun`, `share` |
+| `--limit <n>` | Jumlah baris di tampilan tabel, bawaan 10, `0` untuk semua |
+| `--json` | Bisa dibaca mesin, ikut jendela `--since` |
+| `--card` | Tulis ringkasan sebagai gambar, berukuran untuk unggahan media sosial |
 | `--help`, `-h` | Bantuan |
+
+Semua ejaan lama tetap jalan: `--detail`, `--today`, `--day`, `-d`, `--week`, `-w`,
+`--month`, `-m`, `--hour`, `-H`, `--all-commands`, `--project`, `--context`, `--rerun`
+dan `--share`. Semuanya tidak didaftarkan di sini karena sekarang ada satu cara untuk
+menyebut tiap hal, dan tidak ada peringatan usang yang dicetak: penggantian namanya
+keputusan kami, bukan Anda.
+
+`--json` dan `--card` itu format keluaran, bukan tampilan. `--card` mengalahkan semuanya,
+karena menyebutnya hanya bisa berarti menulis berkasnya; `--json` mengalahkan `--view`,
+karena laporan yang bisa dibaca mesin cuma satu dan bukan per tampilan. Dulu keduanya
+dibaca sebagai tampilan, dan begitulah `--view detail --card` sampai tidak menulis gambar
+sama sekali.
 
 ## `--rerun` yang wajib diketahui
 

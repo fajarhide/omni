@@ -459,15 +459,33 @@ impl SqliteBackend {
     }
 
     /// RewindStore metrics: (total_stored, total_retrieved)
-    pub fn rewind_metrics(&self) -> Result<(u64, u64)> {
+    /// Archives whose row was last written since `since`, and how many of those
+    /// rows have ever been pulled. `since` of 0 is all time.
+    ///
+    /// Both halves are looser than they look and the wording is exact on purpose.
+    /// `ts` is refreshed when identical content is archived again, so a row can
+    /// enter this window carrying a `retrieved` count from before it; and
+    /// `retrieved` is a lifetime counter, never a pull inside the window.
+    ///
+    /// Resetting that counter on re-archive would make the looser reading true and
+    /// is not this function's call: #581 pays a verbatim delivery per recorded
+    /// pull, so zeroing it here cancels a debt the reader is still owed.
+    ///
+    /// It took a window because `--detail` prints this pair under a header naming
+    /// one, so an all-time count read as part of the window (#667).
+    pub fn rewind_metrics(&self, since: i64) -> Result<(u64, u64)> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         let total: u64 = conn
-            .query_row("SELECT COUNT(*) FROM rewind_store", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM rewind_store WHERE ts >= ?1",
+                params![since],
+                |row| row.get(0),
+            )
             .unwrap_or(0);
         let retrieved: u64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM rewind_store WHERE retrieved > 0",
-                [],
+                "SELECT COUNT(*) FROM rewind_store WHERE ts >= ?1 AND retrieved > 0",
+                params![since],
                 |row| row.get(0),
             )
             .unwrap_or(0);
@@ -4487,6 +4505,53 @@ mod tests {
         assert_eq!(tables, 0, "a recorded migration must not protect the table");
     }
 
+    /// #667. `--detail` prints this pair under a header naming a window, so an
+    /// all-time count read as part of that window. The window is the archive's own
+    /// timestamp: `retrieved` is a lifetime counter on the row, and re-archiving
+    /// refreshes `ts`, so the pair means "archives last written in this window, and
+    /// how many of those rows have ever been pulled". Both halves are pinned here
+    /// because the wording is what went wrong first.
+    #[test]
+    fn rewind_metrics_counts_only_the_window() {
+        let (store, _dir) = get_temp_store();
+        let old = store
+            .store_rewind_whole("archived ten days ago")
+            .expect("archived");
+        store
+            .store_rewind_whole("archived just now")
+            .expect("archived");
+
+        {
+            let conn = store.pool.get().expect("conn");
+            conn.execute(
+                "UPDATE rewind_store SET ts = ts - 864000 WHERE hash = ?1",
+                params![old],
+            )
+            .expect("backdate");
+        }
+
+        let week = chrono::Utc::now().timestamp() - 7 * 86_400;
+        assert_eq!(
+            store.rewind_metrics(week).expect("metrics").0,
+            1,
+            "an archive older than the window is not part of it"
+        );
+        assert_eq!(
+            store.rewind_metrics(0).expect("metrics").0,
+            2,
+            "all time still counts both"
+        );
+
+        store
+            .store_rewind_whole("archived ten days ago")
+            .expect("archived");
+        assert_eq!(
+            store.rewind_metrics(week).expect("metrics").0,
+            2,
+            "re-archiving refreshes ts, so the row is in the window it was written in"
+        );
+    }
+
     /// #274. The key carried a nanosecond prefix, so every key was unique and
     /// the `INSERT OR IGNORE` under it could never fire: the same output was
     /// archived again on every run. Harmless while the archive never fired at
@@ -4501,7 +4566,7 @@ mod tests {
 
         assert_eq!(first, second, "the key is the content, so it cannot differ");
         assert_eq!(
-            store.rewind_metrics().expect("metrics").0,
+            store.rewind_metrics(0).expect("metrics").0,
             1,
             "identical content must occupy one row"
         );
@@ -4584,7 +4649,7 @@ mod tests {
             .expect("archived");
 
         assert_ne!(a, b);
-        assert_eq!(store.rewind_metrics().expect("metrics").0, 2);
+        assert_eq!(store.rewind_metrics(0).expect("metrics").0, 2);
         assert_eq!(
             store.retrieve_rewind(&b),
             Some("output of the second command".to_string())

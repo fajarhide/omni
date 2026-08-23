@@ -12,9 +12,9 @@ bagikan tidak mungkin berbeda dari angka di laporannya.
 ```sh
 omni stats                 # 30 hari terakhir, bawaannya
 omni stats --today         # atau --hour, --week, --month
-omni stats --detail        # perintah, rute, sesi, agent
-omni stats --all-commands  # semua perintah, bukan cuma yang teratas
-omni stats --project       # dipecah per jalur proyek
+omni stats --view detail        # perintah, rute, sesi, agent
+omni stats --limit 0       # semua perintah, bukan cuma yang teratas
+omni stats --view projects # dipecah per jalur proyek
 omni stats --json          # bisa dibaca mesin
 ```
 
@@ -124,7 +124,7 @@ Hanya baca, basis data yang sama, mengikat loopback dan tidak yang lain.
 ## Menggali lebih jauh
 
 ```sh
-omni stats --detail              # rincian per perintah dan per rute
+omni stats --view detail              # rincian per perintah dan per rute
 omni query errors in last 5 commands
 omni query warnings from cargo
 omni query timeline today

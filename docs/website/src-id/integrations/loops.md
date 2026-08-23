@@ -99,7 +99,7 @@ sehingga jejak auditnya nyata.
 
 ```sh
 omni stats                 # waktu nyata
-omni stats --detail
+omni stats --view detail
 omni stats --json          # untuk dibaca orkestrator
 omni doctor                # kesehatan
 ```

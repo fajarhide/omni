@@ -49,7 +49,7 @@ vendor's tokenizer, so the unit could not be defended even though the arithmetic
 fine. Percentages were never affected: the divisor cancels in a ratio.
 
 ```sh
-omni stats --detail        # per command, per route, per session, per agent
+omni stats --view detail   # per command, per route, per session, per agent
 omni stats --rerun         # which distillers cost a re-run
 omni dashboard             # the same numbers in a browser, on 127.0.0.1 only
 ```

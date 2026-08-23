@@ -53,7 +53,7 @@ aritmetikanya benar. Persentasenya tidak pernah terpengaruh: pembaginya saling m
 di dalam rasio.
 
 ```sh
-omni stats --detail        # per perintah, per rute, per sesi, per agent
+omni stats --view detail   # per perintah, per rute, per sesi, per agent
 omni stats --rerun         # distiller mana yang berongkos satu run ulang
 omni dashboard             # angka yang sama di peramban, hanya di 127.0.0.1
 ```

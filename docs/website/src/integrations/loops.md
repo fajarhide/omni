@@ -93,7 +93,7 @@ failures, and remember that every interaction is logged so the audit trail is re
 
 ```sh
 omni stats                 # real-time
-omni stats --detail
+omni stats --view detail
 omni stats --json          # for an orchestrator to read
 omni doctor                # health
 ```

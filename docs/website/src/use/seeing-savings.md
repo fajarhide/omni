@@ -12,9 +12,9 @@ cannot drift from the one in the report.
 ```sh
 omni stats                 # last 30 days, the default
 omni stats --today         # or --hour, --week, --month
-omni stats --detail        # commands, routes, sessions, agents
-omni stats --all-commands  # every command, not just the top ones
-omni stats --project       # broken down per project path
+omni stats --view detail   # commands, routes, sessions, agents
+omni stats --limit 0       # every command, not just the top ones
+omni stats --view projects # broken down per project path
 omni stats --json          # machine readable
 ```
 
@@ -45,7 +45,7 @@ with no base. The report says how many of the folds it divided, and prints no pe
 at all when none of them do.
 
 Session lifetime, the per-period table, top commands and the agent split all moved to
-`--detail`. `--detail` also names why each call was declined, out of `passthrough_events`,
+`--view detail`, which also names why each call was declined, out of `passthrough_events`,
 which is what turns a 94% passthrough share from an accusation into an explanation.
 
 ## What the numbers are counted in
@@ -118,7 +118,7 @@ Read-only, same database, binds loopback and nothing else.
 ## Digging further
 
 ```sh
-omni stats --detail              # per-command and per-route breakdown
+omni stats --view detail         # per-command and per-route breakdown
 omni query errors in last 5 commands
 omni query warnings from cargo
 omni query timeline today
