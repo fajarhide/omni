@@ -3363,26 +3363,27 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         );
     }
 
-    /// #657. A `Read` whose survivors sit in two blocks cannot be renumbered, so
-    /// the view is dropped and the host keeps its own bytes. The fold was recorded
-    /// before that decision was taken, so `ledger_folds` kept a row for bytes the
-    /// agent received in full, and `omni_explain_savings` reads that table.
+    /// #657, narrowed by #658. A `Read` whose survivors split now folds its head
+    /// and stops there, so the case that still delivers nothing is the one with no
+    /// head to fold: a payload whose first line is new and whose survivors split
+    /// below it. The books must be empty for it, because the agent received every
+    /// byte.
     ///
-    /// Measured before the fix: 4 of 17 markdown files read twice unchanged
-    /// delivered nothing and recorded 78% to 97% as saved, `CHANGELOG.md` among
-    /// them at 341 KB.
+    /// Measured before #657: 4 of 17 markdown files read twice unchanged delivered
+    /// nothing and recorded 78% to 97% as saved, `CHANGELOG.md` among them at
+    /// 341 KB.
     #[test]
     fn a_refused_read_fold_records_nothing() {
         let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
         let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
         let seen = range(100, 200);
-        // Two new lines with a folded run between them: the survivors are in two
-        // blocks, and one starting number cannot describe both.
+        // The payload opens on a new line, so there is no head to fold, and a
+        // second new line further down splits what is left. Nothing can be
+        // folded here at all, which is the case that must still record nothing.
         let split = format!(
-            "{}{}{}{}{}",
-            range(100, 130),
+            "{}{}{}{}",
             "    let fresh_one = \"added since the first read\";\n",
-            range(130, 170),
+            range(100, 170),
             "    let fresh_two = \"added since the first read too\";\n",
             range(170, 200)
         );
@@ -3415,6 +3416,175 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(
             folds.is_empty(),
             "the fold was refused, so the books must not carry it: {folds:?}"
+        );
+    }
+
+    /// #658. Refusing the whole view when the survivors split gave up the bytes
+    /// above the first split too: an unchanged re-read of `CONTRIBUTING.md` saved
+    /// nothing, because six lines stating a failure are never folded (#458) and
+    /// each one splits the run around it.
+    ///
+    /// Folding down to the first surviving line leaves everything below it
+    /// contiguous, so `startLine` still describes all of it. Priced over 18
+    /// markdown files read twice: the corpus goes from 23.9% to 27.3%, and
+    /// `CHANGELOG.md` from nothing to 4.4%. The ceiling is structural, since a
+    /// fold that keeps the line count is the only way past it.
+    #[test]
+    fn a_split_read_folds_its_head_and_stops_there() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let seen = range(100, 200);
+        let split = format!(
+            "{}{}{}{}{}",
+            range(100, 130),
+            "    let fresh_one = \"added since the first read\";\n",
+            range(130, 170),
+            "    let fresh_two = \"added since the first read too\";\n",
+            range(170, 200)
+        );
+        let payload = |content: &str| {
+            json!({
+                "session_id": "host-658-head",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": content,
+                    "startLine": 100,
+                    "numLines": content.lines().count(),
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload(&seen), Some(store.clone()), None);
+        let out = process_payload(&payload(&split), Some(store.clone()), None)
+            .expect("the head repeats, so it folds");
+
+        let v: serde_json::Value = serde_json::from_str(&out).expect("hook json");
+        let file = &v["hookSpecificOutput"]["updatedToolOutput"]["file"];
+        let content = file["content"].as_str().expect("content");
+
+        // One marker, at the head, and nothing folded below the first survivor.
+        assert_eq!(
+            content.matches("[OMNI:").count(),
+            1,
+            "only the head may fold, or the survivors split again: {content}"
+        );
+        assert!(
+            content.starts_with("[OMNI:"),
+            "the fold has to be the head for one start line to describe the rest: {content}"
+        );
+        assert!(
+            content.contains("let fresh_two") && content.contains("unique_marker_169"),
+            "everything below the first survivor is delivered verbatim: {content}"
+        );
+        // Thirty lines became one marker, so the survivors sit 29 lines higher.
+        assert_eq!(
+            file["startLine"], 129,
+            "the survivors keep numbers they are no longer at: {out}"
+        );
+        // #657: the books say what was delivered, which is the head and only it.
+        let folds = store.get_recent_ledger_folds(None, 10);
+        assert_eq!(
+            folds.iter().map(|f| f.lines).sum::<usize>(),
+            30,
+            "the fold recorded is not the fold delivered: {folds:?}"
+        );
+    }
+
+    /// #657's guard, on the one path #658 leaves it standing. The head is planned
+    /// as two runs of different origin, and a run whose handle was just pulled has
+    /// to be delivered verbatim (#581). The second run still folds, so the emitted
+    /// survivors are the first run and everything below the fold: two blocks
+    /// again, and the view is dropped. Nothing may be recorded for it.
+    ///
+    /// The planner cannot see this coming, because only the store knows a delivery
+    /// is owed. That is the fail-open direction and this is what keeps it honest.
+    #[test]
+    fn a_fold_undone_by_an_owed_delivery_records_nothing() {
+        let line = |i: usize| format!("    let unique_marker_{i:03} = \"quokka-{i:03}-xyzzy\";\n");
+        let range = |from: usize, to: usize| (from..to).map(line).collect::<String>();
+        let body = |content: String, from: usize| {
+            json!({
+                "session_id": "current",
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": content,
+                    "startLine": from,
+                    "numLines": 100,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+        let payload = |sid: &str, from: usize, to: usize| {
+            json!({
+                "session_id": sid,
+                "tool_name": "Read",
+                "tool_input": {"path": "probe.rs"},
+                "tool_response": {"file": {
+                    "filePath": "probe.rs",
+                    "content": range(from, to),
+                    "startLine": from,
+                    "numLines": to - from,
+                    "totalLines": 400,
+                }},
+            })
+            .to_string()
+        };
+        // A new line under the head keeps the survivors split, so the question
+        // stays about the head rather than becoming a whole-output fold.
+        let split = |fresh: &str| {
+            format!(
+                "{}    let {fresh} = \"added since\";\n{}",
+                range(100, 130),
+                range(130, 200)
+            )
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let _ = process_payload(&payload("earlier", 100, 115), Some(store.clone()), None);
+        let _ = process_payload(&payload("current", 115, 130), Some(store.clone()), None);
+        let out = process_payload(&body(split("fresh_one"), 100), Some(store.clone()), None)
+            .expect("the whole head repeats, so this folds");
+        let content = serde_json::from_str::<serde_json::Value>(&out).expect("hook json")
+            ["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"]
+            .as_str()
+            .expect("content")
+            .to_string();
+        assert_eq!(
+            content.matches("[OMNI:").count(),
+            2,
+            "the head has to fold as two runs for this to test anything: {content}"
+        );
+
+        // The agent pulled the first marker's handle, so that run owes it a
+        // verbatim delivery and cannot fold again.
+        let handle = content
+            .split("omni retrieve ")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("a handle in the first marker")
+            .to_string();
+        store.record_rewind_pull(&handle);
+
+        let before = store.get_recent_ledger_folds(None, 50).len();
+        let out = process_payload(&body(split("fresh_two"), 100), Some(store.clone()), None);
+        assert!(
+            out.is_none(),
+            "the first run came back verbatim, so the survivors split again: {out:?}"
+        );
+        assert_eq!(
+            store.get_recent_ledger_folds(None, 50).len(),
+            before,
+            "a view nobody received was booked anyway"
         );
     }
 
