@@ -211,17 +211,15 @@ fn split_pipeline(segment: &str) -> Vec<&str> {
 }
 
 fn is_silent(segment: &str) -> bool {
-    let mut words = segment
-        .split_whitespace()
-        .map(|w| w.trim_matches(|c| c == '"' || c == '\''));
-    let Some(first) = words.next() else {
+    let mut parts = words(segment).map(|w| w.trim_matches(|c| c == '"' || c == '\''));
+    let Some(first) = parts.next() else {
         return true;
     };
     if HEADER_KEYWORDS.contains(&first) {
         return true;
     }
     let mut rest = std::iter::once(first)
-        .chain(words)
+        .chain(parts)
         .skip_while(|w| CLAUSE_PREFIXES.contains(w) || is_assignment(w));
     match rest.next() {
         // Every word was a clause prefix or an assignment, so nothing ran.
@@ -246,16 +244,92 @@ fn is_silent(segment: &str) -> bool {
 /// is what that buys.
 pub(crate) fn strip_assignments(command: &str) -> &str {
     let mut rest = command.trim_start();
-    while let Some(word) = rest.split_whitespace().next() {
+    // The last assignment consumed, kept only for the case below where every word
+    // is an assignment and there is nothing after them to be the producer.
+    let mut last = "";
+    while let Some((word, tail)) = split_word(rest) {
         if !is_assignment(word) {
-            break;
+            return rest;
         }
-        // `rest` is left-trimmed, so `word` is exactly its prefix. `strip_prefix`
-        // rather than a range index because the crate denies `clippy::string_slice`
-        // and this needs no proof of a char boundary to be correct.
-        rest = rest.strip_prefix(word).unwrap_or(rest).trim_start();
+        last = word;
+        rest = tail.trim_start();
+    }
+
+    // Nothing follows the assignments, so if one of them opened a substitution the
+    // program that ran is inside it: `A=$(kubectl get pods)` runs kubectl, and
+    // before #677 this returned `get`.
+    //
+    // Only in this branch. `TAG=$(git rev-parse HEAD) docker build .` runs
+    // *docker*, and reaching into the substitution there would label and route the
+    // command as git.
+    if let Some((_, inner)) = last.split_once("$(") {
+        let inner = inner.trim_start().trim_end_matches(')').trim_end();
+        if !inner.is_empty() {
+            return inner;
+        }
     }
     rest
+}
+
+/// Words, counting a quoted run as one word.
+///
+/// `split_whitespace` cuts `C="--context abc"` after `--context`, so both callers
+/// treated `C="--context` as a whole assignment and left `abc"` standing as the
+/// command: `is_silent` then called the segment a producer and `strip_assignments`
+/// handed back a fragment of somebody's argument for a reporting column (#677).
+///
+/// One splitter rather than two, because this file already carries the scar of
+/// `program_name` existing twice. Same one-directional quote handling as
+/// `split_sequential`: an unbalanced quote runs to the end and yields one word
+/// rather than inventing a split.
+fn split_word(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    let mut quote: Option<char> = None;
+    let mut depth = 0usize;
+    let mut escaped = false;
+    let mut end = s.len();
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            // A backslash escapes the next character everywhere but inside single
+            // quotes, where the shell takes it literally. Without this,
+            // `FOO="a\"b c" kubectl` closed its quote at the escaped one and the
+            // value's tail became the producer.
+            '\\' if quote != Some('\'') => escaped = true,
+            _ if quote == Some(c) => quote = None,
+            _ if quote.is_some() => {}
+            '"' | '\'' => quote = Some(c),
+            // `$( )` belongs to the word that opens it, so an assignment holding a
+            // substitution is consumed whole rather than cut at its first space.
+            '$' if matches!(chars.peek(), Some((_, '('))) => {
+                chars.next();
+                depth += 1;
+            }
+            ')' if depth > 0 => depth -= 1,
+            _ if c.is_whitespace() && depth == 0 => {
+                end = i;
+                break;
+            }
+            _ => {}
+        }
+    }
+    Some((s.get(..end)?, s.get(end..)?))
+}
+
+fn words(s: &str) -> impl Iterator<Item = &str> {
+    let mut rest = s;
+    std::iter::from_fn(move || {
+        let (word, tail) = split_word(rest)?;
+        rest = tail;
+        Some(word)
+    })
 }
 
 /// The program name to file a recorded row under, for any command string.
@@ -449,5 +523,76 @@ mod producer_label_tests {
         for (name, command, expected) in cases {
             assert_eq!(producer_label(command), expected, "case: {name}");
         }
+    }
+}
+
+#[cfg(test)]
+mod label_fragments {
+    use super::producer_label;
+
+    /// #677. `strip_assignments` removed one whitespace-delimited word, and both
+    /// a command substitution and a quoted value are wider than that. What was
+    /// left standing as the command was a fragment of the argument list, so a
+    /// column sized for `cargo` and `kubectl` could hold `-1t` or any word the
+    /// user typed inside a quoted flag.
+    #[test]
+    fn an_assignment_holding_a_substitution_names_the_program_inside_it() {
+        assert_eq!(producer_label("A=$(kubectl get pods -n web)"), "kubectl");
+        // The one that made it obvious: `-1t` is not a program.
+        assert_eq!(producer_label("A=$(ls -1t /tmp/x.gz | head -1)"), "ls");
+        // An empty substitution names nothing, so the next segment stands.
+        assert_eq!(producer_label("X=$(  ) echo hi"), "echo");
+    }
+
+    /// The substitution is only the producer when nothing follows it. Its output
+    /// is captured into the variable rather than written to stdout, so as soon as
+    /// a real command comes after, that command is what wrote the payload.
+    #[test]
+    fn a_command_after_the_substitution_is_the_producer() {
+        assert_eq!(
+            producer_label("TAG=$(git rev-parse HEAD) docker build ."),
+            "docker"
+        );
+        // Same reason across a sequence: `echo` is what printed, not `kubectl`.
+        assert_eq!(
+            producer_label("A=$(kubectl get pods -n web) && echo done"),
+            "echo"
+        );
+    }
+
+    /// A backslash escape inside a quoted value does not end the quote, so the
+    /// value stays one word and its tail cannot become the label.
+    #[test]
+    fn an_escaped_quote_does_not_end_the_value() {
+        assert_eq!(
+            producer_label("FOO=\"a\\\"b c\" kubectl get pods"),
+            "kubectl"
+        );
+    }
+
+    /// The quoted half. `C="--context abc"` is one word, and splitting it on
+    /// whitespace left `abc"` as the producer. `is_silent` had the same split,
+    /// which is why the segment was picked at all, so both had to move together.
+    #[test]
+    fn a_quoted_assignment_value_is_one_word() {
+        assert_eq!(
+            producer_label("C=\"--context abc\"; kubectl get pods"),
+            "kubectl"
+        );
+        assert_eq!(producer_label("MSG=\"a b c\" echo hi"), "echo");
+    }
+
+    /// #339's cases, which this must not regress: the whole point of stripping
+    /// assignments is that an env prefix does not change the producer.
+    #[test]
+    fn a_plain_env_prefix_still_names_the_program() {
+        assert_eq!(producer_label("FOO=1 cargo build --release"), "cargo");
+        assert_eq!(producer_label("A=1 B=2 make ci"), "make");
+        assert_eq!(
+            producer_label("OMNI_DB_PATH=/tmp/d.db kubectl get pods"),
+            "kubectl"
+        );
+        assert_eq!(producer_label("/bin/ls -l /tmp"), "ls");
+        assert_eq!(producer_label("cargo build"), "cargo");
     }
 }
