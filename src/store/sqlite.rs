@@ -974,6 +974,20 @@ impl SqliteBackend {
             [],
         );
 
+        // #672. Nothing tied a declined call to the session that made it, so the
+        // reason breakdown could only ever be global. A time window is not a
+        // substitute: a third of sessions on this machine overlap another.
+        // Empty means the host sent no id, which is the honest answer for pipe
+        // mode rather than the wall-clock fallback that made #118's slices wrong.
+        let _ = conn.execute(
+            "ALTER TABLE passthrough_events ADD COLUMN session TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pt_session ON passthrough_events(session)",
+            [],
+        );
+
         // #581. Set when a handle is pulled and cleared by the delivery that
         // answers it, so the content a marker sent the reader to fetch is not
         // folded back into that same marker on its way in. Separate from
@@ -1393,15 +1407,16 @@ impl SqliteBackend {
     /// JSON" and "declined because no distiller could parse it" call for
     /// opposite work, and the second is the only direct evidence that the
     /// never-fabricate invariant is doing any.
-    pub fn record_passthrough(&self, command: &str, bytes: usize, reason: &str) {
+    pub fn record_passthrough(&self, command: &str, bytes: usize, reason: &str, session: &str) {
         let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
         let now = chrono::Utc::now().timestamp();
         let _ = conn.execute(
-            "INSERT INTO passthrough_events (command, bytes, ts, reason) VALUES (?1, ?2, ?3, ?4)",
-            params![command, bytes as i64, now, reason],
+            "INSERT INTO passthrough_events (command, bytes, ts, reason, session)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![command, bytes as i64, now, reason, session],
         );
     }
 
@@ -1410,20 +1425,45 @@ impl SqliteBackend {
     /// The point of the column: most calls are passthrough and correctly do
     /// nothing, and until this existed that population was one bucket.
     pub fn passthrough_reasons(&self, since: i64) -> Vec<(String, u64)> {
+        self.passthrough_reasons_for(since, None)
+    }
+
+    /// One session's declines, or every session's when `session` is `None`.
+    ///
+    /// `Some("")` returns nothing. An empty id means the host sent none, so it is
+    /// shared by every pipe-mode row in the table and cannot identify a session.
+    pub fn passthrough_reasons_for(&self, since: i64, session: Option<&str>) -> Vec<(String, u64)> {
+        // An empty id is not a session, it is the host declining to name one, so
+        // every pipe-mode row from every session carries it. Falling through to
+        // the unscoped query here answered "what did this session decline" with
+        // every session's declines, which is worse than not answering.
+        if matches!(session, Some("")) {
+            return Vec::new();
+        }
         let Ok(conn) = self.pool.get() else {
             return Vec::new();
         };
-        let Ok(mut stmt) = conn.prepare(
+        let scoped = session.is_some();
+        let sql = if scoped {
             "SELECT reason, COUNT(*) FROM passthrough_events
-             WHERE ts >= ?1 GROUP BY reason ORDER BY 2 DESC",
-        ) else {
+             WHERE ts >= ?1 AND session = ?2 GROUP BY reason ORDER BY 2 DESC"
+        } else {
+            "SELECT reason, COUNT(*) FROM passthrough_events
+             WHERE ts >= ?1 GROUP BY reason ORDER BY 2 DESC"
+        };
+        let Ok(mut stmt) = conn.prepare(sql) else {
             return Vec::new();
         };
-        stmt.query_map(params![since], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
-        })
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default()
+        let row = |r: &rusqlite::Row<'_>| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64));
+        if scoped {
+            stmt.query_map(params![since, session.unwrap_or("")], row)
+                .map(|rows| rows.flatten().collect())
+                .unwrap_or_default()
+        } else {
+            stmt.query_map(params![since], row)
+                .map(|rows| rows.flatten().collect())
+                .unwrap_or_default()
+        }
     }
 
     /// Newest first. Exists so the tag above can be asserted; nothing in the
@@ -2328,6 +2368,12 @@ impl SqliteBackend {
         );
         let _ = conn.execute(
             "DELETE FROM session_events WHERE ts < ?1",
+            params![ts_threshold],
+        );
+        // #672. This was the one time-series table nobody pruned, so it kept
+        // command strings past the window every other table honours.
+        let _ = conn.execute(
+            "DELETE FROM passthrough_events WHERE ts < ?1",
             params![ts_threshold],
         );
         // The ledger's eviction policy, defined before the project scope shipped
@@ -3643,9 +3689,9 @@ mod tests {
     #[test]
     fn counts_passthroughs_by_the_gate_that_declined_them() {
         let (store, _d) = get_temp_store();
-        store.record_passthrough("kubectl get pods -o json", 900, "structured json");
-        store.record_passthrough("gh api repos", 700, "structured json");
-        store.record_passthrough("cargo build", 500, "below guardrail");
+        store.record_passthrough("kubectl get pods -o json", 900, "structured json", "s1");
+        store.record_passthrough("gh api repos", 700, "structured json", "s1");
+        store.record_passthrough("cargo build", 500, "below guardrail", "s2");
 
         let by_reason = store.passthrough_reasons(0);
 
@@ -5185,5 +5231,64 @@ mod tests {
         let (store, _dir) = get_temp_store();
         assert_eq!(store.aggregate_stats(0).unwrap().0, 0);
         assert!(store.get_agent_breakdown(0).unwrap().is_empty());
+    }
+
+    /// #672. Every other time-series table is pruned by `cleanup_old` and this
+    /// one was not, so it kept command strings past the window the rest honour.
+    /// A user who shortens retention got it everywhere except here.
+    #[test]
+    fn the_retention_window_reaches_the_passthrough_log() {
+        let (store, _dir) = get_temp_store();
+        store.record_passthrough("kubectl get pods", 900, "structured:json", "s1");
+        store
+            .pool
+            .get()
+            .unwrap()
+            .execute(
+                "UPDATE passthrough_events SET ts = strftime('%s','now') - 60 * 86400",
+                [],
+            )
+            .unwrap();
+        store.record_passthrough("cargo build", 500, "below guardrail", "s1");
+
+        store.cleanup_old(30);
+
+        let left = store.passthrough_reasons(0);
+        assert_eq!(
+            left,
+            vec![("below guardrail".to_string(), 1)],
+            "the 60 day old decline outlived a 30 day window"
+        );
+    }
+
+    /// #672. Nothing tied a decline to the session that made it, so the reason
+    /// breakdown could only be global. A time window is not a substitute: a
+    /// third of the sessions on the machine this was measured on overlap another.
+    #[test]
+    fn a_decline_is_attributed_to_the_session_that_made_it() {
+        let (store, _dir) = get_temp_store();
+        store.record_passthrough("kubectl get pods", 900, "structured:json", "mine");
+        store.record_passthrough("terraform plan", 800, "structured:json", "theirs");
+        store.record_passthrough("cargo build", 500, "below guardrail", "theirs");
+        // Pipe mode, where the host sends no id at all.
+        store.record_passthrough("sort -u", 400, "below guardrail", "");
+
+        assert_eq!(
+            store.passthrough_reasons_for(0, Some("mine")),
+            vec![("structured:json".to_string(), 1)]
+        );
+        let theirs = store.passthrough_reasons_for(0, Some("theirs"));
+        assert_eq!(theirs.len(), 2, "{theirs:?}");
+        assert_eq!(theirs.iter().map(|(_, n)| n).sum::<u64>(), 2);
+
+        // An empty id is not a session. Asking for one must not hand back every
+        // *other* session's declines, which is what falling through to the
+        // unscoped query did, and what the first version of this assertion
+        // locked in by expecting it.
+        assert!(
+            store.passthrough_reasons_for(0, Some("")).is_empty(),
+            "an empty session id answered with the whole table"
+        );
+        assert_eq!(store.passthrough_reasons_for(0, None).len(), 2);
     }
 }
