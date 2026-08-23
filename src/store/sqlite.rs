@@ -367,15 +367,28 @@ impl SqliteBackend {
     }
 
     /// RewindStore metrics: (total_stored, total_retrieved)
-    pub fn rewind_metrics(&self) -> Result<(u64, u64)> {
+    /// Archives written since `since`, and how many of those have been pulled.
+    ///
+    /// The window is the archive's own timestamp, not the pull's: `retrieved` is a
+    /// lifetime counter on the row, so this answers "of what was archived in this
+    /// window, how much has been needed since", which is the question the report
+    /// asks beside it. `since` of 0 is all time.
+    ///
+    /// It took a window because a scoped report was printing an all-time pair
+    /// beside scoped figures, caught in review of #665.
+    pub fn rewind_metrics(&self, since: i64) -> Result<(u64, u64)> {
         let conn = self.pool.get().context("DB pool exhausted")?;
         let total: u64 = conn
-            .query_row("SELECT COUNT(*) FROM rewind_store", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM rewind_store WHERE ts >= ?1",
+                params![since],
+                |row| row.get(0),
+            )
             .unwrap_or(0);
         let retrieved: u64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM rewind_store WHERE retrieved > 0",
-                [],
+                "SELECT COUNT(*) FROM rewind_store WHERE ts >= ?1 AND retrieved > 0",
+                params![since],
                 |row| row.get(0),
             )
             .unwrap_or(0);
@@ -4365,6 +4378,43 @@ mod tests {
         assert_eq!(tables, 0, "a recorded migration must not protect the table");
     }
 
+    /// Review of #665. A scoped report was printing an all-time archive count
+    /// beside scoped figures, so the pair read as if it belonged to the window.
+    /// The window is the archive's own timestamp: `retrieved` is a lifetime
+    /// counter on the row, so the question is "of what was archived in this
+    /// window, how much has been needed since".
+    #[test]
+    fn rewind_metrics_counts_only_the_window() {
+        let (store, _dir) = get_temp_store();
+        let old = store
+            .store_rewind_whole("archived ten days ago")
+            .expect("archived");
+        store
+            .store_rewind_whole("archived just now")
+            .expect("archived");
+
+        {
+            let conn = store.pool.get().expect("conn");
+            conn.execute(
+                "UPDATE rewind_store SET ts = ts - 864000 WHERE hash = ?1",
+                params![old],
+            )
+            .expect("backdate");
+        }
+
+        let week = chrono::Utc::now().timestamp() - 7 * 86_400;
+        assert_eq!(
+            store.rewind_metrics(week).expect("metrics").0,
+            1,
+            "an archive older than the window is not part of it"
+        );
+        assert_eq!(
+            store.rewind_metrics(0).expect("metrics").0,
+            2,
+            "all time still counts both"
+        );
+    }
+
     /// #274. The key carried a nanosecond prefix, so every key was unique and
     /// the `INSERT OR IGNORE` under it could never fire: the same output was
     /// archived again on every run. Harmless while the archive never fired at
@@ -4379,7 +4429,7 @@ mod tests {
 
         assert_eq!(first, second, "the key is the content, so it cannot differ");
         assert_eq!(
-            store.rewind_metrics().expect("metrics").0,
+            store.rewind_metrics(0).expect("metrics").0,
             1,
             "identical content must occupy one row"
         );
@@ -4462,7 +4512,7 @@ mod tests {
             .expect("archived");
 
         assert_ne!(a, b);
-        assert_eq!(store.rewind_metrics().expect("metrics").0, 2);
+        assert_eq!(store.rewind_metrics(0).expect("metrics").0, 2);
         assert_eq!(
             store.retrieve_rewind(&b),
             Some("output of the second command".to_string())

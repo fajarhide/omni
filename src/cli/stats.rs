@@ -942,7 +942,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     } else {
         0.0
     };
-    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+    let (rewind_stored, rewind_retrieved) = store.rewind_metrics(since)?;
 
     println!();
     print_separator();
@@ -1415,7 +1415,7 @@ fn build_stats_json(store: &Store, since: i64) -> Result<StatsJson> {
     // window they are not named after.
     let periods = store.multi_period_stats()?;
     let top_commands = get_top_commands(store, since, 100);
-    let (rewind_stored, rewind_retrieved) = store.rewind_metrics()?;
+    let (rewind_stored, rewind_retrieved) = store.rewind_metrics(since)?;
     let (count, _, _, sum_latency, _, _, _) = store.aggregate_stats(since)?;
 
     let avg_latency = if count > 0 {
