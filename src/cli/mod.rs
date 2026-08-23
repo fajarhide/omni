@@ -356,6 +356,95 @@ mod flag_tests {
         assert_eq!(flag_name("--filter=key=value"), "--filter");
     }
 
+    /// A script the docs tell you to run has to be in the repository.
+    ///
+    /// #651: the 0.5.2 changelog announced `scripts/seed_marketing.py` and a
+    /// blanket `*.py` ignore meant no release ever contained it. The same rule
+    /// was about to swallow the reproduction script #610's README copy pointed
+    /// at, which would have shipped an instruction nobody could follow.
+    ///
+    /// README and the manual only. `CHANGELOG.md` is history and legitimately
+    /// names files that were removed later, which is a different thing from a
+    /// live instruction naming a file that never existed.
+    #[test]
+    fn every_script_the_docs_name_is_in_the_repository() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        // `CONTRIBUTING.md` is a live guide too and names `scripts/`, which the
+        // first version of this missed.
+        let mut docs = vec![root.join("README.md"), root.join("CONTRIBUTING.md")];
+        for dir in ["docs/website/src", "docs/website/src-id"] {
+            let path = root.join(dir);
+            assert!(
+                path.is_dir(),
+                "{dir} is not a directory, so this guard would scan nothing and \
+                 pass. A check that cannot fail proves nothing."
+            );
+            collect_markdown(&path, &mut docs);
+        }
+        assert!(
+            docs.len() > 10,
+            "only {} documents found, so the traversal is not reaching the manual \
+             and this guard is decorative",
+            docs.len()
+        );
+
+        let mut missing = Vec::new();
+        for doc in &docs {
+            let text = std::fs::read_to_string(doc).unwrap_or_else(|e| {
+                // Skipping an unreadable file would let the guard pass by not
+                // looking, which is the failure mode it is guarding against.
+                panic!("cannot read {}: {e}", doc.display())
+            });
+            for (n, line) in text.lines().enumerate() {
+                // Tokenised rather than sliced. The boundaries here are provable,
+                // but `clippy::string_slice` is denied crate-wide since #619 and
+                // splitting on the characters that delimit a path in prose needs
+                // no indexing at all.
+                for token in
+                    line.split(|c: char| !(c.is_ascii_alphanumeric() || "._-/".contains(c)))
+                {
+                    let path = token.trim_end_matches('.');
+                    if let Some(rest) = path.strip_prefix("scripts/")
+                        && !rest.is_empty()
+                        && !root.join(path).exists()
+                    {
+                        missing.push(format!(
+                            "{}:{}: {path}",
+                            doc.file_name().unwrap_or_default().to_string_lossy(),
+                            n + 1
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "the docs tell a reader to run a script that is not in the repository, \
+             which is what a blanket ignore rule did to `seed_marketing.py` for \
+             every release since 0.5.2 (#651):\n{}",
+            missing.join("\n")
+        );
+    }
+
+    fn collect_markdown(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        // Every failure here is loud. Returning quietly on an unreadable
+        // directory would let the guard pass by scanning less than it thinks it
+        // did, at any depth, which is the same hole the top-level check closes.
+        let entries =
+            std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot list {}: {e}", dir.display()));
+        for entry in entries {
+            let entry =
+                entry.unwrap_or_else(|e| panic!("cannot read an entry of {}: {e}", dir.display()));
+            let path = entry.path();
+            if path.is_dir() {
+                collect_markdown(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                out.push(path);
+            }
+        }
+    }
+
     /// What the scan below looks for, as its own function so it can be tested on
     /// lines that are not in the tree. Any leading dash, not just `--`: `-h` is a
     /// flag too and the first pass of this only caught the long form, which no
