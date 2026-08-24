@@ -986,6 +986,50 @@ fn engine_rows(t: &EngineTotals) -> Vec<String> {
         .collect()
 }
 
+/// The three heaviest command classes, by bytes removed.
+///
+/// Ranked on bytes, never on percentage. `get_top_commands` orders by percentage
+/// because `--view commands` wants that; a block headed "where the bytes went" that
+/// ranks by ratio puts a command that ran once above one that ran nine times and
+/// carried fifty times more, which is what `--view detail` printed for months.
+/// Asks for every class and cuts here, because the store's own cap is by call count
+/// and a byte ranking over a call-ranked sample is a sample chosen by the wrong
+/// measure (#704).
+fn heaviest_rows(store: &Store, since: i64, limit: usize) -> Vec<String> {
+    let mut classes = get_top_commands(store, since, 0);
+    classes.sort_by_key(|c| std::cmp::Reverse(c.3));
+    classes.truncate(limit);
+    classes.retain(|(_, _, _, saved)| *saved > 0);
+    if classes.is_empty() {
+        return Vec::new();
+    }
+
+    let names: Vec<String> = classes
+        .iter()
+        .map(|(n, ..)| crate::util::text::display_truncate_with_ellipsis(n, CMD_KEY_WIDTH - 3))
+        .collect();
+    let saved: Vec<String> = classes
+        .iter()
+        .map(|(_, _, _, b)| format_bytes(*b))
+        .collect();
+    let w_name = max_width(&names);
+    let w_saved = max_width(&saved);
+
+    classes
+        .iter()
+        .enumerate()
+        .map(|(i, (_, calls, pct, _))| {
+            format!(
+                "    {:<w_name$}  {:>w_saved$}  {:>4.0}% off  {} calls",
+                names[i],
+                saved[i],
+                pct,
+                format_number(*calls)
+            )
+        })
+        .collect()
+}
+
 /// The lines that qualify the numbers above them, empty when nothing needs
 /// qualifying. Every one of them names a population, because both defects this
 /// report has shipped were ratios over a population the reader could not see.
@@ -1059,6 +1103,30 @@ fn run_default(args: &[String], store: &Store) -> Result<()> {
     for line in engine_rows(&t) {
         println!("{}", line);
     }
+    // #714. The three engine lines were the whole of this view, and the next
+    // question a reader has is always the same one: where were those bytes, and
+    // what did it cost. Both are already queried for `--view detail`; neither was
+    // shown until you asked for a 58 line report.
+    let heaviest = heaviest_rows(store, since, 3);
+    if !heaviest.is_empty() {
+        println!();
+        println!("    {}", "where the bytes were".bright_black());
+        for line in &heaviest {
+            println!("{}", line);
+        }
+    }
+
+    if let Ok((count, _, _, sum_latency, _, _, _)) = store.aggregate_stats(since)
+        && count > 0
+    {
+        println!();
+        println!(
+            "    {}  {}",
+            format!("{:.0} ms", sum_latency as f64 / count as f64).bright_blue(),
+            format!("per command, over {} calls", format_number(count)).bright_black()
+        );
+    }
+
     println!();
     println!(
         "    {}",
@@ -1109,19 +1177,26 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     println!();
     print_separator();
     println!(
-        " {}",
-        format!("OMNI Signal Report: Detail ({})", period_label.bold()).bright_white()
+        " {} {}",
+        "OMNI · detail".bold().bright_white(),
+        format!("· {period_label}").bright_black()
     );
     print_separator();
 
+    // #714. One vocabulary with the default view, and every ratio names its base.
+    // This block used to say "Signal Ratio: 9.2% reduction" while the default view
+    // said "distilled 49%", from the same database in the same window: the first is
+    // over every call including the ones OMNI declined, the second over what the
+    // distiller was actually given. Neither said which, so the two views read as a
+    // contradiction. #665 fixed this inside one view and left the other alone.
     println!(
-        "  {:<20} {}",
-        "Commands processed:".bright_black(),
+        "  {:<16} {}",
+        "commands".bright_black(),
         format_number(count).bold().cyan()
     );
     println!(
-        "  {:<20} {} {} {}",
-        "Data Distilled:".bright_black(),
+        "  {:<16} {} {} {}",
+        "bytes in, out".bright_black(),
         format_bytes(input_total).red(),
         "→".bright_black(),
         format_bytes(output_total).green()
@@ -1132,7 +1207,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     // that `Data Distilled` did not already state exactly, and it stated it in a
     // unit we cannot defend, so it is gone rather than relabelled.
 
-    let ratio_msg = format!("{:.1}% reduction", reduction_pct);
+    let ratio_msg = format!("{reduction_pct:.1}% over every call, declined included");
     let ratio_colored = if reduction_pct > 70.0 {
         ratio_msg.bold().bright_green()
     } else if reduction_pct > 40.0 {
@@ -1140,18 +1215,23 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     } else {
         ratio_msg.bold().bright_red()
     };
-    println!("  {:<20} {}", "Signal Ratio:".bright_black(), ratio_colored);
     println!(
-        "  {:<20} {}",
-        "Average Latency:".bright_black(),
-        format!("{:.1}ms", avg_latency).bright_blue()
+        "  {:<16} {}",
+        "of what it saw".bright_black(),
+        ratio_colored
     );
     println!(
-        "  {:<20} {}",
-        "RewindStore:".bright_black(),
+        "  {:<16} {}",
+        "latency".bright_black(),
+        format!("{avg_latency:.0} ms average").bright_blue()
+    );
+    println!(
+        "  {:<16} {}",
+        "rewind store".bright_black(),
         format!(
-            "{} archived / {} retrieved",
-            rewind_stored, rewind_retrieved
+            "{} archived, {} retrieved",
+            format_number(rewind_stored),
+            format_number(rewind_retrieved)
         )
         .bright_magenta()
     );
@@ -1162,8 +1242,8 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
         && events > 0
     {
         println!(
-            "  {:<20} {}",
-            "Collapse:".bright_black(),
+            "  {:<16} {}",
+            "collapse".bright_black(),
             format!(
                 "{} → {} lines across {} events",
                 format_number(total_original),
@@ -1200,28 +1280,53 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     // #435. Session lifetime is the meter `CONTRIBUTING.md` calls the number
     // that decides progress, and it is all-time by design: a 30 day window over
     // closed sessions says less than every session ever closed.
+    // #714. One line in the header block rather than a heading of its own. It was
+    // a section with a title, one row and a caveat, for a fact that fits beside
+    // `latency`. The caveat still runs, because it says whether the number is about
+    // sessions or about the window, and that changes what it means.
     let (sessions, median_cmds, longest, compacted) = store.session_lifetime(0);
-    println!("\n {}", "Session lifetime:".bold().bright_white());
     if sessions == 0 {
         println!(
-            "  {}",
-            "not measurable yet: no session has been closed by a host that reports one"
+            "  {:<16} {}",
+            "sessions".bright_black(),
+            "none closed yet by a host that reports one"
                 .bright_black()
                 .italic()
         );
     } else {
-        println!(
-            "  {} commands median, {} longest, across {} closed sessions",
-            median_cmds.to_string().bright_green().bold(),
-            longest.to_string().cyan(),
-            format_number(sessions).cyan()
-        );
-        let compaction_line = if compacted == 0 {
-            "none ended at a compaction, so this measures sessions, not the window".to_string()
+        let tail = if compacted == 0 {
+            " · none ended at a compaction".to_string()
         } else {
-            format!("{compacted} of them ended at a compaction, which is what the window costs")
+            format!(" · {compacted} ended at a compaction")
         };
-        println!("  {}", compaction_line.bright_black().italic());
+        println!(
+            "  {:<16} {}",
+            "sessions".bright_black(),
+            format!(
+                "{} commands median, {} longest, {} closed{}",
+                median_cmds,
+                longest,
+                format_number(sessions),
+                tail
+            )
+            .cyan()
+        );
+    }
+
+    // #714. The per-engine lines, the same three the default view prints, from the
+    // same helper. Without them this view had only the whole-corpus ratio, which is
+    // over a different population, and the two reports read as a contradiction
+    // rather than as two bases. Sharing the renderer is what stops them drifting
+    // again: a reworded label moves in both places or in neither.
+    let engines = store.engine_totals(since)?;
+    if engines.distilled_calls > 0 || engines.folds > 0 || engines.declined_calls > 0 {
+        println!(
+            "\n {}",
+            "by engine, each against its own base".bold().bright_white()
+        );
+        for line in engine_rows(&engines) {
+            println!("{line}");
+        }
     }
 
     // #212: say what the number is a number *of*. It counts only calls whose
@@ -1250,17 +1355,11 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     if !period_rows.is_empty() {
         println!(
             "\n {}",
-            "Every recorded call, by period:".bold().bright_white()
+            "every recorded call, by period".bold().bright_white()
         );
         for line in format_period_rows(&period_rows) {
             println!("{}", line);
         }
-        println!(
-            "  {}",
-            "Declined calls are in this base, which is why it is far under the distiller's own\n  figure above. Counts calls whose result reached a model: terminal output is excluded,\n  no context holds it."
-                .bright_black()
-                .italic()
-        );
     }
 
     // By Command, top 10 (or all if requested), filter 0% savings
@@ -1270,15 +1369,28 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     let all_flag = super::has_flag(args, "--all-commands") || limit == Some(0);
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
 
+    // #714. Ranked by bytes removed, not by percentage. `group_and_calculate_stats`
+    // orders by ratio, and under a heading a reader takes as "what matters", that
+    // put nine commands that ran once above the one that ran nine times and carried
+    // fifty times more. The same defect was fixed in `omni context --tokens` for
+    // #702; this is the other caller. `--view commands` keeps the ratio ordering,
+    // because there the ratio is the subject.
     let display_filters: Vec<_> = if all_flag {
-        grouped_filters.clone()
+        // Greptile on #714. `--all-commands` kept the percentage order under a
+        // heading that says heaviest first, so the full listing contradicted the
+        // top ten above it. One ordering for one table.
+        let mut all: Vec<_> = grouped_filters.clone();
+        all.sort_by_key(|(_, _, _, bytes)| std::cmp::Reverse(*bytes));
+        all
     } else {
-        grouped_filters
+        let mut top: Vec<_> = grouped_filters
             .iter()
             .filter(|(_, _, pct, _)| *pct > 0.0)
-            .take(limit.unwrap_or(10))
             .cloned()
-            .collect()
+            .collect();
+        top.sort_by_key(|(_, _, _, bytes)| std::cmp::Reverse(*bytes));
+        top.truncate(limit.unwrap_or(10));
+        top
     };
 
     // Per-command with agent info
@@ -1296,24 +1408,44 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     }
 
     if !display_filters.is_empty() {
-        println!("\n {}", "By Command:".bold().bright_white());
+        // #714. Widened from a fixed 6 to whatever the rows actually need. A
+        // `-238.5 KB` overflows six columns and pushes the bar right on that row
+        // alone, which is #702's defect in the other table.
+        let byte_cells: Vec<String> = display_filters
+            .iter()
+            .map(|(_, _, _, b)| {
+                if *b > 0 {
+                    format!("-{}", format_bytes(*b))
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        let w_bytes = max_width(&byte_cells).max(5);
+
         println!(
-            "  {:>3} {:<w_cmd$} {:<11} {:>5} {:>6} {:>6} {}",
+            "\n {} {}",
+            "where the bytes were".bold().bright_white(),
+            "· heaviest first".bright_black()
+        );
+        println!(
+            "  {:>3} {:<w_cmd$} {:<11} {:>5} {:>6} {:>w_bytes$} {}",
             "#".bright_black(),
-            "CLI".bright_black(),
-            "Agent".bright_black(),
-            "Count".bright_black(),
-            "Saved".bright_black(),
-            "Saved".bright_black(),
-            "Signal".bright_black(),
-            w_cmd = CMD_KEY_WIDTH
+            "command".bright_black(),
+            "agent".bright_black(),
+            "calls".bright_black(),
+            "off".bright_black(),
+            "bytes".bright_black(),
+            "".bright_black(),
+            w_cmd = CMD_KEY_WIDTH,
+            w_bytes = w_bytes
         );
         println!(
             "  {}",
-            super::column_rule(&[3, CMD_KEY_WIDTH, 11, 5, 6, 6, DETAIL_BAR]).bright_black()
+            super::column_rule(&[3, CMD_KEY_WIDTH, 11, 5, 6, w_bytes, DETAIL_BAR]).bright_black()
         );
 
-        for (i, (name, cnt, pct, bytes_saved)) in display_filters.iter().enumerate() {
+        for (i, (name, cnt, pct, _)) in display_filters.iter().enumerate() {
             let bar = format_bar(*pct, DETAIL_BAR);
             let bar_colored = if *pct > 80.0 {
                 bar.bright_green()
@@ -1340,17 +1472,13 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 // already says why those two facts must not be folded (#471).
                 .unwrap_or("Unknown");
 
-            let tokens_str = if *bytes_saved > 0 {
-                format!("-{}", format_bytes(*bytes_saved))
-            } else {
-                String::new()
-            };
+            let tokens_str = &byte_cells[i];
 
             let display_name =
                 crate::util::text::display_truncate_with_ellipsis(name, CMD_KEY_WIDTH - 3);
 
             println!(
-                "  {:>2}. {:<w_cmd$} {:<11} {:>4}x {:>5.1}% {:>6} {:<w_bar$}{}",
+                "  {:>2}. {:<w_cmd$} {:<11} {:>4}x {:>5.1}% {:>w_bytes$} {:<w_bar$}{}",
                 i + 1,
                 display_name.bright_cyan(),
                 agent_label.bright_blue(),
@@ -1360,6 +1488,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
                 bar_colored,
                 suffix,
                 w_cmd = CMD_KEY_WIDTH,
+                w_bytes = w_bytes,
                 w_bar = DETAIL_BAR
             );
         }
@@ -1395,7 +1524,11 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     let routes = store.route_distribution(since)?;
     if !routes.is_empty() {
         let total_routes: u64 = routes.iter().map(|(_, c)| c).sum();
-        println!("\n {}", "Route Distribution:".bold().bright_white());
+        println!(
+            "\n {} {}",
+            "what OMNI did with each call".bold().bright_white(),
+            "· and why, where it declined".bright_black()
+        );
         for (route, cnt) in &routes {
             let pct = if total_routes > 0 {
                 *cnt as f64 / total_routes as f64 * 100.0
@@ -1425,10 +1558,17 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             // reads as OMNI doing nothing to 94% of calls. `passthrough_events`
             // has recorded why since #533; nothing printed it.
             if route.eq_ignore_ascii_case("passthrough") {
-                for (reason, n) in store.passthrough_reasons(since).iter().take(6) {
+                // #714. Marked as a sub-level rather than indented alone. By
+                // indent only, `below guardrail 16474` sits beside
+                // `Passthrough 94%` and reads as a fifth route.
+                let reasons = store.passthrough_reasons(since);
+                let last = reasons.len().min(6).saturating_sub(1);
+                for (i, (reason, n)) in reasons.iter().take(6).enumerate() {
+                    let stem = if i == last { "└─" } else { "├─" };
                     println!(
-                        "  {:<17}{}  {}",
+                        "  {:<15}{} {}  {}",
                         "",
+                        stem.bright_black(),
                         format!("{n:>6}").bright_black(),
                         reason.bright_black()
                     );
@@ -1436,6 +1576,15 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             }
         }
     }
+
+    // #714. The caveats used to sit between the period table and the next heading,
+    // three lines of qualification inside a table. They qualify the whole report, so
+    // they belong once, at the foot, where a reader who has finished can find them.
+    let footnotes = [
+        "period percentages count declined calls in their base, so they read under",
+        "the distiller's own figure. Only calls that reached a model are counted:",
+        "terminal output is excluded, because no context holds it.",
+    ];
 
     // Agent Distribution
     let agent_data = store.get_agent_breakdown(since).unwrap_or_default();
@@ -1458,25 +1607,33 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     if !grouped_agents.is_empty() {
         let total_cmds: u64 = agent_data.iter().map(|r| r.calls).sum();
-        println!("\n {}", "Agent Distribution:".bold().bright_white());
+        println!("\n {}", "by agent".bold().bright_white());
         // Number then bar, the order By Command already uses. Padding the bar
         // and right-aligning the percentage after it left a hole across the row
         // whenever savings were low, which is most rows.
-        println!(
-            "  {:<16} {:>6} {:>7} {:>6} {}",
-            "Agent".bright_black(),
-            "Count".bright_black(),
-            "Share".bright_black(),
-            "Saved".bright_black(),
-            "Signal".bright_black()
-        );
+        // #714. A header and a rule over two rows is a table doing a sentence's
+        // job, and `CONTRIBUTING.md` says a table earns its place at three rows.
+        // Both are still printed, so no figure is lost, only the frame.
+        let framed = grouped_agents.len() >= 3;
+        if framed {
+            println!(
+                "  {:<16} {:>6} {:>7} {:>6} {}",
+                "agent".bright_black(),
+                "calls".bright_black(),
+                "share".bright_black(),
+                "off".bright_black(),
+                "".bright_black()
+            );
+        }
         // Five groups under a five-column header. It carried five under *four*,
         // because the leading `──` was copied from the By Command table's `#`
         // column, leaving a 56-column rule under a 43-column header (#463).
-        println!(
-            "  {}",
-            super::column_rule(&[16, 6, 7, 6, DETAIL_BAR]).bright_black()
-        );
+        if framed {
+            println!(
+                "  {}",
+                super::column_rule(&[16, 6, 7, 6, DETAIL_BAR]).bright_black()
+            );
+        }
 
         let mut sorted_agents: Vec<_> = grouped_agents.into_iter().collect();
         sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.1.0));
@@ -1528,13 +1685,21 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     // Session insights, always shown in detail mode
     let hot_files = store.hot_files_global(since)?;
     if !hot_files.is_empty() {
-        println!("\n {}", "Session Insights:".bold().bright_white());
+        println!("\n {}", "this session".bold().bright_white());
         let files_str: Vec<String> = hot_files
             .iter()
             .take(3)
             .map(|(f, c)| format!("{} ({})", f.bright_cyan(), c.to_string().bright_black()))
             .collect();
         println!("  Hot files:  {}", files_str.join(", "));
+    }
+
+    println!();
+    for note in footnotes {
+        println!("  {}", note.bright_black().italic());
+    }
+    for note in engine_caveats(&store.engine_totals(since)?, since) {
+        println!("  {}", note.bright_black().italic());
     }
 
     print_separator();

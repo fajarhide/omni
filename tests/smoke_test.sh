@@ -286,6 +286,37 @@ TOTAL=$((TOTAL + 1))
 check "session json has context_pressure" "$SESSION_JSON" "context_pressure"
 
 
+# ─── #714: every figure the detail view carried is still in it ────
+#
+# The views were reworded and re-ranked, not recomputed, so the risk is a section
+# quietly lost in the edit. These are the section headings and the labels that
+# carry a number; a rewording that drops one fails here rather than in a reader's
+# terminal weeks later. It lives in the smoke test for the same reason as the
+# block below: it is a property of the shipped binary's output, and `cargo test`
+# never runs this file.
+DETAIL_OUT="$($OMNI stats --view detail 2>&1 || true)"
+for SECTION in "commands" "bytes in, out" "of what it saw" "latency" "sessions" \
+               "by period" "where the bytes were" "what OMNI did with each call" \
+               "by agent"; do
+    check "detail keeps '$SECTION'" "$DETAIL_OUT" "$SECTION"
+done
+
+# The two views must not drift apart in vocabulary again. `Signal Ratio: 9.2%
+# reduction` in one and `distilled 49%` in the other came from the same database
+# in the same window over different bases, and neither named its base (#665 fixed
+# it in one view only).
+# Greptile on #714: this loop searched only the default view while claiming both
+# share the word, which is the check naming a property it did not test. Each word
+# is now asserted in both outputs, so a rewording in either view fails.
+DEFAULT_OUT="$($OMNI stats 2>&1 || true)"
+for WORD in "folded" "distilled" "left alone" "where the bytes were"; do
+    check "default has '$WORD'" "$DEFAULT_OUT" "$WORD"
+    check "detail has '$WORD'" "$DETAIL_OUT" "$WORD"
+done
+check "detail names the base of its ratio" "$DETAIL_OUT" "over every call"
+check "default says where the bytes were" "$DEFAULT_OUT" "where the bytes were"
+
+
 # ─── #151: no subcommand may swallow a flag it does not know ──────
 #
 # Every subcommand is declared `trailing_var_arg` with a `Vec<String>` catch-all
