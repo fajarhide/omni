@@ -10,7 +10,7 @@ sebelum menilai apakah OMNI layak berada di sana.
 |---|---|---|
 | **Penuh** | Claude Code, Codex CLI, Gemini CLI, OpenClaw, Hermes, Pi, Aider (pipa) | Host menerapkan tulis ulang OMNI, jadi model membaca keluaran sulingan dari tool bawaannya sendiri. |
 | **Handoff dulu** | Cursor, Windsurf | Host tidak bisa menulis ulang keluaran tool bawaannya. `omni_run` menyuling apa pun yang dilewatkan melaluinya, dan `omni init --cursor` memasang aturan yang membuat agent meraihnya. |
-| **MCP saja** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | Ingatan, pemanggilan kembali dan keadaan sesi. Tanpa penyulingan shell, dan tanpa klaim soal itu. |
+| **MCP saja** | Cline, Roo, OpenCode, VS Code, Zed, Copilot, Antigravity | Ingatan, pemanggilan kembali dan keadaan sesi, ditambah `omni_run`. Keluaran tool milik host tidak pernah ditulis ulang, jadi `omni_run` satu-satunya jalan agar model membaca lebih sedikit. |
 
 ```sh
 omni doctor     # mencetak tingkat untuk setiap host yang terpasang
