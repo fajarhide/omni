@@ -1,5 +1,5 @@
 {
-  "commit": "2911923",
+  "commit": "ae5b0a9",
   "corpus": {
     "buckets": [
       [
@@ -45,6 +45,64 @@
   },
   "dirty_tree": true,
   "result": {
+    "by_class": {
+      "aggregate": {
+        "calls": 9478,
+        "capture_rate_pct": 24.1,
+        "filters_pct": 1.4,
+        "input_bytes": 8486830,
+        "repetition_available_pct": 15.6,
+        "with_ledger_pct": 5.1
+      },
+      "build and test": {
+        "calls": 41,
+        "capture_rate_pct": 10.8,
+        "filters_pct": 9.0,
+        "input_bytes": 20778,
+        "repetition_available_pct": 21.7,
+        "with_ledger_pct": 11.1
+      },
+      "file read": {
+        "calls": 1056,
+        "capture_rate_pct": 25.3,
+        "filters_pct": 0.0,
+        "input_bytes": 1891398,
+        "repetition_available_pct": 17.7,
+        "with_ledger_pct": 4.5
+      },
+      "git": {
+        "calls": 899,
+        "capture_rate_pct": 20.8,
+        "filters_pct": 5.1,
+        "input_bytes": 858631,
+        "repetition_available_pct": 18.4,
+        "with_ledger_pct": 8.8
+      },
+      "infra": {
+        "calls": 215,
+        "capture_rate_pct": 10.5,
+        "filters_pct": 3.2,
+        "input_bytes": 135669,
+        "repetition_available_pct": 5.5,
+        "with_ledger_pct": 3.8
+      },
+      "other": {
+        "calls": 6457,
+        "capture_rate_pct": 25.1,
+        "filters_pct": 0.8,
+        "input_bytes": 4814911,
+        "repetition_available_pct": 15.9,
+        "with_ledger_pct": 4.8
+      },
+      "search": {
+        "calls": 810,
+        "capture_rate_pct": 13.7,
+        "filters_pct": 3.4,
+        "input_bytes": 765443,
+        "repetition_available_pct": 6.5,
+        "with_ledger_pct": 4.2
+      }
+    },
     "ledger_claimed_pct": 3.7,
     "net_savings_pct": 1.4,
     "repeated_bytes_pct": 15.4,
