@@ -57,6 +57,31 @@ pub fn passthrough_reason(kind: Structured) -> String {
     format!("structured:{}", kind)
 }
 
+/// Whether a lossy stage must decline this payload.
+///
+/// Distillers, collapse and the head/tail trim all rewrite content, and a
+/// structured payload is parsed by whatever reads it next, so any of them would
+/// corrupt it. Unsure means structured: a missed compression is cheap and a
+/// corrupted payload is not.
+pub fn refuses_lossy_stages(text: &str) -> bool {
+    sniff(text).is_some()
+}
+
+/// Whether the ledger must decline this payload.
+///
+/// Today the same answer as `refuses_lossy_stages`, and deliberately a separate
+/// function rather than a call to it. The two questions are not the same question:
+/// folding a run of already-seen lines leaves a marker and a recoverable handle
+/// rather than rewriting content, which is why #608 proposes letting the ledger in
+/// where nothing downstream parses the payload while lossy stages stay refused.
+///
+/// It exists now, before that decision, because the answer was written out at three
+/// separate call sites, twice in one file. #452, #454 and #456 each fixed one copy
+/// of a duplicated predicate in this codebase and left the other standing (#699).
+pub fn refuses_the_ledger(text: &str) -> bool {
+    sniff(text).is_some()
+}
+
 /// Classify `input`. `None` means plain text, safe to compress.
 pub fn sniff(input: &str) -> Option<Structured> {
     let trimmed = input.trim();
@@ -415,5 +440,69 @@ mod tests {
     fn reason_label_names_the_kind() {
         assert_eq!(passthrough_reason(Structured::Json), "structured:json");
         assert_eq!(passthrough_reason(Structured::Yaml), "structured:yaml");
+    }
+}
+
+#[cfg(test)]
+mod gate_is_named_once {
+    /// #699. `sniff` was asked the same question at five call sites, three of them
+    /// the same ledger decision written out three times, twice in one file. #452,
+    /// #454 and #456 each fixed one copy of a duplicated predicate here and left
+    /// the other standing, so the fix is to have the question exist once.
+    ///
+    /// This forbids the *gate* shape, `sniff(..).is_some()` or `.is_none()`, in the
+    /// hooks. Calling `sniff` for its `Structured` value is still fine and still
+    /// happens: the passthrough reason is built from it. What may not come back is
+    /// a site deciding for itself what a `Some` means, because #608 will change
+    /// that answer for one of the two questions and must not have to find copies.
+    #[test]
+    fn no_hook_decides_for_itself_what_structured_means() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/hooks");
+        let mut offenders = Vec::new();
+
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                for (n, line) in text.lines().enumerate() {
+                    let code = line.trim_start();
+                    if code.starts_with("//") {
+                        continue;
+                    }
+                    if !code.contains("sniff(") {
+                        continue;
+                    }
+                    if code.contains(".is_some()") || code.contains(".is_none()") {
+                        let rel = path
+                            .strip_prefix(&root)
+                            .unwrap_or(&path)
+                            .display()
+                            .to_string();
+                        offenders.push(format!("{rel}:{}: {}", n + 1, code));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "a hook is deciding for itself what a structured payload means. Use \
+             `refuses_lossy_stages` or `refuses_the_ledger` so #608 changes one \
+             answer in one place (#699):\n{}",
+            offenders.join("\n")
+        );
     }
 }

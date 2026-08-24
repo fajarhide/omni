@@ -314,7 +314,13 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
     // Format-safe gate: structured payloads are parsed by whatever reads them next,
     // so every lossy stage below, including the >2MB head/tail trim, would corrupt
     // them. Emit nothing: the host keeps the original bytes at zero marker cost.
-    if let Some(kind) = format::sniff(&normalized.content) {
+    // `refuses_lossy_stages`, not `sniff`, so the reason this declines is the
+    // question being asked rather than a classifier's return value. `kind` is
+    // still needed for the recorded reason, so the classifier is called for that
+    // and the gate is the predicate (#699).
+    if crate::pipeline::format::refuses_lossy_stages(&normalized.content)
+        && let Some(kind) = format::sniff(&normalized.content)
+    {
         if let Some(s) = store {
             s.record_passthrough(
                 &normalized.command,
@@ -422,7 +428,7 @@ fn fold_cross_turn(
         return (text, 0);
     };
     let scope = crate::ledger::scope_for(session, normalized.host_agent_id.as_deref());
-    if crate::pipeline::format::sniff(&text).is_some() {
+    if crate::pipeline::format::refuses_the_ledger(&text) {
         return (text, 0);
     }
     // The repository, not the directory this ran in: a worktree or a second
@@ -790,7 +796,7 @@ pub fn process_payload(
     let distilled_len = final_out.len();
 
     if let (Some(s), Some(session)) = (store.as_ref(), normalized.host_session_id.as_deref())
-        && crate::pipeline::format::sniff(&final_out).is_none()
+        && !crate::pipeline::format::refuses_the_ledger(&final_out)
         && let scope = crate::ledger::scope_for(session, normalized.host_agent_id.as_deref())
         && let Some(view) = crate::ledger::Ledger::new(s, &scope)
             .with_project(crate::paths::project_key(std::path::Path::new(
