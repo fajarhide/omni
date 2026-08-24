@@ -379,6 +379,7 @@ impl SqliteBackend {
             // column as the savings reads as bytes that went missing.
             if route == "Passthrough" {
                 t.declined_calls += calls;
+                t.declined_bytes += input;
             } else {
                 t.distilled_calls += calls;
                 t.distilled_input += input;
@@ -1938,6 +1939,13 @@ impl SqliteBackend {
         results
     }
 
+    /// Per-command totals in the window, most-called first.
+    ///
+    /// `limit` of 0 means every class. The cap is by call count, so any caller
+    /// ranking on something else is reading a sample chosen by a different
+    /// measure: a class that removed 40 MB in three calls sits below 300 chatty
+    /// ones and never reaches the sort. `omni context --tokens` ranks by bytes
+    /// and so asks for all of them.
     #[allow(clippy::type_complexity)]
     pub fn get_per_command_stats(
         &self,
@@ -1962,16 +1970,20 @@ impl SqliteBackend {
         ))?;
 
         let rows = stmt
-            .query_map(params![since, limit as i64], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, u64>(1)?,
-                    row.get::<_, u64>(2)?,
-                    row.get::<_, u64>(3)?,
-                    row.get::<_, u64>(4)?,
-                    row.get::<_, u64>(5)?,
-                ))
-            })?
+            // SQLite reads a negative LIMIT as no limit.
+            .query_map(
+                params![since, if limit == 0 { -1 } else { limit as i64 }],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, u64>(3)?,
+                        row.get::<_, u64>(4)?,
+                        row.get::<_, u64>(5)?,
+                    ))
+                },
+            )?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -3056,6 +3068,11 @@ pub struct EngineTotals {
     /// Calls OMNI declined. They save nothing and cost nothing, and they are the
     /// 15,395 that dragged a 48% distiller down to a reported 9%.
     pub declined_calls: u64,
+    /// Bytes those declined calls carried. Never a saving and never a loss, so it
+    /// stays out of every ratio; it exists so a composition report can say what
+    /// OMNI saw without inferring it from the distiller's output, which is what
+    /// survived distillation rather than what was handed back (#612).
+    pub declined_bytes: u64,
     /// Fold operations, not `ledger_folds` rows. One fold writes a row per
     /// (origin, source agent) pair carrying the same payload size.
     pub folds: u64,
