@@ -127,7 +127,9 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
     // Phase 2.5: Format-safe gate. Structured payloads are machine-read downstream
     // (`jq`, `json.load`, `kubectl apply`); collapse and the distillers would leave
     // them unparseable. Emit the input verbatim, byte for byte.
-    if let Some(kind) = crate::pipeline::format::sniff(&input_text) {
+    if crate::pipeline::format::refuses_lossy_stages(&input_text)
+        && let Some(kind) = crate::pipeline::format::sniff(&input_text)
+    {
         output.write_all(input_text.as_bytes())?;
         output.flush()?;
         if let Some(s) = &store {
@@ -352,7 +354,7 @@ fn distill(
     // which is a wall-clock stamp that covered 16 projects in one value (#118).
     // No forwarded id, no ledger, which is why the pre-hook now passes one.
     if let (Some(s), Some(scope)) = (store, host_session())
-        && crate::pipeline::format::sniff(&output).is_none()
+        && !crate::pipeline::format::refuses_the_ledger(&output)
         && let Some(view) = crate::ledger::Ledger::new(s, scope)
             .with_project(crate::paths::project_key(std::path::Path::new(
                 &project_path,
