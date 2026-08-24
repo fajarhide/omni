@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice, <b>89.6%</b> off file reads across the corpus. Nothing deleted, nothing invented, and every number replays on your own history.</em>
+    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice. Across a whole session it takes about a quarter of the repetition your work actually contains, which was <b>4.5%</b> of file-read bytes on the corpus below. How repetitive your work is decides where you land between those two. Nothing deleted, nothing invented, and every number here replays on your own history.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -207,26 +207,26 @@ Every figure OMNI publishes states the corpus it came from and the week it cover
 because `execution_traces` is pruned after seven days and a number that outlives its
 corpus cannot be checked by anyone, us included.
 
-On the 2026-08-11 to 08-14 UTC window, replayed on the 0.7.5 release binary over 5,984
-real command executions that reached a model:
+On a corpus of 9,478 real command executions that reached a model, 8.42 MB over 70
+sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
 
-* **32.6% from the filters, 69.6% with the ledger.** File re-reads, the largest class
-  by bytes: **39.2%** from the filters and **89.6%** with the ledger, which is the gap
-  the ledger exists for.
-* **Read the corpus before the number.** This window is unusual and it inflates
-  everything here: 286 groups of byte-identical payloads are 80.6% of these bytes, and
-  148 of the 5,984 calls carry 64.7% of them. It was a week of building and
-  benchmarking OMNI. The same harness over a week of ordinary work reads **14.9%**.
-* **These traces have since been pruned.** `execution_traces` keeps seven days, so this
-  window cannot be replayed again by us or by anyone else. What a later week reads, and
-  why it differs, is in
-  [benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks.html). Run the harness
-  on your own history for a figure about your workload.
-* **It fires where your bytes are.** File re-reads are the largest class in this
-  corpus and the ledger takes **89.6%** off them. Where there is nothing safe to
-  take, a two-line `git status` or a JSON payload a later step parses, OMNI hands the
-  output back untouched rather than inventing a saving. **No call came back larger**
-  in this measurement. Two did until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
+* **1.4% from the filters, 5.1% with the ledger**, and the ledger took **24.1% of
+  all the repetition that was there to take**. The last figure is the one that
+  describes OMNI. The first two describe this corpus.
+* **Read the corpus before the number.** This one is shell-heavy, so it
+  *understates* the case the ledger is built for: file reads here average 2.1 KB.
+  An earlier week whose file reads averaged 12.4 KB took **twenty times** more
+  bytes off that class, on the same code, while the capture rate barely moved.
+  Twentyfold in one column, flat in the other, and only one of those two is a fact
+  about OMNI.
+* **This corpus does not expire.** It is frozen on disk and its hash is in
+  `docs/benchmarks/0.7.7.json`, so the numbers above can be checked against the
+  same bytes next release instead of against whatever the last seven days held.
+  Run the harness on your own history for a figure about your workload.
+* **It hands bytes back rather than inventing a saving.** Where there is nothing
+  safe to take, a two-line `git status` or a JSON payload a later step parses, the
+  output comes back untouched. **No call came back larger** in this measurement.
+  Two did until ([#398](https://github.com/fajarhide/omni/issues/398)), and we published them while they stood.
 * **21 ms per command**, growing with your history rather than with the payload. On a
   205 MB database it is 61 ms.
 * **End to end, the gap favours you.** These are bytes per command, which is not the
@@ -235,32 +235,39 @@ real command executions that reached a model:
   shortened once is a payload every later turn stops re-reading. It is an average and
   not a promise, and some sessions did not fall at all.
 
-Per class, over the same 5,984 traces, with what the filters take and what the ledger
-adds on top:
+Per class, with what the filters take, what the ledger adds, and how much of the
+repetition that was there it actually took:
 
-| Class | Calls | Input | Filters | + ledger |
-|---|---|---|---|---|
-| other | 3,703 | 11.05 MB | 29.1% | **56.2%** |
-| file read (`cat`, `sed`, `head`, `tail`) | 884 | 10.93 MB | 39.2% | **89.6%** |
-| search (`grep`, `rg`, `find`) | 600 | 540 KB | 2.3% | **4.3%** |
-| `git`, `gh` | 696 | 475 KB | 2.5% | **7.0%** |
-| build and test | 36 | 24 KB | 10.8% | **10.8%** |
-| infra (`kubectl`, `az`, `docker`) | 65 | 70 KB | 0.0% | **6.8%** |
-| **aggregate** | **5,984** | **23.09 MB** | **32.6%** | **69.6%** |
+<!-- omni:corpus-table:start -->
+| Class | Calls | Input | Filters | + ledger | Available | Captured |
+|---|---|---|---|---|---|---|
+| other | 6,457 | 4.81 MB | 0.8% | 4.8% | 15.9% | **25.1%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 4.5% | 17.7% | **25.3%** |
+| git | 899 | 0.86 MB | 5.1% | 8.8% | 18.4% | **20.8%** |
+| search | 810 | 0.77 MB | 3.4% | 4.2% | 6.5% | **13.7%** |
+| infra | 215 | 0.14 MB | 3.2% | 3.8% | 5.5% | **10.5%** |
+| build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
+| **aggregate** | 9,478 | 8.49 MB | 1.4% | 5.1% | 15.6% | **24.1%** |
 
-`infra` reads 0.0% from the filters on purpose. It was 1.7% one release ago, bought by
-summarising `kubectl get pods` tables, which deleted the pod names that were the
-answer. That saving is gone and the rows are back.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.7.
+<!-- omni:corpus-table:end -->
 
-Head to head on that corpus, identical bytes into every arm. **OMNI with its ledger is
-the top arm at 69.6%**, ahead of headroom's dedup over our filters at 65.8%, lean-ctx
-at 49.4%, caveman at 6.8% and rtk at 6.2%. Bolting our ledger onto rtk lifts it to
-61.4% and onto caveman 61.7%, which is the clearest statement of where the work is.
+`available` is the ceiling. The ledger substitutes lines it has already delivered,
+so it cannot fold what was never repeated, and `captured` is the share of that it
+took. The two columns answer different questions: the saving describes this corpus,
+the capture rate describes OMNI. On a week of large repeated file reads the same
+mechanism took 20 times more bytes off the same class, and the capture rate barely
+moved.
 
-Our filters on their own take 32.6%, and lean-ctx beats that sub-component by 16.8
-points on a corpus built out of a few enormous repetitive payloads, exactly the shape
-a deep-and-narrow compressor is for. Every arm is in the table on the benchmarks page,
-that one included.
+`infra` and `file read` read 0.0% from the filters on purpose. A pod listing is an
+enumeration where every row is a datum, and a source file is not ours to summarise
+(#176), so both hand the bytes back and let the ledger do the work.
+
+A head-to-head against rtk, lean-ctx, caveman and headroom used to sit here. It was
+measured on a corpus that no longer exists, and the re-run found that two of its
+four arms do not run on this machine at all, including headroom, which is the only
+one shipping the same cross-turn dedup. It returns when it can be measured properly
+(#711, #712) rather than being restated from a run whose deciding arm crashed.
 
 Reproduce all of it:
 

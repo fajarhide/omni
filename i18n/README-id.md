@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Agent Anda membayar dua kali untuk output yang sudah pernah dilihatnya.</b> OMNI menggantinya dengan handle yang bisa diambil kembali: <b>97,2%</b> untuk file yang dibaca dua kali, <b>89,6%</b> untuk pembacaan file di seluruh korpus. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka bisa diputar ulang di riwayat Anda sendiri.</em>
+    <em><b>Agent Anda membayar dua kali untuk output yang sudah pernah dilihatnya.</b> OMNI menggantinya dengan handle yang bisa diambil kembali: <b>97,2%</b> untuk file yang dibaca dua kali. Sepanjang satu sesi ia mengambil sekitar seperempat dari pengulangan yang benar-benar ada di pekerjaan Anda, yang di korpus di bawah berarti <b>4,5%</b> dari byte pembacaan file. Seberapa berulang pekerjaan Anda yang menentukan Anda mendarat di mana antara keduanya. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka di sini bisa diputar ulang di riwayat Anda sendiri.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -128,24 +128,29 @@ Itulah satu hal yang tidak bisa dibeli angka kompresi yang lebih besar: **asliny
 
 ## Tolok Ukur
 
-Diukur pada biner rilis dengan memutar ulang **5.984 eksekusi perintah nyata**
-sepanjang **11 sampai 14 Agustus 2026 UTC**, semuanya output yang sampai ke model.
-Jendela waktunya bagian dari angkanya: `execution_traces` dipangkas setelah tujuh
-hari, jadi sebuah korpus lenyap seminggu setelah diukur.
+Diukur pada korpus 9.478 eksekusi perintah nyata yang sampai ke model, 8,42 MB
+sepanjang 70 sesi, dibekukan di disk dan diberi hash `0b63218ef78a1edb` supaya ia
+tidak ikut terhapus.
 
-* **32,6%** dari filter, **69,6%** dengan ledger. Baca ulang berkas, kelas terbesar
-  menurut byte: **39,2%** dari filter dan **89,6%** dengan ledger, dan celah itulah
-  alasan ledger ada.
-* **Baca korpusnya sebelum angkanya.** Jendela ini tidak biasa dan ia menaikkan semua
-  angka di sini: ada 286 grup payload yang identik byte per byte dan grup-grup itu saja
-  sudah **80,6%** dari total byte, sementara 148 dari 5.984 panggilan membawa 64,7%
-  di antaranya. Itu minggu ketika mesin ini hanya mengerjakan dan mengukur OMNI. Harness
-  yang sama pada satu minggu kerja biasa terbaca **14,9%**.
-* **Ia bekerja di tempat byte Anda berada.** Pembacaan file adalah kelas terbesar di
-  korpus ini dan ledger memangkas **89,6%** darinya. Ketika tidak ada yang aman untuk
-  diambil, `git status` dua baris atau payload JSON yang akan diurai langkah
-  berikutnya, OMNI mengembalikan keluarannya utuh alih-alih mengarang penghematan.
-  **Tidak ada panggilan yang justru membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
+* **1,4%** dari filter, **5,1%** dengan ledger, dan ledger mengambil **24,1% dari
+  seluruh pengulangan yang memang ada untuk diambil**. Angka terakhir itu yang
+  menggambarkan OMNI. Dua yang pertama menggambarkan korpus ini.
+* **Baca korpusnya sebelum angkanya.** Korpus ini berat ke perintah shell, jadi ia
+  justru *merendahkan* kasus yang menjadi alasan ledger dibangun: pembacaan file di
+  sini rata-rata 2,1 KB. Satu minggu sebelumnya yang pembacaan filenya rata-rata
+  12,4 KB memberi **dua puluh kali** lebih banyak byte pada kelas yang sama, dengan
+  kode yang sama, sementara capture rate-nya hampir tidak bergerak. Dua puluh kali di
+  satu kolom, datar di kolom lain, dan hanya satu dari keduanya yang merupakan fakta
+  tentang OMNI.
+* **Korpus ini tidak kedaluwarsa.** Ia beku di disk dan hash-nya ada di
+  `docs/benchmarks/0.7.7.json`, jadi angka di atas bisa diperiksa terhadap byte yang
+  sama di rilis berikutnya, bukan terhadap apa pun yang tersisa dari tujuh hari
+  terakhir. Jalankan harness-nya di riwayat Anda sendiri untuk angka tentang beban
+  kerja Anda.
+* **Ia mengembalikan byte alih-alih mengarang penghematan.** Ketika tidak ada yang
+  aman untuk diambil, `git status` dua baris atau payload JSON yang akan diurai
+  langkah berikutnya, keluarannya kembali utuh. **Tidak ada panggilan yang justru
+  membesar** pada pengukuran ini. Dulu ada 2 sampai ([#398](https://github.com/fajarhide/omni/issues/398)), dan kami
   menerbitkannya selama keduanya masih ada.
 * **21 ms per perintah**, tumbuh bersama riwayat Anda dan bukan bersama ukuran
   payload. Pada database 205 MB angkanya 61 ms.

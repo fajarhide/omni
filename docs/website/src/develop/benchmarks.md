@@ -7,36 +7,61 @@ same run as the rest of that section, including the ones that do not flatter us.
 useful thing on the page: the number OMNI reports is a property of the week it replays, not
 a constant. Read the corpus line before the figure, every time.
 
-## The current run, 2026-08-23
+## The current run, 2026-08-24, and the first one that will still exist next month
 
-**Corpus**: 8,934 traces, 7,822,947 bytes, 2026-08-17 02:05:18 to 2026-08-23 14:16:41 UTC,
-all `agent_id='claude_code'`, 0 terminal rows, 0 errored. Replayed in 7.5 s on `8a355f9`.
+**Corpus**: 9,478 traces, 8,458,937 bytes, 70 sessions, all `agent_id='claude_code'`,
+0 terminal rows, 0 errored. Frozen on disk and hashed as `0b63218ef78a1edb`, replayed
+in 7.1 s on OMNI 0.7.7.
 
-**1.0% from the filters. 4.6% with the ledger.** 98.3% of calls saved nothing, 1.7% shrank,
-and **no call came back larger**.
+Every run above this line on this page was measured on `execution_traces`, which prunes
+at seven days, so none of them can be re-derived. This one is a file. That is the whole
+of #704: a release-over-release delta was previously a code change and a corpus change
+added together, with no way to separate them.
 
-| class | calls | input | filters | + ledger |
-|---|---|---|---|---|
-| other | 6,050 | 4.45 MB | 0.5% | 4.3% |
-| file read (`cat`, `sed`, `head`, `tail`) | 1,014 | 1.78 MB | 0.0% | 4.5% |
-| search | 788 | 0.73 MB | 2.6% | 3.6% |
-| `git` | 829 | 0.70 MB | 5.0% | 7.9% |
-| infra | 210 | 0.13 MB | 3.3% | 3.9% |
-| build and test | 43 | 0.02 MB | 7.8% | 9.9% |
-| **aggregate** | **8,934** | **7.82 MB** | **1.0%** | **4.6%** |
+**1.4% from the filters. 5.1% with the ledger.** 98.4% of calls saved nothing, 1.6%
+shrank, and **no call came back larger**. Tokens, `cl100k_base` as a proxy for a
+vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
 
-**Why it is so much lower than the run below: the corpus is mostly one-line shell
-plumbing.** 4,598 of the 8,934 calls begin with `cd`, carrying 3.74 MB at 1.1%, and the
-median repeated run is 10 bytes. This was a week of driving OMNI's own development from a
-terminal, so the payloads are `git`, `gh`, `sed` and `sqlite3` output that is either tiny,
-structured, or seen once. Repetition is 16.3% of raw bytes here against the 80.6% of the
-window below.
+<!-- omni:corpus-table:start -->
+| Class | Calls | Input | Filters | + ledger | Available | Captured |
+|---|---|---|---|---|---|---|
+| other | 6,457 | 4.81 MB | 0.8% | 4.8% | 15.9% | **25.1%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 4.5% | 17.7% | **25.3%** |
+| git | 899 | 0.86 MB | 5.1% | 8.8% | 18.4% | **20.8%** |
+| search | 810 | 0.77 MB | 3.4% | 4.2% | 6.5% | **13.7%** |
+| infra | 215 | 0.14 MB | 3.2% | 3.8% | 5.5% | **10.5%** |
+| build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
+| **aggregate** | 9,478 | 8.49 MB | 1.4% | 5.1% | 15.6% | **24.1%** |
+
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.7.
+<!-- omni:corpus-table:end -->
+
+**`available` and `captured` are new, and `captured` is the figure that survives a
+change of workload.** The ledger substitutes lines it has already delivered, so it can
+never fold what was not repeated; `available` is that ceiling and `captured` is the share
+of it taken. Between this corpus and the 0.7.5 run below, the file-read saving moves by a
+factor of twenty. The capture rate barely moves. Only one of those two is a statement
+about OMNI.
+
+**Why the savings column is so much lower than the run below: this corpus is mostly
+one-line shell plumbing.** 4,815 of the 9,478 calls begin with `cd`, carrying 3.98 MB at
+1.2%, and the median repeated run is 10 bytes. It was a week of driving OMNI's own
+development from a terminal, so the payloads are `git`, `gh`, `sed` and `sqlite3` output
+that is either tiny, structured, or seen once. Repetition is 16.3% of raw bytes here
+against 80.6% in the window below.
 
 **What it does not measure.** The harness replays `execution_traces`, which holds shell
-commands only: zero of these 8,934 rows is a `Read` payload. The ledger's file-read path,
+commands only: zero of these 9,478 rows is a `Read` payload. The ledger's file-read path,
 including the count-preserving fold added in #664, is not exercised by any figure on this
 page. That gap is the honest reason the fold's own numbers live in
 `changelog.d/664.changed.md` with their own corpus instead of here.
+
+**No head-to-head in this run.** Of four competitor arms, `caveman` is not installed on
+the measuring machine and the `headroom` arm crashes (#711). headroom is the only one of
+the four shipping the same cross-turn dedup, so it is the arm the comparison is about,
+and a three-of-four run missing it is not published as one (#712). For the record, of the
+two that did run: rtk alone took 2.1%, lean-ctx 4.8%, and rtk's filters plus our ledger
+took 5.8% against our own 5.1%. On this corpus we are not the top arm.
 
 ## The 0.7.5 run, 2026-08-14, which can no longer be re-derived
 

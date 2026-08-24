@@ -79,7 +79,8 @@ omni retrieve <handle>         # any handle from any marker, printed back byte f
 
 Every figure on this site comes from a corpus you can rebuild.
 [Benchmarks](develop/benchmarks.md) has the method and the exact command for each row,
-including every head-to-head we have run against the closest comparable tools.
+and every head-to-head we have run, including the runs that did not favour us and the
+arms that failed to run at all.
 
 ## What you get
 
@@ -123,18 +124,25 @@ every time they conflict.
 ## What the numbers actually say
 
 OMNI is selective, and that is where its leverage comes from. It goes after the class
-that dominates an agent's context, the same file read again and again. On the 5,984
-command corpus replayed on 0.7.5, that class is the largest by bytes and the ledger
-takes **89.6%** off it. A file your agent reads twice comes back **97.2%** smaller the
-second time.
+that dominates an agent's context, the same file read again and again. A file your agent
+reads twice comes back **97.2%** smaller the second time, and that one is a property of
+the mechanism: it reproduces on any machine, on demand.
+
+Across a whole corpus the figure is a property of the corpus instead. On the 9,478
+command corpus frozen as `0b63218ef78a1edb` the ledger takes **4.5%** off file reads,
+because file reads there average 2.1 KB. An earlier week whose file reads averaged
+12.4 KB gave up twenty times more, on the same code. What barely moved between the two
+is the share of the available repetition the ledger actually took, **24.1%** in
+aggregate, and that is the number that describes OMNI rather than the week.
 
 A file that changed between the two reads still folds around the change. Each fold keeps
 the line count of what it replaced, so the lines you did not see moved stay on the numbers
 your editor gives them.
 
-Those figures come from one week, and the trace log keeps seven days, so that week cannot be
-replayed again. [Benchmarks](develop/benchmarks.md) publishes each run with its corpus, and
-what any of them is worth to you depends on how much your own week repeats itself.
+The corpus is frozen on disk and its hash ships in `docs/benchmarks/`, so unlike every
+figure we published before it, this one can be checked against the same bytes next
+release. [Benchmarks](develop/benchmarks.md) publishes each run with its corpus, and what
+any of them is worth to you depends on how much your own week repeats itself.
 
 Where there is nothing safe to take it takes nothing. A two-line `git status` has no
 ceremony to drop and no repeats to fold, and a JSON payload a later step parses is never
@@ -144,13 +152,17 @@ report.
 The **14.9%** in the table above is a different corpus on purpose: the same harness over
 a week of ordinary work, with every one of those hands-back counted in alongside the
 wins. It is an average over that mix, not a promise for yours. The per-class rows are
-what predict your own workload and they run from **4.3%** on search to **89.6%** on file
-re-reads, so find the classes you actually run. Both corpora, the method, and every
-unflattering figure we have are on [Benchmarks](develop/benchmarks.md).
+what predict your own workload, and on the frozen corpus their capture rate runs from
+**10.5%** on infra to **25.3%** on file re-reads, so find the classes you actually run.
+Both corpora, the method, and every unflattering figure we have are on
+[Benchmarks](develop/benchmarks.md).
 
-Against the closest comparable tools on identical bytes, the ledger is what puts OMNI
-ahead overall. The full head-to-head, including the arm where another tool's filters
-edge ours and what combining the two would give, is on
+**There is no current head-to-head, and the last one did not favour us.** Of four
+comparable tools, one is not installed on the measuring machine and the arm for the
+only other tool shipping the same cross-turn dedup crashes. Of the two that did run,
+one tool's filters plus our ledger beat ours by 0.7 points. Rather than publish a
+three-of-four run missing the arm the comparison is about, the claim is withdrawn
+until it can be measured properly. What ran, and what it said, is on
 [Benchmarks](develop/benchmarks.md).
 
 If you want a number that describes your machine rather than someone else's, run

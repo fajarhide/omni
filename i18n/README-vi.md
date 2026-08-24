@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Agent của bạn trả tiền hai lần cho output nó đã thấy rồi.</b> OMNI trả lại một handle lấy lại được thay vì thế: <b>97,2%</b> với tệp đọc hai lần, <b>89,6%</b> với việc đọc tệp trên toàn tập dữ liệu. Không xoá gì, không bịa gì, và mọi con số đều phát lại được trên chính lịch sử của bạn.</em>
+    <em><b>Agent của bạn trả tiền hai lần cho output nó đã thấy rồi.</b> OMNI trả lại một handle lấy lại được thay vì thế: <b>97,2%</b> với tệp đọc hai lần. Trên cả một phiên làm việc nó lấy khoảng một phần tư lượng lặp lại thực sự có trong công việc của bạn, tức <b>4,5%</b> số byte đọc tệp trên tập dữ liệu bên dưới. Công việc của bạn lặp lại nhiều hay ít quyết định bạn nằm ở đâu giữa hai con số đó. Không xoá gì, không bịa gì, và mọi con số ở đây đều phát lại được trên chính lịch sử của bạn.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -129,24 +129,26 @@ một câu xin bạn tin.
 
 ## Đo đạc
 
-Đo trên bản binary phát hành bằng cách phát lại **5.984 lần thực thi lệnh thật**
-trong khoảng **11 đến 14 tháng 8 năm 2026 UTC**, tất cả đều là đầu ra tới được mô hình.
-Khoảng thời gian là một phần của con số: `execution_traces` bị cắt sau bảy ngày, nên
-một tập dữ liệu biến mất một tuần sau khi được đo.
+Đo trên tập dữ liệu gồm 9.478 lần thực thi lệnh thật tới được mô hình, 8,42 MB trải
+qua 70 phiên, được đóng băng trên đĩa và băm thành `0b63218ef78a1edb` để nó không bị
+cắt mất.
 
-* **32,6%** từ bộ lọc, **69,6%** khi có ledger. Lớp lớn nhất tính theo byte là đọc lại
-  tệp: bộ lọc lấy **39,2%**, cùng ledger là **89,6%**, và chính khoảng cách đó là lý do
-  ledger tồn tại.
-* **Đọc tập dữ liệu trước khi đọc con số.** Khoảng thời gian này bất thường và nó thổi
-  phồng mọi con số bên dưới: có 286 nhóm payload giống nhau từng byte và riêng chúng đã
-  chiếm **80,6%** tổng số byte, còn 148 trong 5.984 lệnh gọi mang 64,7% số đó. Đó là tuần
-  cỗ máy này chỉ làm và đo chính OMNI. Cũng bộ đo đó trên một tuần làm việc bình thường
-  đọc ra **14,9%**.
-* **Nó phát huy đúng chỗ có nhiều byte.** Đọc lại tệp là lớp lớn nhất trong tập dữ liệu
-  này và sổ cái cắt đi **89,6%** của lớp đó. Khi không có gì an toàn để cắt, một
-  `git status` hai dòng hay một payload JSON mà bước sau sẽ phân tích, OMNI trả nguyên
-  đầu ra thay vì bịa ra một khoản tiết kiệm. **Không lệnh gọi nào làm đầu ra lớn hơn**
-  trong lần đo này. Từng có 2 cho tới ([#398](https://github.com/fajarhide/omni/issues/398)), và chúng tôi đã công bố chúng suốt
+* **1,4%** từ bộ lọc, **5,1%** khi có ledger, và ledger lấy **24,1% toàn bộ lượng lặp
+  lại thực sự có ở đó để lấy**. Con số cuối mới là con số nói về OMNI. Hai con số đầu
+  nói về tập dữ liệu này.
+* **Đọc tập dữ liệu trước khi đọc con số.** Tập này nghiêng nhiều về lệnh shell, nên nó
+  *hạ thấp* chính trường hợp mà ledger được xây cho: đọc tệp ở đây trung bình 2,1 KB.
+  Một tuần trước đó với đọc tệp trung bình 12,4 KB cho ra **hai mươi lần** nhiều byte
+  hơn ở cùng lớp đó, trên cùng mã nguồn, trong khi capture rate gần như không đổi. Hai
+  mươi lần ở một cột, phẳng ở cột kia, và chỉ một trong hai là sự thật về OMNI.
+* **Tập dữ liệu này không hết hạn.** Nó nằm cố định trên đĩa và băm của nó có trong
+  `docs/benchmarks/0.7.7.json`, nên các con số trên có thể được kiểm lại trên đúng những
+  byte đó ở bản phát hành sau, thay vì trên bất cứ gì bảy ngày vừa rồi còn giữ. Hãy chạy
+  bộ đo trên lịch sử của chính bạn để có con số về khối lượng công việc của bạn.
+* **Nó trả lại byte thay vì bịa ra một khoản tiết kiệm.** Khi không có gì an toàn để
+  cắt, một `git status` hai dòng hay một payload JSON mà bước sau sẽ phân tích, đầu ra
+  trở về nguyên vẹn. **Không lệnh gọi nào làm đầu ra lớn hơn** trong lần đo này. Từng
+  có 2 cho tới ([#398](https://github.com/fajarhide/omni/issues/398)), và chúng tôi đã công bố chúng suốt
   thời gian đó.
 * **21 ms mỗi lệnh**, lớn dần theo lịch sử của bạn chứ không theo kích thước payload. Với
   cơ sở dữ liệu 205 MB con số là 61 ms.
