@@ -515,6 +515,12 @@ fn replay_execution_traces_net_savings() {
             .to_string_lossy()
             .into_owned()
     });
+    // #704. `OMNI_BENCH_CORPUS` names a frozen corpus and replaces the DB as the
+    // source. It exists because `TRACE_RETENTION_DAYS` is 7, so replaying the DB
+    // measures a different input every week and no release-over-release delta was
+    // ever attributable to the code. Resolved from the real HOME, like the two
+    // paths above, because HOME is repointed at a temp dir a few lines down.
+    let corpus = std::env::var("OMNI_BENCH_CORPUS").ok();
     let since = since_ts();
     // Also from the real home, and for the same reason. caveman resolves its own
     // Go binaries under `$HOME/.caveman/bin`, so with HOME repointed below it
@@ -544,12 +550,66 @@ fn replay_execution_traces_net_savings() {
         std::env::remove_var("OMNI_PASSTHROUGH");
     }
 
-    if !std::path::Path::new(&db).exists() {
-        eprintln!("SKIP: no trace DB at {db} (set OMNI_BENCH_DB)");
+    // The frozen corpus is already filtered to model-facing traces and already in
+    // `ts, id` order, both done when it was built. Nothing here re-derives either:
+    // the file is the corpus, and re-sorting or re-filtering it would make the
+    // replay disagree with the manifest that names it.
+    let from_corpus = corpus.as_ref().map(|path| {
+        let text =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read corpus {path}: {e}"));
+        let rows: Vec<Trace> = text
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .enumerate()
+            .map(|(i, line)| {
+                let v: serde_json::Value = serde_json::from_str(line).expect("corpus line is JSON");
+                // Reject, never default. `unwrap_or_default` on a missing field
+                // hands back an empty string, and an empty `session` collapses
+                // unrelated traces into one ledger scope, which is #118's defect
+                // exactly, while an empty payload silently moves the byte totals.
+                // A corpus that cannot be read is a failure, not a measurement.
+                let s = |k: &str| -> String {
+                    v.get(k)
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_else(|| panic!("corpus line {i} has no string `{k}`"))
+                        .to_string()
+                };
+                // `as_str` accepts `""`, so presence is not enough. An empty
+                // `session` or `project` puts unrelated traces in one ledger
+                // scope, and an empty `payload` moves the byte totals with
+                // nothing to show it did. The builder cannot emit either, so this
+                // is the reader refusing to trust a file it did not write.
+                let required = |k: &str| -> String {
+                    let v = s(k);
+                    assert!(!v.is_empty(), "corpus line {i} has an empty `{k}`");
+                    v
+                };
+                Trace {
+                    // `command` may legitimately be empty: a trace can carry a
+                    // payload with no command string, and the builder writes it
+                    // through rather than inventing one.
+                    command: s("command"),
+                    raw: required("payload"),
+                    session: required("session"),
+                    project: required("project"),
+                }
+            })
+            .collect();
+        assert!(!rows.is_empty(), "corpus at {path} has no traces");
+        rows
+    });
+
+    if from_corpus.is_none() && !std::path::Path::new(&db).exists() {
+        eprintln!("SKIP: no trace DB at {db} (set OMNI_BENCH_DB or OMNI_BENCH_CORPUS)");
         return;
     }
 
-    let conn = rusqlite::Connection::open(&db).expect("open trace db");
+    let conn = rusqlite::Connection::open(if from_corpus.is_some() {
+        ":memory:"
+    } else {
+        db.as_str()
+    })
+    .expect("open trace db");
     // Two populations, because the difference between them is the number this
     // project keeps having to correct. `terminal` rows are TTY output no model
     // ever receives, and on the reporting installation they are 888 traces
@@ -584,14 +644,23 @@ fn replay_execution_traces_net_savings() {
         .collect()
     };
 
-    let model_facing = fetch("AND agent_id IS NOT NULL AND agent_id != 'terminal'");
-    let everything = fetch("");
-    let total_traces = everything.len();
-    let use_everything = std::env::var("OMNI_BENCH_ALL").is_ok() || model_facing.is_empty();
-    let rows = if use_everything {
-        everything
-    } else {
-        model_facing
+    // A frozen corpus answers all three of these itself: it was filtered to
+    // model-facing traces when it was built, so there is no terminal population
+    // to choose between and `OMNI_BENCH_ALL` has nothing to widen to. Asking the
+    // empty in-memory DB instead would return zero rows and report a clean 0.0%,
+    // which is the shape of failure this file already documents twice.
+    let (rows, total_traces, use_everything) = match from_corpus {
+        Some(rows) => {
+            let n = rows.len();
+            (rows, n, false)
+        }
+        None => {
+            let model_facing = fetch("AND agent_id IS NOT NULL AND agent_id != 'terminal'");
+            let everything = fetch("");
+            let total = everything.len();
+            let all = std::env::var("OMNI_BENCH_ALL").is_ok() || model_facing.is_empty();
+            (if all { everything } else { model_facing }, total, all)
+        }
     };
     // Ask the flag, not the row count. Comparing lengths reads "no terminal rows
     // were excluded" as "terminal rows were included", and a corpus with no
@@ -917,7 +986,11 @@ fn replay_execution_traces_net_savings() {
 
     println!("\n=== #184 net-savings replay (current pipeline) ===");
     println!("population:        {population}");
-    println!("corpus:            {n} traces from {db} ({errored} errored, excluded)");
+    // Name the source that was actually read. Printing the DB path while
+    // replaying a frozen corpus is a provenance line that lies, which is the
+    // exact defect class #704 exists to remove.
+    let source = corpus.as_deref().unwrap_or(db.as_str());
+    println!("corpus:            {n} traces from {source} ({errored} errored, excluded)");
     println!("terminal rows:     {excluded} excluded from {total_traces}");
     // The corpus is pruned to `TRACE_RETENTION_DAYS`, so an all-time figure
     // stops being reproducible the week after it is published. Print the window

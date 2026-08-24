@@ -1,0 +1,54 @@
+{
+  "commit": "2911923",
+  "corpus": {
+    "buckets": [
+      [
+        0,
+        264
+      ],
+      [
+        264,
+        2000
+      ],
+      [
+        2000,
+        10000
+      ],
+      [
+        10000,
+        4611686018427387904
+      ]
+    ],
+    "bytes": 8422641,
+    "class_bytes": {
+      "[other]": 1542946,
+      "az": 44079,
+      "bun": 49451,
+      "cat": 780019,
+      "echo": 854841,
+      "find": 44882,
+      "gh": 541218,
+      "git": 890065,
+      "grep": 1028345,
+      "head": 70640,
+      "kubectl": 94929,
+      "ls": 347486,
+      "python3": 510598,
+      "rm": 68933,
+      "sed": 1538412,
+      "wc": 52093
+    },
+    "class_floor": 0.005,
+    "sessions": 70,
+    "sha256": "0b63218ef78a1edbd758943c816af957d69633fb61d0be7569428d5e3df333dd",
+    "traces": 9478
+  },
+  "dirty_tree": true,
+  "result": {
+    "ledger_claimed_pct": 3.7,
+    "net_savings_pct": 1.4,
+    "repeated_bytes_pct": 15.4,
+    "traces_replayed": 9478
+  },
+  "version": "0.7.7"
+}
