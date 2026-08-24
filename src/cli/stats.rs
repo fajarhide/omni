@@ -41,7 +41,7 @@ pub fn format_bar(pct: f64, width: usize) -> String {
     "█".repeat(filled)
 }
 
-fn format_number(n: u64) -> String {
+pub(crate) fn format_number(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::new();
     for (i, c) in s.chars().rev().enumerate() {
@@ -175,9 +175,16 @@ pub(crate) fn group_and_calculate_stats(
     result
 }
 
-fn get_top_commands(store: &Store, since: i64, limit: usize) -> Vec<(String, u64, f64, u64)> {
+pub(crate) fn get_top_commands(
+    store: &Store,
+    since: i64,
+    limit: usize,
+) -> Vec<(String, u64, f64, u64)> {
+    // 0 asks for every class, and has to stay 0 through the multiply: the store
+    // reads it as "no cap", and `limit * 3` on a caller ranking by anything other
+    // than call count is a sample chosen by the wrong measure.
     let raw = store
-        .get_per_command_stats(since, limit * 3)
+        .get_per_command_stats(since, limit.saturating_mul(3))
         .unwrap_or_default();
 
     group_and_calculate_stats(raw, limit)
@@ -286,7 +293,7 @@ const VISIBLE: usize = 5;
 /// One resolver for every mode. `run_detail` and `run_project_stats` each had
 /// their own copy and neither matched `--month` at all, it was honoured only by
 /// being the fall-through in one of them, and silently ignored in the other.
-fn scope(args: &[String]) -> (&'static str, i64) {
+pub(crate) fn scope(args: &[String]) -> (&'static str, i64) {
     let now = chrono::Utc::now().timestamp();
     // `--since` first, so a caller mixing the new flag with an old one gets the
     // window they named rather than whichever branch is tested first.
@@ -2403,6 +2410,7 @@ mod tests {
             distilled_input: 7_453_169,
             distilled_output: 3_849_739,
             declined_calls: 15_443,
+            declined_bytes: 31_463_896,
             folds: 1_269,
             fold_bytes: 1_750_802,
             priced_folds: 468,

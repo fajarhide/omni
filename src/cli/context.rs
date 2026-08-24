@@ -19,7 +19,22 @@ use anyhow::Result;
 use colored::*;
 
 /// Read by both `print_help` and `super::check_flags` (#151).
-const FLAGS: super::Flags = &[];
+///
+/// `--since` is here because `run_tokens` calls `stats::scope`, which reads it.
+/// A flag the command acts on and the flag list does not name is rejected before
+/// it ever reaches the parser, so every window except the default was
+/// unreachable. Only the `--since` spelling is accepted: `omni stats` also takes
+/// `--week` and friends, and one documented way to name a window is enough here.
+const FLAGS: super::Flags = &[
+    (
+        "--tokens",
+        "where this project's tool output went, and what OMNI declined",
+    ),
+    (
+        "--since <window>",
+        "With --tokens: hour | today | week | month | all (default month)",
+    ),
+];
 
 pub fn run_context(args: &[String], session: Option<&SessionState>) -> Result<()> {
     if super::wants_help(args) {
@@ -27,6 +42,10 @@ pub fn run_context(args: &[String], session: Option<&SessionState>) -> Result<()
         return Ok(());
     }
     super::check_flags("context", args, FLAGS)?;
+
+    if super::has_flag(args, "--tokens") {
+        return run_tokens(args);
+    }
 
     let Some(file_path) = args.iter().skip(2).find(|a| !a.starts_with('-')) else {
         print_help();
@@ -74,6 +93,157 @@ pub fn report(
             "no".to_string()
         }
     ))
+}
+
+/// `omni context --tokens`: what OMNI saw, what it removed, and what it declined.
+///
+/// #612 came from someone saying "I thought it was just me, because of polluted
+/// context". That is a guess they cannot check, and OMNI is the one thing in the
+/// stack already holding the answer for the part it can see.
+///
+/// **What it deliberately does not report.** #612 asks first for the share of
+/// context that is tool output against everything else. OMNI cannot answer that and
+/// must not appear to: it records what passed through its hook, and never sees the
+/// prompts, the system block, the tool definitions or the assistant's own text. A
+/// denominator built from what OMNI happens to hold would read as "share of your
+/// context" while meaning "share of the part OMNI touched", which is the kind of
+/// figure this project exists to refuse. The closing line says so instead.
+///
+/// Read only, and no new store query: `engine_totals`, `passthrough_reasons` and
+/// `filter_breakdown` already existed, the first two built for #665 and #672.
+fn run_tokens(args: &[String]) -> Result<()> {
+    let store = match crate::store::sqlite::Store::open() {
+        Ok(s) => s,
+        Err(e) => {
+            println!("no database yet: {e}");
+            return Ok(());
+        }
+    };
+    let (label, since) = super::stats::scope(args);
+    print!("{}", tokens_report(&store, label, since)?);
+    Ok(())
+}
+
+/// Split from the printing so the arithmetic can be driven directly. The defect
+/// this whole area keeps producing is a ratio taken over the wrong population, and
+/// a test that has to reach through a terminal cannot see one.
+pub(crate) fn tokens_report(
+    store: &crate::store::sqlite::Store,
+    label: &str,
+    since: i64,
+) -> Result<String> {
+    use crate::cli::stats::{format_bytes, format_number};
+    use std::fmt::Write as _;
+
+    let t = store.engine_totals(since)?;
+    // What reached OMNI: what the distiller was given, plus what it declined to
+    // touch. Not `distilled_output`, which is what survived distillation rather
+    // than what was handed back, and reading it as the second is how the first
+    // draft of this report mislabelled 3.7 MB.
+    let seen = t.distilled_input + t.declined_bytes;
+    let mut out = String::new();
+
+    writeln!(out, "\n Where the tokens went · {label}\n")?;
+
+    if t.distilled_calls == 0 && t.declined_calls == 0 && t.folds == 0 {
+        writeln!(out, "   nothing recorded yet in this window\n")?;
+        return Ok(out);
+    }
+
+    writeln!(
+        out,
+        "   {:<24}{:>10}   {} calls",
+        "tool output OMNI saw",
+        format_bytes(seen),
+        format_number(t.distilled_calls + t.declined_calls)
+    )?;
+    // One line per engine, each percentage against its own base, exactly as #665
+    // settled it for `omni stats`. A single "removed" figure under the total was
+    // the first draft and it subtracts across populations: the ledger folds
+    // payloads whose bytes are not inside `distilled_input`, so the two may be
+    // summed and may never share a denominator.
+    let distilled_pct = t
+        .distilled_pct()
+        .map(|p| format!("{p:.0}% of what it was given"))
+        .unwrap_or_else(|| "of what it was given".to_string());
+    writeln!(
+        out,
+        "     {:<22}{:>10}   {:<26} {} calls",
+        "distilled",
+        format_bytes(t.distilled_saved()),
+        distilled_pct,
+        format_number(t.distilled_calls)
+    )?;
+    let fold_pct = t
+        .fold_pct()
+        .map(|p| format!("{p:.0}% of what it folded"))
+        .unwrap_or_else(|| "of what it folded".to_string());
+    writeln!(
+        out,
+        "     {:<22}{:>10}   {:<26} {} folds",
+        "folded",
+        format_bytes(t.fold_bytes),
+        fold_pct,
+        format_number(t.folds)
+    )?;
+    writeln!(
+        out,
+        "     {:<22}{:>10}   {:<26} {} calls",
+        "handed back untouched",
+        format_bytes(t.declined_bytes),
+        "by design",
+        format_number(t.declined_calls)
+    )?;
+
+    // Why, not just how much. "OMNI did nothing" is the second thing a reader
+    // misreads as pollution, and `passthrough_events.reason` has recorded the
+    // answer since #533 while nothing outside `--detail` printed it.
+    let reasons = store.passthrough_reasons(since);
+    if !reasons.is_empty() {
+        writeln!(out)?;
+        writeln!(out, "   why it was handed back")?;
+        for (reason, n) in reasons.iter().take(5) {
+            writeln!(out, "     {:<22}{:>10} calls", reason, format_number(*n))?;
+        }
+    }
+
+    // Actionable rather than a verdict: which classes carry the bytes.
+    //
+    // `get_top_commands` ranks by percentage removed, which is not what heaviest
+    // means: a small class that halves is not where the bytes went. Re-ranked
+    // here rather than in the shared function, which `omni stats` orders by
+    // percentage on purpose. Every class, not a slice: the store's cap is by call
+    // count, so a class that removed 40 MB in three calls sits below 300 chatty
+    // ones and never reaches this sort at all.
+    let mut classes = super::stats::get_top_commands(store, since, 0);
+    classes.sort_by_key(|c| std::cmp::Reverse(c.3));
+    classes.truncate(5);
+    if !classes.is_empty() {
+        writeln!(out)?;
+        writeln!(out, "   heaviest classes")?;
+        for (name, calls, pct, saved) in classes {
+            writeln!(
+                out,
+                "     {:<16}{:>10}  {:>5.0}% removed  {} calls",
+                name,
+                format_bytes(saved),
+                pct,
+                format_number(calls)
+            )?;
+        }
+    }
+
+    writeln!(out)?;
+    writeln!(
+        out,
+        "   OMNI sees tool output only. Your prompts, the system block and the"
+    )?;
+    writeln!(
+        out,
+        "   assistant's own text are not counted here and are not OMNI's to see."
+    )?;
+    writeln!(out)?;
+    Ok(out)
 }
 
 fn print_help() {
@@ -125,5 +295,232 @@ mod tests {
                 "{spelling} reported the wrong hot status:\n{out}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tokens_tests {
+    use crate::pipeline::{DistillResult, Route};
+    use crate::store::sqlite::Store;
+
+    /// A store holding one distilled call and one declined call, with sizes that
+    /// cannot be confused: what survived distillation and what was handed back are
+    /// deliberately different numbers.
+    fn seeded() -> (Store, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
+        let row = |route: Route, input: usize, output: usize| DistillResult {
+            output: String::new(),
+            route,
+            filter_name: "cargo".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: input,
+            output_bytes: output,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
+            delivered_bytes: output,
+        };
+        store.record_distillation(
+            "s1",
+            &row(Route::Keep, 1_000, 200),
+            "cargo build",
+            "",
+            "claude_code",
+        );
+        store.record_distillation(
+            "s1",
+            &row(Route::Passthrough, 9_000, 9_000),
+            "kubectl get pods -o json",
+            "",
+            "claude_code",
+        );
+        (store, dir)
+    }
+
+    /// #612. The first draft printed `distilled_output` as "handed back untouched".
+    /// That field is what survived distillation, not what OMNI declined to touch,
+    /// so the line read 200 bytes where the answer was 9,000 and the totals did not
+    /// add up.
+    ///
+    /// Asserted on the rendered report. The first version of this test compared two
+    /// fields of `EngineTotals` and passed with the report printing either one,
+    /// which is the same mistake one level up.
+    #[test]
+    fn the_report_says_what_was_handed_back_not_what_survived() {
+        let (store, _d) = seeded();
+        let out = super::tokens_report(&store, "all time", 0).unwrap();
+
+        let line = out
+            .lines()
+            .find(|l| l.contains("handed back"))
+            .expect("a handed-back line");
+        assert!(
+            line.contains("8.8 KB") || line.contains("9.0 KB"),
+            "handed back should be the declined call's 9,000 bytes: {line}"
+        );
+        assert!(
+            !line.contains("200 B"),
+            "handed back is showing what survived distillation: {line}"
+        );
+    }
+
+    /// The two engines fold different payloads, so their bytes may be summed and
+    /// their ratios may never share a denominator. One "removed" figure under one
+    /// total was the first draft, and it subtracts across populations.
+    #[test]
+    fn the_report_gives_each_engine_its_own_base() {
+        let (store, _d) = seeded();
+        let out = super::tokens_report(&store, "all time", 0).unwrap();
+
+        assert!(out.contains("of what it was given"), "{out}");
+        assert!(out.contains("of what it folded"), "{out}");
+        assert!(
+            !out.contains("of what OMNI saw"),
+            "a ratio is being taken against the combined total: {out}"
+        );
+    }
+
+    /// An empty database must say so rather than print a frame of zeroes that reads
+    /// as "OMNI did nothing for you".
+    #[test]
+    fn an_empty_window_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
+        let out = super::tokens_report(&store, "last 30 days", 0).unwrap();
+        assert!(out.contains("nothing recorded yet"), "{out}");
+        assert!(!out.contains("0 B"), "printed a frame of zeroes: {out}");
+    }
+
+    /// #612 asks first for the share of context that is tool output against
+    /// everything else. OMNI cannot see the rest, so the report has to say so
+    /// rather than build a denominator out of what it happens to hold.
+    ///
+    /// Asserted on the rendered output, not on this file. Scanning the source for
+    /// the sentence passes on the doc comment describing it, which is how the first
+    /// version of this stayed green with the line deleted. Third time this trap has
+    /// been hit in one repository.
+    #[test]
+    fn the_report_states_its_own_blind_spot() {
+        let (store, _d) = seeded();
+        let out = super::tokens_report(&store, "all time", 0).unwrap();
+        assert!(
+            out.contains("not OMNI's to see"),
+            "the report stopped stating what it cannot see: {out}"
+        );
+    }
+
+    /// Greptile on #612. `get_top_commands` sorts by percentage removed, so a
+    /// class that halved 2 KB outranked one that removed 40 KB, under a heading
+    /// that says heaviest. The two classes here disagree in exactly that way.
+    #[test]
+    fn heaviest_classes_are_ranked_by_bytes_not_percentage() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
+        let row = |input: usize, output: usize| DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "x".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: input,
+            output_bytes: output,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
+            delivered_bytes: output,
+        };
+        // 90% removed, 1,800 bytes.
+        store.record_distillation("s1", &row(2_000, 200), "git diff", "", "claude_code");
+        // 40% removed, 40,000 bytes.
+        store.record_distillation(
+            "s1",
+            &row(100_000, 60_000),
+            "cargo build",
+            "",
+            "claude_code",
+        );
+
+        let out = super::tokens_report(&store, "all time", 0).unwrap();
+        let heavy = out
+            .split("heaviest classes")
+            .nth(1)
+            .expect("a heaviest-classes block");
+        let cargo = heavy.find("cargo build").expect("cargo in the block");
+        let git = heavy.find("git diff").expect("git in the block");
+        assert!(
+            cargo < git,
+            "the heaviest class is ranked below a smaller one: {heavy}"
+        );
+    }
+
+    /// Greptile on #612, second round. The store caps by call count, so a class
+    /// that removed the most bytes in the fewest calls was dropped before the
+    /// byte sort ever saw it. 310 chatty classes here, all ahead of the heavy one
+    /// on calls, which puts it past the old 300-row cap.
+    #[test]
+    fn a_heavy_class_survives_a_window_full_of_chatty_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
+        let row = |input: usize, output: usize| DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "x".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: input,
+            output_bytes: output,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
+            delivered_bytes: output,
+        };
+        for i in 0..310 {
+            let cmd = format!("chatty{i} run");
+            for _ in 0..2 {
+                store.record_distillation("s1", &row(200, 100), &cmd, "", "claude_code");
+            }
+        }
+        // One call, and more bytes than all 310 together.
+        store.record_distillation("s1", &row(900_000, 100), "heavy thing", "", "claude_code");
+
+        let out = super::tokens_report(&store, "all time", 0).unwrap();
+        let heavy = out
+            .split("heaviest classes")
+            .nth(1)
+            .expect("a heaviest-classes block");
+        assert!(
+            heavy.contains("heavy thing"),
+            "the heaviest class was cut before the sort: {heavy}"
+        );
+    }
+
+    /// Greptile on #612. `run_tokens` hands its args to `stats::scope`, which
+    /// reads `--since`, but `check_flags` runs first and rejects any flag the
+    /// list does not name. Every window except the default was unreachable.
+    #[test]
+    fn the_window_flag_reaches_the_parser() {
+        let args: Vec<String> = ["omni", "context", "--tokens", "--since", "all"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(
+            crate::cli::check_flags("context", &args, super::FLAGS).is_ok(),
+            "--since is rejected before run_tokens can read it"
+        );
+        assert_eq!(crate::cli::stats::scope(&args).0, "all time");
     }
 }
