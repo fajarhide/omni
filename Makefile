@@ -83,6 +83,9 @@ ci: fmt clippy test security binary-check
 	@echo "🚀 All CI checks passed successfully! 🚀"
 	@echo "========================================"
 
+bench:
+	./scripts/bench.sh
+
 clean:
 	cargo clean
 
