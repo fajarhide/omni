@@ -752,7 +752,12 @@ fn replay_execution_traces_net_savings() {
     // shell shape -> (calls, raw_bytes, out_bytes), the P2 gate
     let mut per_form: BTreeMap<&'static str, (u64, u64, u64)> = BTreeMap::new();
     // command class -> (calls, raw, after filters, after ledger), the P1 gate
-    let mut per_class: BTreeMap<&'static str, (u64, u64, u64, u64)> = BTreeMap::new();
+    // (calls, raw, post-filter, post-ledger, repeated bytes available, accounted).
+    // The last two are the ceiling #708 reports against: the ledger cannot fold a
+    // line that was never delivered before, so a savings percentage swings with how
+    // repetitive the week was while the ratio against the ceiling does not.
+    type ClassRow = (u64, u64, u64, u64, u64, u64);
+    let mut per_class: BTreeMap<&'static str, ClassRow> = BTreeMap::new();
     let started = std::time::Instant::now();
 
     for t in &rows {
@@ -815,6 +820,17 @@ fn replay_execution_traces_net_savings() {
         {
             let lines = gap_seen.account(t, &distilled);
             let repeated: u64 = lines.iter().filter(|(s, _)| *s).map(|(_, l)| l).sum();
+            // #708's ceiling, accumulated here rather than in a second pass so it
+            // uses `GapSeen`'s keys and `trace_class`'s definition, the same two
+            // the columns beside it use. Measuring the ceiling with a separate
+            // classifier is how 4.5% and 6.3% ended up describing populations of
+            // 1,056 and 672 traces and being divided anyway.
+            {
+                let accounted: u64 = lines.iter().map(|(_, l)| l).sum();
+                let c = per_class.entry(trace_class(&t.command)).or_default();
+                c.4 += repeated;
+                c.5 += accounted;
+            }
             if omni::pipeline::format::sniff(&distilled).is_some() {
                 gap_structured += repeated;
                 n_structured += 1;
@@ -1064,22 +1080,50 @@ fn replay_execution_traces_net_savings() {
     // the second one adds on top of the first.
     println!("\n--- by command class, filters then ledger (the P1 gate) ---");
     println!(
-        "{:<16} {:>7} {:>12} {:>10} {:>10}",
-        "class", "calls", "input", "filters", "+ ledger"
+        "{:<16} {:>7} {:>12} {:>10} {:>10} {:>10} {:>9}",
+        "class", "calls", "input", "filters", "+ ledger", "available", "captured"
     );
+    // `available` is the share of accounted bytes whose line had already been
+    // delivered in that scope, and `captured` is what the ledger took of it.
+    // `captured` is the figure that does not move with the workload, which is the
+    // whole of #708: on this corpus file reads read 4.5% saved against 89.6% in a
+    // week of large repeated reads, while the ratio against the ceiling holds.
+    let ratio = |part: u64, whole: u64| 100.0 * part as f64 / whole.max(1) as f64;
     let mut classes: Vec<_> = per_class.into_iter().collect();
     classes.sort_by_key(|(_, v)| std::cmp::Reverse(v.1));
-    for (class, (calls, r, f, l)) in classes {
+    let (mut avail_total, mut acct_total) = (0u64, 0u64);
+    for (class, (calls, r, f, l, avail, acct)) in classes {
+        avail_total += avail;
+        acct_total += acct;
+        // The ledger only ever substitutes lines it has already delivered, so it
+        // cannot remove more bytes than were repeated. Claiming more means the
+        // two are measured over different populations, which is the defect that
+        // produced a 71% estimate where the answer was 25%. Asserted rather than
+        // printed: a capture rate over 100% is not a surprising number, it is a
+        // broken denominator, and nothing else in this file would catch it.
+        assert!(
+            f.saturating_sub(l) <= avail,
+            "{class}: ledger claimed {} bytes but only {avail} were repeated",
+            f.saturating_sub(l)
+        );
+        // The ledger runs after the filters, so its claim is `f - l`, and the
+        // denominator is the class's own repeated bytes rather than its input:
+        // what was actually foldable, not what happened to arrive.
+        let captured = ratio(f.saturating_sub(l), avail);
         println!(
-            "{class:<16} {calls:>7} {r:>12} {:>9.1}% {:>9.1}%",
+            "{class:<16} {calls:>7} {r:>12} {:>9.1}% {:>9.1}% {:>9.1}% {:>8.1}%",
             saved(r, f),
-            saved(r, l)
+            saved(r, l),
+            ratio(avail, acct),
+            captured
         );
     }
     println!(
-        "aggregate        {n:>7} {raw_total:>12} {:>9.1}% {:>9.1}%  ({ledger_calls} calls projected)",
+        "aggregate        {n:>7} {raw_total:>12} {:>9.1}% {:>9.1}% {:>9.1}% {:>8.1}%  ({ledger_calls} calls projected)",
         saved(raw_total, out_total),
-        saved(raw_total, ledger_total)
+        saved(raw_total, ledger_total),
+        ratio(avail_total, acct_total),
+        ratio(out_total.saturating_sub(ledger_total), avail_total)
     );
     println!(
         "ledger arm:      project_scope={project_scope} floor_mult={} bytes={ledger_total} markers: {mark_session} session, {mark_project} project",

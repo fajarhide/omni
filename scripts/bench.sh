@@ -111,6 +111,40 @@ def whole(pattern):
     return int(m.group(1)) if m else None
 
 
+def by_class():
+    """The per-class table the replay prints, parsed rather than recomputed.
+
+    Class names come from `trace_class` in the harness, which is a fixed set of
+    generic buckets (`file read`, `search`, `git`, `infra`, `build and test`,
+    `other`), so unlike command classes they carry nothing local and need no
+    allowlist. Rows are read by shape; a table that stops printing a column shows
+    up as an empty dict and fails the missing-field check below.
+    """
+    block = re.search(
+        r"by command class.*?\n(.*?)\nledger arm:", text, re.S
+    )
+    if not block:
+        return {}
+    out = {}
+    for line in block.group(1).splitlines():
+        m = re.match(
+            r"^(\S.*?)\s{2,}(\d+)\s+(\d+)\s+([\d.]+)%\s+([\d.]+)%"
+            r"\s+([\d.]+)%\s+([\d.]+)%",
+            line,
+        )
+        if not m:
+            continue
+        out[m.group(1).strip()] = {
+            "calls": int(m.group(2)),
+            "input_bytes": int(m.group(3)),
+            "filters_pct": float(m.group(4)),
+            "with_ledger_pct": float(m.group(5)),
+            "repetition_available_pct": float(m.group(6)),
+            "capture_rate_pct": float(m.group(7)),
+        }
+    return out
+
+
 # A command class is the basename of whatever ran, so the corpus knows the names
 # of local scripts, and the first run of this put a client's name into the
 # artifact. Only names on this list are published; everything else is summed into
@@ -170,9 +204,15 @@ report = {
         "traces_replayed": whole(r"corpus:\s+(\d+) traces"),
         "repeated_bytes_pct": num(r"repeated bytes handed to the ledger: \d+ \(([\d.]+)%"),
         "ledger_claimed_pct": num(r"claimed by the ledger:\s+\d+ \(([\d.]+)%"),
+        # #708. Per class, and `captured` is the one that does not move with the
+        # workload: on this corpus file reads save 4.5% where a week of large
+        # repeated reads read 89.6%, while the share of available repetition the
+        # ledger takes stays in a narrow band. A savings percentage describes the
+        # week; this describes OMNI.
+        "by_class": by_class(),
     },
 }
-missing = [k for k, v in report["result"].items() if v is None]
+missing = [k for k, v in report["result"].items() if v is None or v == {}]
 if missing:
     sys.exit(f"replay output did not carry: {', '.join(missing)}")
 
