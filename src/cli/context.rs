@@ -124,6 +124,17 @@ fn run_tokens(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// "1 call", not "1 calls". Six lines of this report end in a count and a noun,
+/// and a window holding one of something is the common case on the short windows.
+fn counted(n: u64, noun: &str) -> String {
+    let n = crate::cli::stats::format_number(n);
+    if n == "1" {
+        format!("{n} {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 /// Split from the printing so the arithmetic can be driven directly. The defect
 /// this whole area keeps producing is a ratio taken over the wrong population, and
 /// a test that has to reach through a terminal cannot see one.
@@ -132,7 +143,7 @@ pub(crate) fn tokens_report(
     label: &str,
     since: i64,
 ) -> Result<String> {
-    use crate::cli::stats::{format_bytes, format_number};
+    use crate::cli::stats::format_bytes;
     use std::fmt::Write as _;
 
     let t = store.engine_totals(since)?;
@@ -152,10 +163,10 @@ pub(crate) fn tokens_report(
 
     writeln!(
         out,
-        "   {:<24}{:>10}   {} calls",
+        "   {:<24}{:>10}   {}",
         "tool output OMNI saw",
         format_bytes(seen),
-        format_number(t.distilled_calls + t.declined_calls)
+        counted(t.distilled_calls + t.declined_calls, "call")
     )?;
     // One line per engine, each percentage against its own base, exactly as #665
     // settled it for `omni stats`. A single "removed" figure under the total was
@@ -168,11 +179,11 @@ pub(crate) fn tokens_report(
         .unwrap_or_else(|| "of what it was given".to_string());
     writeln!(
         out,
-        "     {:<22}{:>10}   {:<26} {} calls",
+        "     {:<22}{:>10}   {:<26} {}",
         "distilled",
         format_bytes(t.distilled_saved()),
         distilled_pct,
-        format_number(t.distilled_calls)
+        counted(t.distilled_calls, "call")
     )?;
     let fold_pct = t
         .fold_pct()
@@ -180,19 +191,19 @@ pub(crate) fn tokens_report(
         .unwrap_or_else(|| "of what it folded".to_string());
     writeln!(
         out,
-        "     {:<22}{:>10}   {:<26} {} folds",
+        "     {:<22}{:>10}   {:<26} {}",
         "folded",
         format_bytes(t.fold_bytes),
         fold_pct,
-        format_number(t.folds)
+        counted(t.folds, "fold")
     )?;
     writeln!(
         out,
-        "     {:<22}{:>10}   {:<26} {} calls",
+        "     {:<22}{:>10}   {:<26} {}",
         "handed back untouched",
         format_bytes(t.declined_bytes),
         "by design",
-        format_number(t.declined_calls)
+        counted(t.declined_calls, "call")
     )?;
 
     // Why, not just how much. "OMNI did nothing" is the second thing a reader
@@ -203,7 +214,7 @@ pub(crate) fn tokens_report(
         writeln!(out)?;
         writeln!(out, "   why it was handed back")?;
         for (reason, n) in reasons.iter().take(5) {
-            writeln!(out, "     {:<22}{:>10} calls", reason, format_number(*n))?;
+            writeln!(out, "     {:<22}{:>16}", reason, counted(*n, "call"))?;
         }
     }
 
@@ -224,11 +235,15 @@ pub(crate) fn tokens_report(
         for (name, calls, pct, saved) in classes {
             writeln!(
                 out,
-                "     {:<16}{:>10}  {:>5.0}% removed  {} calls",
-                name,
+                "     {:<w$}{:>10}  {:>5.0}% removed  {}",
+                crate::util::text::display_truncate_with_ellipsis(
+                    &name,
+                    super::stats::CMD_KEY_WIDTH - 3
+                ),
                 format_bytes(saved),
                 pct,
-                format_number(calls)
+                counted(calls, "call"),
+                w = super::stats::CMD_KEY_WIDTH
             )?;
         }
     }
@@ -460,6 +475,60 @@ mod tokens_tests {
         assert!(
             cargo < git,
             "the heaviest class is ranked below a smaller one: {heavy}"
+        );
+    }
+
+    /// #702. The class key can reach `CMD_KEY_WIDTH`, the report padded to 16, so
+    /// an overflowing name pushed every later column right on that row alone. Two
+    /// of five rows were wrong on the machine that found it. The singular is here
+    /// too: the same block read "1 calls".
+    #[test]
+    fn every_heaviest_row_lines_up_and_one_call_is_singular() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_path(&dir.path().join("omni.db")).unwrap();
+        let row = |input: usize, output: usize| DistillResult {
+            output: String::new(),
+            route: Route::Keep,
+            filter_name: "x".to_string(),
+            score: 0.0,
+            context_score: 0.0,
+            input_bytes: input,
+            output_bytes: output,
+            latency_ms: 1,
+            rewind_hash: None,
+            segments_kept: 0,
+            segments_dropped: 0,
+            collapse_savings: None,
+            raw_tokens: 0,
+            filtered_tokens: 0,
+            delivered_bytes: output,
+        };
+        // Longer than the column, so it is the row that used to shove the rest right.
+        store.record_distillation(
+            "s1",
+            &row(90_000, 1_000),
+            "cd /home/somebody/a/deep/path",
+            "",
+            "claude_code",
+        );
+        store.record_distillation("s1", &row(50_000, 1_000), "sed -n", "", "claude_code");
+        // One call, so the noun has to lose its s.
+        store.record_distillation("s1", &row(9_000, 100), "journalctl -u", "", "claude_code");
+
+        let out = super::tokens_report(&store, "all time", 0).unwrap();
+        let heavy = out
+            .split("heaviest classes")
+            .nth(1)
+            .expect("a heaviest-classes block");
+        let columns: Vec<usize> = heavy.lines().filter_map(|l| l.find("% removed")).collect();
+        assert_eq!(columns.len(), 3, "expected three rows: {heavy}");
+        assert!(
+            columns.windows(2).all(|w| w[0] == w[1]),
+            "rows do not line up, `% removed` sits at {columns:?}: {heavy}"
+        );
+        assert!(
+            heavy.contains(" 1 call\n"),
+            "a single call is printed as a plural: {heavy}"
         );
     }
 
