@@ -1590,7 +1590,36 @@ impl rmcp::ServerHandler for OmniServer {}
 fn compute_project_hash_str(project_path: &str) -> String {
     crate::agents::multiagent::project_hash(project_path)
 }
+/// A session id for this MCP connection, stable for the process and unique to it.
+///
+/// Prefixed so a row is recognisable as this path's and can never collide with an
+/// id a host forwards. Pid plus start time rather than a random value, because the
+/// crate has no uuid dependency and adding one to name a process is more than this
+/// needs.
+fn mcp_session_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("mcp-{}-{nanos}", std::process::id())
+}
+
 pub async fn run(store: Arc<Store>, session: Arc<Mutex<SessionState>>) -> anyhow::Result<()> {
+    // #686. `omni_run` distils through `pipe::run_inner`, which has carried the
+    // ledger stage since #416, and that stage is gated on a host session id. Only
+    // `omni exec --session` ever set one, so on an MCP host the gate stood shut and
+    // cross-turn folding never ran: the tier with no hook, where `omni_run` is the
+    // only way the model reads less, was the tier that folded nothing.
+    //
+    // Minted per process, and deliberately not `SessionState::session_id`. That one
+    // is a wall-clock stamp on globally persisted state, and `init_globals` hands
+    // this process whichever session was last written by anything, so scoping by it
+    // would tell one agent it had been shown output that went to another (#118). An
+    // `omni --mcp` process serves one stdio client for its lifetime, so the process
+    // is the session: it begins when the client connects and ends when it
+    // disconnects, which is exactly the boundary a fold may reason across.
+    crate::hooks::pipe::set_host_session(&mcp_session_id());
+
     let server = OmniServer { store, session };
 
     // Setup transport over standard IO seamlessly
@@ -1963,6 +1992,107 @@ mod tests {
         assert_eq!(
             OmniServer::tool_router().list_all().len(),
             crate::mcp::policy::ALL_TOOL_COUNT
+        );
+    }
+
+    /// The other half of #686, and the half the fold test cannot reach.
+    ///
+    /// `run` is an async server loop over stdio, so a unit test cannot drive it,
+    /// and the fold test opens the gate itself. That means the fold test passes
+    /// with the call in `run` deleted, which is exactly the defect: the mechanism
+    /// worked all along and nothing on this path invoked it.
+    ///
+    /// So this reads `run`'s own body. Narrow window on purpose: "somewhere in the
+    /// file" would pass on the call inside this test module.
+    /// #351: on Cursor every route to the built-in Shell tool is closed, so the
+    /// only way a command's output can be distilled is if OMNI is the tool that
+    /// ran it. This is that path, and it must actually shorten.
+    /// #686. `omni_run` distils through `pipe::run_inner`, whose ledger stage is
+    /// gated on a host session id, and nothing on this path ever set one. So the
+    /// tier where `omni_run` is the only way the model reads less was the tier
+    /// that never folded across turns.
+    ///
+    /// Driven through the real entry point rather than by calling the ledger, and
+    /// asserting on the *second* run of the same command: the first is what the
+    /// ledger learns from, the second is the one it can fold. A test that runs the
+    /// command once cannot tell a working ledger from an absent one.
+    ///
+    /// Unix only, like its neighbour and for the same reason: the fixture needs a
+    /// shell that has `seq` and `awk`. On Windows it produced 175 bytes of error
+    /// text both times, which is two equal lengths and a red assertion for a
+    /// reason that has nothing to do with the ledger.
+    #[cfg(unix)]
+    #[test]
+    fn a_repeated_omni_run_folds_against_what_the_first_one_showed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
+
+        // The gate this test exists for. Without it the two runs come back the
+        // same length and the assertion below is meaningless.
+        crate::hooks::pipe::set_host_session(&super::mcp_session_id());
+
+        // Distinct lines, and enough of them. Forty *identical* lines came to 176
+        // bytes because `collapse` had already folded them to one marker, which is
+        // under `MIN_LEDGER_INPUT` (264 B) and never reached the ledger at all: the
+        // fixture has to clear the floor of the stage under test.
+        let cmd = "seq 1 40 | awk '{ printf \"worker-%02d handled request id=req_%05d in %dms\\n\", $1, $1 * 37, $1 }'";
+
+        let first = run_and_distill(cmd, store.clone(), None);
+        let second = run_and_distill(cmd, store.clone(), None);
+
+        assert!(
+            !first.is_empty() && !second.is_empty(),
+            "the command produced nothing: {first:?} / {second:?}"
+        );
+        assert!(
+            second.len() < first.len(),
+            "the second identical run was not folded against the first, so the \
+             ledger never ran on this path. first={} bytes, second={} bytes",
+            first.len(),
+            second.len()
+        );
+    }
+
+    /// The other half of #686, and the half the fold test cannot reach.
+    ///
+    /// `run` is an async server loop over stdio, so a unit test cannot drive it,
+    /// and the fold test opens the gate itself. That means the fold test passes
+    /// with the call in `run` deleted, which is exactly the defect: the mechanism
+    /// worked all along and nothing on this path invoked it.
+    ///
+    /// So this reads `run`'s own body. Narrow window on purpose: "somewhere in the
+    /// file" would pass on the call inside this test module.
+    #[test]
+    fn the_server_sets_a_session_before_serving() {
+        let src = include_str!("server.rs");
+        let start = src
+            .find("pub async fn run(store: Arc<Store>")
+            .expect("the server entry point moved");
+        let body = src.get(start..).unwrap_or("");
+        let body = body.split("\n}\n").next().unwrap_or(body);
+
+        // Positive and exact. A negative check for `session_id` looked stricter
+        // and was not: `run` takes a `session` parameter and the window is easy to
+        // over-slice, so it failed on text that was never a scope decision.
+        let set = body.find("set_host_session(&mcp_session_id())");
+        assert!(
+            set.is_some(),
+            "`run` does not scope the ledger by this process's own id, so either \
+             `pipe`'s ledger stage stays gated shut, or it is keyed by \
+             `SessionState::session_id`, which `init_globals` fills with whichever \
+             session was last written by anything (#118)."
+        );
+
+        // Before serving, not merely somewhere in the function. `serve_server`
+        // blocks for the life of the connection, so a call below it runs at
+        // shutdown and every request in between is unscoped.
+        let serve = body
+            .find("serve_server")
+            .expect("`run` no longer serves; this test is reading the wrong function");
+        assert!(
+            set.is_some_and(|i| i < serve),
+            "`set_host_session` runs after `serve_server`, which blocks for the \
+             life of the connection, so every request it serves is unscoped"
         );
     }
 }
