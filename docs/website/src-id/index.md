@@ -148,17 +148,25 @@ mengalahkan kompresi, dalam urutan itu, setiap kali bertabrakan.
 ## Apa yang sebenarnya dikatakan angka-angkanya
 
 OMNI itu selektif, dan dari situlah daya ungkitnya datang. Ia mengincar kelas yang
-mendominasi konteks sebuah agent, yaitu file yang sama dibaca berulang kali. Pada
-korpus 5.984 perintah yang diputar ulang di 0.7.5, kelas itu yang terbesar menurut
-byte dan ledger memangkas **89,6%** darinya. File yang dibaca agent Anda dua kali
-kembali **97,2%** lebih kecil pada bacaan keduanya.
+mendominasi konteks sebuah agent, yaitu file yang sama dibaca berulang kali. File yang
+dibaca agent Anda dua kali kembali **97,2%** lebih kecil pada bacaan keduanya, dan yang
+satu itu sifat mekanismenya: ia bereproduksi di mesin mana pun, kapan pun diminta.
+
+Sepanjang satu korpus penuh, angkanya jadi sifat korpusnya. Pada korpus 9.478 perintah
+yang dibekukan sebagai `0b63218ef78a1edb`, ledger memangkas **4,5%** dari pembacaan
+file, karena pembacaan file di sana rata-rata 2,1 KB. Satu minggu sebelumnya yang
+pembacaan filenya rata-rata 12,4 KB memberi dua puluh kali lebih banyak, dengan kode
+yang sama. Yang hampir tidak bergerak di antara keduanya adalah porsi pengulangan
+tersedia yang benar-benar diambil ledger, **24,1%** secara agregat, dan itulah angka
+yang menggambarkan OMNI alih-alih menggambarkan minggunya.
 
 File yang berubah di antara dua bacaan tetap dilipat di sekitar perubahannya. Tiap lipatan
 mempertahankan jumlah baris yang digantikannya, jadi baris yang tidak berpindah tetap ada
 di nomor yang diberikan editor Anda.
 
-Angka-angka itu berasal dari satu minggu, dan log trace hanya menyimpan tujuh hari, jadi
-minggu itu tidak bisa diputar ulang lagi. [Benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat tiap
+Korpusnya beku di disk dan hash-nya dikirim di `docs/benchmarks/`, jadi tidak seperti
+setiap angka yang kami terbitkan sebelumnya, yang ini bisa diperiksa terhadap byte yang
+sama di rilis berikutnya. [Benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat tiap
 run beserta korpusnya, dan seberapa berharga angka mana pun bagi Anda bergantung pada
 seberapa banyak minggu Anda sendiri mengulang dirinya.
 
@@ -171,16 +179,19 @@ untuk dilaporkan.
 Angka **14,9%** di tabel atas sengaja dari korpus yang berbeda: harness yang sama
 pada satu minggu kerja biasa, dengan setiap pengembalian tadi ikut dihitung bersama
 kemenangannya. Itu rata-rata atas campuran tersebut, bukan janji untuk campuran Anda.
-Baris per kelas itulah yang memprediksi beban kerja Anda sendiri, dan rentangnya dari
-**4,3%** pada pencarian sampai **89,6%** pada pembacaan ulang file, jadi cari kelas
-yang benar-benar Anda jalankan. Itu rata-rata
-nyata atas campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari
-hari yang bagus.
+Baris per kelas itulah yang memprediksi beban kerja Anda sendiri, dan di korpus beku
+capture rate-nya berjalan dari **10,5%** pada infra sampai **25,3%** pada pembacaan
+ulang file, jadi cari kelas yang benar-benar Anda jalankan. Itu rata-rata nyata atas
+campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari hari yang bagus.
 
-Diadu dengan alat sebanding terdekat pada byte yang identik, yang membuat OMNI
-unggul secara keseluruhan adalah ledger-nya. Adu langsung selengkapnya, termasuk
-babak di mana penyaring alat lain sedikit di atas kami dan berapa hasilnya bila
-keduanya digabung, ada di halaman Benchmarks.
+**Tidak ada adu langsung yang berlaku saat ini, dan yang terakhir tidak menguntungkan
+kami.** Dari empat alat sebanding, satu tidak terpasang di mesin pengukur dan babak
+untuk satu-satunya alat lain yang mengirimkan dedup lintas giliran yang sama justru
+crash. Dari dua yang benar-benar jalan, penyaring satu alat ditambah ledger kami
+mengalahkan milik kami dengan selisih 0,7 poin. Alih-alih menerbitkan hasil tiga dari
+empat babak tanpa babak yang justru menjadi inti perbandingannya, klaimnya dicabut
+sampai bisa diukur dengan benar. Apa yang jalan, dan apa hasilnya, ada di halaman
+Benchmarks.
 [Benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat
 metodenya dan perintah untuk mereproduksi setiap baris di riwayat Anda sendiri.
 
