@@ -127,7 +127,7 @@ const DETAIL_BAR: usize = 12;
 ///
 /// It is a constant because two call sites disagreeing by a single column is
 /// what made the `Agent` column report commands it had never resolved (#471).
-const CMD_KEY_WIDTH: usize = 18;
+pub(crate) const CMD_KEY_WIDTH: usize = 18;
 
 pub(crate) fn group_and_calculate_stats(
     items: Vec<(String, u64, u64, u64, u64, u64)>,
