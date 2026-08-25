@@ -11,7 +11,7 @@ a constant. Read the corpus line before the figure, every time.
 
 **Corpus**: 9,478 traces, 8,458,937 bytes, 70 sessions, all `agent_id='claude_code'`,
 0 terminal rows, 0 errored. Frozen on disk and hashed as `0b63218ef78a1edb`, replayed
-in 7.1 s on OMNI 0.7.7.
+in 7.1 s on OMNI 0.7.8.
 
 Every run above this line on this page was measured on `execution_traces`, which prunes
 at seven days, so none of them can be re-derived. This one is a file. That is the whole
@@ -33,7 +33,9 @@ vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
 | build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
 | **aggregate** | 9,478 | 8.49 MB | 1.4% | 5.1% | 15.6% | **24.1%** |
 
-Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.7.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.8.
+
+Every figure on this page is byte-identical to the 0.7.7 run on the same corpus: `docs/benchmarks/0.7.7.json` and `0.7.8.json` differ only in `version` and in `dirty_tree`, which was `true` for 0.7.7 and is `false` here. 0.7.8 is a reporting release and changed no distiller, so the numbers not moving is the expected result rather than a coincidence, and the clean-tree run retroactively confirms the ones taken with uncommitted changes present.
 <!-- omni:corpus-table:end -->
 
 **`available` and `captured` are new, and `captured` is the figure that survives a

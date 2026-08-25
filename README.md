@@ -220,7 +220,7 @@ sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
   Twentyfold in one column, flat in the other, and only one of those two is a fact
   about OMNI.
 * **This corpus does not expire.** It is frozen on disk and its hash is in
-  `docs/benchmarks/0.7.7.json`, so the numbers above can be checked against the
+  `docs/benchmarks/0.7.8.json`, so the numbers above can be checked against the
   same bytes next release instead of against whatever the last seven days held.
   Run the harness on your own history for a figure about your workload.
 * **It hands bytes back rather than inventing a saving.** Where there is nothing
@@ -249,7 +249,7 @@ repetition that was there it actually took:
 | build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
 | **aggregate** | 9,478 | 8.49 MB | 1.4% | 5.1% | 15.6% | **24.1%** |
 
-Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.7.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.8.
 <!-- omni:corpus-table:end -->
 
 `available` is the ceiling. The ledger substitutes lines it has already delivered,
