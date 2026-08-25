@@ -274,7 +274,7 @@ const FLAGS: super::Flags = &[
     ),
     (
         "--view <name>",
-        "summary | detail | commands | projects | context | rerun | share",
+        "summary | detail | projects | context | rerun | share",
     ),
     (
         "--limit <n>",
@@ -329,6 +329,23 @@ pub(crate) fn scope(args: &[String]) -> (&'static str, i64) {
     }
 }
 
+/// The window the caller actually named, `None` when they named none.
+///
+/// `scope` folds "no flag" into the 30 day default, which is right for a report
+/// and wrong for the share card: that card is an all-time figure unless someone
+/// asks otherwise, and `scope` cannot tell "no flag" from an explicit
+/// `--since month` (#723).
+fn named_scope(args: &[String]) -> Option<(&'static str, i64)> {
+    let named = value_of(args, "--since").is_some()
+        || super::has_any(
+            args,
+            &[
+                "--hour", "-H", "--day", "--today", "-d", "--week", "-w", "--month", "-m",
+            ],
+        );
+    named.then(|| scope(args))
+}
+
 /// The value of a flag that takes one, ignoring the next flag.
 ///
 /// `flag_value` returns whatever token follows, so `omni stats --since --view
@@ -374,6 +391,8 @@ fn view(args: &[String]) -> &'static str {
     if let Some(name) = value_of(args, "--view") {
         return match name.to_ascii_lowercase().as_str() {
             "detail" => "detail",
+            // An accepted spelling that is no longer documented: it renders
+            // the detail view and always did (#722).
             "commands" => "commands",
             "projects" | "project" => "project",
             "context" => "context",
@@ -503,8 +522,8 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
     require_values(args)?;
 
     match renderer_for(args) {
-        "card" => run_card(store),
-        "share" => run_share(store),
+        "card" => run_card(args, store),
+        "share" => run_share(args, store),
         "rerun" => run_rerun(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
@@ -591,17 +610,36 @@ struct ShareFigures {
     pct: f64,
     unit: &'static str,
     calls: u64,
+    /// The population the percentage is over, printed beside it. A ratio whose
+    /// base the reader cannot see is the defect #665 was filed about, and this
+    /// is the surface built for posting in public (#723).
+    window: &'static str,
     top: Vec<(String, u64, f64, u64)>,
 }
 
-fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
-    let periods = store.multi_period_stats()?;
-    let Some((_, calls, input, output, raw_tok, filt_tok)) = periods
-        .iter()
-        .find(|(label, ..)| label == "All Time")
-        .cloned()
-    else {
-        return Ok(None);
+fn share_figures(
+    store: &Store,
+    window: Option<(&'static str, i64)>,
+) -> Result<Option<ShareFigures>> {
+    // `--since week --share` printed the all-time card, byte for byte, because
+    // this read `All Time` out of `multi_period_stats` and asked
+    // `get_top_commands` for `since = 0`. Same shape as #670, one view over.
+    let (label, since, calls, input, output) = match window {
+        Some((label, since)) => {
+            let (calls, input, output, ..) = store.aggregate_stats(since)?;
+            (label, since, calls, input, output)
+        }
+        None => {
+            let periods = store.multi_period_stats()?;
+            let Some((_, calls, input, output, ..)) = periods
+                .iter()
+                .find(|(label, ..)| label == "All Time")
+                .cloned()
+            else {
+                return Ok(None);
+            };
+            ("all time", 0, calls, input, output)
+        }
     };
     if calls == 0 {
         return Ok(None);
@@ -612,7 +650,6 @@ fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
     // happened to carry a token column, so two installs could publish the same
     // saving under different words.
     let (saved, total) = (input.saturating_sub(output), input);
-    let _ = (raw_tok, filt_tok);
     Ok(Some(ShareFigures {
         saved,
         pct: if total > 0 {
@@ -622,7 +659,8 @@ fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
         },
         unit: "bytes",
         calls,
-        top: get_top_commands(store, 0, 3),
+        window: label,
+        top: get_top_commands(store, since, 3),
     }))
 }
 
@@ -641,14 +679,15 @@ fn share_figures(store: &Store) -> Result<Option<ShareFigures>> {
 /// * a line saying terminal output is excluded. That exclusion is #212's fix,
 ///   and it is the difference between 64.5% and a headline that counted 86 MB
 ///   of TTY bytes no model ever read.
-fn run_share(store: &Store) -> Result<()> {
+fn run_share(args: &[String], store: &Store) -> Result<()> {
     let Some(ShareFigures {
         saved,
         pct,
         unit,
         calls,
+        window,
         top,
-    }) = share_figures(store)?
+    }) = share_figures(store, named_scope(args))?
     else {
         println!("No data yet. Run a few commands and try again.");
         return Ok(());
@@ -658,7 +697,7 @@ fn run_share(store: &Store) -> Result<()> {
     // The command count is written out, not abbreviated: `6K` is a rounder
     // number than `6,253` and this card exists to show the real one.
     println!(
-        "OMNI saved me {} {unit} ({pct:.1}%) across {} commands.",
+        "OMNI saved me {} {unit} ({pct:.1}%) across {} commands, {window}.",
         format_compact(saved),
         format_number(calls)
     );
@@ -716,13 +755,16 @@ fn card_svg(f: &ShareFigures, w: u32, h: u32) -> String {
     // not reflow and a clipped number is worse than a smaller one. Monospace is
     // close enough to 0.6 em per character to size against, and the widest line
     // is the one carrying the command count.
-    let widest = format!(
-        "{:.1}% of my terminal output, {} commands",
+    // Built once and measured, because the width formula and the rendered text
+    // were two copies of one string and only one of them would have grown when
+    // the window was added to it.
+    let stat_line = format!(
+        "{:.1}% of my terminal output, {} commands, {}",
         f.pct,
-        format_number(f.calls)
-    )
-    .chars()
-    .count() as f64;
+        format_number(f.calls),
+        f.window
+    );
+    let widest = stat_line.chars().count() as f64;
     // Floored, not rounded. Rounding the fitted size up is how a size that was
     // computed to fit stops fitting: 34.8 became 35 and put the last character
     // four pixels past the right edge.
@@ -768,13 +810,12 @@ fn card_svg(f: &ShareFigures, w: u32, h: u32) -> String {
     ));
     y += px(96.0);
     s.push_str(&format!(
-        r##"<text x="{x}" y="{y}" font-size="{fs}">{pct:.1}% of my terminal output, {calls} commands</text>
+        r##"<text x="{x}" y="{y}" font-size="{fs}">{stat}</text>
 "##,
         x = pad.round(),
         y = y.round(),
         fs = body,
-        pct = f.pct,
-        calls = xml_escape(&format_number(f.calls))
+        stat = xml_escape(&stat_line)
     ));
 
     // The percentage and the count are anchored to the right edge rather than to
@@ -881,8 +922,8 @@ fn svg_to_png(svg: &std::path::Path, png: &std::path::Path, w: u32) -> Option<&'
     None
 }
 
-fn run_card(store: &Store) -> Result<()> {
-    let Some(figures) = share_figures(store)? else {
+fn run_card(args: &[String], store: &Store) -> Result<()> {
+    let Some(figures) = share_figures(store, named_scope(args))? else {
         println!("No data yet. Run a few commands and try again.");
         return Ok(());
     };
@@ -1384,8 +1425,12 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     // orders by ratio, and under a heading a reader takes as "what matters", that
     // put nine commands that ran once above the one that ran nine times and carried
     // fifty times more. The same defect was fixed in `omni context --tokens` for
-    // #702; this is the other caller. `--view commands` keeps the ratio ordering,
-    // because there the ratio is the subject.
+    // #702; this is the other caller.
+    //
+    // This used to end "`--view commands` keeps the ratio ordering". Nothing
+    // implemented it: #714 moved the table to bytes and its review moved
+    // `--all-commands` to match, on the grounds that one table gets one
+    // ordering. The clause described a distinction the code does not make (#722).
     let display_filters: Vec<_> = if all_flag {
         // Greptile on #714. `--all-commands` kept the percentage order under a
         // heading that says heaviest first, so the full listing contradicted the
@@ -2267,6 +2312,89 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
+    /// #722. `--view commands` and `--view detail` render the same thing, and
+    /// the help offered both as if they were choices. A comment in `run_detail`
+    /// claimed an ordering difference that #714 had already removed, so the two
+    /// documented names had nothing between them. The list is the thing under
+    /// test: an alias may keep working, it may not be advertised as a choice.
+    #[test]
+    fn the_view_list_offers_no_two_names_for_one_renderer() {
+        let documented = FLAGS
+            .iter()
+            .find(|(spec, _)| spec.starts_with("--view"))
+            .map(|(_, desc)| *desc)
+            .expect("--view carries its accepted values");
+
+        let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for name in documented.split('|').map(str::trim) {
+            let argv = vec!["--view".to_string(), name.to_string()];
+            let rendered = renderer(view(&argv), false, false);
+            if let Some(previous) = seen.insert(rendered, name) {
+                panic!("`--view {previous}` and `--view {name}` both render `{rendered}`");
+            }
+        }
+    }
+
+    /// #723. The share card is all time unless someone asks for a window, and
+    /// `scope` cannot express that: it answers "last 30 days" for an argv that
+    /// named nothing. `--since week --share` printed the all-time card because
+    /// of it, the same shape as #670 one view over.
+    #[test]
+    fn a_window_nobody_named_is_not_a_window() {
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(named_scope(&args(&[])), None, "no flag names no window");
+        assert_eq!(
+            named_scope(&args(&["--view", "share"])).map(|(l, _)| l),
+            None,
+            "another flag does not name a window either"
+        );
+        assert_eq!(
+            named_scope(&args(&["--since", "week"])).map(|(l, _)| l),
+            Some("last 7 days")
+        );
+        assert_eq!(
+            named_scope(&args(&["-d"])).map(|(l, _)| l),
+            Some("today"),
+            "the older spellings name a window too"
+        );
+        assert_eq!(
+            named_scope(&args(&["--since", "month"])).map(|(l, _)| l),
+            Some("last 30 days"),
+            "naming the default window is still naming one"
+        );
+    }
+
+    /// #723. The card's stat line and the width it is sized against were two
+    /// copies of one format string, so adding the window to the text would have
+    /// left the measurement behind and pushed the line off the canvas.
+    #[test]
+    fn the_card_names_its_window_and_measures_what_it_prints() {
+        let mut f = card_figures(vec![]);
+        f.window = "last 7 days";
+        let svg = card_svg(&f, 1080, 1080);
+
+        assert!(svg.contains("last 7 days"), "{svg}");
+
+        // The stat line is the widest line, and the body size is fitted to it.
+        // A longer window must shrink the fitted size, which is the proof that
+        // the measurement read the same string the renderer printed.
+        let mut wide = card_figures(vec![]);
+        wide.window = "a window with a very much longer name than any real one";
+        let size = |svg: &str| {
+            svg.lines()
+                .find(|l| l.contains("of my terminal output"))
+                .and_then(|l| l.split("font-size=\"").nth(1))
+                .and_then(|l| l.split('"').next())
+                .and_then(|v| v.parse::<f64>().ok())
+                .expect("the stat line carries a fitted font size")
+        };
+        assert!(
+            size(&card_svg(&wide, 1080, 1080)) < size(&svg),
+            "the longer window did not shrink the fitted size"
+        );
+    }
+
     /// #717. The default view stacks the engine block and "where the bytes
     /// were", and they have to share one column geometry. Each block sized its
     /// own, so the byte column of the second sat two characters off the first.
@@ -2335,6 +2463,7 @@ mod tests {
             pct: 54.2,
             unit: "tokens",
             calls: 12_624,
+            window: "all time",
             top,
         }
     }
