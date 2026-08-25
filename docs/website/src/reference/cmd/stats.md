@@ -6,25 +6,32 @@ Token savings analytics, read from your own database.
 omni stats
 ```
 
-Leads with **session lifetime**, how many commands a session carries before the host
-closes it. The distillation percentage below it is a diagnostic for one host's
-pipeline, not a product claim.
+Leads with the bytes that never reached your model, then one line per engine, each
+percentage against its own base, then the command classes those bytes came from. The
+aggregate below them mixes in every call OMNI deliberately declined, so it is a
+diagnostic for one host's pipeline rather than a product claim.
+
+Every view draws the same frame, `OMNI · <view> · <window>` between two rules, and
+`--view context` carries no window because it reads the live session rather than a
+period.
 
 ## Flags
 
 | flag | effect |
 |---|---|
 | `--since <window>` | `hour`, `today`, `week`, `month` (default), `all` |
-| `--view <name>` | `summary` (default), `detail`, `commands`, `projects`, `context`, `rerun`, `share` |
-| `--limit <n>` | Rows in a table view, default 10, `0` for all |
+| `--view <name>` | `summary` (default), `detail`, `projects`, `context`, `rerun`, `share` |
+| `--limit <n>` | Rows in a table view, default 10, `0` for all. Read by `detail`, `projects` and `rerun`; a table it cuts says how many rows it hid |
 | `--json` | Machine readable, scoped by `--since` |
 | `--card` | Write the summary as an image, sized for social posts |
 | `--help`, `-h` | Help |
 
 Every earlier spelling still resolves: `--detail`, `--today`, `--day`, `-d`, `--week`,
 `-w`, `--month`, `-m`, `--hour`, `-H`, `--all-commands`, `--project`, `--context`,
-`--rerun` and `--share`. They are not listed because there is one way to say each thing
-now, and they print no deprecation notice: the rename was ours, not yours.
+`--rerun`, `--share` and `--view commands`. They are not listed because there is one way
+to say each thing now, and they print no deprecation notice: the rename was ours, not
+yours. `--view commands` is in that list rather than the table above because it renders
+the detail view and always did.
 
 `--json` and `--card` are output formats rather than views. `--card` outranks everything,
 since naming it can only mean writing the file; `--json` outranks `--view`, since there is

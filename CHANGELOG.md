@@ -8,6 +8,344 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-08-26
+
+### Added
+**`make bench` measures a corpus that does not move.** Every benchmark figure OMNI
+had published was computed from `execution_traces`, and `TRACE_RETENTION_DAYS` is
+7. Two releases therefore reported numbers derived from two different corpora, and
+the delta between them mixed a code change with a corpus change with no way to
+tell which. That is why the headline drifted release to release and nobody could
+explain it.
+
+The corpus is frozen once and replayed from a file. `docs/benchmarks/<version>.json`
+lands in the repo, so a release-over-release delta is finally attributable to the
+code.
+
+The payloads stay local. They are real command output, so `bench-corpus/` is
+excluded from the repo and only the measurement plus a composition summary is
+committed. That buys a figure that is stable and attributable; it does not buy
+independent reproducibility, and the artifact says so by carrying the corpus hash
+rather than pretending anyone else can re-run it.
+
+Two things the first run found, both now checks rather than intentions. The replay
+printed the database path while reading a frozen file, which is a provenance line
+that lies. And a command class is the basename of whatever ran, so a locally named
+script published its own name: the artifact names only classes above 0.5% of the
+corpus and refuses to write at all if a name carries a redacted word.
+
+### Changed
+**`omni context --tokens` answers "where did my tokens go" from data OMNI already
+records.** #612 came from someone saying "I thought it was just me, because of
+polluted context". That is a guess they cannot check, and OMNI is the one thing in
+the stack already holding the answer for the part it can see.
+
+```
+ Where the tokens went · last 30 days
+
+   tool output OMNI saw       38.9 MB   18,449 calls
+     distilled                 3.5 MB   49% of what it was given   1,146 calls
+     folded                    1.8 MB   52% of what it folded      925 folds
+     handed back untouched    31.6 MB   by design                  17,303 calls
+
+   why it was handed back
+     below guardrail           15,932 calls
+     structured:yaml              731 calls
+     ...
+```
+
+One line per engine, each percentage against its own base, because the ledger folds
+payloads whose bytes are not inside the distiller's input: they may be summed and may
+never share a denominator.
+
+**What it deliberately does not report.** #612 asks first for the share of context
+that is tool output against everything else. OMNI cannot answer that: it records what
+passed through its hook and never sees the prompts, the system block, the tool
+definitions or the assistant's own text. A denominator built from what OMNI happens
+to hold would read as "share of your context" while meaning "share of the part OMNI
+touched". The report says so in its closing line instead, and a test asserts that
+line survives.
+
+Read only, no new writes, and it is a CLI subcommand rather than an MCP tool so it
+costs nothing to a session that does not run it, per #609. `engine_totals`,
+`passthrough_reasons` and `filter_breakdown` already existed; the only store change
+is `declined_bytes`, because the first draft printed what survived distillation as
+what was handed back.
+**One gate, two named questions.** `format::sniff` was asked the same thing at five
+call sites, and each decided for itself what a `Some` meant:
+
+```
+src/hooks/pipe.rs:130        passthrough on structured
+src/hooks/pipe.rs:355        ledger gate, pipe path
+src/hooks/post_tool.rs:317   the all-or-nothing decline
+src/hooks/post_tool.rs:425   ledger gate, fold_cross_turn
+src/hooks/post_tool.rs:793   ledger gate, Bash path
+```
+
+Three of those five were the same ledger decision written out three times, twice in
+one file. #452, #454 and #456 each fixed one copy of a duplicated predicate in this
+codebase and left the other standing.
+
+`refuses_lossy_stages` and `refuses_the_ledger` both answer `sniff(..).is_some()`
+today, so nothing changes: the suite passes without a snapshot moving. The point is
+that they are two questions rather than one. Folding a run of already-seen lines
+leaves a marker and a recoverable handle rather than rewriting content, which is why
+#608 proposes letting the ledger in where nothing downstream parses the payload
+while lossy stages stay refused. That decision now lands as a one-line edit to one
+function instead of three copies, one of which would be missed.
+
+A test forbids the gate shape returning to the hooks. Calling `sniff` for its
+`Structured` value is untouched and still happens, because the passthrough reason is
+built from it.
+**The benchmark reports what share of the available repetition OMNI captures, not
+only what share of bytes it removed.** #704 stopped a figure moving when the code
+changed. It did nothing about a figure moving when the *workload* changed, and that
+turned out to be the larger source of the drift.
+
+Replaying the frozen corpus against the table in the README, four of six classes
+reproduce and two do not. One of the two is the hero line: file reads read 89.6%
+saved on the corpus that number was taken from, and 4.5% here. Not a regression.
+That corpus averaged 12.4 KB per file read against 2.1 KB here, the same large
+files read again and again, so both numbers are true of their own week.
+
+That is the problem with the metric rather than with either number. "89.6% off file
+reads" reads as a property of OMNI and is a property of one week's work.
+
+Two columns per class now, and the second is the one that holds still:
+
+```
+class              calls        input    filters   + ledger  available  captured
+file read           1056      1891398       0.0%       4.5%      17.7%     25.3%
+git                  899       858631       5.1%       8.8%      18.4%     20.8%
+search               810       765443       3.4%       4.2%       6.5%     13.7%
+aggregate           9478      8486830       1.4%       5.1%      15.6%     24.1%
+```
+
+`available` is the share of bytes whose line had already been delivered in that
+scope, which is the ceiling: the ledger cannot fold what was never repeated.
+`captured` is what it took of that ceiling. Savings swing about twentyfold across
+these two corpora; capture stays between 10.5% and 25.3%.
+
+Computed inside the replay with the replay's own class definition, on purpose. A
+first estimate using a separate script put the ceiling at 6.3% and capture at 71%,
+against 17.7% and 25.3% measured properly, because the two classifiers disagreed
+about which traces were file reads. Two numbers from two classifiers is the
+mistake, and the fix is one classifier rather than a footnote.
+
+A ledger that claims more bytes than were repeated has a broken denominator, so
+that is asserted rather than printed.
+**`omni stats` says something now, and `omni stats --view detail` says it in one
+voice.** Every number is the same number; this is layout and wording.
+
+The default view was three engine lines and three footnotes, so the caveats
+outweighed the content. It carries the two things a reader asks next: where the
+bytes were, and what the hook cost in latency. Both were already queried for the
+detail view and were only shown if you asked for a 58 line report.
+
+What detail got wrong, and none of it was taste:
+
+- **`By Command` was ranked by percentage.** Nine of its ten rows were commands that
+  ran once, and the row carrying the most bytes was last. It is ranked by bytes and
+  headed `where the bytes were`, which is the same defect and the same fix as #702
+  in `omni context --tokens`.
+- **Two columns shared the header `Saved`**, one holding a percentage and one bytes.
+  They are `off` and `bytes`, and the byte column is sized from its rows, because a
+  `-238.5 KB` overflowed a fixed six and pushed the bar right on that row alone.
+- **The two views disagreed about vocabulary.** Detail said `Signal Ratio: 9.2%
+  reduction`; default said `distilled 49%`. Same database, same window, different
+  bases, and neither said which. Detail now reads `of what it saw 9.2% over every
+  call, declined included`, and it prints the three per-engine lines from the same
+  helper the default view uses, so a reworded label moves in both places or in
+  neither. #665 fixed this inside one view and left the other alone.
+
+  Worth recording how that was caught. The smoke check written for it searched only
+  the default view while its name claimed both, and correcting it proved the detail
+  view carried none of the three engine words. The claim was in this file before the
+  code was.
+- **The route list mixed two levels**, so `below guardrail 16,522` sat beside
+  `Passthrough 94%` and read as a fifth route. The reasons are drawn as what they
+  are, a breakdown of one row.
+- **A three-line caveat sat inside a table.** The caveats qualify the whole report,
+  so they are at the foot, once.
+- Three capitalisation styles in one block, and `Session lifetime` was a heading, a
+  row and a caveat for a fact that fits beside `latency`.
+
+**It is 61 lines, not the "under 45" the issue asked for.** That target was written
+before counting, and reaching it means deleting figures the issue also said to keep.
+One candidate looked genuinely redundant, the `All Time` row against the header, and
+it is not: on `--since week` the header reads 9,329 and `All Time` 19,131. They
+coincide only while the database is younger than the window.
+
+Checks in the smoke test, because `cargo test` never runs the binary's output: every
+section heading survives a rewording, and both views still use the same word for the
+same thing.
+
+### Fixed
+**`omni_run` folds across turns now, on the one tier where it is the only way the
+model reads less.** The mechanism was never missing. `omni_run` distils through
+`pipe::run_inner`, which has carried the ledger stage since #416, and that stage is
+gated on a host session id. Only `omni exec --session` ever set one, so on an MCP
+host the gate stood shut and nothing folded.
+
+The id is minted per process and is deliberately not `SessionState::session_id`.
+That one is a wall-clock stamp on globally persisted state, and `init_globals` hands
+an MCP process whichever session was last written by anything, so scoping by it
+would tell one agent it had already been shown output that went to another (#118).
+An `omni --mcp` process serves one stdio client for its lifetime, so the process is
+the session: it begins when the client connects and ends when it disconnects, which
+is exactly the boundary a fold may reason across.
+
+The fold test is Unix only, like its neighbour: its fixture needs a shell with `seq`
+and `awk`, and on Windows it produced 175 bytes of error text twice, which is two
+equal lengths and a red assertion for a reason unrelated to the ledger.
+
+Two tests, because one cannot cover it. The first runs the same command twice
+through the real entry point and asserts the second comes back shorter, which is the
+only way to tell a working ledger from an absent one. The second reads `run`'s own
+body, because `run` is an async loop over stdio that no unit test can drive, and the
+fold test opens the gate itself so it passes with the wiring deleted. That gap was
+the defect in miniature: the mechanism worked and nothing invoked it.
+**The tier table stopped saying MCP-only hosts distil nothing.** #686 put `omni_run`
+on that tier, so "Memory, recall and session state. No shell distillation, and no
+claim of it." became false in the README and in the manual's agents page, both
+languages.
+
+The row now says what is actually true there: memory, recall and session state plus
+`omni_run`, and the host's own tool output is never rewritten, which is why
+`omni_run` is the only path by which the model reads less.
+
+The sentence in `troubleshooting.md` was already precise enough to survive, because
+it says a Handoff-first or MCP-only host cannot rewrite its *built-in shell tool's*
+output. That is still exactly right.
+**Rows in `omni context --tokens` line up again, and one call is one call.** The
+class key can reach 18 columns and the report padded the name to 16, so any name
+that overflowed pushed the bytes, the percentage and the count right on that row
+alone. Two of five rows were wrong on the machine that found it.
+
+```
+     cd /Users/name/...   93.7 KB      4% removed  3,396 calls
+     sed -n             30.4 KB      6% removed  215 calls
+     journalctl -u      21.2 KB     75% removed  1 calls
+```
+
+The name is truncated to the width the report actually pads to, which is what
+`omni stats` has always done with the same key. Counts read "1 call" now: six
+lines of this report end in a count and a noun, and a short window holding one of
+something is the ordinary case rather than the edge.
+**The hero line promised that every number replays on your own history, and the one
+number that did not was in it.** "89.6% off file reads across the corpus" was
+measured on a trace corpus `TRACE_RETENTION_DAYS` deleted. Replayed against the
+corpus frozen by #704, four of the six classes in that table reproduce and two do
+not, and file reads read 4.5% where the copy said 89.6%.
+
+Not a regression. That corpus averaged 12.4 KB per file read against 2.1 KB here,
+so both numbers are true of their own week. The defect is in the metric: a corpus
+aggregate reads as a property of OMNI and is a property of one week's work.
+
+What the copy says now, on every surface and in all six translations:
+
+- the mechanism claim stays, because it is the strong one. 97.2% off a file read
+  twice reproduces on any machine, on demand
+- the corpus figure names its corpus and its hash, and sits beside the capture rate,
+  which is the share of the available repetition the ledger actually took. Savings
+  move twentyfold between the two corpora; capture moves from 25.3% to about the
+  same place
+- the per-class table is generated from `docs/benchmarks/<version>.json` inside
+  marked region comments, so it cannot drift from the measurement again
+- the head-to-head is withdrawn rather than restated. Of four arms, `caveman` is not
+  installed and `headroom` crashes (#711), and headroom is the only competitor
+  shipping the same cross-turn dedup. Of the two that ran, rtk's filters plus our
+  ledger took 5.8% against our 5.1%: on this corpus we are not the top arm, and the
+  benchmarks page says so (#712)
+
+The benchmarks page keeps every retired figure on purpose. It is an archive that
+labels each run with its corpus, and deleting a published number to make a check
+green is worse than labelling it. It is held to a different rule: it must name the
+current corpus.
+
+**Three tests, because prose is what rotted.** No claim surface may quote a retired
+figure, in either decimal convention, and that second half is the point:
+`README-id.md` and `-vi.md` write `89,6%`, so a scan for `89.6` called them clean
+while they still carried it. That is #541 again, and it happened while writing this
+check. 52 findings across 9 files at the start, 0 now.
+**Every `omni stats` view now draws the same frame.** Five views drew three
+different ones. The default and detail views ruled off above and below their
+title; `--view context` still said "OMNI Signal Report: Context"; `--view
+projects` and `--view rerun` drew no rule above at all, and `projects` folded the
+period label into the middle of a sentence, "OMNI Project Analytics, last 30 days
+Breakdown".
+
+```
+ OMNI · last 30 days
+ OMNI · detail · last 30 days
+ OMNI · projects · last 30 days
+ OMNI · rerun · last 30 days
+ OMNI · context
+```
+
+One `print_header` in `cli/mod.rs` prints all of them, so a sixth view cannot
+quietly draw a sixth frame. `context` passes no scope because it reads the live
+session rather than a window, and its labels now use the same lowercase
+vocabulary as the detail view.
+
+**The two blocks in the default view line up.** They sized their columns
+independently, so the byte column of "where the bytes were" sat two characters
+off the engine block directly above it. Both go through one `aligned_rows` call
+now, and the test asserts the shared right edge rather than any one width.
+
+```
+    folded                2.0 MB   54% of what it folded       1,033 folds
+    distilled             3.7 MB   49% of what it distilled    1,223 calls
+    left alone                 0   by design                  18,847 calls
+
+    where the bytes were
+    npm run               1.8 MB    30% off                      153 calls
+    cat .superpower...  238.5 KB    76% off                       25 calls
+    cd /Users/fajar...  182.3 KB     4% off                    6,115 calls
+```
+
+**`--limit` reaches every table view.** It is documented as "Rows in a table view
+(default 10, 0 for all)" and only `--view detail` read it, so `omni stats --view
+projects --limit 2` printed 161 rows, the same as passing nothing. `projects` and
+`rerun` read it now, through the one `row_limit` that also resolves `--limit 0`
+and the older `--all-commands`, and a cut table says how many rows it hid.
+**`omni stats --help` stopped offering two names for one view.** `--view commands`
+and `--view detail` produced byte-identical output. `renderer` maps both to
+`"detail"` and nothing downstream reads which was named, so the seven values the
+help listed were six views and a synonym.
+
+A comment in `run_detail` said otherwise: "`--view commands` keeps the ratio
+ordering, because there the ratio is the subject." #714 moved that table to byte
+ordering and its review moved `--all-commands` to match, on the grounds that one
+table gets one ordering. The clause was what got left behind.
+
+`commands` still works, undocumented, the way `-d` does. A test now walks the
+values the help advertises and fails if two of them reach the same renderer.
+**`--share` and `--card` honour `--since`, and say which window they are showing.**
+Both accepted the flag and threw it away: `run` called them without `args` at all,
+and `share_figures` hardcoded the window twice, reading `All Time` out of
+`multi_period_stats` and asking `get_top_commands` for `since = 0`. So
+`omni stats --since week --share` printed the all-time card, byte for byte. Same
+shape as #670, which was the JSON report ignoring the four window flags.
+
+```
+OMNI saved me 3.9M bytes (9.1%) across 20,129 commands, all time.
+OMNI saved me 421K bytes (5.4%) across 8,312 commands, last 7 days.
+OMNI saved me 7K bytes (2.5%) across 294 commands, today.
+```
+
+No window named still means all time, because that is what a share card is for,
+and `scope` cannot tell "no flag" from an explicit `--since month`. `named_scope`
+answers that question and nothing else.
+
+The line now names its window either way. A percentage whose population the
+reader cannot see is what #665 was filed about, and this is the surface built for
+posting in public.
+
+The card's stat line and the width it is fitted to were two copies of one format
+string. They are one string now, and the test drives the fitted size down by
+lengthening the window, so a measurement that stops reading what it prints fails.
+
 ## [0.7.7] - 2026-08-24
 
 ### Changed
