@@ -242,6 +242,18 @@ fn print_separator() {
     super::print_rule();
 }
 
+/// Says how many rows a `--limit` cut, because a table that silently stops at
+/// ten reads as a table with ten rows in it.
+fn print_hidden_rows(shown: usize, total: usize) {
+    if total > shown {
+        println!();
+        println!(
+            "  {}",
+            format!("Top {shown} of {total}. --limit 0 shows all").bright_black()
+        );
+    }
+}
+
 /// Read by both `print_help` and `super::check_flags`, so this list is what
 /// `omni stats` documents *and* what it accepts (#151).
 /// One flag per dimension, then every older spelling, which still resolves (#667).
@@ -401,6 +413,23 @@ fn view(args: &[String]) -> &'static str {
     }
 }
 
+/// Rows a table view shows, `None` for every row.
+///
+/// `--limit 0` and the older `--all-commands` say the same thing. One reader
+/// rather than one per view: `--limit` is documented for "a table view" and only
+/// `--view detail` ever read it, so `--view projects --limit 2` printed 161 rows,
+/// the same as no flag at all (#717).
+fn row_limit(args: &[String]) -> Option<usize> {
+    if super::has_flag(args, "--all-commands") {
+        return None;
+    }
+    match value_of(args, "--limit").and_then(|v| v.parse::<usize>().ok()) {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => Some(10),
+    }
+}
+
 /// The renderer for one argv, which is the whole decision in one place.
 ///
 /// Separated from `renderer` so the wiring is tested and not only the table: the
@@ -487,53 +516,47 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
 
 // ─── Context Mode: Context Composition Analyzer ────────
 fn run_context_stats(store: &Store) -> Result<()> {
-    println!();
-    print_separator();
-    println!(" {}", "OMNI Signal Report: Context".bold().bright_white());
-    print_separator();
+    // No scope: this view reads the live session, not a window, so `--since`
+    // has nothing to select and the header must not imply it does.
+    super::print_header(Some("context"), None);
 
     if let Some(session) = store.find_latest_session() {
         let turn = &session.current_turn;
         println!(
-            "  {:<25} {}",
-            "Session ID:".bright_black(),
+            "  {:<16} {}",
+            "session".bright_black(),
             session.session_id.cyan()
         );
         println!(
-            "  {:<25} {}",
-            "Commands (Turns):".bright_black(),
+            "  {:<16} {}",
+            "commands".bright_black(),
             format_number(session.command_count as u64).cyan()
         );
         // #589. This block was labelled a rough estimate because it accumulated
         // `size_bytes / 4`. It accumulates the sizes themselves now, so the
         // label goes with the estimator: a file's length and a delivered
         // payload's length are both counted, and neither needs a caveat.
-        println!("\n  {}", "Context Breakdown:".bold().bright_white());
+        println!("\n {}", "what is in the context".bold().bright_white());
         println!(
-            "    {:<25} {}",
-            "File Reads:".bright_black(),
+            "  {:<16} {}",
+            "file reads".bright_black(),
             format_bytes(turn.file_read_bytes).yellow()
         );
         println!(
-            "    {:<25} {}",
-            "Tool Outputs:".bright_black(),
+            "  {:<16} {}",
+            "tool outputs".bright_black(),
             format_bytes(turn.tool_output_bytes).green()
         );
 
         let total = turn.file_read_bytes + turn.tool_output_bytes;
         println!(
-            "\n  {:<27} {}",
-            "Context Total:".bold().bright_white(),
-            format_bytes(total).bright_cyan()
+            "  {:<16} {}",
+            "total".bright_black(),
+            format_bytes(total).bold().bright_cyan()
         );
 
         if turn.has_duplicate_file_reads {
-            println!(
-                "\n  {}",
-                "WARNING: Duplicate File Reads Detected!"
-                    .bold()
-                    .bright_red()
-            );
+            println!("\n  {}", "duplicate file reads".bold().bright_red());
             for f in turn.duplicate_files.iter().take(5) {
                 println!("    - {}", f.red());
             }
@@ -541,14 +564,14 @@ fn run_context_stats(store: &Store) -> Result<()> {
 
         if turn.largest_single_read.1 > 0 {
             println!(
-                "\n  {:<27} {} ({})",
-                "Largest File Read:".bright_black(),
+                "\n  {:<16} {} ({})",
+                "largest read".bright_black(),
                 turn.largest_single_read.0.cyan(),
                 format_bytes(turn.largest_single_read.1).yellow()
             );
         }
     } else {
-        println!("  {}", "No active session found.".bright_black().italic());
+        println!("  {}", "no active session".bright_black().italic());
     }
 
     print_separator();
@@ -917,8 +940,8 @@ fn run_card(store: &Store) -> Result<()> {
 /// Split out from the printing so the arithmetic can be driven directly: the
 /// defect this replaces was a ratio taken over the wrong population, and a test
 /// that has to reach through a terminal to see one cannot check it.
-fn engine_rows(t: &EngineTotals) -> Vec<String> {
-    let rows: [(&str, u64, String, u64, &str); 3] = [
+fn engine_rows(t: &EngineTotals) -> Vec<StatRow> {
+    let rows: [(&'static str, u64, String, u64, &'static str); 3] = [
         (
             "folded",
             t.fold_bytes,
@@ -955,32 +978,41 @@ fn engine_rows(t: &EngineTotals) -> Vec<String> {
         ),
     ];
 
-    let saved: Vec<String> = rows
-        .iter()
-        .map(|(_, b, ..)| {
-            if *b == 0 {
+    rows.into_iter()
+        .map(|(label, bytes, base, n, unit)| {
+            // A no-op saved nothing, and `0 B` reads as a measurement rather
+            // than as the absence of one.
+            let saved = if bytes == 0 {
                 "0".to_string()
             } else {
-                format_bytes(*b)
-            }
+                format_bytes(bytes)
+            };
+            (label.to_string(), saved, base, format_number(n), unit)
         })
-        .collect();
-    let counts: Vec<String> = rows
-        .iter()
-        .map(|(_, _, _, n, _)| format_number(*n))
-        .collect();
+        .collect()
+}
 
-    let w_label = max_width(rows.iter().map(|(l, ..)| *l));
-    let w_saved = max_width(&saved);
-    let w_base = max_width(rows.iter().map(|(_, _, b, _, _)| b.as_str()));
-    let w_count = max_width(&counts);
+/// One row of a stat block: label, bytes saved, the base its percentage is
+/// against, the count, and what the count counts.
+type StatRow = (String, String, String, String, &'static str);
+
+/// Formats stat rows to one column geometry.
+///
+/// Widths come from every row handed in, so blocks stacked in the same view must
+/// be passed together to line up. They were not: `engine_rows` and
+/// `heaviest_rows` each sized their own columns, which put the byte column of
+/// "where the bytes were" two characters off the engine block directly above it
+/// (#717).
+fn aligned_rows(rows: &[StatRow]) -> Vec<String> {
+    let w_label = max_width(rows.iter().map(|(l, ..)| l.as_str()));
+    let w_saved = max_width(rows.iter().map(|(_, s, ..)| s.as_str()));
+    let w_base = max_width(rows.iter().map(|(_, _, b, ..)| b.as_str()));
+    let w_count = max_width(rows.iter().map(|(_, _, _, c, _)| c.as_str()));
 
     rows.iter()
-        .enumerate()
-        .map(|(i, (label, _, base, _, unit))| {
+        .map(|(label, saved, base, count, unit)| {
             format!(
-                "    {:<w_label$}  {:>w_saved$}   {:<w_base$}   {:>w_count$} {}",
-                label, saved[i], base, counts[i], unit
+                "    {label:<w_label$}  {saved:>w_saved$}   {base:<w_base$}   {count:>w_count$} {unit}"
             )
         })
         .collect()
@@ -995,36 +1027,24 @@ fn engine_rows(t: &EngineTotals) -> Vec<String> {
 /// Asks for every class and cuts here, because the store's own cap is by call count
 /// and a byte ranking over a call-ranked sample is a sample chosen by the wrong
 /// measure (#704).
-fn heaviest_rows(store: &Store, since: i64, limit: usize) -> Vec<String> {
+fn heaviest_rows(store: &Store, since: i64, limit: usize) -> Vec<StatRow> {
     let mut classes = get_top_commands(store, since, 0);
     classes.sort_by_key(|c| std::cmp::Reverse(c.3));
     classes.truncate(limit);
     classes.retain(|(_, _, _, saved)| *saved > 0);
-    if classes.is_empty() {
-        return Vec::new();
-    }
-
-    let names: Vec<String> = classes
-        .iter()
-        .map(|(n, ..)| crate::util::text::display_truncate_with_ellipsis(n, CMD_KEY_WIDTH - 3))
-        .collect();
-    let saved: Vec<String> = classes
-        .iter()
-        .map(|(_, _, _, b)| format_bytes(*b))
-        .collect();
-    let w_name = max_width(&names);
-    let w_saved = max_width(&saved);
 
     classes
         .iter()
-        .enumerate()
-        .map(|(i, (_, calls, pct, _))| {
-            format!(
-                "    {:<w_name$}  {:>w_saved$}  {:>4.0}% off  {} calls",
-                names[i],
-                saved[i],
-                pct,
-                format_number(*calls)
+        .map(|(name, calls, pct, bytes)| {
+            (
+                crate::util::text::display_truncate_with_ellipsis(name, CMD_KEY_WIDTH - 3),
+                format_bytes(*bytes),
+                // Padded, because the base column is left-aligned for the
+                // engine block's sentences and a bare `4% off` under `76% off`
+                // puts the digits in different columns.
+                format!("{pct:>3.0}% off"),
+                format_number(*calls),
+                "calls",
             )
         })
         .collect()
@@ -1071,14 +1091,7 @@ fn run_default(args: &[String], store: &Store) -> Result<()> {
     let (period_label, since) = scope(args);
     let t = store.engine_totals(since)?;
 
-    println!();
-    print_separator();
-    println!(
-        " {} {}",
-        "OMNI".bold().bright_white(),
-        format!("· {period_label}").bright_black()
-    );
-    print_separator();
+    super::print_header(None, Some(period_label));
 
     if t.distilled_calls == 0 && t.declined_calls == 0 && t.folds == 0 {
         println!(
@@ -1100,19 +1113,25 @@ fn run_default(args: &[String], store: &Store) -> Result<()> {
         "never reached your model".bright_white()
     );
     println!();
-    for line in engine_rows(&t) {
-        println!("{}", line);
-    }
+    // Both blocks through one `aligned_rows` call, because that is what shares
+    // the column widths between them.
+    let mut rows = engine_rows(&t);
+    let engine_count = rows.len();
     // #714. The three engine lines were the whole of this view, and the next
     // question a reader has is always the same one: where were those bytes, and
     // what did it cost. Both are already queried for `--view detail`; neither was
     // shown until you asked for a 58 line report.
-    let heaviest = heaviest_rows(store, since, 3);
-    if !heaviest.is_empty() {
+    rows.extend(heaviest_rows(store, since, 3));
+    let lines = aligned_rows(&rows);
+
+    for line in &lines[..engine_count] {
+        println!("{line}");
+    }
+    if lines.len() > engine_count {
         println!();
         println!("    {}", "where the bytes were".bright_black());
-        for line in &heaviest {
-            println!("{}", line);
+        for line in &lines[engine_count..] {
+            println!("{line}");
         }
     }
 
@@ -1174,14 +1193,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
     };
     let (rewind_stored, rewind_retrieved) = store.rewind_metrics(since)?;
 
-    println!();
-    print_separator();
-    println!(
-        " {} {}",
-        "OMNI · detail".bold().bright_white(),
-        format!("· {period_label}").bright_black()
-    );
-    print_separator();
+    super::print_header(Some("detail"), Some(period_label));
 
     // #714. One vocabulary with the default view, and every ratio names its base.
     // This block used to say "Signal Ratio: 9.2% reduction" while the default view
@@ -1324,7 +1336,7 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
             "\n {}",
             "by engine, each against its own base".bold().bright_white()
         );
-        for line in engine_rows(&engines) {
+        for line in aligned_rows(&engine_rows(&engines)) {
             println!("{line}");
         }
     }
@@ -1364,9 +1376,8 @@ fn run_detail(args: &[String], store: &Store) -> Result<()> {
 
     // By Command, top 10 (or all if requested), filter 0% savings
     let raw_filters = store.filter_breakdown(since)?;
-    // `--limit 0` and the older `--all-commands` say the same thing.
-    let limit = value_of(args, "--limit").and_then(|v| v.parse::<usize>().ok());
-    let all_flag = super::has_flag(args, "--all-commands") || limit == Some(0);
+    let limit = row_limit(args);
+    let all_flag = limit.is_none();
     let grouped_filters = group_and_calculate_stats(raw_filters, 0);
 
     // #714. Ranked by bytes removed, not by percentage. `group_and_calculate_stats`
@@ -1944,14 +1955,13 @@ fn build_stats_json(store: &Store, since: i64) -> Result<StatsJson> {
 /// bytes removed were the ones it needed.
 fn run_rerun(args: &[String], store: &Store) -> Result<()> {
     let (period_label, since) = scope(args);
-    let rows = store.rerun_breakdown(since)?;
+    let mut rows = store.rerun_breakdown(since)?;
+    let total = rows.len();
+    if let Some(n) = row_limit(args) {
+        rows.truncate(n);
+    }
 
-    println!(
-        "\n  {}, {}",
-        "OMNI Re-run Analysis".bold().bright_white(),
-        period_label
-    );
-    print_separator();
+    super::print_header(Some("rerun"), Some(period_label));
 
     if rows.is_empty() {
         println!(
@@ -1960,6 +1970,8 @@ fn run_rerun(args: &[String], store: &Store) -> Result<()> {
             crate::pipeline::RERUN_MIN_SAMPLES
         );
         println!("  runs in this window before its delta means anything.");
+        print_separator();
+        println!();
         return Ok(());
     }
 
@@ -1994,6 +2006,8 @@ fn run_rerun(args: &[String], store: &Store) -> Result<()> {
         );
     }
 
+    print_hidden_rows(rows.len(), total);
+
     println!();
     println!(
         "  {} a command re-run within {}s of reading its distilled output.",
@@ -2022,6 +2036,7 @@ fn run_rerun(args: &[String], store: &Store) -> Result<()> {
         }
     }
 
+    print_separator();
     println!();
     Ok(())
 }
@@ -2029,16 +2044,18 @@ fn run_rerun(args: &[String], store: &Store) -> Result<()> {
 fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
     let (period_label, since) = scope(args);
 
-    let projects = store.get_project_stats(since)?;
-    println!(
-        "\n  {}, {} Breakdown",
-        "OMNI Project Analytics".bold().bright_white(),
-        period_label
-    );
-    print_separator();
+    let mut projects = store.get_project_stats(since)?;
+    let total = projects.len();
+    if let Some(n) = row_limit(args) {
+        projects.truncate(n);
+    }
+    let shown = projects.len();
+    super::print_header(Some("projects"), Some(period_label));
 
     if projects.is_empty() {
         println!("  No project data recorded yet for this period.");
+        print_separator();
+        println!();
         return Ok(());
     }
 
@@ -2082,6 +2099,8 @@ fn run_project_stats(args: &[String], store: &Store) -> Result<()> {
             bar_colored
         );
     }
+    print_hidden_rows(shown, total);
+    print_separator();
     println!();
     Ok(())
 }
@@ -2247,6 +2266,68 @@ mod tests {
     }
     use super::*;
     use tempfile::NamedTempFile;
+
+    /// #717. The default view stacks the engine block and "where the bytes
+    /// were", and they have to share one column geometry. Each block sized its
+    /// own, so the byte column of the second sat two characters off the first.
+    /// The invariant is the shared right edge, not the width of any one column.
+    #[test]
+    fn stacked_blocks_share_one_column_geometry() {
+        let rows: Vec<StatRow> = vec![
+            (
+                "folded".into(),
+                "2.0 MB".into(),
+                "54% of what it folded".into(),
+                "1,027".into(),
+                "folds",
+            ),
+            (
+                "cat .superpower...".into(),
+                "238.5 KB".into(),
+                " 76% off".into(),
+                "25".into(),
+                "calls",
+            ),
+        ];
+        let lines = aligned_rows(&rows);
+        let byte_edge = |l: &str| {
+            l.find("MB")
+                .or_else(|| l.find("KB"))
+                .expect("a byte cell on every row")
+                + 2
+        };
+        assert_eq!(
+            byte_edge(&lines[0]),
+            byte_edge(&lines[1]),
+            "the byte columns end in different places:\n{}",
+            lines.join("\n")
+        );
+
+        let count_edge = |l: &str| l.rfind(' ').expect("a unit on every row");
+        assert_eq!(
+            count_edge(&lines[0]),
+            count_edge(&lines[1]),
+            "the count columns end in different places:\n{}",
+            lines.join("\n")
+        );
+    }
+
+    /// #717. `--limit` was documented as "Rows in a table view" and read by
+    /// exactly one of them, so `--view projects --limit 2` printed 161 rows.
+    /// One reader, so a third table view cannot invent a fourth default.
+    #[test]
+    fn every_table_view_reads_the_same_row_limit() {
+        let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(row_limit(&args(&[])), Some(10));
+        assert_eq!(row_limit(&args(&["--limit", "3"])), Some(3));
+        assert_eq!(row_limit(&args(&["--limit", "0"])), None, "0 means all");
+        assert_eq!(
+            row_limit(&args(&["--all-commands"])),
+            None,
+            "the older spelling still says all"
+        );
+    }
 
     fn card_figures(top: Vec<(String, u64, f64, u64)>) -> ShareFigures {
         ShareFigures {
@@ -2591,7 +2672,7 @@ mod tests {
     /// totals are the only thing the two engines may share a column with.
     #[test]
     fn no_row_takes_a_ratio_over_a_population_it_did_not_come_from() {
-        let out = engine_rows(&a_real_week()).join("\n");
+        let out = aligned_rows(&engine_rows(&a_real_week())).join("\n");
 
         assert!(out.contains("48% of what it distilled"), "{out}");
         assert!(out.contains("31% of what it folded"), "{out}");
@@ -2628,7 +2709,7 @@ mod tests {
         t.priced_fold_bytes = 0;
         t.priced_payload = 0;
 
-        let rows = engine_rows(&t).join("\n");
+        let rows = aligned_rows(&engine_rows(&t)).join("\n");
         let folded = rows.lines().find(|l| l.contains("folded")).unwrap();
         assert!(!folded.contains('%'), "no base, no ratio: {folded}");
         assert!(
