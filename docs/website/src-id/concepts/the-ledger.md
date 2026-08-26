@@ -66,6 +66,25 @@ yang berasal dari sesi harus menghemat 150 byte di atas penandanya; deretan yang
 berasal dari proyek harus menghemat tiga kali lipatnya, sebab agent tidak punya
 pilihan selain membayar satu pengambilan kalau ia butuh isinya.
 
+**Dan scope proyek hanya boleh melipat sebagian balasan.** Lipatan sesi boleh
+mengambil seluruh balasan, sebab pembacanya memang sedang memegang byte itu.
+Lipatan proyek tidak boleh: pembacanya belum pernah melihatnya, jadi mengganti
+semuanya meninggalkan satu penanda, nol isi, dan tidak ada cara memeriksa satu
+satunya klaim yang ia terima. Perintah pertama sebuah subagent pernah kembali
+sebagai satu baris yang bilang 40 baris identik dengan sesi terdahulu, dan seorang
+peninjau yang didispatch ke sebuah pull request harus menyalurkan berkasnya lewat
+`base64` untuk membaca kode yang ia diminta tinjau.
+
+Syaratnya adalah apa yang ditinggalkan lipatan itu, bukan siapa yang membaca.
+"Apakah pembaca ini sudah pernah melihat sesuatu" terdengar seperti uji yang sama
+padahal bukan: setiap lipatan proyek seluruh keluaran yang tercatat di mesin ini
+dan menyebut sesi terjadi di sesi yang sudah memegang antara 261 sampai 1.369
+baris miliknya sendiri. Pembaca yang pernah melihat sesuatu tidak mengatakan
+apa pun tentang apakah ia sudah melihat baris *ini*, dan justru itulah yang
+dijawab scope proyek. Menolak kelas ini memakan 10 lipatan dan 32.104 byte, 1,51%
+dari setiap byte yang pernah dilipat penyimpanan ini, berbanding 678.585 byte yang
+terus dihasilkan lengan parsial.
+
 ## Dua lantai yang memutuskan tidak ada yang dilipat sama sekali
 
 Kedua ambang di atas menanyakan apakah sebuah deretan lebih besar daripada penanda
