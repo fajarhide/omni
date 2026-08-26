@@ -61,6 +61,23 @@ Because the project claim is not free, it carries a higher bar. A session-origin
 must save 150 bytes over its marker; a project-origin run must save three times that,
 since the agent has no choice about paying a retrieval if it needs the content.
 
+**And the project scope may only ever fold part of a reply.** A session fold can take
+the whole of one, because the reader really is holding those bytes. A project fold
+cannot: the reader has never seen them, so replacing everything leaves it with one
+marker, no content, and no way to check the only claim it was given. A subagent's
+first command came back as a single line saying 40 lines were identical to an earlier
+session, and a reviewer dispatched onto a pull request had to pipe files through
+`base64` to read the code it was sent to review.
+
+The condition is what the fold would leave behind, not who is reading. "Has this
+reader seen anything yet" sounds like the same test and is not: every whole-output
+project fold recorded on this machine that names a session happened in a session
+already holding between 261 and 1,369 lines of its own. A reader having seen
+something says nothing about whether it has seen *these* lines, which is exactly what
+the project scope answers for. Refusing the class costs 10 folds and 32,104 bytes,
+1.51% of every byte this store has folded, against the 678,585 bytes the partial arm
+keeps earning.
+
 ## The two floors that decide nothing folds at all
 
 Both bars above ask whether a run outgrows the marker replacing it. Two floors are

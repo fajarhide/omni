@@ -696,7 +696,7 @@ impl<'a> Ledger<'a> {
         // store can still turn a planned fold back into a verbatim run below,
         // and that direction is safe: the caller then refuses the view exactly
         // as it did before any of this existed.
-        let planned: Vec<bool> = runs
+        let mut planned: Vec<bool> = runs
             .iter()
             .map(|run| {
                 run.seen.as_ref().is_some_and(|seen| {
@@ -711,6 +711,39 @@ impl<'a> Ledger<'a> {
                 })
             })
             .collect();
+
+        // #705. The project scope may fold part of a reply, never the whole of
+        // it. A whole-output project fold leaves the reader holding one marker
+        // and no content, and the claim in that marker is the one thing it
+        // cannot check: it was not there. A subagent's first command came back
+        // as `identical to 40 lines from an earlier session, none shown here`
+        // and nothing else, and a reviewer dispatched onto a pull request had to
+        // pipe files through `base64` to read the code it was sent to review.
+        //
+        // Not the reader's own set, which is what the report proposed. That
+        // condition never fires: of the four recorded whole-output project folds
+        // that name a session, every one happened in a session already holding
+        // between 261 and 1,369 lines of its own, the 1,319-byte case in the
+        // report included. A reader having seen *something* says nothing about
+        // whether it has seen *these lines*, which is precisely what the project
+        // scope exists to answer for.
+        //
+        // Every run planned means every line goes, since an unseen or unaffordable
+        // run survives verbatim. Unplanning only the project runs rather than
+        // refusing outright keeps an honest session fold in the mixed payload, and
+        // leaves the reader real lines to weigh the marker against. Priced over
+        // the recorded corpus: 10 folds, 32,104 bytes, 1.51% of all folded bytes.
+        if planned.iter().all(|&fold| fold) {
+            for (fold, run) in planned.iter_mut().zip(&runs) {
+                if run
+                    .seen
+                    .as_ref()
+                    .is_some_and(|s| s.origin == Origin::Project)
+                {
+                    *fold = false;
+                }
+            }
+        }
 
         // #658, then #664. A host that renumbers what it is handed cannot take
         // survivors sitting in two blocks. #658 answered that by folding only down
@@ -1108,6 +1141,36 @@ mod tests {
             .join("\n")
     }
 
+    /// A repeated block and a fresh one, which since #705 is the only shape a
+    /// project fold may take: the first is foldable, the second is not, so the
+    /// reader keeps real lines to weigh the marker against. Returns the block to
+    /// prime the first session with, then the payload the second session sends.
+    ///
+    /// The repeated half is six times the session floor so the project scope's
+    /// own bar is cleared and a fold really happens. Under it the second reader is
+    /// simply shown the lines and a test asserting on an absent fold passes for
+    /// the wrong reason.
+    fn project_repeat_then_fresh() -> (String, String) {
+        let repeated = project_repeat();
+        let payload = format!("{repeated}{}", fresh_block("cache probe"));
+        (repeated, payload)
+    }
+
+    /// The block a first session is primed with, six times the session floor so
+    /// the project scope's higher bar is cleared and a fold really happens.
+    fn project_repeat() -> String {
+        (0..200)
+            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
+            .collect()
+    }
+
+    /// Lines no scope has seen, tagged so two calls can each carry their own.
+    fn fresh_block(tag: &str) -> String {
+        (0..20)
+            .map(|i| format!("2026-08-10T00:00:00Z  {tag} {i} missed and refilled\n"))
+            .collect()
+    }
+
     /// #543. A whole-output fold leaves the agent a handle and no content, so any
     /// part of the payload it still needs costs a retrieval round trip. Four of
     /// the four recorded under 1 KB were retrieved within nine seconds, against a
@@ -1313,25 +1376,19 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("omni.db");
         let store = Store::open_path(&db).expect("store");
-        // Six times the session floor, so the project scope's higher bar is
-        // cleared and a fold really happens. Under it the second agent is simply
-        // shown the lines, and a test asserting on an absent fold passes for the
-        // wrong reason.
-        let text: String = (0..200)
-            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
-            .collect();
+        let (repeated, payload) = project_repeat_then_fresh();
 
         Ledger::new(&store, "s1")
             .with_project("/repo")
             .by("claude_code")
-            .project(&text);
+            .project(&repeated);
         let view = Ledger::new(&store, "s2")
             .with_project("/repo")
             .by("codex")
-            .project(&text)
+            .project(&payload)
             .expect("no fold on the second agent, so there is nothing to record");
         assert!(
-            view.contains("from an earlier session"),
+            view.contains("not shown here"),
             "this has to be a project fold to be the case under test: {view}"
         );
 
@@ -1353,28 +1410,82 @@ mod tests {
         assert!(lines > 0 && bytes > 0, "{lines} lines, {bytes} bytes");
     }
 
+    /// #705. A reader the project scope answers for has not seen those bytes, so
+    /// replacing the whole payload leaves it holding one marker and nothing it
+    /// can check the marker against. A subagent's first command came back as
+    /// `identical to 40 lines from an earlier session, none shown here` and
+    /// nothing else, and it is not a subagent property: a second session on the
+    /// same project gets the identical empty reply.
+    ///
+    /// The counter-case is asserted in the same test on purpose. The rule is
+    /// "never the whole of a reply", not "the project scope stops folding": the
+    /// partial arm is 635 folds and 678,585 bytes against the 10 folds and
+    /// 32,104 bytes this gives up.
+    #[test]
+    fn never_replaces_a_whole_payload_from_the_project_scope() {
+        let (store, _d) = temp_store();
+        let repeated = project_repeat();
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .by("claude_code")
+            .project(&repeated);
+
+        for (label, reader) in [
+            (
+                "a fresh session",
+                Ledger::new(&store, "s2").with_project("/repo"),
+            ),
+            (
+                "a subagent of the first",
+                Ledger::new(&store, scope_for("s1", Some("sub-agent-1"))).with_project("/repo"),
+            ),
+        ] {
+            assert!(
+                reader.project(&repeated).is_none(),
+                "{label} was handed a marker and zero content lines"
+            );
+        }
+
+        // Same repeated block, now inside a payload that carries lines nobody has
+        // seen. This must still fold, or the fix reads as "the project scope is
+        // off" rather than "it may not take the whole reply".
+        let view = Ledger::new(&store, "s3")
+            .with_project("/repo")
+            .project(&format!("{repeated}{}", fresh_block("cache probe")))
+            .expect("a project run inside a payload is still projectable");
+        assert!(
+            view.contains("not shown here"),
+            "the partial project fold stopped firing: {view}"
+        );
+        assert!(
+            view.contains("cache probe 0"),
+            "the reader must keep the lines the fold did not claim: {view}"
+        );
+    }
+
     /// The whole licence for the project scope. A second session may reuse the
     /// first session's history, but it has **not seen those bytes**, so the
     /// marker must not say it has. An earlier draft cancelled this phase over
     /// exactly that wording; the remedy was the wording.
+    ///
+    /// Since #705 the licence is narrower: a project fold is a run inside a
+    /// payload, never the whole of one, so the fixture carries fresh lines the
+    /// second session keeps. What is asserted here is unchanged.
     #[test]
     fn never_tells_a_new_session_it_has_already_seen_the_project_history() {
         let (store, _d) = temp_store();
-        // Six times the session floor, so it clears the project scope's own bar.
-        let text: String = (0..200)
-            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
-            .collect();
+        let (repeated, payload) = project_repeat_then_fresh();
         Ledger::new(&store, "s1")
             .with_project("/repo")
-            .project(&text);
+            .project(&repeated);
 
         let view = Ledger::new(&store, "s2")
             .with_project("/repo")
-            .project(&text)
+            .project(&payload)
             .expect("a project repeat above the floor is projectable");
 
         assert!(
-            view.contains("from an earlier session"),
+            view.contains("not shown here"),
             "the marker claimed a sighting this session never had: {view}"
         );
         assert!(
@@ -1440,28 +1551,33 @@ mod tests {
     #[test]
     fn a_folded_run_is_not_recorded_as_shown() {
         let (store, _d) = temp_store();
-        let text: String = (0..200)
-            .map(|i| format!("2026-08-10T00:00:00Z  handler finished request {i} in 12ms\n"))
-            .collect();
+        let repeated = project_repeat();
         Ledger::new(&store, "s1")
             .with_project("/repo")
-            .project(&text);
+            .project(&repeated);
+
+        // Each call carries its own fresh tail. The same one twice would put the
+        // first call's tail into s2's session scope, and the two runs together
+        // would then cover the whole payload, which #705 refuses to fold: the
+        // project run would come back verbatim and the test would fail on a
+        // fixture artefact rather than on the claim it is about.
+        let call = |tag: &str| format!("{repeated}{}", fresh_block(tag));
 
         // s2 sees it for the first time and is handed a marker, not the bytes.
         let first = Ledger::new(&store, "s2")
             .with_project("/repo")
-            .project(&text)
+            .project(&call("cache probe"))
             .expect("a project repeat above the floor is projectable");
-        assert!(first.contains("from an earlier session"), "{first}");
+        assert!(first.contains("not shown here"), "{first}");
 
-        // Same session, same payload. It has still never received those lines.
+        // Same session, same repeated block. It has still never received it.
         let second = Ledger::new(&store, "s2")
             .with_project("/repo")
-            .project(&text)
+            .project(&call("queue drain"))
             .expect("still projectable");
 
         assert!(
-            second.contains("from an earlier session"),
+            second.contains("not shown here"),
             "a run this session only ever saw as a marker was reported as shown: {second}"
         );
         assert!(

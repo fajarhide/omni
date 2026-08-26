@@ -4031,13 +4031,23 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         let body: String = (0..200)
             .map(|i| format!("2026-08-12T00:00:00Z  handler finished request {i} in 12ms\n"))
             .collect();
+        // The second read appends lines nobody has seen, so its fold is a run
+        // inside a payload. Since #705 the project scope refuses to replace a
+        // whole one, and a re-read of exactly the same bytes would come back
+        // verbatim on the subagent arm, which asserts on a marker.
+        let second_body = format!(
+            "{body}{}",
+            (0..20)
+                .map(|i| format!("2026-08-12T00:00:00Z  cache probe {i} missed and refilled\n"))
+                .collect::<String>()
+        );
 
-        let payload = |agent: Option<&str>| {
+        let payload = |agent: Option<&str>, text: &str| {
             let mut v = json!({
                 "session_id": session,
                 "tool_name": "Read",
                 "tool_input": {"path": "notes.txt"},
-                "tool_response": {"content": body},
+                "tool_response": {"content": text},
             });
             if let Some(a) = agent {
                 v["agent_id"] = json!(a);
@@ -4045,9 +4055,10 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             v.to_string()
         };
 
-        let first = process_payload(&payload(None), Some(store.clone()), None).unwrap_or_default();
-        let second =
-            process_payload(&payload(agent), Some(store.clone()), None).unwrap_or_default();
+        let first =
+            process_payload(&payload(None, &body), Some(store.clone()), None).unwrap_or_default();
+        let second = process_payload(&payload(agent, &second_body), Some(store.clone()), None)
+            .unwrap_or_default();
         (first, second)
     }
 
