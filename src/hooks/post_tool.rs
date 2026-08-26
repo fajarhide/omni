@@ -340,21 +340,30 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
     // tokens for a 2,129-byte distillation that appears nowhere in the transcript
     // (#212). Emit nothing, and record it as the passthrough it really is.
     //
-    // Measured on `tool_response.stdout`, the field the host actually caps, and
-    // deliberately **not** on `normalized.content`: `normalize` folds a non-empty
-    // stderr into that string, so a 25 KB stdout beside a 6 KB stderr would clear
-    // the cap on a result the host never truncated, and this guard would decline
-    // to distil perfectly ordinary output. Found by self-review before merge;
-    // the wrong reading loses compression silently, which is the failure mode
-    // that does not announce itself.
-    let host_capped_stdout = normalized
+    // Measured on the single field `normalize` read, in its own precedence
+    // (`content`, then `file.content`, then `stdout`), and deliberately **not**
+    // on `normalized.content`: the `stdout` arm folds a non-empty stderr into
+    // that string, so a 25 KB stdout beside a 6 KB stderr would clear the cap on
+    // a result the host never truncated, and this guard would decline to distil
+    // perfectly ordinary output.
+    //
+    // Reading only `stdout` had the mirror-image bug and shipped: Claude Code
+    // sends plenty of over-cap Bash results as `content`, which has no `stdout`
+    // key, so the gate never met them. The run was recorded as a delivered
+    // passthrough, and a later `tail` of the same file folded 90 lines as
+    // "already shown" that the session had never received (#716).
+    let host_capped = normalized
         .raw_response
         .as_ref()
-        .and_then(|r| r.get("stdout"))
+        .and_then(|r| {
+            r.get("content")
+                .or_else(|| r.get("file").and_then(|f| f.get("content")))
+                .or_else(|| r.get("stdout"))
+        })
         .and_then(serde_json::Value::as_str)
         .is_some_and(|s| s.len() >= crate::guard::limits::HOST_OUTPUT_CAP);
 
-    if normalized.agent_id == "claude_code" && host_capped_stdout {
+    if normalized.agent_id == "claude_code" && host_capped {
         if let Some(s) = store {
             s.record_passthrough(
                 &normalized.command,
@@ -2176,6 +2185,66 @@ mod tests {
         );
     }
 
+    /// #716. `normalize` reads a Claude Code payload's text from one of three
+    /// fields, and the cap gate read only the third. An over-cap `cat` arriving
+    /// at `tool_response.content` therefore sailed past it and was recorded as a
+    /// delivered passthrough, while the host kept a 2 KB preview and dropped the
+    /// rest. The session ledger then folded 90 of those lines out of a later
+    /// `tail` as "already shown", and nothing the reader could see said the bytes
+    /// had never arrived.
+    ///
+    /// Asserted on the ledger and the decline reason rather than on the return
+    /// value: `process_payload` answers `None` for a passthrough too, so
+    /// `is_none()` alone cannot tell the gate firing from the bug.
+    #[test]
+    fn declines_an_over_cap_payload_in_every_shape_normalize_reads() {
+        let body = "para 0001 beta some prose about a subject here\n"
+            .repeat(crate::guard::limits::HOST_OUTPUT_CAP / 46 + 20);
+        assert!(body.len() >= crate::guard::limits::HOST_OUTPUT_CAP);
+
+        let shapes = [
+            ("content", json!({"content": body})),
+            (
+                "file.content",
+                json!({"file": {"filePath": "big3.txt", "content": body,
+                                "startLine": 1, "numLines": 700, "totalLines": 700}}),
+            ),
+            ("stdout", json!({"stdout": body, "stderr": ""})),
+        ];
+
+        for (field, response) in shapes {
+            let payload = json!({
+                "session_id": "host-716",
+                "tool_name": if field == "file.content" { "Read" } else { "Bash" },
+                "tool_input": {"command": "cat big3.txt", "path": "big3.txt"},
+                "tool_response": response,
+            })
+            .to_string();
+
+            let dir = tempfile::tempdir().expect("tempdir");
+            let db = dir.path().join("omni.db");
+            let store = Arc::new(Store::open_path(&db).expect("store"));
+            process_payload(&payload, Some(store), None);
+
+            assert_eq!(
+                count(&db, "SELECT COUNT(*) FROM ledger_lines"),
+                0,
+                "{field}: the host kept a 2 KB preview, so no line from this run \
+                 reached the reader and none may be claimed as shown"
+            );
+            assert_eq!(
+                count(
+                    &db,
+                    "SELECT COUNT(*) FROM passthrough_events \
+                     WHERE reason = 'host output cap'"
+                ),
+                1,
+                "{field}: an over-cap payload has to be declined by the cap gate, \
+                 not by whatever the pipeline happened to decide downstream"
+            );
+        }
+    }
+
     /// #589. The banner's bar was expressed in the same estimated unit as the
     /// figure it gates, so moving the figure to bytes without moving the bar
     /// would have fired it on a saving 3.6 times smaller, quietly tripling how
@@ -2855,20 +2924,22 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
     /// archived, and the reply has to say so rather than leaving the agent to
     /// infer that a handle exists for it.
     ///
-    /// The payload carries its text at `tool_response.content` on purpose. The
-    /// host-cap gate reads `tool_response.stdout`, so a Bash-shaped response
-    /// would be declined at 30 KB and this branch could never be reached. A bare
-    /// string does not work either: `normalize` has no extraction arm for one and
-    /// returns `None`.
+    /// The payload is OpenCode-shaped on purpose. `MAX_REWIND_BYTES` is 64 KB
+    /// and Claude Code's cap is 30 KB, so on that host the gate declines first
+    /// and this branch is unreachable by construction. It used to be reached by
+    /// sending the text at `tool_response.content`, which the gate did not read
+    /// until #716; that was the bug wearing a test's clothes. OpenCode has no
+    /// inline cap, so the branch is exercised on a host it can actually happen on.
     #[test]
     fn states_the_bound_when_the_input_is_over_the_rewind_cap() {
         // Arrange: comfortably over MAX_REWIND_BYTES.
         let content = lossy_content(6_000);
         assert!(content.len() > crate::guard::limits::MAX_REWIND_BYTES);
         let payload = json!({
-            "tool_name": "Bash",
-            "tool_input": {"command": "cargo test"},
-            "tool_response": {"content": content},
+            "type": "tool_result",
+            "tool": "shell",
+            "command": "cargo test",
+            "output": content,
         })
         .to_string();
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4103,6 +4174,12 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         // `final_out` and the host's own bytes are the same string and the
         // assertion below passes either way. Sized against the threshold the
         // path actually crosses, after a first fixture at 30 KB proved nothing.
+        //
+        // OpenCode-shaped, because `MAX_OUTPUT_BYTES` is 50 KB and Claude Code's
+        // inline cap is 30 KB: a Claude payload big enough to cross the first is
+        // always declined at the second, so the branch cannot be reached on that
+        // host. It used to be, by sending the text at `tool_response.content`,
+        // the field the cap gate failed to read before #716.
         let body: String = (0..3_000)
             .map(|i| format!("{:016x} {:016x}\n", i * 2_654_435_761u64, i * 40_503))
             .collect();
@@ -4112,10 +4189,10 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             body.len()
         );
         let payload = json!({
-            "session_id": "passthrough-595",
-            "tool_name": "Bash",
-            "tool_input": {"command": "cat blob.hex"},
-            "tool_response": {"content": body},
+            "type": "tool_result",
+            "tool": "shell",
+            "command": "cat blob.hex",
+            "output": body,
         })
         .to_string();
 
