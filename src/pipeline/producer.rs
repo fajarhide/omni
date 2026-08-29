@@ -425,6 +425,17 @@ fn words(s: &str) -> impl Iterator<Item = &str> {
 /// `/opt/homebrew/opt/python@3.11/bin/python3.11` and `python3.11` are one
 /// program and must be one row.
 pub(crate) fn producer_label(command: &str) -> &str {
+    program_name(producing_segment(command))
+}
+
+/// The segment that wrote the output, with assignments stripped: what
+/// `producer_label` names before it reduces to the program.
+///
+/// Split out for `shorten_command`, which needs the words after the program and
+/// so cannot use the label. Keying stats on the first two words of the raw
+/// string filed a third of all traffic under `cd`, because that many recorded
+/// commands are multi-line blocks whose first line changes directory (#706).
+pub(crate) fn producing_segment(command: &str) -> &str {
     // The producer when there is a single one, and otherwise the first segment
     // that actually runs something. `sole_output_command` answers `None` for a
     // chain with two producers, and the raw string it was falling back to begins
@@ -441,7 +452,7 @@ pub(crate) fn producer_label(command: &str) -> &str {
                 .find(|seg| !is_silent(seg))
         })
         .unwrap_or(command);
-    program_name(strip_assignments(segment))
+    strip_assignments(segment)
 }
 
 /// The bare program name of an already-stripped command.
