@@ -495,15 +495,14 @@ fn headroom_module(named: &str) -> Option<String> {
     if named.ends_with(".py") {
         return Some(named.to_string());
     }
+    // PATH walked here rather than through `sh -c "command -v"`: the name comes
+    // from the environment, and a shell would evaluate whatever it contains.
     let exe = if named.contains(std::path::MAIN_SEPARATOR) {
-        named.to_string()
+        std::path::PathBuf::from(named)
     } else {
-        let found = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {named}"))
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&found.stdout).trim().to_string()
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(named))
+            .find(|candidate| candidate.is_file())?
     };
     let script = std::fs::read_to_string(&exe).ok()?;
     let mut words = script
