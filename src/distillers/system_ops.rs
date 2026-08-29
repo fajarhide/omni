@@ -696,7 +696,12 @@ fn looks_like_shell_expansion(value: &str) -> bool {
 ///
 /// `None` means deliver the line as written.
 fn redact_assignment(key: &str, value: &str) -> Option<String> {
-    if !is_sensitive_key(key) || value.trim().is_empty() || looks_like_shell_expansion(value) {
+    // The value arrives with its delimiters and any trailing punctuation
+    // attached, so `apiKey = "",` never read as empty and was delivered as
+    // `apiKey = "[REDACTED]"`, comma and all, which does not parse (#726).
+    let quoted = quoted_value(value);
+    let literal = quoted.map_or(value, |(_, inner, _)| inner);
+    if !is_sensitive_key(key) || literal.trim().is_empty() || looks_like_shell_expansion(value) {
         return None;
     }
     // The value only gets a say when `KEY` alone made the name look sensitive.
@@ -717,15 +722,40 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     // The old form ate the spacing and the quotes, so an HCL line came out as
     // `key =[REDACTED]`, which is neither valid nor informative.
     let lead: String = value.chars().take_while(|c| c.is_whitespace()).collect();
-    let quoted = value.trim_start().starts_with('"');
-    Some(format!(
-        "{lead}{}",
-        if quoted {
-            "\"[REDACTED]\""
-        } else {
-            "[REDACTED]"
+    Some(match quoted {
+        // Only punctuation is handed back with the value. Anything else after
+        // the closing quote could be a second literal, and the direction of
+        // doubt in this file is to redact.
+        Some((q, _, tail))
+            if tail
+                .chars()
+                .all(|c| c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']' | '}')) =>
+        {
+            format!("{lead}{q}[REDACTED]{q}{tail}")
         }
-    ))
+        Some((q, _, _)) => format!("{lead}{q}[REDACTED]{q}"),
+        None => format!("{lead}[REDACTED]"),
+    })
+}
+
+/// A quoted value's parts: the quote character, the literal between the quotes,
+/// and whatever trails the closing one.
+///
+/// Splitting on `=` leaves the delimiters on the value, which is what made
+/// `apiKey = ""` look like it held something and cost the line its comma on the
+/// way out (#726). An unterminated quote keeps the old reading: everything
+/// after it is the literal.
+///
+/// `find` returns a char boundary and both quote characters are one ASCII byte.
+#[allow(clippy::string_slice)]
+fn quoted_value(value: &str) -> Option<(char, &str, &str)> {
+    let body = value.trim_start();
+    let quote = body.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+    let rest = &body[1..];
+    Some(match rest.find(quote) {
+        Some(end) => (quote, &rest[..end], &rest[end + 1..]),
+        None => (quote, rest, ""),
+    })
 }
 
 /// Slices here are proven to sit on a char boundary rather than assumed to.
@@ -1181,6 +1211,39 @@ mod tests {
         let env = "GOOGLE_CREDENTIALS={\"type\":\"service_account\",\"private_key\":\"abc\"}\n";
         let out = redact_sensitive_assignments(env).expect("a JSON credential is still a secret");
         assert!(!out.contains("service_account"), "secret delivered:\n{out}");
+    }
+
+    /// #726. Two defects on one line, and the second is what breaks an edit.
+    ///
+    /// `apiKey = ""` names a credential and holds none, and the emptiness test
+    /// never saw that because the quotes and the comma are part of the value.
+    /// The replacement then ate the comma, so a `.tsx` came back as syntax that
+    /// does not parse. Same punctuation loss as the HCL line in #486, which
+    /// means that fix did not generalise past an unpunctuated value.
+    #[test]
+    fn keeps_empty_defaults_and_the_punctuation_after_a_secret() {
+        let tsx = "export function Demo({\n  open,\n  apiKey = \"\",\n  token = \"\",\n  label = \"hello\",\n}) {\n  return null;\n}\n";
+        assert!(
+            redact_sensitive_assignments(tsx).is_none(),
+            "an empty string is not a credential whatever the key is called"
+        );
+
+        // The delimiter and the trailing comma come back, so the line still parses.
+        assert_eq!(
+            redact_assignment("  apiKey ", " \"sk-ant-realsecret123\","),
+            Some(" \"[REDACTED]\",".to_string())
+        );
+        assert_eq!(
+            redact_assignment("password", "'hunter2';"),
+            Some("'[REDACTED]';".to_string())
+        );
+
+        // Anything past the closing quote that is not punctuation could be a
+        // second literal, so it goes with the first.
+        assert_eq!(
+            redact_assignment("API_KEY", " \"sk-one\" \"sk-two\""),
+            Some(" \"[REDACTED]\"".to_string())
+        );
     }
 
     /// #559. `echo "pass=$P/10"` after a ten-run test loop came back as
