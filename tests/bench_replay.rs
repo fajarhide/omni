@@ -502,7 +502,7 @@ fn headroom_module(named: &str) -> Option<String> {
     } else {
         std::env::split_paths(&std::env::var_os("PATH")?)
             .map(|dir| dir.join(named))
-            .find(|candidate| candidate.is_file())?
+            .find(|candidate| is_executable(candidate))?
     };
     let script = std::fs::read_to_string(&exe).ok()?;
     let mut words = script
@@ -524,6 +524,22 @@ fn headroom_module(named: &str) -> Option<String> {
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|p| !p.is_empty())
+}
+
+/// What `command -v` means by a hit, which `is_file` alone does not: a
+/// non-executable file earlier on `PATH` would otherwise shadow the real
+/// command and be read for its shebang (review of #730).
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &std::path::Path) -> bool {
+    path.is_file()
 }
 
 fn base_command(cmd: &str) -> String {
