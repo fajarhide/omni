@@ -434,7 +434,14 @@ fn lean_ctx_bytes(bin: &str, cmd: &str, raw: &str) -> usize {
 ///
 /// Returns `None` when anything at all goes wrong, because a competitor arm that
 /// silently reports zero would read as a win.
-fn headroom_total(module: &str, blocks: &BTreeMap<String, Vec<String>>) -> Option<u64> {
+fn headroom_total(named: &str, blocks: &BTreeMap<String, Vec<String>>) -> Option<u64> {
+    let module = match headroom_module(named) {
+        Some(m) => m,
+        None => {
+            eprintln!("headroom arm failed: no module file behind {named}");
+            return None;
+        }
+    };
     let dir = tempfile::tempdir().ok()?;
     let payload = dir.path().join("blocks.json");
     std::fs::write(&payload, serde_json::to_vec(blocks).ok()?).ok()?;
@@ -460,7 +467,7 @@ print(total)
 
     let out = std::process::Command::new("python3.13")
         .arg(&driver)
-        .arg(module)
+        .arg(&module)
         .arg(&payload)
         .output()
         .ok()?;
@@ -472,6 +479,76 @@ print(total)
         return None;
     }
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// The module file behind an installed `headroom`, given whatever the caller
+/// named: the file itself, or the command they actually have.
+///
+/// `OMNI_BENCH_HEADROOM` documents a path inside headroom's own tree, and what a
+/// person has is the console script, so naming `headroom` handed
+/// `spec_from_file_location` something it cannot read and the arm never ran once
+/// (#711). The script's shebang names the interpreter whose site-packages hold
+/// the module, and that interpreter is the only thing that can be asked where it
+/// is. python3.13 can exec the file afterwards wherever it came from, which is
+/// what lets an install on an older python still answer.
+fn headroom_module(named: &str) -> Option<String> {
+    if named.ends_with(".py") {
+        return Some(named.to_string());
+    }
+    // PATH walked here rather than through `sh -c "command -v"`: the name comes
+    // from the environment, and a shell would evaluate whatever it contains.
+    let exe = if named.contains(std::path::MAIN_SEPARATOR) {
+        std::path::PathBuf::from(named)
+    } else {
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(named))
+            .find(|candidate| is_executable(candidate))?
+    };
+    let script = std::fs::read_to_string(&exe).ok()?;
+    let mut words = script
+        .lines()
+        .next()?
+        .strip_prefix("#!")?
+        .split_whitespace();
+    let mut interpreter = words.next()?;
+    // `#!/usr/bin/env python3.13` puts the interpreter one token along.
+    if interpreter.ends_with("/env") {
+        interpreter = words.next()?;
+    }
+    let out = std::process::Command::new(interpreter)
+        .arg("-c")
+        .arg("import headroom.transforms.cross_turn_dedup as m; print(m.__file__)")
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|p| !p.is_empty())
+}
+
+/// What `command -v` means by a hit, which `is_file` alone does not: a
+/// non-executable file earlier on `PATH` would otherwise shadow the real
+/// command and be read for its shebang (review of #730).
+///
+/// `access` rather than the mode bits, on the second pass of the same review:
+/// `mode & 0o111` is true for a file executable by a group this process is not
+/// in, so an unusable shadow would still stop the search. The kernel is the only
+/// thing that can answer the question this is asking. libc is already a direct
+/// unix dependency here.
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: `c_path` is a NUL-terminated string that outlives the call, and
+    // `access` only reads it.
+    path.is_file() && unsafe { libc::access(c_path.as_ptr(), libc::X_OK) } == 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &std::path::Path) -> bool {
+    path.is_file()
 }
 
 fn base_command(cmd: &str) -> String {
@@ -1275,7 +1352,10 @@ fn replay_execution_traces_net_savings() {
                         saved(raw_total, total)
                     );
                 }
-                None => println!("headroom arm did not run; see the error above"),
+                // Naming the arm and getting no number is how this arm spent
+                // its whole life absent while the run still read as a result
+                // (#711). A named arm that cannot answer fails the bench.
+                None => panic!("headroom arm was named as {module} and produced no number"),
             }
         }
 
@@ -1363,6 +1443,20 @@ fn replay_execution_traces_net_savings() {
 
 /// The repetition accounting is the number P1 is judged on, so it is tested on
 /// input whose answer can be counted by hand rather than only on the corpus.
+#[test]
+fn resolves_the_headroom_module_from_the_installed_command() {
+    // #711: the arm was pointed at `headroom`, which is a console script and not
+    // the module, so it resolved nothing and never ran.
+    assert_eq!(headroom_module("omni-no-such-command-711"), None);
+
+    // A machine with no headroom is the CI machine, and there the line above is
+    // the whole test. Where it is installed, the command has to lead to the file.
+    if let Some(path) = headroom_module("headroom") {
+        assert!(path.ends_with("cross_turn_dedup.py"), "resolved to {path}");
+        assert!(std::path::Path::new(&path).is_file(), "not a file: {path}");
+    }
+}
+
 #[test]
 fn counts_a_repeated_line_once_per_scope() {
     let mut seen = Seen::default();
