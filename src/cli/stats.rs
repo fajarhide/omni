@@ -191,11 +191,28 @@ pub(crate) fn get_top_commands(
 }
 
 fn shorten_command(cmd: &str, max_len: usize) -> String {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    let short = match parts.len() {
-        0 => return "[pipe]".to_string(),
-        1 => parts[0].to_string(),
-        _ => format!("{} {}", parts[0], parts[1]),
+    // Half of all recorded commands are multi-line blocks whose first line is a
+    // `cd`, so the first two words of the raw string filed them under one
+    // directory change and the heaviest class in every report was `cd` (#706).
+    // `producing_segment` is the predicate the pipeline already routes on, so the
+    // key names whatever actually wrote the bytes, and the local absolute path
+    // that came with `cd` goes with it.
+    let segment = crate::pipeline::producer::producing_segment(cmd);
+    // A loop body's segment opens with the keyword that introduced it, so
+    // `for n in 1 2; do echo hi; done` keyed as `do echo`. Stripped here rather
+    // than in `producing_segment`, which the pipeline routes on: the label wants
+    // the program, and routing has no opinion about the word in front of it.
+    let mut parts = segment
+        .split_whitespace()
+        .skip_while(|w| matches!(*w, "do" | "then" | "else"));
+    let short = match (parts.next(), parts.next()) {
+        (None, _) => return "[pipe]".to_string(),
+        // The file name, not the path: `/opt/homebrew/bin/python3` and `python3`
+        // are one program, the same reason `producer_label` reduces it (#339).
+        (Some(prog), None) => crate::pipeline::producer::program_name(prog).to_string(),
+        (Some(prog), Some(arg)) => {
+            format!("{} {arg}", crate::pipeline::producer::program_name(prog))
+        }
     };
     if short.len() <= max_len {
         short
@@ -2668,6 +2685,31 @@ mod tests {
         let args: Vec<String> = vec!["stats".into(), "--json".into()];
         let result = run(&args, &store);
         assert!(result.is_ok());
+    }
+
+    /// #706. Half of all recorded commands are multi-line blocks opening with a
+    /// `cd`, so the first two words keyed them under one directory change and the
+    /// heaviest class in every report named nothing that produced a byte. On this
+    /// machine's corpus that one key held 7,222 calls.
+    ///
+    /// A filtering tail owns the payload, so `| grep` keys as grep. That is the
+    /// same predicate the pipeline routes on, which is the point of reusing it.
+    #[test]
+    fn keys_a_block_on_what_wrote_the_output_not_on_its_cd() {
+        for (cmd, expected) in [
+            ("cd /tmp && kubectl get pods", "kubectl get"),
+            ("K=1 cd /tmp\nsed -n 1,20p f.rs", "sed -n"),
+            // The loop keyword goes with the `cd`: `do` names no program either.
+            (
+                "cd /Users/fajar/p\nfor n in 1 2; do echo hi; done",
+                "echo hi",
+            ),
+            // The file name, not the path, so one program is one row (#339).
+            ("/opt/homebrew/bin/python3 x.py", "python3 x.py"),
+            ("cat package.json", "cat package.json"),
+        ] {
+            assert_eq!(shorten_command(cmd, CMD_KEY_WIDTH), expected, "{cmd}");
+        }
     }
 
     /// The agent map is keyed by `shorten_command(cmd, CMD_KEY_WIDTH)`, and the
