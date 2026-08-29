@@ -529,12 +529,21 @@ fn headroom_module(named: &str) -> Option<String> {
 /// What `command -v` means by a hit, which `is_file` alone does not: a
 /// non-executable file earlier on `PATH` would otherwise shadow the real
 /// command and be read for its shebang (review of #730).
+///
+/// `access` rather than the mode bits, on the second pass of the same review:
+/// `mode & 0o111` is true for a file executable by a group this process is not
+/// in, so an unusable shadow would still stop the search. The kernel is the only
+/// thing that can answer the question this is asking. libc is already a direct
+/// unix dependency here.
 #[cfg(unix)]
 fn is_executable(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: `c_path` is a NUL-terminated string that outlives the call, and
+    // `access` only reads it.
+    path.is_file() && unsafe { libc::access(c_path.as_ptr(), libc::X_OK) } == 0
 }
 
 #[cfg(not(unix))]
