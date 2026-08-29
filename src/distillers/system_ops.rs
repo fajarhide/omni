@@ -700,8 +700,14 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     // attached, so `apiKey = "",` never read as empty and was delivered as
     // `apiKey = "[REDACTED]"`, comma and all, which does not parse (#726).
     let quoted = quoted_value(value);
-    let literal = quoted.map_or(value, |(_, inner, _)| inner);
-    if !is_sensitive_key(key) || literal.trim().is_empty() || looks_like_shell_expansion(value) {
+    let (literal, tail) = quoted.map_or((value, ""), |(_, inner, tail)| (inner, tail));
+    // The tail decides whether the empty literal is the whole value. Review's
+    // case: `API_KEY=""sk-secret"` opens with an empty segment and carries the
+    // credential after it, so emptiness alone would hand the line back whole.
+    if !is_sensitive_key(key)
+        || (literal.trim().is_empty() && is_only_punctuation(tail))
+        || looks_like_shell_expansion(value)
+    {
         return None;
     }
     // The value only gets a say when `KEY` alone made the name look sensitive.
@@ -723,19 +729,18 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     // `key =[REDACTED]`, which is neither valid nor informative.
     let lead: String = value.chars().take_while(|c| c.is_whitespace()).collect();
     Some(match quoted {
-        // Only punctuation is handed back with the value. Anything else after
-        // the closing quote could be a second literal, and the direction of
-        // doubt in this file is to redact.
-        Some((q, _, tail))
-            if tail
-                .chars()
-                .all(|c| c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']' | '}')) =>
-        {
-            format!("{lead}{q}[REDACTED]{q}{tail}")
-        }
+        Some((q, _, tail)) if is_only_punctuation(tail) => format!("{lead}{q}[REDACTED]{q}{tail}"),
         Some((q, _, _)) => format!("{lead}{q}[REDACTED]{q}"),
         None => format!("{lead}[REDACTED]"),
     })
+}
+
+/// Whether what follows a closing quote is only syntax, so it can be handed
+/// back with the line. Anything else could be a second literal, and the
+/// direction of doubt in this file is to redact.
+fn is_only_punctuation(tail: &str) -> bool {
+    tail.chars()
+        .all(|c| c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']' | '}'))
 }
 
 /// A quoted value's parts: the quote character, the literal between the quotes,
@@ -1239,11 +1244,20 @@ mod tests {
         );
 
         // Anything past the closing quote that is not punctuation could be a
-        // second literal, so it goes with the first.
-        assert_eq!(
-            redact_assignment("API_KEY", " \"sk-one\" \"sk-two\""),
-            Some(" \"[REDACTED]\"".to_string())
-        );
+        // second literal, so it goes with the first. Review's case is the same
+        // shape with the empty segment first, where reading emptiness alone
+        // would have delivered the credential untouched.
+        for (key, value, expected) in [
+            ("API_KEY", " \"sk-one\" \"sk-two\"", " \"[REDACTED]\""),
+            ("API_KEY", " \"\"sk-secret\"", " \"[REDACTED]\""),
+            ("password", " \'\'hunter2\'", " \'[REDACTED]\'"),
+        ] {
+            assert_eq!(
+                redact_assignment(key, value),
+                Some(expected.to_string()),
+                "{key}={value} kept a literal the reader should not see"
+            );
+        }
     }
 
     /// #559. `echo "pass=$P/10"` after a ten-run test loop came back as
