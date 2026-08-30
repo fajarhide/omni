@@ -733,7 +733,28 @@ impl<'a> Ledger<'a> {
         // refusing outright keeps an honest session fold in the mixed payload, and
         // leaves the reader real lines to weigh the marker against. Priced over
         // the recorded corpus: 10 folds, 32,104 bytes, 1.51% of all folded bytes.
-        if planned.iter().all(|&fold| fold) {
+        //
+        // #735 widens the same remedy to a second case the coverage floor above
+        // cannot see. That floor asks what share of the *payload* went, and a
+        // compound reply hides the answer: `cat notes.md; echo ---; tail -5 log`
+        // folded all five lines of the `tail` and still measured 45%, because the
+        // `cat` before it paid for the other 55%. Nothing here can find the
+        // command boundary inside a joined payload, so this asks the command
+        // instead of the bytes.
+        //
+        // A command that rations its own output has already named the answer.
+        // `tail -5` means those five lines are the question and not the
+        // background, so retrieval is not a risk the project scope is taking, it
+        // is the outcome. That is why the bet is off here and nowhere else: the
+        // session scope keeps folding, because there the reader is holding the
+        // bytes and the handle costs it nothing.
+        //
+        // Deliberately narrower than `registry::passes_through_verbatim`, which
+        // reaches the same conclusion one stage earlier for the collapse
+        // fallback. Its list carries `cat` and `grep`, and those are where the
+        // project scope earns most of what it earns, so borrowing it wholesale
+        // would pay for this report with the feature.
+        if planned.iter().all(|&fold| fold) || rations_its_output(&self.source) {
             for (fold, run) in planned.iter_mut().zip(&runs) {
                 if run
                     .seen
@@ -891,6 +912,26 @@ fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Seen>) ->
         }
     }
     runs
+}
+
+/// Whether the command rationed its own output to a set of lines it named.
+///
+/// `head` and `tail` only, and only when they are counting lines. `tail -f`
+/// never ends and `head -c` counts bytes, so neither of those says the reader
+/// picked a set of lines it now wants to read. A bare `head file` is as explicit
+/// as `head -10 file`, since the default is what the reader accepted.
+///
+/// Matched on whole tokens and on the basename, so `/usr/bin/tail` counts and a
+/// `--tail` flag or a `tailwind` argument does not.
+fn rations_its_output(command: &str) -> bool {
+    let tokens: Vec<&str> = command.split_whitespace().collect();
+    tokens.iter().enumerate().any(|(i, tok)| {
+        let base = tok.rsplit('/').next().unwrap_or(tok);
+        (base == "head" || base == "tail")
+            && tokens.get(i + 1).is_none_or(|next| {
+                !(next.starts_with('-') && next.trim_start_matches('-').starts_with(['c', 'f']))
+            })
+    })
 }
 
 /// A line's identity in the ledger.
@@ -1492,6 +1533,85 @@ mod tests {
             !view.contains("already shown"),
             "a project repeat was reported as a session repeat: {view}"
         );
+    }
+
+    /// #735. The coverage floor asks what share of the *payload* a fold took, and
+    /// a compound reply hides the answer. The report folded all five lines of a
+    /// `tail -5` and still measured 45%, because the `cat` in front of it paid for
+    /// the other 55%, so the reader was handed a header announcing content and
+    /// then a marker instead of it.
+    ///
+    /// Both arms in one test on purpose. The guard has to be the command and not
+    /// the project scope: unbudgeted commands must still fold, or the fix costs
+    /// the feature rather than the defect.
+    ///
+    /// Each arm carries its own fresh block, and that is load-bearing. Sharing
+    /// one payload lets the first arm record the other's survivors, which leaves
+    /// every run project-seen and hands the refusal to #705's whole-output guard
+    /// instead. The test then passes with this guard deleted, which is how the
+    /// first draft of it read.
+    #[test]
+    fn a_line_budgeted_command_keeps_the_lines_it_asked_for() {
+        let (store, _d) = temp_store();
+        let repeated = project_repeat();
+        let unbudgeted = format!("{repeated}{}", fresh_block("cache probe"));
+        let budgeted = format!("{repeated}{}", fresh_block("queue probe"));
+        Ledger::new(&store, "s1")
+            .with_project("/repo")
+            .project(&repeated);
+
+        let folded = Ledger::new(&store, "s2")
+            .with_project("/repo")
+            .from("cat handlers.log")
+            .project(&unbudgeted)
+            .expect("a command that named no line budget still folds");
+        assert!(
+            folded.contains("not shown here"),
+            "the unbudgeted arm stopped folding, so this test no longer proves \
+             the guard reads the command: {folded}"
+        );
+
+        // Same store, same project history, survivors of its own. Only the
+        // command differs.
+        let view = Ledger::new(&store, "s3")
+            .with_project("/repo")
+            .from("cat notes.md; echo ---; tail -5 handlers.log")
+            .project(&budgeted)
+            .unwrap_or_else(|| budgeted.clone());
+        assert!(
+            !view.contains("not shown here"),
+            "a tail -5 was answered with a handle for lines this session never held: {view}"
+        );
+        assert!(
+            view.contains("handler finished request 0"),
+            "the budgeted arm kept the marker out but lost the lines anyway: {view}"
+        );
+    }
+
+    /// The predicate on its own, in both directions. A line budget counts and a
+    /// byte budget or a follow does not, and neither does a word that merely
+    /// contains one of the names.
+    #[test]
+    fn rations_its_output_reads_a_line_budget_and_nothing_else() {
+        for cmd in [
+            "tail -5 notes.md",
+            "tail -n 5 notes.md",
+            "cargo test | tail -30",
+            "head -20 src/main.rs",
+            "head notes.md",
+            "/usr/bin/tail -1 notes.md",
+        ] {
+            assert!(rations_its_output(cmd), "should ration: {cmd}");
+        }
+        for cmd in [
+            "tail -f /var/log/app.log",
+            "head -c 200 notes.md",
+            "cat notes.md",
+            "kubectl logs pod --tail=20",
+            "npm run build -- --watch tailwind.config.js",
+        ] {
+            assert!(!rations_its_output(cmd), "should not ration: {cmd}");
+        }
     }
 
     /// #567. The run marker said `from an earlier session`, which states where the

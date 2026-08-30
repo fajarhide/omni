@@ -359,6 +359,11 @@ fn distill(
             .with_project(crate::paths::project_key(std::path::Path::new(
                 &project_path,
             )))
+            // #736, the third door. `post_tool` named its command and this did
+            // not, which is the drift #452, #454 and #456 each paid for once:
+            // one pipeline, two entrances, a fix applied to whichever one the
+            // report happened to come through.
+            .from(command_name.unwrap_or(""))
             .by(resolve_pipe_agent_id())
             .project(&output)
     {

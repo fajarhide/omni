@@ -811,6 +811,12 @@ pub fn process_payload(
             .with_project(crate::paths::project_key(std::path::Path::new(
                 &project_path,
             )))
+            // #736. This is the door a Bash reply comes through, and it was the
+            // one door of three that never named its command, so every guard and
+            // marker reading the source was inert here. #735's fix went in at
+            // `fold_cross_turn` and did nothing to a real `tail -5` until this
+            // line existed.
+            .from(normalized.command.as_str())
             .by(_agent_id)
             .project(&final_out)
     {
