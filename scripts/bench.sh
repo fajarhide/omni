@@ -48,7 +48,7 @@ trap 'rm -f "$LOG"' EXIT
 # Cost: the competitor arms spawn a process per trace, so a full run is ~20 minutes
 # against ~40 seconds for ours alone. `OMNI_BENCH_ARMS=off` skips them when the
 # question is only whether a change moved our own number.
-declare -a ARMS_RUN=()
+declare -a ARMS_RUN=() ARMS_ABSENT=()
 if [ "${OMNI_BENCH_ARMS:-on}" != "off" ]; then
   # caveman is not on PATH and is not a bare `caveman`: the binary that compresses
   # is `caveman-engine`. See the caveman_out docstring for what naming a plausible
@@ -59,11 +59,19 @@ if [ "${OMNI_BENCH_ARMS:-on}" != "off" ]; then
   : "${OMNI_BENCH_CAVEMAN:=$([ -x "$HOME/.caveman/bin/caveman-engine" ] && echo "$HOME/.caveman/bin/caveman-engine" || true)}"
   for arm in RTK LEANCTX HEADROOM CAVEMAN; do
     var="OMNI_BENCH_$arm"
-    if [ -n "${!var:-}" ]; then export "$var"; ARMS_RUN+=("$arm"); else unset "$var" || true; fi
+    if [ -n "${!var:-}" ]; then
+      export "$var"; ARMS_RUN+=("$arm")
+    else
+      # Greptile on #712. An arm nobody could find used to vanish without a trace,
+      # so a three-arm table and a four-arm table were the same artifact. Recorded
+      # rather than refused: a machine without the competitors installed still has
+      # a legitimate reason to run this, and the artifact should say which it is.
+      unset "$var" || true; ARMS_ABSENT+=("$arm")
+    fi
   done
 fi
 echo "replaying $(wc -l < "$CORPUS" | tr -d ' ') traces against $VERSION ($COMMIT)"
-echo "arms: ${ARMS_RUN[*]:-none}"
+echo "arms: ${ARMS_RUN[*]:-none}${ARMS_ABSENT:+ (absent: ${ARMS_ABSENT[*]})}"
 OMNI_BENCH_CORPUS="$CORPUS" \
   cargo test --release --test bench_replay -- --ignored --nocapture >"$LOG" 2>&1 || {
   tail -30 "$LOG" >&2
@@ -75,10 +83,11 @@ mkdir -p "$OUT_DIR"
 # here, so this script cannot disagree with the harness it ran. A missing field
 # is left null instead of defaulted: a benchmark that reports 0 where it failed
 # to read is the failure mode this whole ticket is about.
-python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" "${ARMS_RUN[*]:-}" <<'PY'
+python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" "${ARMS_RUN[*]:-}" \
+  "${ARMS_ABSENT[*]:-}" <<'PY'
 import json, re, sys
 
-log, manifest_path, version, commit, out_dir, dirty, arms_run = sys.argv[1:8]
+log, manifest_path, version, commit, out_dir, dirty, arms_run, arms_absent = sys.argv[1:9]
 text = open(log, errors="replace").read()
 manifest = json.load(open(manifest_path))
 
@@ -270,9 +279,18 @@ report = {
         # arms are absent from the dict; an arm that was named and produced no row
         # aborts below rather than being published as a zero.
         "arms": arms(),
+        # Greptile on #712. Which competitors this machine could not find, so a
+        # table with three arms cannot be read as a complete four-arm comparison.
+        "arms_absent": arms_absent.split(),
     },
 }
-missing = [k for k, v in report["result"].items() if v is None or v == {}]
+required = dict(report["result"])
+# The replay prints the head-to-head block only when at least one competitor was
+# named, so with `OMNI_BENCH_ARMS=off` an empty `arms` is the correct answer rather
+# than a failed read. Required whenever an arm was asked for, and only then.
+if not arms_run.split():
+    required.pop("arms", None)
+missing = [k for k, v in required.items() if v is None or v == {}]
 if missing:
     sys.exit(f"replay output did not carry: {', '.join(missing)}")
 
@@ -293,6 +311,28 @@ silent = [
 ]
 if silent:
     sys.exit(f"named arms produced no row: {'; '.join(silent)}")
+
+# Greptile on #712, and the sharper half of the same defect. Every competitor arm
+# returns the raw payload on any failure, `rtk_out` from three separate paths, so a
+# binary that cannot spawn, cannot parse its arguments, or writes nothing does not go
+# silent. It emits a full table of unchanged bytes and lands as a tidy 0.0% row. That
+# is what `caveman tools compress` was doing, and a presence check cannot see it.
+#
+# headroom is deliberately not probed here: its arm panics outright when it produces
+# no number (#711), and a headroom that deduped nothing would read as our own
+# filters-only figure rather than as zero, so a zero test would never fire on it.
+PROBE = {"RTK": "rtk", "LEANCTX": "lean_ctx", "CAVEMAN": "caveman"}
+inert = [
+    f"{arm} ({key} saved {report['result']['arms'][key]['saved_pct']}%)"
+    for arm in arms_run.split()
+    for key in [PROBE.get(arm)]
+    if key and report["result"]["arms"].get(key, {}).get("saved_pct") == 0.0
+]
+if inert:
+    sys.exit(
+        "named arms changed nothing on any trace, which is a broken binary and not "
+        f"a measured loss: {'; '.join(inert)}"
+    )
 
 path = f"{out_dir}/{version}.json"
 with open(path, "w") as fh:
