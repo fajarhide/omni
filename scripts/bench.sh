@@ -51,8 +51,8 @@ trap 'rm -f "$LOG"' EXIT
 declare -a ARMS_RUN=()
 if [ "${OMNI_BENCH_ARMS:-on}" != "off" ]; then
   # caveman is not on PATH and is not a bare `caveman`: the binary that compresses
-  # is `caveman-engine`. See the caveman_out docstring for what naming the wrong one
-  # produced for four releases.
+  # is `caveman-engine`. See the caveman_out docstring for what naming a plausible
+  # sibling produces instead, which is a silent zero.
   : "${OMNI_BENCH_RTK:=$(command -v rtk || true)}"
   : "${OMNI_BENCH_LEANCTX:=$(command -v lean-ctx || true)}"
   : "${OMNI_BENCH_HEADROOM:=$(command -v headroom || true)}"

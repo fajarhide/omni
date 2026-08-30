@@ -342,18 +342,22 @@ fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
 /// nothing has to be parsed out of the bytes being counted, and our ledger can be
 /// stacked on top the way it is on rtk.
 ///
-/// **The arm was `caveman tools compress` until #712 and that was never a real
-/// command.** There is no `caveman` on this machine, only `caveman-engine`,
-/// `caveman-shrink` and friends under `~/.caveman/bin`. Pointed at `caveman-shrink`,
-/// which is the plausible guess, `tools compress` is not a subcommand it knows: it
-/// falls through to shrink mode, types every payload as `toolschema`, and returns
-/// the input with `"ratio":0`. A competitor arm that reports zero on every trace
-/// reads as a competitor that lost, so this spent its whole life looking like a
-/// result. Same shape as #711's silent headroom arm.
+/// **The arm was `caveman tools compress` until #712, and there is no longer a
+/// `caveman` to run it.** `~/.caveman/bin` holds `caveman-engine`, `caveman-shrink`
+/// and four others; nothing on this machine answers to a bare `caveman`. The 0.7.5
+/// table's 6.8% came from a wrapper that is gone, so that row cannot be reproduced
+/// and is history rather than a baseline.
+///
+/// What makes this worth a comment is how it fails now. Pointed at `caveman-shrink`,
+/// the plausible guess, `tools compress` is not a subcommand it knows: it falls
+/// through to shrink mode, types every payload as `toolschema` and returns the input
+/// with `"ratio":0`. A competitor arm reporting zero on every trace reads as a
+/// competitor that lost, which is #711's shape with a different binary.
 ///
 /// `caveman-engine compress` is the real entry point, and it is self-contained: it
-/// needs neither `CAVEMAN_HOME` nor the other binaries. The env is kept because it
-/// costs nothing and the sibling binaries do read it.
+/// needs neither `CAVEMAN_HOME` nor the other binaries (verified by running it under
+/// an empty `HOME` with the variable unset). The env is kept because it costs
+/// nothing and the sibling binaries do read it.
 ///
 /// **It is handed less than the other two arms.** rtk gets the filter name and
 /// lean-ctx gets `--shell <cmd>`; caveman-engine takes no command hint at all
