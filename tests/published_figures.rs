@@ -35,6 +35,18 @@ const RETIRED: &[&str] = &[
     "3,703", // other, calls
     "10.93", // file read, input MB
     "11.05", // other, input MB
+    // #712. The head to head from that same corpus. It was withdrawn from every
+    // claim surface rather than restated, and the guard is what keeps it withdrawn:
+    // these are the numbers a copy edit would reach for to fill the gap back in.
+    "65.8", // headroom dedup over our filters
+    "49.4", // lean-ctx compress
+    "61.4", // rtk + our ledger
+    "61.7", // caveman + our ledger
+            // rtk alone (6.2) and caveman alone (6.8) are deliberately absent. The
+            // match is a substring, so `6.2` also hits every `0.6.2` in a changelog
+            // link or a version string. A two-significant-digit figure cannot be
+            // guarded this way, and a check that fires on version numbers gets
+            // disabled, which is worse than the gap.
 ];
 
 fn root() -> PathBuf {
@@ -203,6 +215,18 @@ fn the_generated_table_was_produced_from_the_current_corpus() {
             // table as "0.0". Rust's default float formatting writes that as
             // "0", which is not a number the table contains.
             allowed.push(format!("{:.1}", row[key].as_f64().unwrap_or(-1.0)));
+        }
+    }
+    // #712. The head-to-head rows are generated into the same region, so the same
+    // rule covers them: a competitor's percentage edited by hand is a claim about a
+    // measurement that was never made, and it is the direction of edit nobody
+    // double-checks because it flatters us.
+    if let Some(arms) = data["result"]["arms"].as_object() {
+        for arm in arms.values() {
+            for key in ["input_bytes", "output_bytes"] {
+                allowed.push(commas(arm[key].as_u64().unwrap_or(0)));
+            }
+            allowed.push(format!("{:.1}", arm["saved_pct"].as_f64().unwrap_or(-1.0)));
         }
     }
 

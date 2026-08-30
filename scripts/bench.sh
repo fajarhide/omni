@@ -40,7 +40,30 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then DIRTY=true; else DIRTY=fa
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
 
+# #712. The head to head used to live only in a session's scrollback, so the
+# README could claim OMNI was the top arm while the last actual run said otherwise
+# and nobody could check. An arm runs whenever its binary is on this machine, and
+# what ran lands in the artifact next to our own figures.
+#
+# Cost: the competitor arms spawn a process per trace, so a full run is ~20 minutes
+# against ~40 seconds for ours alone. `OMNI_BENCH_ARMS=off` skips them when the
+# question is only whether a change moved our own number.
+declare -a ARMS_RUN=()
+if [ "${OMNI_BENCH_ARMS:-on}" != "off" ]; then
+  # caveman is not on PATH and is not a bare `caveman`: the binary that compresses
+  # is `caveman-engine`. See the caveman_out docstring for what naming a plausible
+  # sibling produces instead, which is a silent zero.
+  : "${OMNI_BENCH_RTK:=$(command -v rtk || true)}"
+  : "${OMNI_BENCH_LEANCTX:=$(command -v lean-ctx || true)}"
+  : "${OMNI_BENCH_HEADROOM:=$(command -v headroom || true)}"
+  : "${OMNI_BENCH_CAVEMAN:=$([ -x "$HOME/.caveman/bin/caveman-engine" ] && echo "$HOME/.caveman/bin/caveman-engine" || true)}"
+  for arm in RTK LEANCTX HEADROOM CAVEMAN; do
+    var="OMNI_BENCH_$arm"
+    if [ -n "${!var:-}" ]; then export "$var"; ARMS_RUN+=("$arm"); else unset "$var" || true; fi
+  done
+fi
 echo "replaying $(wc -l < "$CORPUS" | tr -d ' ') traces against $VERSION ($COMMIT)"
+echo "arms: ${ARMS_RUN[*]:-none}"
 OMNI_BENCH_CORPUS="$CORPUS" \
   cargo test --release --test bench_replay -- --ignored --nocapture >"$LOG" 2>&1 || {
   tail -30 "$LOG" >&2
@@ -52,10 +75,10 @@ mkdir -p "$OUT_DIR"
 # here, so this script cannot disagree with the harness it ran. A missing field
 # is left null instead of defaulted: a benchmark that reports 0 where it failed
 # to read is the failure mode this whole ticket is about.
-python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" <<'PY'
+python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" "${ARMS_RUN[*]:-}" <<'PY'
 import json, re, sys
 
-log, manifest_path, version, commit, out_dir, dirty = sys.argv[1:7]
+log, manifest_path, version, commit, out_dir, dirty, arms_run = sys.argv[1:8]
 text = open(log, errors="replace").read()
 manifest = json.load(open(manifest_path))
 
@@ -109,6 +132,39 @@ def num(pattern):
 def whole(pattern):
     m = re.search(pattern, text)
     return int(m.group(1)) if m else None
+
+
+def arms():
+    """The head-to-head rows, parsed from the same output as everything else.
+
+    Each row is `<label>  <raw> -> <out>  <pct>%`, printed only when that arm's
+    binary was named. Labels are matched exactly rather than by shape, so a new row
+    is a deliberate addition here and a renamed one fails the silence check below
+    instead of quietly disappearing from the artifact.
+    """
+    labels = {
+        "omni, filters only": "omni_filters",
+        "omni, with ledger": "omni_ledger",
+        "rtk pipe": "rtk",
+        "rtk pipe + our ledger": "rtk_ledger",
+        "caveman compress": "caveman",
+        "caveman + our ledger": "caveman_ledger",
+        "headroom dedup": "headroom",
+        "lean-ctx compress": "lean_ctx",
+    }
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r"^(\S.*?)\s{2,}(\d+) -> \s*(\d+)\s+([\d.]+)%", line)
+        if not m:
+            continue
+        key = labels.get(m.group(1).strip())
+        if key:
+            out[key] = {
+                "input_bytes": int(m.group(2)),
+                "output_bytes": int(m.group(3)),
+                "saved_pct": float(m.group(4)),
+            }
+    return out
 
 
 def by_class():
@@ -210,11 +266,33 @@ report = {
         # ledger takes stays in a narrow band. A savings percentage describes the
         # week; this describes OMNI.
         "by_class": by_class(),
+        # #712. The head to head, recorded rather than left in a scrollback. Absent
+        # arms are absent from the dict; an arm that was named and produced no row
+        # aborts below rather than being published as a zero.
+        "arms": arms(),
     },
 }
 missing = [k for k, v in report["result"].items() if v is None or v == {}]
 if missing:
     sys.exit(f"replay output did not carry: {', '.join(missing)}")
+
+# #711's lesson, applied to the artifact. A named arm that prints nothing is what
+# let headroom sit out every published comparison while the table still read as a
+# four-arm result. Silence is a failure, never a loss.
+EXPECTED = {
+    "RTK": ("rtk", "rtk_ledger"),
+    "LEANCTX": ("lean_ctx",),
+    "HEADROOM": ("headroom",),
+    "CAVEMAN": ("caveman", "caveman_ledger"),
+}
+silent = [
+    f"{arm} ({', '.join(k for k in keys if k not in report['result']['arms'])})"
+    for arm in arms_run.split()
+    for keys in [EXPECTED[arm]]
+    if any(k not in report["result"]["arms"] for k in keys)
+]
+if silent:
+    sys.exit(f"named arms produced no row: {'; '.join(silent)}")
 
 path = f"{out_dir}/{version}.json"
 with open(path, "w") as fh:

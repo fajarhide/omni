@@ -337,20 +337,37 @@ fn rtk_out(rtk: &str, cmd: &str, raw: &str) -> String {
 
 /// What caveman delivers for one payload.
 ///
-/// `caveman tools compress` takes the payload on stdin and writes the compressed
+/// `caveman-engine compress` takes the payload on stdin and writes the compressed
 /// text on **stdout**; its metrics JSON goes to stderr, so unlike the lean-ctx arm
 /// nothing has to be parsed out of the bytes being counted, and our ledger can be
 /// stacked on top the way it is on rtk.
 ///
+/// **The arm was `caveman tools compress` until #712, and there is no longer a
+/// `caveman` to run it.** `~/.caveman/bin` holds `caveman-engine`, `caveman-shrink`
+/// and four others; nothing on this machine answers to a bare `caveman`. The 0.7.5
+/// table's 6.8% came from a wrapper that is gone, so that row cannot be reproduced
+/// and is history rather than a baseline.
+///
+/// What makes this worth a comment is how it fails now. Pointed at `caveman-shrink`,
+/// the plausible guess, `tools compress` is not a subcommand it knows: it falls
+/// through to shrink mode, types every payload as `toolschema` and returns the input
+/// with `"ratio":0`. A competitor arm reporting zero on every trace reads as a
+/// competitor that lost, which is #711's shape with a different binary.
+///
+/// `caveman-engine compress` is the real entry point, and it is self-contained: it
+/// needs neither `CAVEMAN_HOME` nor the other binaries (verified by running it under
+/// an empty `HOME` with the variable unset). The env is kept because it costs
+/// nothing and the sibling binaries do read it.
+///
 /// **It is handed less than the other two arms.** rtk gets the filter name and
-/// lean-ctx gets `--shell <cmd>`; caveman accepts no command hint (verified: the
-/// output is byte-identical with and without `--shell`, `--command` and `--cmd`),
-/// so it infers the shape from content alone. That handicap runs against it, which
-/// is worth saying out loud in the direction that does not flatter us.
+/// lean-ctx gets `--shell <cmd>`; caveman-engine takes no command hint at all
+/// (`--shell`, `--command`, `--cmd` and `--hint` each make it exit with empty
+/// stdout), so it infers the shape from content alone. That handicap runs against
+/// it, which is worth saying out loud in the direction that does not flatter us.
 fn caveman_out(bin: &str, home: &str, raw: &str) -> String {
     use std::io::Write;
     let Ok(mut child) = std::process::Command::new(bin)
-        .args(["tools", "compress"])
+        .args(["compress"])
         // The harness repoints HOME, which would leave caveman unable to find its
         // own binaries and silently passing everything through. See the call site.
         .env("CAVEMAN_HOME", home)
@@ -795,10 +812,11 @@ fn replay_execution_traces_net_savings() {
     // Second competitor arm, same rule: off unless the binary is named.
     let lean_ctx = std::env::var("OMNI_BENCH_LEANCTX").ok();
     let (mut lc_total, mut lc_claimed) = (0u64, 0u64);
-    // Fourth arm. `OMNI_BENCH_CAVEMAN` names the `caveman` CLI. It is the first
-    // competitor that ships both halves of OMNI's shape: `tools compress` is the
-    // filter tier and `tools retrieve` recovers byte-exact content, so it earns
-    // the same ledger-stacked row rtk gets rather than a filters-only row.
+    // Fourth arm. `OMNI_BENCH_CAVEMAN` names `~/.caveman/bin/caveman-engine`, not a
+    // bare `caveman`, which does not exist. It is the first competitor that ships
+    // both halves of OMNI's shape: `compress` is the filter tier and `retrieve
+    // <handle>` recovers the content behind the handle it leaves in the output, so
+    // it earns the same ledger-stacked row rtk gets rather than a filters-only row.
     let caveman = std::env::var("OMNI_BENCH_CAVEMAN").ok();
     let (mut cm_total, mut cm_claimed) = (0u64, 0u64);
     let cm_ledger_dir = tempfile::tempdir().expect("caveman ledger home");

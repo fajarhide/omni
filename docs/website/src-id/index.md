@@ -184,14 +184,14 @@ capture rate-nya berjalan dari **10,5%** pada infra sampai **25,3%** pada pembac
 ulang file, jadi cari kelas yang benar-benar Anda jalankan. Itu rata-rata nyata atas
 campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari hari yang bagus.
 
-**Tidak ada adu langsung yang berlaku saat ini, dan yang terakhir tidak menguntungkan
-kami.** Dari empat alat sebanding, satu tidak terpasang di mesin pengukur dan babak
-untuk satu-satunya alat lain yang mengirimkan dedup lintas giliran yang sama justru
-crash. Dari dua yang benar-benar jalan, penyaring satu alat ditambah ledger kami
-mengalahkan milik kami dengan selisih 0,7 poin. Alih-alih menerbitkan hasil tiga dari
-empat babak tanpa babak yang justru menjadi inti perbandingannya, klaimnya dicabut
-sampai bisa diukur dengan benar. Apa yang jalan, dan apa hasilnya, ada di halaman
-Benchmarks.
+**Keempat babak sekarang jalan, dan di korpus ini OMNI bukan babak teratas.** Alat
+yang mengirimkan dedup lintas giliran yang sama mengambil 5,8% dari byte ini,
+sementara ledger kami mengambil 4,9%, di atas penyaring yang sama dan blok yang sama,
+jadi selisih itu murni mesin dedupnya. Penyaring kami paling lemah dari keempatnya
+dengan 1,4%, dan itulah sebabnya ledger kami sendiri justru mencetak angka lebih
+tinggi ketika ditumpuk di atas penyaring pesaing ketimbang di atas milik kami.
+Tabelnya dihasilkan oleh run yang sama dengan setiap angka lain di sini, dan ada di
+halaman Benchmarks.
 [Benchmarks](https://omni.weekndlabs.com/docs/develop/benchmarks) memuat
 metodenya dan perintah untuk mereproduksi setiap baris di riwayat Anda sendiri.
 

@@ -25,17 +25,26 @@ vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
 |---|---|---|---|---|---|---|
-| other | 6,457 | 4.81 MB | 0.8% | 4.8% | 15.9% | **25.1%** |
-| file read | 1,056 | 1.89 MB | 0.0% | 4.5% | 17.7% | **25.3%** |
-| git | 899 | 0.86 MB | 5.1% | 8.8% | 18.4% | **20.8%** |
+| other | 6,457 | 4.81 MB | 0.8% | 4.6% | 15.9% | **24.3%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 4.3% | 17.7% | **24.4%** |
+| git | 899 | 0.86 MB | 5.1% | 8.6% | 18.4% | **20.1%** |
 | search | 810 | 0.77 MB | 3.4% | 4.2% | 6.5% | **13.7%** |
 | infra | 215 | 0.14 MB | 3.2% | 3.8% | 5.5% | **10.5%** |
 | build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
-| **aggregate** | 9,478 | 8.49 MB | 1.4% | 5.1% | 15.6% | **24.1%** |
+| **aggregate** | 9,478 | 8.49 MB | 1.4% | 4.9% | 15.6% | **23.3%** |
+
+| Arm | bytes | saved |
+|---|---|---|
+| headroom dedup, omni's filters | 8,486,830 to 7,992,449 | 5.8% |
+| rtk + omni's ledger | 8,486,830 to 8,004,410 | 5.7% |
+| caveman + omni's ledger | 8,486,830 to 8,009,164 | 5.6% |
+| **omni, with the ledger** | 8,486,830 to 8,067,201 | 4.9% |
+| lean-ctx `compress` | 8,486,830 to 8,076,957 | 4.8% |
+| caveman `compress` | 8,486,830 to 8,311,999 | 2.1% |
+| rtk `pipe` | 8,486,830 to 8,308,491 | 2.1% |
+| omni, filters only | 8,486,830 to 8,371,362 | 1.4% |
 
 Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.8.
-
-Every figure on this page is byte-identical to the 0.7.7 run on the same corpus: `docs/benchmarks/0.7.7.json` and `0.7.8.json` differ only in `version` and in `dirty_tree`, which was `true` for 0.7.7 and is `false` here. 0.7.8 is a reporting release and changed no distiller, so the numbers not moving is the expected result rather than a coincidence, and the clean-tree run retroactively confirms the ones taken with uncommitted changes present.
 <!-- omni:corpus-table:end -->
 
 **`available` and `captured` are new, and `captured` is the figure that survives a
@@ -58,12 +67,38 @@ including the count-preserving fold added in #664, is not exercised by any figur
 page. That gap is the honest reason the fold's own numbers live in
 `changelog.d/664.changed.md` with their own corpus instead of here.
 
-**No head-to-head in this run.** Of four competitor arms, `caveman` is not installed on
-the measuring machine and the `headroom` arm crashes (#711). headroom is the only one of
-the four shipping the same cross-turn dedup, so it is the arm the comparison is about,
-and a three-of-four run missing it is not published as one (#712). For the record, of the
-two that did run: rtk alone took 2.1%, lean-ctx 4.8%, and rtk's filters plus our ledger
-took 5.8% against our own 5.1%. On this corpus we are not the top arm.
+**All four arms answer now, and the table above is the result.** #711 fixed the
+headroom arm. The caveman arm was calling `caveman tools compress`, and nothing on the
+measuring machine answers to a bare `caveman`: `~/.caveman/bin` holds `caveman-engine`,
+`caveman-shrink` and four others. Pointed at `caveman-shrink`, `tools compress` is not
+a subcommand it knows, so it falls through to shrink mode and hands back the input with
+`"ratio":0`. An arm reporting zero on every trace reads as an arm that lost, which is
+#711's failure wearing a different binary. `caveman-engine compress` is the entry point
+that works (#712).
+
+**On this corpus OMNI is last of the four rows that carry a ledger, and both halves are
+behind.** headroom's dedup takes 5.8% where ours takes 4.9% over identical filters and
+identical blocks, so that 0.9 points is the dedup engine alone. Our filter tier is the
+weakest of the four at 1.4%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
+and that shortfall is what carries `rtk + omni's ledger` and `caveman + omni's ledger`
+above our own stack: the ledger is identical in all three rows and only the filters
+underneath it differ.
+
+lean-ctx beating our filters by 3.4 points is the largest single gap here and it is not
+argued away. It is a deep compressor rather than a per-command filter, and the same
+shape showed up on the 0.7.5 corpus below at a much larger magnitude.
+
+Versions: rtk 0.45.0, lean-ctx 3.9.18, caveman `bin-v1.0.0`, headroom 0.34.0. No
+`lean-ctx + our ledger` row: its preview reports `compressed_bytes` and never emits the
+text, so the row could only be estimated, and an estimate beside four measurements is
+the blend this harness exists to avoid.
+
+**The aggregate moved from 5.1% to 4.9% on the same corpus, and it was paid for on
+purpose.** Replaying the frozen corpus at the two commits either side of #728 puts the
+whole move on that one change: 5.1% and 24.1% captured before it, 4.9% and 23.3% after.
+#728 stopped the project scope folding a whole reply where it should fold part of one,
+and folding less is the point of that fix. The corpus hash did not change, so the delta
+is code alone.
 
 ## The 0.7.5 run, 2026-08-14, which can no longer be re-derived
 
