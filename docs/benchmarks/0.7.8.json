@@ -1,5 +1,5 @@
 {
-  "commit": "33de7b9",
+  "commit": "324b515",
   "corpus": {
     "buckets": [
       [
@@ -45,14 +45,56 @@
   },
   "dirty_tree": false,
   "result": {
+    "arms": {
+      "caveman": {
+        "input_bytes": 8486830,
+        "output_bytes": 8311999,
+        "saved_pct": 2.1
+      },
+      "caveman_ledger": {
+        "input_bytes": 8486830,
+        "output_bytes": 8009164,
+        "saved_pct": 5.6
+      },
+      "headroom": {
+        "input_bytes": 8486830,
+        "output_bytes": 7992449,
+        "saved_pct": 5.8
+      },
+      "lean_ctx": {
+        "input_bytes": 8486830,
+        "output_bytes": 8076957,
+        "saved_pct": 4.8
+      },
+      "omni_filters": {
+        "input_bytes": 8486830,
+        "output_bytes": 8371362,
+        "saved_pct": 1.4
+      },
+      "omni_ledger": {
+        "input_bytes": 8486830,
+        "output_bytes": 8067201,
+        "saved_pct": 4.9
+      },
+      "rtk": {
+        "input_bytes": 8486830,
+        "output_bytes": 8308491,
+        "saved_pct": 2.1
+      },
+      "rtk_ledger": {
+        "input_bytes": 8486830,
+        "output_bytes": 8004410,
+        "saved_pct": 5.7
+      }
+    },
     "by_class": {
       "aggregate": {
         "calls": 9478,
-        "capture_rate_pct": 24.1,
+        "capture_rate_pct": 23.3,
         "filters_pct": 1.4,
         "input_bytes": 8486830,
         "repetition_available_pct": 15.6,
-        "with_ledger_pct": 5.1
+        "with_ledger_pct": 4.9
       },
       "build and test": {
         "calls": 41,
@@ -64,19 +106,19 @@
       },
       "file read": {
         "calls": 1056,
-        "capture_rate_pct": 25.3,
+        "capture_rate_pct": 24.4,
         "filters_pct": 0.0,
         "input_bytes": 1891398,
         "repetition_available_pct": 17.7,
-        "with_ledger_pct": 4.5
+        "with_ledger_pct": 4.3
       },
       "git": {
         "calls": 899,
-        "capture_rate_pct": 20.8,
+        "capture_rate_pct": 20.1,
         "filters_pct": 5.1,
         "input_bytes": 858631,
         "repetition_available_pct": 18.4,
-        "with_ledger_pct": 8.8
+        "with_ledger_pct": 8.6
       },
       "infra": {
         "calls": 215,
@@ -88,11 +130,11 @@
       },
       "other": {
         "calls": 6457,
-        "capture_rate_pct": 25.1,
+        "capture_rate_pct": 24.3,
         "filters_pct": 0.8,
         "input_bytes": 4814911,
         "repetition_available_pct": 15.9,
-        "with_ledger_pct": 4.8
+        "with_ledger_pct": 4.6
       },
       "search": {
         "calls": 810,
@@ -103,7 +145,7 @@
         "with_ledger_pct": 4.2
       }
     },
-    "ledger_claimed_pct": 3.7,
+    "ledger_claimed_pct": 3.6,
     "net_savings_pct": 1.4,
     "repeated_bytes_pct": 15.4,
     "traces_replayed": 9478
