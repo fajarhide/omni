@@ -321,12 +321,21 @@ if silent:
 # headroom is deliberately not probed here: its arm panics outright when it produces
 # no number (#711), and a headroom that deduped nothing would read as our own
 # filters-only figure rather than as zero, so a zero test would never fire on it.
+#
+# Greptile again, on the first version of this check: it read `saved_pct`, which is
+# rounded to one decimal, so a competitor that genuinely saved under 0.05% would have
+# been failed as broken. The bytes are in the artifact unrounded, and `output ==
+# input` says exactly what this needs to say, that not one byte moved across the whole
+# corpus. rtk's own claimed count cannot stand in for it: `rtk_claimed` counts
+# commands *our* `rtk_filter` mapped, whether or not their binary then did anything.
 PROBE = {"RTK": "rtk", "LEANCTX": "lean_ctx", "CAVEMAN": "caveman"}
 inert = [
-    f"{arm} ({key} saved {report['result']['arms'][key]['saved_pct']}%)"
+    f"{arm} ({key} returned all {report['result']['arms'][key]['input_bytes']:,} bytes)"
     for arm in arms_run.split()
     for key in [PROBE.get(arm)]
-    if key and report["result"]["arms"].get(key, {}).get("saved_pct") == 0.0
+    if key
+    and (a := report["result"]["arms"].get(key))
+    and a["output_bytes"] == a["input_bytes"]
 ]
 if inert:
     sys.exit(
