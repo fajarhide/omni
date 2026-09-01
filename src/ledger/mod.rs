@@ -916,22 +916,79 @@ fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Seen>) ->
 
 /// Whether the command rationed its own output to a set of lines it named.
 ///
-/// `head` and `tail` only, and only when they are counting lines. `tail -f`
-/// never ends and `head -c` counts bytes, so neither of those says the reader
-/// picked a set of lines it now wants to read. A bare `head file` is as explicit
-/// as `head -10 file`, since the default is what the reader accepted.
+/// Three forms, and they are one idea: the caller said which lines it wants, so
+/// those lines are the answer rather than the background. `head` and `tail`
+/// counting lines, and a `sed` address naming line numbers. `tail -f` never ends
+/// and `head -c` counts bytes, so neither names a set of lines. A bare
+/// `head file` is as explicit as `head -10 file`, since the default is what the
+/// reader accepted.
 ///
-/// Matched on whole tokens and on the basename, so `/usr/bin/tail` counts and a
-/// `--tail` flag or a `tailwind` argument does not.
+/// **Only in command position** (#738). The first shipped version matched the
+/// name anywhere, so `grep -rn head src/` and `ls | grep tail` read as a reader
+/// rationing itself when the word was somebody else's argument. That is a fold
+/// given up for nothing, on two shapes this repository runs constantly.
+///
+/// **`sed` ranges count** (#741). The first version covered `head` and `tail`
+/// only, and shipped one command family too narrow: `sed -n 60,200p` of a source
+/// file names its lines exactly as `tail -5` does, and folding it handed the
+/// reader a marker where it was about to edit that code.
+/// `registry::passes_through_verbatim` already groups `sed` with `head` and
+/// `tail` for the collapse fallback, under this same reasoning.
+///
+/// **`awk` is deliberately not covered.** Its line selection is an expression
+/// rather than a flag, no report has produced one, and the obvious guess is
+/// wrong: `NR` appears in `{print NR}`, which prints line numbers rather than
+/// selecting them. It gets added when a payload demands it, not before.
+///
+/// Matched on the basename, so `/usr/bin/tail` counts and a `--tail` flag or a
+/// `tailwind` argument does not.
 fn rations_its_output(command: &str) -> bool {
     let tokens: Vec<&str> = command.split_whitespace().collect();
     tokens.iter().enumerate().any(|(i, tok)| {
-        let base = tok.rsplit('/').next().unwrap_or(tok);
-        (base == "head" || base == "tail")
-            && tokens.get(i + 1).is_none_or(|next| {
+        if !opens_a_command(&tokens, i) {
+            return false;
+        }
+        match tok.rsplit('/').next().unwrap_or(tok) {
+            "head" | "tail" => tokens.get(i + 1).is_none_or(|next| {
                 !(next.starts_with('-') && next.trim_start_matches('-').starts_with(['c', 'f']))
-            })
+            }),
+            "sed" => tokens[i + 1..].iter().any(|a| names_line_numbers(a)),
+            _ => false,
+        }
     })
+}
+
+/// Whether the token at `i` is the first word of a command.
+///
+/// The first word of the reply, or the first word after a shell separator. The
+/// separator is usually glued to the token before it (`notes.md;`), which is why
+/// this reads the end of the previous token rather than looking for a bare one.
+///
+/// A separator glued to the *following* token (`cat a.md;tail -5 b`) is not
+/// recognised, so that shape folds as before. It is left alone rather than
+/// split here: agents write the spaced form, and a tokeniser is a larger thing
+/// than this predicate deserves.
+fn opens_a_command(tokens: &[&str], i: usize) -> bool {
+    match i.checked_sub(1).map(|p| tokens[p]) {
+        None => true,
+        Some(prev) => prev.ends_with([';', '|', '&']),
+    }
+}
+
+/// A `sed` address that names line numbers: `5p`, `60,200p`, quoted or not.
+///
+/// A pattern address (`/foo/p`) and a substitution (`s/a/b/`) are both refused.
+/// They filter, which is a different claim from naming the lines wanted, and the
+/// ledger only steps aside for the second.
+fn names_line_numbers(arg: &str) -> bool {
+    let Some(body) = arg.trim_matches(['\'', '"']).strip_suffix('p') else {
+        return false;
+    };
+    let (start, end) = body.split_once(',').unwrap_or((body, body));
+    !start.is_empty()
+        && !end.is_empty()
+        && start.bytes().all(|b| b.is_ascii_digit())
+        && end.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// A line's identity in the ledger.
@@ -1600,6 +1657,13 @@ mod tests {
             "head -20 src/main.rs",
             "head notes.md",
             "/usr/bin/tail -1 notes.md",
+            // After a separator, which is normally glued to the token before it.
+            "cat notes.md; echo ---; tail -5 handlers.log",
+            "cat a.md && head -3 b.md",
+            // #741, the reported command, unquoted and quoted.
+            "sed -n 60,200p app/run-panel.tsx",
+            "sed -n '285,340p' src/lib.rs",
+            "sed -n 5p notes.md",
         ] {
             assert!(rations_its_output(cmd), "should ration: {cmd}");
         }
@@ -1609,6 +1673,18 @@ mod tests {
             "cat notes.md",
             "kubectl logs pod --tail=20",
             "npm run build -- --watch tailwind.config.js",
+            // #738. The word is somebody else's argument, not a reader
+            // rationing itself, and both of these run constantly here.
+            "grep tail notes.md",
+            "grep -rn head src/",
+            "ls | grep tail",
+            "cat tail",
+            // A `sed` that filters rather than naming lines.
+            "sed -n '/failed/p' build.log",
+            "sed 's/a/b/' notes.md",
+            // Deliberately uncovered, so a future change that starts matching
+            // it is a decision rather than a side effect.
+            "awk 'NR>=60 && NR<=200' src/lib.rs",
         ] {
             assert!(!rations_its_output(cmd), "should not ration: {cmd}");
         }
