@@ -936,6 +936,9 @@ fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Seen>) ->
 /// `cd repo` then `sed -n 58,95p src/app.tsx` is the #741 shape again, and it is
 /// 136 of the 168 commands the narrowing cost across the recorded corpus.
 ///
+/// **Command position is the first word of a segment, or anywhere inside an
+/// opaque one.** `segment_rations_its_output` has the reasoning.
+///
 /// **`sed` ranges count** (#741). The first version covered `head` and `tail`
 /// only, and shipped one command family too narrow: `sed -n 60,200p` of a source
 /// file names its lines exactly as `tail -5` does, and folding it handed the
@@ -958,16 +961,21 @@ fn rations_its_output(command: &str) -> bool {
 
 /// The same question for one command of the reply, separators already removed.
 ///
-/// A wrapper (`docker exec app tail -5 x`, `ssh host 'tail -6 x'`) runs a
-/// program this cannot parse, so nothing in the segment is at a position we can
-/// read and the name counts wherever it appears. That errs toward keeping the
-/// lines the caller named, which is the direction this predicate exists to
-/// protect (#751).
+/// A segment is **opaque** when its first word runs a program rather than being
+/// one: a wrapper (`docker exec app tail -5 x`, `ssh host 'tail -6 x'`), or
+/// `sudo`, `env`, `time`, `nohup` and the `VAR=value` assignments a shell strips
+/// before exec. Their own flags are a grammar per binary (`sudo -u root`,
+/// `env -i`, `time -p`), and parsing four of those to find where the real
+/// command starts is a larger thing than this predicate deserves. So the name
+/// counts anywhere inside an opaque segment. It errs toward keeping the lines
+/// the caller named, which is the direction this predicate exists to protect,
+/// and the cost is a fold given up on `sudo grep -rn head src/` (#751, #752).
 fn segment_rations_its_output(segment: &str) -> bool {
     let tokens: Vec<&str> = segment.split_whitespace().collect();
-    let opaque = registry::wraps_another_command(segment);
+    let opaque = registry::wraps_another_command(segment)
+        || tokens.first().is_some_and(|t| introduces_a_command(t));
     tokens.iter().enumerate().any(|(i, tok)| {
-        if !opaque && !opens_a_command(&tokens, i) {
+        if !opaque && i != 0 {
             return false;
         }
         match tok.rsplit('/').next().unwrap_or(tok) {
@@ -980,16 +988,7 @@ fn segment_rations_its_output(segment: &str) -> bool {
     })
 }
 
-/// Whether the token at `i` is the first word of its segment's command.
-///
-/// The segment already ends at the next separator, so this only has to step over
-/// the words that introduce a command without being one: `sudo`, `env` and the
-/// `VAR=value` assignments a shell strips before exec.
-fn opens_a_command(tokens: &[&str], i: usize) -> bool {
-    tokens[..i].iter().all(|t| introduces_a_command(t))
-}
-
-/// A word that precedes a command without being the command.
+/// A word that runs another program instead of being one.
 fn introduces_a_command(token: &str) -> bool {
     matches!(
         token.rsplit('/').next().unwrap_or(token),
@@ -1702,6 +1701,11 @@ mod tests {
             // so the name counts anywhere inside it.
             "docker exec app tail -5 /var/log/app.log",
             "kubectl exec pod -- head -30 /etc/config.yaml",
+            // An introducer's own flags are its own grammar, so the segment is
+            // opaque rather than parsed (PR #752 review).
+            "sudo -u root tail -5 /var/log/app.log",
+            "env -i head -20 notes.md",
+            "sudo docker exec app tail -5 /var/log/app.log",
         ] {
             assert!(rations_its_output(cmd), "should ration: {cmd}");
         }
