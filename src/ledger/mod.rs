@@ -43,6 +43,7 @@ use std::collections::{HashMap, HashSet};
 use crate::guard::limits::{
     MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, MIN_WHOLE_OUTPUT_FOLD, PROJECT_FLOOR_MULT,
 };
+use crate::pipeline::registry;
 use crate::store::sqlite::Store;
 
 /// How much of a source name a marker will carry.
@@ -928,6 +929,13 @@ fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Seen>) ->
 /// rationing itself when the word was somebody else's argument. That is a fold
 /// given up for nothing, on two shapes this repository runs constantly.
 ///
+/// **Per segment, and a newline is a separator** (#750). The first version of
+/// that narrowing read command position off the previous token, which
+/// `split_whitespace` had already stripped the newline from, so a two-line
+/// command was one command and nothing on the second line could open one.
+/// `cd repo` then `sed -n 58,95p src/app.tsx` is the #741 shape again, and it is
+/// 136 of the 168 commands the narrowing cost across the recorded corpus.
+///
 /// **`sed` ranges count** (#741). The first version covered `head` and `tail`
 /// only, and shipped one command family too narrow: `sed -n 60,200p` of a source
 /// file names its lines exactly as `tail -5` does, and folding it handed the
@@ -943,9 +951,23 @@ fn group_runs(hashes: &[String], origin_of: &dyn Fn(&String) -> Option<Seen>) ->
 /// Matched on the basename, so `/usr/bin/tail` counts and a `--tail` flag or a
 /// `tailwind` argument does not.
 fn rations_its_output(command: &str) -> bool {
-    let tokens: Vec<&str> = command.split_whitespace().collect();
+    command
+        .split(['\n', ';', '|', '&'])
+        .any(segment_rations_its_output)
+}
+
+/// The same question for one command of the reply, separators already removed.
+///
+/// A wrapper (`docker exec app tail -5 x`, `ssh host 'tail -6 x'`) runs a
+/// program this cannot parse, so nothing in the segment is at a position we can
+/// read and the name counts wherever it appears. That errs toward keeping the
+/// lines the caller named, which is the direction this predicate exists to
+/// protect (#751).
+fn segment_rations_its_output(segment: &str) -> bool {
+    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    let opaque = registry::wraps_another_command(segment);
     tokens.iter().enumerate().any(|(i, tok)| {
-        if !opens_a_command(&tokens, i) {
+        if !opaque && !opens_a_command(&tokens, i) {
             return false;
         }
         match tok.rsplit('/').next().unwrap_or(tok) {
@@ -958,21 +980,23 @@ fn rations_its_output(command: &str) -> bool {
     })
 }
 
-/// Whether the token at `i` is the first word of a command.
+/// Whether the token at `i` is the first word of its segment's command.
 ///
-/// The first word of the reply, or the first word after a shell separator. The
-/// separator is usually glued to the token before it (`notes.md;`), which is why
-/// this reads the end of the previous token rather than looking for a bare one.
-///
-/// A separator glued to the *following* token (`cat a.md;tail -5 b`) is not
-/// recognised, so that shape folds as before. It is left alone rather than
-/// split here: agents write the spaced form, and a tokeniser is a larger thing
-/// than this predicate deserves.
+/// The segment already ends at the next separator, so this only has to step over
+/// the words that introduce a command without being one: `sudo`, `env` and the
+/// `VAR=value` assignments a shell strips before exec.
 fn opens_a_command(tokens: &[&str], i: usize) -> bool {
-    match i.checked_sub(1).map(|p| tokens[p]) {
-        None => true,
-        Some(prev) => prev.ends_with([';', '|', '&']),
-    }
+    tokens[..i].iter().all(|t| introduces_a_command(t))
+}
+
+/// A word that precedes a command without being the command.
+fn introduces_a_command(token: &str) -> bool {
+    matches!(
+        token.rsplit('/').next().unwrap_or(token),
+        "sudo" | "env" | "time" | "nohup"
+    ) || token.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    })
 }
 
 /// A `sed` address that names line numbers: `5p`, `60,200p`, quoted or not.
@@ -1664,6 +1688,20 @@ mod tests {
             "sed -n 60,200p app/run-panel.tsx",
             "sed -n '285,340p' src/lib.rs",
             "sed -n 5p notes.md",
+            // #750. A newline separates two commands, and the reply is written
+            // that way far more often than with a `;`.
+            "cd /path/to/repo\nsed -n '58,95p' src/app.tsx",
+            "cd /path/to/repo\ntail -20 /tmp/dev.log",
+            // A separator glued to the following token, which the token-position
+            // version could not see either.
+            "cat a.md;tail -5 b.md",
+            // #751. Words that introduce a command without being one.
+            "sudo tail -20 /var/log/app.log",
+            "env OMNI_PASSTHROUGH=1 sed -n '335,360p' src/hooks/post_tool.rs",
+            // #751. A wrapper's argument list is somebody else's command line,
+            // so the name counts anywhere inside it.
+            "docker exec app tail -5 /var/log/app.log",
+            "kubectl exec pod -- head -30 /etc/config.yaml",
         ] {
             assert!(rations_its_output(cmd), "should ration: {cmd}");
         }
@@ -1685,6 +1723,11 @@ mod tests {
             // Deliberately uncovered, so a future change that starts matching
             // it is a decision rather than a side effect.
             "awk 'NR>=60 && NR<=200' src/lib.rs",
+            // #751. The `sed` scan stops at its own command's end, so a later
+            // command's `5p` is not this one's address.
+            "sed -n '/failed/p' build.log; echo 5p",
+            // A newline is a separator, not a licence to match anywhere.
+            "cd /path/to/repo\ngrep -rn head src/",
         ] {
             assert!(!rations_its_output(cmd), "should not ration: {cmd}");
         }
