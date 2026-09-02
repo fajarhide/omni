@@ -609,7 +609,7 @@ pub fn passes_through_verbatim(command: &str) -> bool {
 /// 59 of 8,032 recorded commands are wrappers, 0.7%, so that parser and its
 /// failure modes would be bought for less than one call in a hundred. If the
 /// share grows, revisit it with the same query.
-fn wraps_another_command(command: &str) -> bool {
+pub(crate) fn wraps_another_command(command: &str) -> bool {
     let mut tokens = command.split_whitespace().map(|t| t.trim_matches('"'));
     let base = tokens
         .next()
