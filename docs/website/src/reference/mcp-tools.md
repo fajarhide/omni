@@ -22,6 +22,11 @@ in 467 bytes, while the other six cost 1,631 bytes for 11 calls in the life of t
 corpus. A Handoff-first host never has its built-in tool output rewritten, so MCP is the
 only door OMNI has there and nothing is priced away.
 
+On Claude Code the shortest list is still not free, and the bytes are the smaller half of
+why: the host discards the whole prompt cache when an MCP server connects or disconnects
+with its tools loaded. [Supported agents](agents.md) has what that means and how to run
+the hooks without it.
+
 An unadvertised tool is not callable on that tier either, so the way back is the CLI or
 the override:
 

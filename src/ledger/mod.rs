@@ -1286,6 +1286,44 @@ mod tests {
             .collect()
     }
 
+    /// Runs git in `dir`, hermetically: nothing the surrounding environment says
+    /// about git reaches it, and a missing config file is an empty one to git.
+    ///
+    /// Every inherited `GIT_*` goes, rather than a list of the ones that bite.
+    /// `GIT_DIR` alone is enough to point the whole test at another repository,
+    /// and it fails as `fatal: this operation must be run in a work tree` from a
+    /// test that never mentions a work tree (PR #754 review).
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(dir).args(args);
+        for (name, _) in std::env::vars_os() {
+            // Uppercased first: Windows env names are case-insensitive to git,
+            // so a `git_dir` would survive a case-sensitive prefix check and
+            // point the test at another repository (PR #754 review).
+            if name
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
+                cmd.env_remove(&name);
+            }
+        }
+        let out = cmd
+            .env("GIT_CONFIG_GLOBAL", dir.join("no-such-gitconfig"))
+            .env("GIT_CONFIG_SYSTEM", dir.join("no-such-gitconfig"))
+            .env("GIT_AUTHOR_NAME", "omni test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "omni test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .expect("git has to be on PATH for this test to mean anything");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     /// Lines no scope has seen, tagged so two calls can each carry their own.
     fn fresh_block(tag: &str) -> String {
         (0..20)
@@ -1731,6 +1769,56 @@ mod tests {
         ] {
             assert!(!rations_its_output(cmd), "should not ration: {cmd}");
         }
+    }
+
+    /// #739. The host's prompt cache is pinned to the git snapshot it started on:
+    /// a branch switch or a new commit means the next session shares no prefix and
+    /// starts cold, even where the bytes are identical. The ledger has no such
+    /// constraint, and that is the one saving in this lane the cache structurally
+    /// cannot make.
+    ///
+    /// Nothing asserted it. `paths::project_key` walks to the repository root and
+    /// never reads a ref, which is correct by construction and one refactor away
+    /// from silently not being true, which is the shape of every guard this
+    /// repository has found decorative after the fact.
+    ///
+    /// Real git rather than a hand-built `.git` directory, because the property is
+    /// that a real snapshot change does not move the scope. A fabricated `.git`
+    /// would still pass if someone made the key shell out to `git rev-parse`.
+    #[test]
+    fn a_project_fold_outlives_a_branch_switch_and_a_new_commit() {
+        let (store, _d) = temp_store();
+        let repo = tempfile::tempdir().expect("tempdir");
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.path().join("app.rs"), "fn main() {}\n").expect("write");
+        git(repo.path(), &["add", "app.rs"]);
+        git(repo.path(), &["commit", "-qm", "first"]);
+        let before = crate::paths::project_key(repo.path());
+
+        let (repeated, payload) = project_repeat_then_fresh();
+        Ledger::new(&store, "s1")
+            .with_project(&before)
+            .project(&repeated);
+
+        git(repo.path(), &["checkout", "-qb", "feature"]);
+        std::fs::write(repo.path().join("app.rs"), "fn main() { run() }\n").expect("write");
+        git(repo.path(), &["commit", "-qam", "second"]);
+        let after = crate::paths::project_key(repo.path());
+
+        assert_eq!(
+            after, before,
+            "the project scope moved with the branch, so every session after a \
+             checkout would open a fresh history"
+        );
+
+        let view = Ledger::new(&store, "s2")
+            .with_project(&after)
+            .project(&payload)
+            .expect("the project history has to outlive the snapshot it was recorded on");
+        assert!(
+            view.contains("not shown here"),
+            "a new session on a new commit was not given the project history: {view}"
+        );
     }
 
     /// #567. The run marker said `from an earlier session`, which states where the
