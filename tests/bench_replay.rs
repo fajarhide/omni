@@ -967,13 +967,22 @@ fn replay_execution_traces_net_savings() {
             }
         }
 
-        // Same two gates the hook applies: structured payloads are never
-        // projected, and the scope is the session the trace really belongs to.
+        // Same three gates the hook applies: structured payloads are never
+        // projected, the scope is the session the trace really belongs to, and
+        // the ledger is told which command produced the payload.
+        //
+        // #760. That last one was missing, and it made this harness blind to
+        // every rule that reads the command. The `from` clause never rendered
+        // (#622), the line budget never fired (#735, #742, #750, #751), and the
+        // re-run wording never appeared (#755), so a release could change all of
+        // them and the artifact came back byte-identical, which it did between
+        // 0.7.8 and this commit. The corpus carries the command and the routing
+        // half above already uses it; only the ledger was left guessing.
         let after_ledger = ledger_store
             .as_ref()
             .filter(|_| omni::pipeline::format::sniff(&distilled).is_none())
             .and_then(|s| {
-                let ledger = omni::ledger::Ledger::new(s, &t.session);
+                let ledger = omni::ledger::Ledger::new(s, &t.session).from(&t.command);
                 let ledger = if project_scope {
                     ledger.with_project(&t.project)
                 } else {
@@ -984,7 +993,13 @@ fn replay_execution_traces_net_savings() {
         let l = match after_ledger {
             Some(view) => {
                 ledger_calls += 1;
-                mark_session += view.matches("lines already shown").count() as u64;
+                // Every session wording, not one string. A same-command re-run
+                // says `identical to an earlier run` since #755, and counting
+                // only the older phrase dropped those folds from the tally while
+                // the number carried on looking plausible.
+                mark_session += (view.matches("lines already shown").count()
+                    + view.matches("identical to an earlier run").count())
+                    as u64;
                 // `shown here` and not the whole phrase: a project run says
                 // `not shown here` and a project whole-output fold says
                 // `none shown here`, while neither session form contains it
@@ -1039,6 +1054,7 @@ fn replay_execution_traces_net_savings() {
                 .filter(|_| omni::pipeline::format::sniff(&rtk_text).is_none())
                 .and_then(|s| {
                     omni::ledger::Ledger::new(s, &t.session)
+                        .from(&t.command)
                         .with_project(&t.project)
                         .project(&rtk_text)
                 });
@@ -1059,6 +1075,7 @@ fn replay_execution_traces_net_savings() {
                 .filter(|_| omni::pipeline::format::sniff(&cm_text).is_none())
                 .and_then(|s| {
                     omni::ledger::Ledger::new(s, &t.session)
+                        .from(&t.command)
                         .with_project(&t.project)
                         .project(&cm_text)
                 });

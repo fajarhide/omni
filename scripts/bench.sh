@@ -249,6 +249,16 @@ if other:
 report = {
     "version": version,
     "commit": commit,
+    # #760. The replay used to build its ledger without ever naming the command
+    # that produced the payload, so every source-aware rule was inert here: the
+    # `from` clause (#622), the line budget (#735, #742, #750) and the re-run
+    # wording (#755). Artifacts written before this field exists were measured by
+    # that harness, and their fold rate is an upper bound on production rather
+    # than a measurement of it. A delta across the boundary is a harness change
+    # and a code change added together, which is exactly what #704 exists to
+    # prevent, so the boundary is recorded rather than explained in a release
+    # note nobody will have to hand.
+    "harness": {"ledger_knows_the_command": True},
     # True means the working tree carried uncommitted changes, so `commit` names
     # the nearest commit and not the source that was measured.
     "dirty_tree": dirty == "true",
