@@ -62,7 +62,10 @@ tersambung atau terputus sementara perkakasnya sudah dimuat, yang bisa terjadi s
 saat proses server keluar lalu tersambung lagi di tengah sesi tanpa Anda melakukan apa
 pun. `omni init --claude` mendaftarkannya. Jalur plugin tidak menambah definisi perkakas
 sama sekali. Untuk tetap memakai hook tanpa pertukaran itu, hapus entri `omni` dari
-`mcpServers` di `~/.claude.json`.
+`mcpServers` di `~/.claude.json`, dan ketahui bahwa penghapusannya tidak bertahan:
+`omni doctor` melaporkan ketiadaannya sebagai peringatan, sedangkan `omni doctor --fix`
+dan `omni init` berikutnya akan mendaftarkannya lagi. Belum ada flag khusus hook saja
+([#757](https://github.com/fajarhide/omni/issues/757)).
 
 **OpenClaw** Penuh di giliran berikutnya, bukan giliran saat ini. Hook
 `tool_result_persist`-nya menulis ulang hasil tool yang disimpan OpenClaw, jadi model
