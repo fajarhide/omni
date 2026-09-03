@@ -53,6 +53,17 @@ berkas, pencarian dan pengambilan web berjalan sama sekali. Tiga di antaranya
 sudah ditulis dan diuji sepenuhnya dan tidak pernah sekali pun berjalan di sesi
 sungguhan.
 
+Ia juga host tempat `omni init` memasang dua hal dan hanya satu di antaranya yang
+bekerja. Hook-lah yang memendekkan keluaran. Server MCP adalah kemudahan yang menaruh
+`omni_retrieve` dan `omni_explain_savings` di tempat yang bisa dipanggil agent, dan di
+host ini ia sebuah pertukaran dengan cache prompt: dua definisi itu berukuran 471 byte
+JSON di awal setiap request, dan host membuang seluruh cache ketika sebuah server MCP
+tersambung atau terputus sementara perkakasnya sudah dimuat, yang bisa terjadi sendiri
+saat proses server keluar lalu tersambung lagi di tengah sesi tanpa Anda melakukan apa
+pun. `omni init --claude` mendaftarkannya. Jalur plugin tidak menambah definisi perkakas
+sama sekali. Untuk tetap memakai hook tanpa pertukaran itu, hapus entri `omni` dari
+`mcpServers` di `~/.claude.json`.
+
 **OpenClaw** Penuh di giliran berikutnya, bukan giliran saat ini. Hook
 `tool_result_persist`-nya menulis ulang hasil tool yang disimpan OpenClaw, jadi model
 membaca byte sulingan setiap kali transkrip dibaca ulang, sementara giliran yang

@@ -49,6 +49,16 @@ execution semantics into OMNI, and bypasses the host's approval flow.
 distillers run at all. Three of them had been fully written and tested and had never
 executed on a real session.
 
+It is also the host where `omni init` installs two things and only one of them does the
+work. The hooks are what shortens output. The MCP server is a convenience that puts
+`omni_retrieve` and `omni_explain_savings` where the agent can call them, and on this
+host it is a trade against the prompt cache: those two definitions are 471 bytes of JSON
+in the prefix of every request, and the host discards the whole cache when an MCP server
+connects or disconnects with its tools loaded, which a server process can do by exiting
+and reconnecting mid-session without you touching anything. `omni init --claude`
+registers it. The plugin route adds no tool definitions at all. To keep the hooks and
+drop the trade, remove the `omni` entry from `mcpServers` in `~/.claude.json`.
+
 **OpenClaw** is Full on a later turn, not the current one. Its `tool_result_persist`
 hook rewrites the tool result OpenClaw persists, so the model reads the distilled bytes
 every time the transcript is re-read, while the turn that ran the command still sees the

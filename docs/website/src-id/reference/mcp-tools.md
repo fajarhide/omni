@@ -22,6 +22,11 @@ dengan 467 byte, sedangkan enam sisanya memakan 1.631 byte untuk 11 panggilan se
 korpus. Host Handoff-first tidak pernah mendapat penulisan ulang pada output perkakas
 bawaannya, jadi MCP adalah satu-satunya pintu OMNI di sana dan tidak ada yang dipangkas.
 
+Di Claude Code, daftar terpendek pun tetap ada ongkosnya, dan byte-nya justru bagian yang
+lebih kecil: host membuang seluruh cache prompt ketika sebuah server MCP tersambung atau
+terputus sementara perkakasnya sudah dimuat. [Agent yang didukung](agents.md) menjelaskan
+artinya dan cara menjalankan hook tanpa server MCP.
+
 Perkakas yang tidak diiklankan juga tidak bisa dipanggil di tier itu, jadi jalan kembalinya
 adalah CLI atau override:
 

@@ -59,6 +59,10 @@ omni init --all      # every host, and a .vscode/mcp.json in the current directo
 `omni init` writes hooks and registers the MCP server. It is idempotent, so running it
 again after an upgrade is the right move rather than a risk.
 
+On Claude Code the hooks are the part that shortens output, and the MCP server is a
+convenience with a cache cost. Keeping it is fine; knowing what it costs is in
+[Supported agents](../reference/agents.md).
+
 With no terminal to prompt on, which is how an agent runs it, `omni init` configures
 the host it is running inside instead of failing on the absent menu. It says which
 host it picked. If it cannot name the host, a plain shell for instance, it stops and
