@@ -281,13 +281,35 @@ pub(crate) fn returns_archived_bytes(command: &str) -> bool {
 ///
 /// `true` means the caller returns `None`, which means the host keeps the
 /// original bytes at zero marker cost.
-fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option<&Store>) -> bool {
+/// What a decline means for the context breakdown.
+///
+/// Every reason below hands the payload back, and the breakdown counts what the
+/// agent was handed, so the two questions are not the same one (#725).
+enum Declined {
+    /// The host holds the same bytes normalize flattened. The turn is that much
+    /// heavier and nothing here said so, which is why 550 declines over 23 days
+    /// were missing from `omni context --tokens` on this machine.
+    KeepsTheseBytes,
+    /// Claude Code above its inline cap. It writes the raw output to a file and
+    /// keeps a preview, so what reaches the context is neither these bytes nor
+    /// nothing. Measured on a 36.1 KB reply in this repository's own transcript:
+    /// 2,233 characters arrived, against the 30,000 this hook was handed. Both
+    /// available answers are wrong and counting nothing is the closer one, since
+    /// the preview's size is not visible from here. #725 named this branch; it
+    /// is the one branch the fix leaves alone.
+    KeepsAPreview,
+}
+
+fn declined(
+    normalized: &crate::hooks::normalize::NormalizedInput,
+    store: Option<&Store>,
+) -> Option<Declined> {
     // #120: a command that exited non-zero passes through verbatim, never distilled.
     // Distillation must never turn a failed command into output that reads as success
     // (a fabricated success terminates investigation; a fabricated error only costs a
     // retry). Emit nothing: the host keeps the original bytes at zero marker cost.
     if normalized.failed {
-        return true;
+        return Some(Declined::KeepsTheseBytes);
     }
 
     // The escape hatch cannot be subject to the thing it escapes (#456).
@@ -300,7 +322,7 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
                 normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
-        return true;
+        return Some(Declined::KeepsTheseBytes);
     }
 
     // The process environment, and the assignment the user typed in front of the
@@ -308,7 +330,7 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
     if crate::guard::env::is_passthrough()
         || crate::guard::env::command_asks_for_passthrough(&normalized.command)
     {
-        return true;
+        return Some(Declined::KeepsTheseBytes);
     }
 
     // Format-safe gate: structured payloads are parsed by whatever reads them next,
@@ -329,7 +351,7 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
                 normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
-        return true;
+        return Some(Declined::KeepsTheseBytes);
     }
 
     // The host capped this payload, which means the command produced more than
@@ -372,10 +394,10 @@ fn declined(normalized: &crate::hooks::normalize::NormalizedInput, store: Option
                 normalized.host_session_id.as_deref().unwrap_or(""),
             );
         }
-        return true;
+        return Some(Declined::KeepsAPreview);
     }
 
-    false
+    None
 }
 
 /// Head and tail of a payload too large to hold whole, with the omission marked.
@@ -642,7 +664,17 @@ pub fn process_payload(
     // lifted out of a 701 line function so the entry conditions can be read
     // without scrolling past the pipeline (#442). Every one of them records why
     // it declined, which is the column #441 added.
-    if declined(&normalized, store.as_deref()) {
+    if let Some(decline) = declined(&normalized, store.as_deref()) {
+        // The host keeps its own bytes on the way out, so the turn is heavier
+        // than the breakdown said. Counted at the shared exit rather than in
+        // each branch: the host-cap branch #725 reported is 19 calls of the 569
+        // that were missing here, and four sibling reasons carry the rest.
+        if matches!(decline, Declined::KeepsTheseBytes)
+            && let Some(ref sess) = session
+            && let Ok(mut state) = sess.lock()
+        {
+            state.current_turn.tool_output_bytes += normalized.content.len() as u64;
+        }
         return None;
     }
 
@@ -4226,6 +4258,66 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
             body.len() as u64,
             "a passthrough leaves the host's own bytes in context, so that is \
              what the breakdown has to count"
+        );
+    }
+
+    /// #725. A decline hands the payload straight back, and the breakdown counts
+    /// what the agent was handed, so those bytes have to be booked on the way
+    /// out. They were not: `declined` returns before the accounting, which cost
+    /// 569 calls and 1.37 MB over 23 days on this machine.
+    ///
+    /// Two arms, and the second one is the point. The report named the host-cap
+    /// branch, and that is the single branch this must **not** count. Claude
+    /// Code above its inline cap writes the raw output to a file and keeps a
+    /// preview: measured on a 36.1 KB reply in this repository's own transcript,
+    /// 2,233 characters reached the context against the 30,000 the hook was
+    /// handed, so booking what the hook saw would overstate the turn by an order
+    /// of magnitude. Counting nothing is the closer of two wrong answers.
+    #[test]
+    fn a_decline_counts_the_bytes_the_host_kept_and_not_the_ones_it_replaced() {
+        let structured: String = format!(
+            "[{}]",
+            (0..40)
+                .map(|i| format!(r#"{{"id":{i},"name":"worker-{i:03}","state":"Running"}}"#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pods -o json"},
+            "tool_response": bash_response(&structured),
+        })
+        .to_string();
+
+        let session = Arc::new(Mutex::new(crate::pipeline::SessionState::new()));
+        assert!(
+            process_payload(&payload, None, Some(session.clone())).is_none(),
+            "a structured payload has to be declined or this arm proves nothing"
+        );
+        assert_eq!(
+            session.lock().expect("lock").current_turn.tool_output_bytes,
+            structured.len() as u64,
+            "the host kept these bytes verbatim, so the breakdown has to count them"
+        );
+
+        let capped = "x".repeat(crate::guard::limits::HOST_OUTPUT_CAP);
+        let over_cap = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat /tmp/huge.log"},
+            "tool_response": bash_response(&capped),
+        })
+        .to_string();
+
+        let session = Arc::new(Mutex::new(crate::pipeline::SessionState::new()));
+        assert!(
+            process_payload(&over_cap, None, Some(session.clone())).is_none(),
+            "a capped payload has to be declined or this arm proves nothing"
+        );
+        assert_eq!(
+            session.lock().expect("lock").current_turn.tool_output_bytes,
+            0,
+            "the host replaced these bytes with a preview it never shows this hook, \
+             so counting them would overstate the turn by an order of magnitude"
         );
     }
 
