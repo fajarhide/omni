@@ -112,15 +112,26 @@ impl Origin {
     /// get them back. The session form was 87 bytes and is 65; trimming it moved
     /// the aggregate by 0.3 points on its own, because a shorter marker makes
     /// smaller runs worth folding (#450).
-    fn marker(self, lines: usize, handle: &str, source: Option<&str>) -> String {
+    fn marker(self, lines: usize, handle: &str, source: &SourceOfSighting) -> String {
         // Only ever present when the source differs from the command being
         // answered (#622). `Seen` decides that; this only renders it, and keeps
         // it short because the fold gate weighs this string.
         let from = match source {
-            Some(s) => format!(" from {}", source_label(s)),
-            None => String::new(),
+            SourceOfSighting::Another(s) => format!(" from {}", source_label(s)),
+            _ => String::new(),
         };
         match self {
+            // #755. A poll re-run verbatim is asking whether the value moved,
+            // and `N lines already shown` answers a different question: it says
+            // the bytes are behind you without saying they are the same bytes
+            // this command printed last time. The reported reply kept its first
+            // half, which read as a complete result, and put the seven metric
+            // lines the caller was watching behind a handle. The identity is
+            // what the run was asking for, so it is what the marker states, at
+            // 15 bytes more than the wording it replaces on this arm only.
+            Self::Session if matches!(source, SourceOfSighting::ThisCommandAgain) => {
+                format!("[OMNI: {lines} lines identical to an earlier run, omni retrieve {handle}]")
+            }
             Self::Session => {
                 format!("[OMNI: {lines} lines already shown{from}, omni retrieve {handle}]")
             }
@@ -152,10 +163,12 @@ impl Origin {
     ///
     /// It states the identity instead, which is the fact the re-run was asking
     /// for and is strictly more information than the run wording carried.
-    fn whole_output_marker(self, lines: usize, handle: &str, source: Option<&str>) -> String {
+    fn whole_output_marker(self, lines: usize, handle: &str, source: &SourceOfSighting) -> String {
+        // No `ThisCommandAgain` arm: this wording has stated the identity since
+        // #519, which is the fact a re-run is asking for.
         let from = match source {
-            Some(s) => format!(" from {}", source_label(s)),
-            None => String::new(),
+            SourceOfSighting::Another(s) => format!(" from {}", source_label(s)),
+            _ => String::new(),
         };
         match self {
             Self::Session => format!(
@@ -337,7 +350,26 @@ pub struct Ledger<'a> {
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct Seen {
     origin: Origin,
-    source: Option<String>,
+    source: SourceOfSighting,
+}
+
+/// Which command put these lines in front of the agent, relative to the one
+/// being answered now.
+///
+/// Three cases and they say different things, which is why this is not an
+/// `Option<String>`. Before #755 the middle and the last were one `None`, and
+/// the last is the one a reader most needs named: a poll re-run verbatim whose
+/// output has not changed is answered by the fact that it has not changed, and
+/// `N lines already shown` does not say that.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum SourceOfSighting {
+    /// Nothing recorded, so nothing claimed.
+    Unrecorded,
+    /// A different command (#622). The marker names it so the reader can tell
+    /// whether the lines it is missing came from something relevant.
+    Another(String),
+    /// This same command, run again, printing these same lines (#755).
+    ThisCommandAgain,
 }
 
 /// One stretch of output, and where it was seen before if it was.
@@ -487,7 +519,13 @@ impl<'a> Ledger<'a> {
         // rendered marker cannot disagree: a run only claims a source when the
         // ledger recorded one and it is not the command being answered (#622).
         let differing = |seen: &crate::store::sqlite::SeenLine| {
-            (!seen.source.is_empty() && seen.source != self.source).then(|| seen.source.clone())
+            if seen.source.is_empty() {
+                SourceOfSighting::Unrecorded
+            } else if seen.source == self.source {
+                SourceOfSighting::ThisCommandAgain
+            } else {
+                SourceOfSighting::Another(seen.source.clone())
+            }
         };
         let origin_of = |h: &String| {
             if never_fold.contains(h) {
@@ -630,7 +668,7 @@ impl<'a> Ledger<'a> {
     /// which needs different wording (#519), and that wording is longer: an
     /// earlier draft weighed the short one and emitted the long one.
     fn marker_for(&self, run: &Run, seen: &Seen, total: usize, handle: &str) -> String {
-        let src = seen.source.as_deref();
+        let src = &seen.source;
         let lines = run.end - run.start;
         if run.start == 0 && run.end == total {
             seen.origin.whole_output_marker(lines, handle, src)
@@ -1082,6 +1120,50 @@ mod tests {
 
         assert!(second.len() < text.len());
         assert!(second.contains("lines already shown"));
+    }
+
+    /// #755. A poll is re-run to find out whether the value moved, and when it
+    /// has not, that is the answer. `N lines already shown` does not give it:
+    /// it says the bytes are behind the reader without saying they are this
+    /// command's own output, unchanged. In the report the surviving half of the
+    /// reply was an unrelated table that read as a complete result, and the
+    /// seven metric lines the caller was watching went behind a handle.
+    ///
+    /// Two arms, because the wording moves only for the command that ran again.
+    /// A different command still names itself (#622), which is what a reader
+    /// needs there: it tells them whether the lines they cannot see came from
+    /// something relevant.
+    #[test]
+    fn a_command_run_again_is_told_its_lines_are_unchanged() {
+        let (store, _d) = temp_store();
+        let poll = "for p in 0 1 2; do wget -qO- 127.0.0.1:8482/metrics | grep ^is_read_only; done";
+        let metrics = fresh_block("is_read_only");
+
+        Ledger::new(&store, "s1").from(poll).project(&metrics);
+        let again = Ledger::new(&store, "s1")
+            .from(poll)
+            .project(&format!("{}{metrics}", fresh_block("capacity")))
+            .expect("a verbatim re-run of a recorded block is projectable");
+
+        assert!(
+            again.contains("identical to an earlier run"),
+            "a re-run has to be told its own output did not change: {again}"
+        );
+        assert!(
+            !again.contains("already shown"),
+            "the wording that answers a different question survived: {again}"
+        );
+
+        let elsewhere = Ledger::new(&store, "s1")
+            .from("kubectl get pvc")
+            .project(&format!("{}{metrics}", fresh_block("phase")))
+            .expect("the same block under another command is projectable");
+
+        assert!(
+            elsewhere.contains("already shown") && elsewhere.contains("from for p in"),
+            "a different command still has to name the source it is standing in \
+             for (#622): {elsewhere}"
+        );
     }
 
     /// #627. A fold archives the run it replaced, never the reply, so the handle
@@ -1921,7 +2003,11 @@ mod tests {
     #[test]
     fn a_source_cannot_break_out_of_its_marker() {
         let nasty = "cat <<EOF\nsecond line\nthird line\nEOF";
-        let marker = Origin::Session.marker(9, &"0".repeat(HANDLE_LEN), Some(nasty));
+        let marker = Origin::Session.marker(
+            9,
+            &"0".repeat(HANDLE_LEN),
+            &SourceOfSighting::Another(nasty.to_string()),
+        );
         assert_eq!(
             marker.lines().count(),
             1,
@@ -1932,7 +2018,11 @@ mod tests {
             "expected the first line only: {marker:?}"
         );
 
-        let tabs = Origin::Session.marker(9, &"0".repeat(HANDLE_LEN), Some("go\ttest\t./..."));
+        let tabs = Origin::Session.marker(
+            9,
+            &"0".repeat(HANDLE_LEN),
+            &SourceOfSighting::Another("go\ttest\t./...".to_string()),
+        );
         assert_eq!(tabs.lines().count(), 1, "a tab split the marker: {tabs:?}");
         assert!(
             tabs.contains("from go test ./..."),
@@ -2023,11 +2113,11 @@ mod tests {
             .map(|i| format!("2026-08-10T00:00:0{i}Z  handler finished request {i}\n"))
             .collect();
         let session_bar = Origin::Session
-            .marker(9, &"0".repeat(HANDLE_LEN), None)
+            .marker(9, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
             .len()
             + Origin::Session.min_gain();
         let project_bar = Origin::Project
-            .marker(9, &"0".repeat(HANDLE_LEN), None)
+            .marker(9, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
             .len()
             + Origin::Project.min_gain();
         assert!(
@@ -2195,7 +2285,7 @@ mod tests {
         ledger.project(&format!("{run}{}", payload()));
 
         let bar = Origin::Session
-            .marker(3, &"0".repeat(HANDLE_LEN), None)
+            .marker(3, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
             .len()
             + Origin::Session.min_gain();
         assert!(
@@ -2230,9 +2320,11 @@ mod tests {
 
         assert_eq!(handle.len(), HANDLE_LEN);
         assert_eq!(
-            Origin::Session.marker(9, &handle, None).len(),
             Origin::Session
-                .marker(9, &"0".repeat(HANDLE_LEN), None)
+                .marker(9, &handle, &SourceOfSighting::Unrecorded)
+                .len(),
+            Origin::Session
+                .marker(9, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
                 .len()
         );
     }
@@ -2297,7 +2389,7 @@ mod tests {
         assert!(
             block('a').len()
                 >= Origin::Session
-                    .marker(8, &"0".repeat(HANDLE_LEN), None)
+                    .marker(8, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
                     .len()
                     + Origin::Session.min_gain(),
             "each block must be able to fold on its own, or the guard is not what \
