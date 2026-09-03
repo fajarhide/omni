@@ -1286,12 +1286,22 @@ mod tests {
             .collect()
     }
 
-    /// Runs git in `dir`, hermetically: the machine's own config decides nothing
-    /// here, and a missing config file is an empty one to git.
+    /// Runs git in `dir`, hermetically: nothing the surrounding environment says
+    /// about git reaches it, and a missing config file is an empty one to git.
+    ///
+    /// Every inherited `GIT_*` goes, rather than a list of the ones that bite.
+    /// `GIT_DIR` alone is enough to point the whole test at another repository,
+    /// and it fails as `fatal: this operation must be run in a work tree` from a
+    /// test that never mentions a work tree (PR #754 review).
     fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
-            .args(args)
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(dir).args(args);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("GIT_") {
+                cmd.env_remove(&name);
+            }
+        }
+        let out = cmd
             .env("GIT_CONFIG_GLOBAL", dir.join("no-such-gitconfig"))
             .env("GIT_CONFIG_SYSTEM", dir.join("no-such-gitconfig"))
             .env("GIT_AUTHOR_NAME", "omni test")
