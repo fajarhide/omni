@@ -23,6 +23,16 @@ klaimnya adalah agent masih memegangnya dan handle-nya tidak berongkos kecuali i
 memang mau membaca ulang.
 
 ```
+[OMNI: 40 lines identical to an earlier run, omni retrieve 0000000000000000]
+```
+
+Ledger lagi, untuk kasus ketika kesamaannya justru jawabannya. Anda menjalankan
+perintah yang sama untuk kedua kalinya dan ia mencetak baris yang sama, jadi marker
+menyebut itu alih-alih "already shown": polling yang diulang untuk melihat apakah
+sebuah nilai berubah dijawab oleh nilainya yang tidak berubah, dan pembacaan ulang
+dijawab oleh berkasnya yang tidak berubah.
+
+```
 [OMNI: 40 lines not shown here, omni retrieve 0000000000000000]
 ```
 
@@ -71,10 +81,10 @@ karena berkas lain sudah menampilkannya lebih dulu. Tanpa klausa itu, membanding
 dua berkas untuk memeriksa apakah blok bersamanya sama dijawab dengan menghapus
 buktinya.
 
-Membaca ulang berkas yang sama tidak membawa klausa apa pun, dan itu disengaja,
-bukan kelalaian. Panjang penanda menentukan apa yang layak dilipat sama sekali,
-jadi mencantumkan sumber di setiap penanda akan memotong penghematan pada kasus
-yang umum demi menamai kasus yang jarang.
+Menjalankan ulang perintah yang sama tidak membawa klausa itu, karena penanda di
+atas sudah menyebutkannya dengan kata-kata. Panjang penanda menentukan apa yang
+layak dilipat sama sekali, jadi mencantumkan sumber di setiap penanda akan
+memotong penghematan pada kasus yang umum demi menamai kasus yang jarang.
 
 ```
 [N similar lines collapsed]
