@@ -1297,7 +1297,14 @@ mod tests {
         let mut cmd = std::process::Command::new("git");
         cmd.current_dir(dir).args(args);
         for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("GIT_") {
+            // Uppercased first: Windows env names are case-insensitive to git,
+            // so a `git_dir` would survive a case-sensitive prefix check and
+            // point the test at another repository (PR #754 review).
+            if name
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
                 cmd.env_remove(&name);
             }
         }
