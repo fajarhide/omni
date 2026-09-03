@@ -7,6 +7,36 @@ same run as the rest of that section, including the ones that do not flatter us.
 useful thing on the page: the number OMNI reports is a property of the week it replays, not
 a constant. Read the corpus line before the figure, every time.
 
+## Correction, 2026-09-03: every ledger figure below is overstated
+
+The replay built its ledger without ever telling it which command produced the payload
+(#760), so every rule in the ledger that reads the command was inert here while running
+normally in production: the `from` clause, the line budget that leaves a `tail -5` alone,
+and the wording a re-run gets. The harness measured a ledger with its guards switched off.
+
+Re-measured on the same frozen corpus, same commit, with only that fixed:
+
+| arm | as published | with the guards visible |
+| --- | --- | --- |
+| omni, with the ledger | 4.9% | **3.0%** |
+| rtk + our ledger | 5.7% | 3.7% |
+| caveman + our ledger | 5.6% | 3.7% |
+| headroom dedup | 5.8% | 5.8% |
+| lean-ctx compress | 4.8% | 4.8% |
+| omni, filters only | 1.4% | 1.4% |
+
+Per class, with the ledger: file read 4.3% to **1.5%**, other 4.6% to 2.8%, git 8.6% to
+6.4%, search 4.2% to 4.0%, infra 3.8% to 3.6%, build and test 11.1% to 10.7%. The capture
+rate goes 23.3% to 10.7%.
+
+Only the arms that use our ledger move, which is the check that the change is what it
+claims to be. Filters do not touch the ledger and read 1.4% either way, and the three
+competitor engines are untouched.
+
+The tables below are left as they were measured, because deleting a published number is
+worse than labelling it. Artifacts carry `harness.ledger_knows_the_command` from #760 on,
+and one written without that field was measured this way.
+
 ## The current run, 2026-08-24, and the first one that will still exist next month
 
 **Corpus**: 9,478 traces, 8,458,937 bytes, 70 sessions, all `agent_id='claude_code'`,
