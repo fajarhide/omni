@@ -59,6 +59,10 @@ omni init --all      # semua host, plus .vscode/mcp.json di direktori saat ini
 `omni init` menulis hook dan mendaftarkan server MCP. Ia idempoten, jadi
 menjalankannya lagi setelah upgrade adalah langkah yang benar, bukan risiko.
 
+Di Claude Code, bagian yang memendekkan keluaran adalah hook-nya, sedangkan server MCP
+adalah kemudahan yang ada ongkos cache-nya. Membiarkannya terpasang tidak masalah; yang
+perlu Anda tahu ongkosnya ada di [Agent yang didukung](../reference/agents.md).
+
 Tanpa terminal untuk bertanya, yang memang begitulah cara agent menjalankannya,
 `omni init` menyetel host tempat ia berjalan alih-alih gagal karena menunya tidak
 ada. Ia menyebut host mana yang ia pilih. Kalau ia tidak bisa menyebut host-nya,
