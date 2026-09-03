@@ -22,6 +22,15 @@ the agent is still holding them and the handle costs nothing unless it wants to
 re-read.
 
 ```
+[OMNI: 40 lines identical to an earlier run, omni retrieve 0000000000000000]
+```
+
+The ledger again, for the case where the identity is the answer. You ran the same
+command a second time and it printed the same lines, so the marker says that rather
+than "already shown": a poll re-run to find out whether a value moved is answered by
+the value not having moved, and a re-read is answered by the file not having changed.
+
+```
 [OMNI: 40 lines not shown here, omni retrieve 0000000000000000]
 ```
 
@@ -67,9 +76,9 @@ and having a block elided because a different file showed it earlier. Without th
 clause, comparing two files to check a shared block matches is answered by deleting
 the evidence.
 
-Re-reading the same file carries no clause, and that is deliberate rather than an
-omission. Marker length decides what is worth folding at all, so a source on every
-marker would cost savings on the common case to label the rare one.
+Running the same command again carries no clause, because the marker above already
+says so in words. Marker length decides what is worth folding at all, so a source on
+every marker would cost savings on the common case to label the rare one.
 
 ```
 [N similar lines collapsed]

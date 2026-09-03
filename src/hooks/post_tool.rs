@@ -4048,14 +4048,23 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
 
     /// The other half of #581, and the one a scope change would break silently:
     /// the main agent has no `agent_id`, so its scope is unchanged and a repeat
-    /// inside one session still folds as `already shown`, which is true there.
+    /// inside one session still folds through it.
+    ///
+    /// It asserts the session scope rather than one wording. #755 moved the
+    /// string for a command run a second time, which this fixture is, and the
+    /// project scope is what a scope regression would produce, so the claim to
+    /// hold is that this did not come back through it.
     #[test]
-    fn the_main_agent_still_folds_its_own_repeats_as_already_shown() {
+    fn the_main_agent_still_folds_its_own_repeats_through_the_session_scope() {
         let (_, second) = two_reads_of_one_file("solo-session-581", None);
 
         assert!(
-            second.contains("already shown"),
+            second.contains("identical to an earlier run"),
             "the session scope stopped folding for the reader that does hold the bytes: {second}"
+        );
+        assert!(
+            !second.contains("not shown here") && !second.contains("none shown here"),
+            "the main agent's own repeat was answered by the project scope: {second}"
         );
     }
 
