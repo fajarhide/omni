@@ -320,6 +320,7 @@ fn declined(
                 normalized.content.len(),
                 "own recovery command",
                 normalized.host_session_id.as_deref().unwrap_or(""),
+                &normalized.agent_id,
             );
         }
         return Some(Declined::KeepsTheseBytes);
@@ -349,6 +350,7 @@ fn declined(
                 normalized.content.len(),
                 &format::passthrough_reason(kind),
                 normalized.host_session_id.as_deref().unwrap_or(""),
+                &normalized.agent_id,
             );
         }
         return Some(Declined::KeepsTheseBytes);
@@ -392,6 +394,7 @@ fn declined(
                 normalized.content.len(),
                 "host output cap",
                 normalized.host_session_id.as_deref().unwrap_or(""),
+                &normalized.agent_id,
             );
         }
         return Some(Declined::KeepsAPreview);
@@ -867,6 +870,7 @@ pub fn process_payload(
                 content.len(),
                 "would have dropped the failure",
                 normalized.host_session_id.as_deref().unwrap_or(""),
+                &normalized.agent_id,
             );
         }
         final_out = content.to_string();
@@ -954,6 +958,7 @@ pub fn process_payload(
                 content.len(),
                 "below guardrail",
                 normalized.host_session_id.as_deref().unwrap_or(""),
+                &normalized.agent_id,
             );
         }
 
