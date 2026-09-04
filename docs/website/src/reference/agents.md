@@ -57,10 +57,16 @@ in the prefix of every request, and the host discards the whole cache when an MC
 connects or disconnects with its tools loaded, which a server process can do by exiting
 and reconnecting mid-session without you touching anything. `omni init --claude`
 registers it. The plugin route adds no tool definitions at all. To keep the hooks and drop
-the trade, remove the `omni` entry from `mcpServers` in `~/.claude.json`, and know that
-the removal does not stick: `omni doctor` reports the absence as a warning, and both
-`omni doctor --fix` and the next `omni init` register it again. There is no hooks-only
-flag yet ([#757](https://github.com/fajarhide/omni/issues/757)).
+the trade, install that half on its own:
+
+```sh
+omni init --hook     # hooks, no MCP registration
+omni init --mcp      # the MCP server on its own, if you change your mind
+```
+
+`omni doctor` then reports the MCP server as not registered rather than as a fault, and
+neither it nor `--fix` puts it back (#757). Naming the host, `omni init --claude`, still
+installs both.
 
 **OpenClaw** is Full on a later turn, not the current one. Its `tool_result_persist`
 hook rewrites the tool result OpenClaw persists, so the model reads the distilled bytes

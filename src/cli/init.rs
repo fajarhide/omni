@@ -127,6 +127,22 @@ fn non_interactive_host() -> anyhow::Result<&'static str> {
     })
 }
 
+/// Which halves of the Claude Code install a flag set asks for, as (hooks, mcp).
+///
+/// #757. `--hook` has said "Only install hooks" since it shipped and installed
+/// the MCP server as well, which is the shape of #151: a flag the parser accepts
+/// and the code ignores. On this host the hooks are what shortens output and the
+/// MCP server is a convenience whose tool definitions sit in the prefix of every
+/// request, so one without the other is a preference somebody can hold.
+///
+/// Asking for both, by naming the host or by naming both halves, gets both.
+fn claude_halves(is_claude: bool, is_all: bool, is_hook: bool, is_mcp: bool) -> (bool, bool) {
+    if is_claude || is_all || (is_hook && is_mcp) || (!is_hook && !is_mcp) {
+        return (true, true);
+    }
+    (is_hook, is_mcp)
+}
+
 pub fn run_init(args: &[String]) -> anyhow::Result<()> {
     if super::wants_help(args) {
         print_help();
@@ -426,7 +442,21 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
         if target_ids.contains(&agent.id()) {
             println!("{}", format!("🤖 {} Setup", agent.name()).bold().cyan());
 
-            match agent.install(&exe_path) {
+            // #757. `--hook` and `--mcp` have promised "Only install hooks" and
+            // "Only register MCP server" since they shipped, and both installed
+            // the pair. On Claude Code the hooks are what shortens output and the
+            // MCP server is a convenience that puts two tool definitions in the
+            // prefix of every request, so one without the other is a preference
+            // somebody can hold, and the flag that says so has to mean it.
+            let outcome = match (
+                agent.id(),
+                claude_halves(is_claude, is_all, is_hook, is_mcp),
+            ) {
+                ("claude", (true, false)) => crate::agents::claude::install_hooks(&exe_path),
+                ("claude", (false, true)) => crate::agents::claude::install_mcp_server(&exe_path),
+                _ => agent.install(&exe_path),
+            };
+            match outcome {
                 Err(e) => eprintln!("  {} Failed: {}", "✗".red(), e),
                 // #684. The success line was the same shape on every host, so
                 // configuring an MCP-only one read as "OMNI is now shortening
@@ -462,6 +492,33 @@ pub fn run_init(args: &[String]) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// #757. Both flags have promised a half since they shipped and delivered
+    /// the pair, so `omni init --hook` registered an MCP server the user had
+    /// just said they did not want. The parser accepted the flag and the code
+    /// ignored it, which is #151 wearing a different name.
+    ///
+    /// The table is the point: naming the host, or naming both halves, or naming
+    /// neither, all still get both. Only a single half means a single half.
+    #[test]
+    fn a_half_flag_installs_that_half_and_nothing_else() {
+        // (is_claude, is_all, is_hook, is_mcp) -> (hooks, mcp)
+        for (args, want) in [
+            ((false, false, true, false), (true, false)),
+            ((false, false, false, true), (false, true)),
+            ((false, false, true, true), (true, true)),
+            ((true, false, true, false), (true, true)),
+            ((false, true, true, false), (true, true)),
+            ((false, false, false, false), (true, true)),
+        ] {
+            let (is_claude, is_all, is_hook, is_mcp) = args;
+            assert_eq!(
+                claude_halves(is_claude, is_all, is_hook, is_mcp),
+                want,
+                "claude_halves{args:?} has to be {want:?}"
+            );
+        }
+    }
     use super::*;
 
     /// Every host the no-tty path can pick has to be a real install target, or
