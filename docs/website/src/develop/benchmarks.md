@@ -55,26 +55,26 @@ vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
 |---|---|---|---|---|---|---|
-| other | 6,457 | 4.81 MB | 0.8% | 4.6% | 15.9% | **24.3%** |
-| file read | 1,056 | 1.89 MB | 0.0% | 4.3% | 17.7% | **24.4%** |
-| git | 899 | 0.86 MB | 5.1% | 8.6% | 18.4% | **20.1%** |
-| search | 810 | 0.77 MB | 3.4% | 4.2% | 6.5% | **13.7%** |
-| infra | 215 | 0.14 MB | 3.2% | 3.8% | 5.5% | **10.5%** |
-| build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
-| **aggregate** | 9,478 | 8.49 MB | 1.4% | 4.9% | 15.6% | **23.3%** |
+| other | 6,457 | 4.81 MB | 0.8% | 2.8% | 15.9% | **12.4%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 1.5% | 17.7% | **8.3%** |
+| git | 899 | 0.86 MB | 5.1% | 6.4% | 18.4% | **7.5%** |
+| search | 810 | 0.77 MB | 3.4% | 4.0% | 6.5% | **10.2%** |
+| infra | 215 | 0.14 MB | 3.2% | 3.6% | 5.5% | **6.8%** |
+| build and test | 41 | 0.02 MB | 9.0% | 10.7% | 21.7% | **8.6%** |
+| **aggregate** | 9,478 | 8.49 MB | 1.4% | 3.0% | 15.6% | **10.7%** |
 
 | Arm | bytes | saved |
 |---|---|---|
 | headroom dedup, omni's filters | 8,486,830 to 7,992,449 | 5.8% |
-| rtk + omni's ledger | 8,486,830 to 8,004,410 | 5.7% |
-| caveman + omni's ledger | 8,486,830 to 8,009,164 | 5.6% |
-| **omni, with the ledger** | 8,486,830 to 8,067,201 | 4.9% |
 | lean-ctx `compress` | 8,486,830 to 8,076,957 | 4.8% |
+| caveman + omni's ledger | 8,486,830 to 8,177,033 | 3.7% |
+| rtk + omni's ledger | 8,486,830 to 8,170,668 | 3.7% |
+| **omni, with the ledger** | 8,486,830 to 8,232,391 | 3.0% |
 | caveman `compress` | 8,486,830 to 8,311,999 | 2.1% |
 | rtk `pipe` | 8,486,830 to 8,308,491 | 2.1% |
 | omni, filters only | 8,486,830 to 8,371,362 | 1.4% |
 
-Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.8.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.9.
 <!-- omni:corpus-table:end -->
 
 **`available` and `captured` are new, and `captured` is the figure that survives a
@@ -107,8 +107,9 @@ a subcommand it knows, so it falls through to shrink mode and hands back the inp
 that works (#712).
 
 **On this corpus OMNI is last of the four rows that carry a ledger, and both halves are
-behind.** headroom's dedup takes 5.8% where ours takes 4.9% over identical filters and
-identical blocks, so that 0.9 points is the dedup engine alone. Our filter tier is the
+behind.** headroom's dedup takes 5.8% where ours takes 3.0% over identical filters and
+identical blocks, so that 2.8 points is the dedup engine alone. It read 0.9 points until
+#760, which is the correction at the top of this page and not a change in the code. Our filter tier is the
 weakest of the four at 1.4%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
 and that shortfall is what carries `rtk + omni's ledger` and `caveman + omni's ledger`
 above our own stack: the ledger is identical in all three rows and only the filters

@@ -180,14 +180,16 @@ Angka **14,9%** di tabel atas sengaja dari korpus yang berbeda: harness yang sam
 pada satu minggu kerja biasa, dengan setiap pengembalian tadi ikut dihitung bersama
 kemenangannya. Itu rata-rata atas campuran tersebut, bukan janji untuk campuran Anda.
 Baris per kelas itulah yang memprediksi beban kerja Anda sendiri, dan di korpus beku
-capture rate-nya berjalan dari **10,5%** pada infra sampai **25,3%** pada pembacaan
-ulang file, jadi cari kelas yang benar-benar Anda jalankan. Itu rata-rata nyata atas
+capture rate-nya berjalan dari **6,8%** pada infra sampai **12,4%** pada ember
+campuran, jadi cari kelas yang benar-benar Anda jalankan. Itu rata-rata nyata atas
 campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari hari yang bagus.
 
 **Keempat babak sekarang jalan, dan di korpus ini OMNI bukan babak teratas.** Alat
 yang mengirimkan dedup lintas giliran yang sama mengambil 5,8% dari byte ini,
-sementara ledger kami mengambil 4,9%, di atas penyaring yang sama dan blok yang sama,
-jadi selisih itu murni mesin dedupnya. Penyaring kami paling lemah dari keempatnya
+sementara ledger kami mengambil 3,0%, di atas penyaring yang sama dan blok yang sama,
+jadi selisih itu murni mesin dedupnya. Angka kami sendiri terbaca 4,9% sampai #760,
+ketika benchmark berhenti mengukur ledger yang tidak pernah diberi tahu perintah mana
+yang menghasilkan payload-nya. Penyaring kami paling lemah dari keempatnya
 dengan 1,4%, dan itulah sebabnya ledger kami sendiri justru mencetak angka lebih
 tinggi ketika ditumpuk di atas penyaring pesaing ketimbang di atas milik kami.
 Tabelnya dihasilkan oleh run yang sama dengan setiap angka lain di sini, dan ada di
