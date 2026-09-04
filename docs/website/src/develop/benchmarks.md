@@ -30,7 +30,23 @@ Per class, with the ledger: file read 4.3% to **1.5%**, other 4.6% to 2.8%, git 
 rate goes 23.3% to 10.7%.
 
 Only the arms that use our ledger move, which is the check that the change is what it
-claims to be. Filters do not touch the ledger and read 1.4% either way, and the three
+claims to be.
+
+**Where the 1.9 points went**, measured by switching each guard off on the same corpus and
+the same commit. Every one of them exists to stop a fold that should not happen, so this is
+the price of the ledger behaving, not a regression:
+
+| ledger arm | aggregate |
+| --- | --- |
+| guards invisible to the harness, as published in 0.7.8 | 4.9% |
+| naming the source switched off (`from` clause, re-run wording) | 4.3% |
+| line budget switched off (`tail -5`, `sed -n 60,200p` fold again) | 3.4% |
+| **shipped, every guard on** | **3.0%** |
+
+Naming the source costs 1.3 points and the line budget 0.4. The rest is the two
+interacting: a marker that carries a source is longer, and marker length decides which
+runs are worth folding at all.
+
 competitor engines are untouched.
 
 The tables below are left as they were measured, because deleting a published number is
@@ -48,33 +64,34 @@ at seven days, so none of them can be re-derived. This one is a file. That is th
 of #704: a release-over-release delta was previously a code change and a corpus change
 added together, with no way to separate them.
 
-**1.4% from the filters. 5.1% with the ledger.** 98.4% of calls saved nothing, 1.6%
+**1.4% from the filters. 3.0% with the ledger**, the second re-measured under #760;
+this section first published 5.1%. 98.4% of calls saved nothing, 1.6%
 shrank, and **no call came back larger**. Tokens, `cl100k_base` as a proxy for a
 vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
 
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
 |---|---|---|---|---|---|---|
-| other | 6,457 | 4.81 MB | 0.8% | 4.6% | 15.9% | **24.3%** |
-| file read | 1,056 | 1.89 MB | 0.0% | 4.3% | 17.7% | **24.4%** |
-| git | 899 | 0.86 MB | 5.1% | 8.6% | 18.4% | **20.1%** |
-| search | 810 | 0.77 MB | 3.4% | 4.2% | 6.5% | **13.7%** |
-| infra | 215 | 0.14 MB | 3.2% | 3.8% | 5.5% | **10.5%** |
-| build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
-| **aggregate** | 9,478 | 8.49 MB | 1.4% | 4.9% | 15.6% | **23.3%** |
+| other | 6,457 | 4.81 MB | 0.8% | 2.8% | 15.9% | **12.4%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 1.5% | 17.7% | **8.3%** |
+| git | 899 | 0.86 MB | 5.1% | 6.4% | 18.4% | **7.5%** |
+| search | 810 | 0.77 MB | 3.4% | 4.0% | 6.5% | **10.2%** |
+| infra | 215 | 0.14 MB | 3.2% | 3.6% | 5.5% | **6.8%** |
+| build and test | 41 | 0.02 MB | 9.0% | 10.7% | 21.7% | **8.6%** |
+| **aggregate** | 9,478 | 8.49 MB | 1.4% | 3.0% | 15.6% | **10.7%** |
 
 | Arm | bytes | saved |
 |---|---|---|
 | headroom dedup, omni's filters | 8,486,830 to 7,992,449 | 5.8% |
-| rtk + omni's ledger | 8,486,830 to 8,004,410 | 5.7% |
-| caveman + omni's ledger | 8,486,830 to 8,009,164 | 5.6% |
-| **omni, with the ledger** | 8,486,830 to 8,067,201 | 4.9% |
 | lean-ctx `compress` | 8,486,830 to 8,076,957 | 4.8% |
+| caveman + omni's ledger | 8,486,830 to 8,177,033 | 3.7% |
+| rtk + omni's ledger | 8,486,830 to 8,170,668 | 3.7% |
+| **omni, with the ledger** | 8,486,830 to 8,232,391 | 3.0% |
 | caveman `compress` | 8,486,830 to 8,311,999 | 2.1% |
 | rtk `pipe` | 8,486,830 to 8,308,491 | 2.1% |
 | omni, filters only | 8,486,830 to 8,371,362 | 1.4% |
 
-Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.8.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.9.
 <!-- omni:corpus-table:end -->
 
 **`available` and `captured` are new, and `captured` is the figure that survives a
@@ -107,8 +124,9 @@ a subcommand it knows, so it falls through to shrink mode and hands back the inp
 that works (#712).
 
 **On this corpus OMNI is last of the four rows that carry a ledger, and both halves are
-behind.** headroom's dedup takes 5.8% where ours takes 4.9% over identical filters and
-identical blocks, so that 0.9 points is the dedup engine alone. Our filter tier is the
+behind.** headroom's dedup takes 5.8% where ours takes 3.0% over identical filters and
+identical blocks, so that 2.8 points is the dedup engine alone. It read 0.9 points until
+#760, which is the correction at the top of this page and not a change in the code. Our filter tier is the
 weakest of the four at 1.4%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
 and that shortfall is what carries `rtk + omni's ledger` and `caveman + omni's ledger`
 above our own stack: the ledger is identical in all three rows and only the filters

@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice. Across a whole session it takes about a quarter of the repetition your work actually contains, which was <b>4.5%</b> of file-read bytes on the corpus below. How repetitive your work is decides where you land between those two. Nothing deleted, nothing invented, and every number here replays on your own history.</em>
+    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice. Across a whole session it takes about a tenth of the repetition your work actually contains, which was <b>1.5%</b> of file-read bytes on the corpus below. How repetitive your work is decides where you land between those two. Nothing deleted, nothing invented, and every number here replays on your own history.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)
@@ -210,7 +210,7 @@ corpus cannot be checked by anyone, us included.
 On a corpus of 9,478 real command executions that reached a model, 8.42 MB over 70
 sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
 
-* **1.4% from the filters, 5.1% with the ledger**, and the ledger took **24.1% of
+* **1.4% from the filters, 3.0% with the ledger**, and the ledger took **10.7% of
   all the repetition that was there to take**. The last figure is the one that
   describes OMNI. The first two describe this corpus.
 * **Read the corpus before the number.** This one is shell-heavy, so it
@@ -220,7 +220,7 @@ sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
   Twentyfold in one column, flat in the other, and only one of those two is a fact
   about OMNI.
 * **This corpus does not expire.** It is frozen on disk and its hash is in
-  `docs/benchmarks/0.7.8.json`, so the numbers above can be checked against the
+  `docs/benchmarks/0.7.9.json`, so the numbers above can be checked against the
   same bytes next release instead of against whatever the last seven days held.
   Run the harness on your own history for a figure about your workload.
 * **It hands bytes back rather than inventing a saving.** Where there is nothing
@@ -241,26 +241,26 @@ repetition that was there it actually took:
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
 |---|---|---|---|---|---|---|
-| other | 6,457 | 4.81 MB | 0.8% | 4.6% | 15.9% | **24.3%** |
-| file read | 1,056 | 1.89 MB | 0.0% | 4.3% | 17.7% | **24.4%** |
-| git | 899 | 0.86 MB | 5.1% | 8.6% | 18.4% | **20.1%** |
-| search | 810 | 0.77 MB | 3.4% | 4.2% | 6.5% | **13.7%** |
-| infra | 215 | 0.14 MB | 3.2% | 3.8% | 5.5% | **10.5%** |
-| build and test | 41 | 0.02 MB | 9.0% | 11.1% | 21.7% | **10.8%** |
-| **aggregate** | 9,478 | 8.49 MB | 1.4% | 4.9% | 15.6% | **23.3%** |
+| other | 6,457 | 4.81 MB | 0.8% | 2.8% | 15.9% | **12.4%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 1.5% | 17.7% | **8.3%** |
+| git | 899 | 0.86 MB | 5.1% | 6.4% | 18.4% | **7.5%** |
+| search | 810 | 0.77 MB | 3.4% | 4.0% | 6.5% | **10.2%** |
+| infra | 215 | 0.14 MB | 3.2% | 3.6% | 5.5% | **6.8%** |
+| build and test | 41 | 0.02 MB | 9.0% | 10.7% | 21.7% | **8.6%** |
+| **aggregate** | 9,478 | 8.49 MB | 1.4% | 3.0% | 15.6% | **10.7%** |
 
 | Arm | bytes | saved |
 |---|---|---|
 | headroom dedup, omni's filters | 8,486,830 to 7,992,449 | 5.8% |
-| rtk + omni's ledger | 8,486,830 to 8,004,410 | 5.7% |
-| caveman + omni's ledger | 8,486,830 to 8,009,164 | 5.6% |
-| **omni, with the ledger** | 8,486,830 to 8,067,201 | 4.9% |
 | lean-ctx `compress` | 8,486,830 to 8,076,957 | 4.8% |
+| caveman + omni's ledger | 8,486,830 to 8,177,033 | 3.7% |
+| rtk + omni's ledger | 8,486,830 to 8,170,668 | 3.7% |
+| **omni, with the ledger** | 8,486,830 to 8,232,391 | 3.0% |
 | caveman `compress` | 8,486,830 to 8,311,999 | 2.1% |
 | rtk `pipe` | 8,486,830 to 8,308,491 | 2.1% |
 | omni, filters only | 8,486,830 to 8,371,362 | 1.4% |
 
-Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.8.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.9.
 <!-- omni:corpus-table:end -->
 
 `available` is the ceiling. The ledger substitutes lines it has already delivered,
@@ -279,13 +279,19 @@ table, so it cannot fall a release behind its corpus again. Every arm is handed 
 same bytes. Versions: rtk 0.45.0, lean-ctx 3.9.18, caveman `bin-v1.0.0`, headroom
 0.34.0.
 
-**On this corpus OMNI is not the top arm, and both of its halves are behind.**
-headroom's cross-turn dedup takes 5.8% where our ledger takes 4.9% over the same
-filters and the same blocks, so that gap is the dedup engine and nothing else. At
-1.4% our filter tier is the weakest of the four, against 2.1% for rtk and caveman
+**On this corpus OMNI is last of the arms that carry a ledger, and both of its halves
+are behind.** headroom's cross-turn dedup takes 5.8% where our ledger takes 3.0% over
+the same filters and the same blocks, so that gap is the dedup engine and nothing else.
+At 1.4% our filter tier is the weakest of the four, against 2.1% for rtk and caveman
 and 4.8% for lean-ctx. That shortfall is what puts `rtk + omni's ledger` and
 `caveman + omni's ledger` above our own stack: the ledger is the same in all three
 rows, and only the filters underneath it differ.
+
+The ledger rows read lower than they did in 0.7.8, and no code got worse. The harness
+built its ledger without telling it which command produced the payload, so every rule
+that reads the command was switched off in the measurement while running normally in
+production (#760). 4.9% was that harness; 3.0% is the same code measured with the
+guards visible.
 
 The one row that is not a like-for-like: lean-ctx has no `+ our ledger` row because
 its preview reports `compressed_bytes` and never emits the text, so the row could

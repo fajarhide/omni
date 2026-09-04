@@ -153,12 +153,15 @@ dibaca agent Anda dua kali kembali **97,2%** lebih kecil pada bacaan keduanya, d
 satu itu sifat mekanismenya: ia bereproduksi di mesin mana pun, kapan pun diminta.
 
 Sepanjang satu korpus penuh, angkanya jadi sifat korpusnya. Pada korpus 9.478 perintah
-yang dibekukan sebagai `0b63218ef78a1edb`, ledger memangkas **4,5%** dari pembacaan
+yang dibekukan sebagai `0b63218ef78a1edb`, ledger memangkas **1,5%** dari pembacaan
 file, karena pembacaan file di sana rata-rata 2,1 KB. Satu minggu sebelumnya yang
 pembacaan filenya rata-rata 12,4 KB memberi dua puluh kali lebih banyak, dengan kode
-yang sama. Yang hampir tidak bergerak di antara keduanya adalah porsi pengulangan
-tersedia yang benar-benar diambil ledger, **24,1%** secara agregat, dan itulah angka
-yang menggambarkan OMNI alih-alih menggambarkan minggunya.
+yang sama, dan itulah yang membuat angka byte jadi sifat minggunya, bukan sifat OMNI.
+
+Porsi pengulangan tersedia yang benar-benar diambil ledger adalah **10,7%** secara
+agregat di korpus ini. Angka padanannya untuk minggu yang lebih awal itu diukur sebelum
+#760, ketika benchmark belum bisa melihat guard milik ledger sendiri, jadi keduanya tidak
+sebanding dan halaman ini berhenti berpura-pura sebanding.
 
 File yang berubah di antara dua bacaan tetap dilipat di sekitar perubahannya. Tiap lipatan
 mempertahankan jumlah baris yang digantikannya, jadi baris yang tidak berpindah tetap ada
@@ -180,14 +183,16 @@ Angka **14,9%** di tabel atas sengaja dari korpus yang berbeda: harness yang sam
 pada satu minggu kerja biasa, dengan setiap pengembalian tadi ikut dihitung bersama
 kemenangannya. Itu rata-rata atas campuran tersebut, bukan janji untuk campuran Anda.
 Baris per kelas itulah yang memprediksi beban kerja Anda sendiri, dan di korpus beku
-capture rate-nya berjalan dari **10,5%** pada infra sampai **25,3%** pada pembacaan
-ulang file, jadi cari kelas yang benar-benar Anda jalankan. Itu rata-rata nyata atas
+capture rate-nya berjalan dari **6,8%** pada infra sampai **12,4%** pada ember
+campuran, jadi cari kelas yang benar-benar Anda jalankan. Itu rata-rata nyata atas
 campuran perintah yang nyata, bukan kasus terbaik yang dipetik dari hari yang bagus.
 
 **Keempat babak sekarang jalan, dan di korpus ini OMNI bukan babak teratas.** Alat
 yang mengirimkan dedup lintas giliran yang sama mengambil 5,8% dari byte ini,
-sementara ledger kami mengambil 4,9%, di atas penyaring yang sama dan blok yang sama,
-jadi selisih itu murni mesin dedupnya. Penyaring kami paling lemah dari keempatnya
+sementara ledger kami mengambil 3,0%, di atas penyaring yang sama dan blok yang sama,
+jadi selisih itu murni mesin dedupnya. Angka kami sendiri terbaca 4,9% sampai #760,
+ketika benchmark berhenti mengukur ledger yang tidak pernah diberi tahu perintah mana
+yang menghasilkan payload-nya. Penyaring kami paling lemah dari keempatnya
 dengan 1,4%, dan itulah sebabnya ledger kami sendiri justru mencetak angka lebih
 tinggi ketika ditumpuk di atas penyaring pesaing ketimbang di atas milik kami.
 Tabelnya dihasilkan oleh run yang sama dengan setiap angka lain di sini, dan ada di
