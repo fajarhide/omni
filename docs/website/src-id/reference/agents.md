@@ -61,11 +61,17 @@ JSON di awal setiap request, dan host membuang seluruh cache ketika sebuah serve
 tersambung atau terputus sementara perkakasnya sudah dimuat, yang bisa terjadi sendiri
 saat proses server keluar lalu tersambung lagi di tengah sesi tanpa Anda melakukan apa
 pun. `omni init --claude` mendaftarkannya. Jalur plugin tidak menambah definisi perkakas
-sama sekali. Untuk tetap memakai hook tanpa pertukaran itu, hapus entri `omni` dari
-`mcpServers` di `~/.claude.json`, dan ketahui bahwa penghapusannya tidak bertahan:
-`omni doctor` melaporkan ketiadaannya sebagai peringatan, sedangkan `omni doctor --fix`
-dan `omni init` berikutnya akan mendaftarkannya lagi. Belum ada flag khusus hook saja
-([#757](https://github.com/fajarhide/omni/issues/757)).
+sama sekali. Untuk tetap memakai hook tanpa pertukaran itu, pasang
+separuhnya saja:
+
+```sh
+omni init --hook     # hook saja, tanpa pendaftaran MCP
+omni init --mcp      # server MCP saja, kalau Anda berubah pikiran
+```
+
+`omni doctor` kemudian melaporkan server MCP sebagai tidak terdaftar, bukan sebagai
+kesalahan, dan baik ia maupun `--fix` tidak akan memasangnya kembali (#757). Menyebut
+host-nya, `omni init --claude`, tetap memasang keduanya.
 
 **OpenClaw** Penuh di giliran berikutnya, bukan giliran saat ini. Hook
 `tool_result_persist`-nya menulis ulang hasil tool yang disimpan OpenClaw, jadi model
