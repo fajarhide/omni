@@ -2352,6 +2352,14 @@ impl SqliteBackend {
     /// content, in different shapes, are both credited by one retrieval. Content
     /// addressing is what makes a handle worth having, and separating those two
     /// would need a per-marker id the retrieval path does not carry.
+    ///
+    /// `>=` and not `>`, deliberately. Both tables keep whole seconds, so a tie is
+    /// ambiguous either way, and the two readings are not equally likely: a reader
+    /// follows a handle within seconds of meeting it (#543 recorded four of four
+    /// pulls inside nine seconds), while the case `>` would protect against needs
+    /// the same content folded twice with a pull in between, inside one second.
+    /// `>` would drop the common case to avoid the rare one. Resolving the tie for
+    /// real needs sub-second timestamps on both tables (#771 review).
     pub fn marker_retrieve_rates(&self, days: i64) -> Vec<MarkerRate> {
         let Ok(conn) = self.pool.get() else {
             return Vec::new();
