@@ -393,6 +393,22 @@ enum SourceOfSighting {
     ThisCommandAgain,
 }
 
+/// What one substitution produced.
+///
+/// A tuple until #766 added the fifth field, at which point clippy called it a
+/// very complex type and was right: five positional fields is a shape nobody can
+/// read at the call site.
+struct Substitution {
+    view: String,
+    folded: HashSet<usize>,
+    /// Markers standing above the first surviving line, which is what decides
+    /// whether a starting line number still describes the view.
+    markers_above: usize,
+    padded: bool,
+    /// One row per marker actually emitted, for the books (#766).
+    emitted: Vec<crate::store::sqlite::MarkerRecord>,
+}
+
 /// One stretch of output, and where it was seen before if it was.
 struct Run {
     start: usize,
@@ -573,7 +589,7 @@ impl<'a> Ledger<'a> {
         // deterministic for a caller replaying the same session.
         let projected = self
             .substitute(&lines, &hashes, &origin_of)
-            .filter(|(view, _, _, _, _)| view.len() < text.len());
+            .filter(|s| s.view.len() < text.len());
 
         // What the fold did to the numbering below it (#557), read from the folded
         // indices where the answer is known. Decided here rather than after the
@@ -583,11 +599,12 @@ impl<'a> Ledger<'a> {
         // already where the file has it and no starting number moves (#664).
         let shifts = projected
             .as_ref()
-            .map(|(_, folded, above, padded, _)| {
-                if *padded {
+            .map(|s| {
+                let (folded, above, padded) = (&s.folded, s.markers_above, s.padded);
+                if padded {
                     FoldShift::None
                 } else {
-                    FoldShift::of(folded, lines.len(), *above)
+                    FoldShift::of(folded, lines.len(), above)
                 }
             })
             .unwrap_or(FoldShift::None);
@@ -605,7 +622,7 @@ impl<'a> Ledger<'a> {
         // the gain filter above, the caller emits `text` verbatim and every line
         // was delivered. That is the empty-set case and needs no special arm.
         let delivered: Vec<String> = match &projected {
-            Some((_, folded, _, _, _)) => hashes
+            Some(Substitution { folded, .. }) => hashes
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !folded.contains(i))
@@ -617,7 +634,12 @@ impl<'a> Ledger<'a> {
         // like this session's (#533). `PROJECT_FLOOR_MULT` prices cross-agent
         // reuse and was calibrated on the single-agent case, and nothing recorded
         // enough to tell the two apart after the fact.
-        if let Some((_, folded, _, _, markers)) = &projected {
+        if let Some(Substitution {
+            folded,
+            emitted: markers,
+            ..
+        }) = &projected
+        {
             // Every line folded means the agent holds markers and nothing else,
             // which is the case `MIN_WHOLE_OUTPUT_FOLD` refuses below 1 KB. Read
             // here rather than threaded out of `substitute`, because that flag is
@@ -684,7 +706,7 @@ impl<'a> Ledger<'a> {
                 .ledger_record(p, &delivered, &self.agent, &self.source);
         }
 
-        projected.map(|(view, _, _, _, _)| (view, shifts))
+        projected.map(|s| (s.view, shifts))
     }
 
     /// The marker one run would be replaced by, rendered rather than estimated
@@ -719,13 +741,7 @@ impl<'a> Ledger<'a> {
         lines: &[&str],
         hashes: &[String],
         origin_of: &dyn Fn(&String) -> Option<Seen>,
-    ) -> Option<(
-        String,
-        HashSet<usize>,
-        usize,
-        bool,
-        Vec<crate::store::sqlite::MarkerRecord>,
-    )> {
+    ) -> Option<Substitution> {
         let runs = group_runs(hashes, origin_of);
         if !runs.iter().any(|r| r.seen.is_some()) {
             return None;
@@ -979,7 +995,13 @@ impl<'a> Ledger<'a> {
                 }
             }
         }
-        replaced_any.then_some((out, folded, markers_above, padded_any, emitted))
+        replaced_any.then_some(Substitution {
+            view: out,
+            folded,
+            markers_above,
+            padded: padded_any,
+            emitted,
+        })
     }
 }
 
