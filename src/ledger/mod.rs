@@ -112,7 +112,12 @@ impl Origin {
     /// get them back. The session form was 87 bytes and is 65; trimming it moved
     /// the aggregate by 0.3 points on its own, because a shorter marker makes
     /// smaller runs worth folding (#450).
-    fn marker(self, lines: usize, handle: &str, source: &SourceOfSighting) -> String {
+    fn marker(
+        self,
+        lines: usize,
+        handle: &str,
+        source: &SourceOfSighting,
+    ) -> (String, &'static str) {
         // Only ever present when the source differs from the command being
         // answered (#622). `Seen` decides that; this only renders it, and keeps
         // it short because the fold gate weighs this string.
@@ -129,12 +134,16 @@ impl Origin {
             // lines the caller was watching behind a handle. The identity is
             // what the run was asking for, so it is what the marker states, at
             // 15 bytes more than the wording it replaces on this arm only.
-            Self::Session if matches!(source, SourceOfSighting::ThisCommandAgain) => {
-                format!("[OMNI: {lines} lines identical to an earlier run, omni retrieve {handle}]")
-            }
-            Self::Session => {
-                format!("[OMNI: {lines} lines already shown{from}, omni retrieve {handle}]")
-            }
+            Self::Session if matches!(source, SourceOfSighting::ThisCommandAgain) => (
+                format!(
+                    "[OMNI: {lines} lines identical to an earlier run, omni retrieve {handle}]"
+                ),
+                "session_rerun",
+            ),
+            Self::Session => (
+                format!("[OMNI: {lines} lines already shown{from}, omni retrieve {handle}]"),
+                "session_run",
+            ),
             // #567. `from an earlier session` states provenance and reads as
             // "you have seen this", which is the opposite of what it means: the
             // project scope only answers for lines the session scope did not, so
@@ -146,9 +155,10 @@ impl Origin {
             // is also nine bytes shorter. Marker length gates folding, and the
             // session form's trim was worth 0.3 points on its own (#450), so the
             // honest wording is the cheaper one here rather than a trade.
-            Self::Project => {
-                format!("[OMNI: {lines} lines not shown here{from}, omni retrieve {handle}]")
-            }
+            Self::Project => (
+                format!("[OMNI: {lines} lines not shown here{from}, omni retrieve {handle}]"),
+                "project_run",
+            ),
         }
     }
 
@@ -163,7 +173,12 @@ impl Origin {
     ///
     /// It states the identity instead, which is the fact the re-run was asking
     /// for and is strictly more information than the run wording carried.
-    fn whole_output_marker(self, lines: usize, handle: &str, source: &SourceOfSighting) -> String {
+    fn whole_output_marker(
+        self,
+        lines: usize,
+        handle: &str,
+        source: &SourceOfSighting,
+    ) -> (String, &'static str) {
         // No `ThisCommandAgain` arm: this wording has stated the identity since
         // #519, which is the fact a re-run is asking for.
         let from = match source {
@@ -171,14 +186,20 @@ impl Origin {
             _ => String::new(),
         };
         match self {
-            Self::Session => format!(
-                "[OMNI: identical to the {lines} lines already shown{from}, omni retrieve {handle}]"
+            Self::Session => (
+                format!(
+                    "[OMNI: identical to the {lines} lines already shown{from}, omni retrieve {handle}]"
+                ),
+                "session_whole",
             ),
             // The whole payload, and none of it delivered here, so the agent
             // holds nothing at all. Worth the extra bytes to say both: this
             // marker is already gated at `MIN_WHOLE_OUTPUT_FOLD` (#567).
-            Self::Project => format!(
-                "[OMNI: identical to {lines} lines from an earlier session{from}, none shown here, omni retrieve {handle}]"
+            Self::Project => (
+                format!(
+                    "[OMNI: identical to {lines} lines from an earlier session{from}, none shown here, omni retrieve {handle}]"
+                ),
+                "project_whole",
             ),
         }
     }
@@ -552,7 +573,7 @@ impl<'a> Ledger<'a> {
         // deterministic for a caller replaying the same session.
         let projected = self
             .substitute(&lines, &hashes, &origin_of)
-            .filter(|(view, _, _, _)| view.len() < text.len());
+            .filter(|(view, _, _, _, _)| view.len() < text.len());
 
         // What the fold did to the numbering below it (#557), read from the folded
         // indices where the answer is known. Decided here rather than after the
@@ -562,7 +583,7 @@ impl<'a> Ledger<'a> {
         // already where the file has it and no starting number moves (#664).
         let shifts = projected
             .as_ref()
-            .map(|(_, folded, above, padded)| {
+            .map(|(_, folded, above, padded, _)| {
                 if *padded {
                     FoldShift::None
                 } else {
@@ -584,7 +605,7 @@ impl<'a> Ledger<'a> {
         // the gain filter above, the caller emits `text` verbatim and every line
         // was delivered. That is the empty-set case and needs no special arm.
         let delivered: Vec<String> = match &projected {
-            Some((_, folded, _, _)) => hashes
+            Some((_, folded, _, _, _)) => hashes
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !folded.contains(i))
@@ -596,7 +617,7 @@ impl<'a> Ledger<'a> {
         // like this session's (#533). `PROJECT_FLOOR_MULT` prices cross-agent
         // reuse and was calibrated on the single-agent case, and nothing recorded
         // enough to tell the two apart after the fact.
-        if let Some((_, folded, _, _)) = &projected {
+        if let Some((_, folded, _, _, markers)) = &projected {
             // Every line folded means the agent holds markers and nothing else,
             // which is the case `MIN_WHOLE_OUTPUT_FOLD` refuses below 1 KB. Read
             // here rather than threaded out of `substitute`, because that flag is
@@ -643,8 +664,13 @@ impl<'a> Ledger<'a> {
             let scope = self.project.as_deref().unwrap_or(&self.scope);
             // `scope` above is the project when there is one, so the session
             // has to travel separately or the row cannot answer for itself.
-            self.store
-                .ledger_record_folds(scope, &self.agent, session_of(&self.scope), &folds);
+            self.store.ledger_record_folds(
+                scope,
+                &self.agent,
+                session_of(&self.scope),
+                &folds,
+                markers,
+            );
         }
 
         self.store
@@ -658,7 +684,7 @@ impl<'a> Ledger<'a> {
                 .ledger_record(p, &delivered, &self.agent, &self.source);
         }
 
-        projected.map(|(view, _, _, _)| (view, shifts))
+        projected.map(|(view, _, _, _, _)| (view, shifts))
     }
 
     /// The marker one run would be replaced by, rendered rather than estimated
@@ -667,7 +693,13 @@ impl<'a> Ledger<'a> {
     /// A run covering every line means the reply is this marker and nothing else,
     /// which needs different wording (#519), and that wording is longer: an
     /// earlier draft weighed the short one and emitted the long one.
-    fn marker_for(&self, run: &Run, seen: &Seen, total: usize, handle: &str) -> String {
+    fn marker_for(
+        &self,
+        run: &Run,
+        seen: &Seen,
+        total: usize,
+        handle: &str,
+    ) -> (String, &'static str) {
         let src = &seen.source;
         let lines = run.end - run.start;
         if run.start == 0 && run.end == total {
@@ -687,7 +719,13 @@ impl<'a> Ledger<'a> {
         lines: &[&str],
         hashes: &[String],
         origin_of: &dyn Fn(&String) -> Option<Seen>,
-    ) -> Option<(String, HashSet<usize>, usize, bool)> {
+    ) -> Option<(
+        String,
+        HashSet<usize>,
+        usize,
+        bool,
+        Vec<crate::store::sqlite::MarkerRecord>,
+    )> {
         let runs = group_runs(hashes, origin_of);
         if !runs.iter().any(|r| r.seen.is_some()) {
             return None;
@@ -741,6 +779,7 @@ impl<'a> Ledger<'a> {
                 run.seen.as_ref().is_some_and(|seen| {
                     let marker = self
                         .marker_for(run, seen, lines.len(), &"0".repeat(HANDLE_LEN))
+                        .0
                         .len();
                     lines[run.start..run.end]
                         .iter()
@@ -832,6 +871,10 @@ impl<'a> Ledger<'a> {
         // or stays verbatim, and adjacent runs of different origin are separate
         // runs. Every attempt to infer it downstream was wrong (#573).
         let mut markers_above = 0usize;
+        // #766. What was actually handed over, at the grain the marker lives at.
+        // `ledger_folds` groups a call by (origin, source agent), so it cannot
+        // answer which wording a reader met or which handle they were given.
+        let mut emitted: Vec<crate::store::sqlite::MarkerRecord> = Vec::new();
         let mut still_above = true;
         let mut padded_any = false;
         for (i, run) in runs.iter().enumerate() {
@@ -879,6 +922,7 @@ impl<'a> Ledger<'a> {
                     // gain it is required to make (review of #664).
                     let marker = self
                         .marker_for(run, seen, lines.len(), &"0".repeat(HANDLE_LEN))
+                        .0
                         .len()
                         + usize::from(body.ends_with('\n'));
                     body.len() >= marker + padding + seen.origin.min_gain()
@@ -903,7 +947,14 @@ impl<'a> Ledger<'a> {
                 .zip(run.seen.as_ref())
             {
                 Some((handle, seen)) => {
-                    out.push_str(&render(seen, &handle));
+                    let (marker, kind) = render(seen, &handle);
+                    out.push_str(&marker);
+                    emitted.push(crate::store::sqlite::MarkerRecord {
+                        kind,
+                        handle: handle.clone(),
+                        lines: run.end - run.start,
+                        bytes: body.len(),
+                    });
                     // The run carried its own terminator, so the marker needs one
                     // only when the text it replaced ended a line. A run at the
                     // very end of an output with no trailing newline does not.
@@ -928,7 +979,7 @@ impl<'a> Ledger<'a> {
                 }
             }
         }
-        replaced_any.then_some((out, folded, markers_above, padded_any))
+        replaced_any.then_some((out, folded, markers_above, padded_any, emitted))
     }
 }
 
@@ -1163,6 +1214,59 @@ mod tests {
             elsewhere.contains("already shown") && elsewhere.contains("from for p in"),
             "a different command still has to name the source it is standing in \
              for (#622): {elsewhere}"
+        );
+    }
+
+    /// #766. Every wording change so far was argued from examples, because
+    /// nothing recorded which shape a reader met. `ledger_folds` groups a call by
+    /// (origin, source agent) and holds no handle, so it can say how much was
+    /// folded and never which marker did it or whether anyone went back for the
+    /// bytes.
+    ///
+    /// The kind comes from the arm that renders the string, so this asserts the
+    /// pairing rather than a label somebody typed twice: a re-run records
+    /// `session_rerun` and says `identical to an earlier run`, and a different
+    /// command records `session_run` and says `already shown`. A parser over the
+    /// rendered text would be the second copy #765 just deleted.
+    #[test]
+    fn a_fold_records_which_marker_shape_it_rendered() {
+        let (store, _d) = temp_store();
+        let poll = "wget -qO- 127.0.0.1:8482/metrics | grep ^is_read_only";
+        let block = fresh_block("is_read_only");
+
+        Ledger::new(&store, "s1").from(poll).project(&block);
+        let again = Ledger::new(&store, "s1")
+            .from(poll)
+            .project(&format!("{}{block}", fresh_block("capacity")))
+            .expect("a verbatim re-run is projectable");
+        let elsewhere = Ledger::new(&store, "s1")
+            .from("kubectl get pvc")
+            .project(&format!("{}{block}", fresh_block("phase")))
+            .expect("the same block under another command is projectable");
+
+        let rates = store.marker_retrieve_rates(1);
+        let by_kind: std::collections::HashMap<&str, i64> =
+            rates.iter().map(|r| (r.kind.as_str(), r.folds)).collect();
+
+        assert_eq!(
+            by_kind.get("session_rerun").copied(),
+            Some(1),
+            "a re-run has to be recorded as one: {:?}",
+            rates.iter().map(|r| (&r.kind, r.folds)).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            by_kind.get("session_run").copied(),
+            Some(1),
+            "a different command has to be recorded as one: {:?}",
+            rates.iter().map(|r| (&r.kind, r.folds)).collect::<Vec<_>>()
+        );
+        assert!(
+            again.contains("identical to an earlier run") && elsewhere.contains("already shown"),
+            "the recorded kinds have to name the wording that was rendered:\n{again}\n{elsewhere}"
+        );
+        assert!(
+            rates.iter().all(|r| r.retrieved == 0),
+            "nothing was retrieved in this test, so the rate has to read zero"
         );
     }
 
@@ -2003,11 +2107,13 @@ mod tests {
     #[test]
     fn a_source_cannot_break_out_of_its_marker() {
         let nasty = "cat <<EOF\nsecond line\nthird line\nEOF";
-        let marker = Origin::Session.marker(
-            9,
-            &"0".repeat(HANDLE_LEN),
-            &SourceOfSighting::Another(nasty.to_string()),
-        );
+        let marker = Origin::Session
+            .marker(
+                9,
+                &"0".repeat(HANDLE_LEN),
+                &SourceOfSighting::Another(nasty.to_string()),
+            )
+            .0;
         assert_eq!(
             marker.lines().count(),
             1,
@@ -2018,11 +2124,13 @@ mod tests {
             "expected the first line only: {marker:?}"
         );
 
-        let tabs = Origin::Session.marker(
-            9,
-            &"0".repeat(HANDLE_LEN),
-            &SourceOfSighting::Another("go\ttest\t./...".to_string()),
-        );
+        let tabs = Origin::Session
+            .marker(
+                9,
+                &"0".repeat(HANDLE_LEN),
+                &SourceOfSighting::Another("go\ttest\t./...".to_string()),
+            )
+            .0;
         assert_eq!(tabs.lines().count(), 1, "a tab split the marker: {tabs:?}");
         assert!(
             tabs.contains("from go test ./..."),
@@ -2114,10 +2222,12 @@ mod tests {
             .collect();
         let session_bar = Origin::Session
             .marker(9, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
+            .0
             .len()
             + Origin::Session.min_gain();
         let project_bar = Origin::Project
             .marker(9, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
+            .0
             .len()
             + Origin::Project.min_gain();
         assert!(
@@ -2286,6 +2396,7 @@ mod tests {
 
         let bar = Origin::Session
             .marker(3, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
+            .0
             .len()
             + Origin::Session.min_gain();
         assert!(
@@ -2322,9 +2433,11 @@ mod tests {
         assert_eq!(
             Origin::Session
                 .marker(9, &handle, &SourceOfSighting::Unrecorded)
+                .0
                 .len(),
             Origin::Session
                 .marker(9, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
+                .0
                 .len()
         );
     }
@@ -2390,6 +2503,7 @@ mod tests {
             block('a').len()
                 >= Origin::Session
                     .marker(8, &"0".repeat(HANDLE_LEN), &SourceOfSighting::Unrecorded)
+                    .0
                     .len()
                     + Origin::Session.min_gain(),
             "each block must be able to fold on its own, or the guard is not what \

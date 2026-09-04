@@ -970,6 +970,40 @@ impl SqliteBackend {
                 [],
             );
         }
+        // #766. `ledger_folds` aggregates a call's folds by (origin, source agent),
+        // so it cannot say which marker wording a reader was handed, and it holds
+        // no handle, so nothing joins a retrieval back to the fold that caused it.
+        // Both questions are per marker, which is a finer grain than that table
+        // has, and widening it would change every figure already published from
+        // it. A second table at the right grain answers them and disturbs nothing.
+        //
+        // `kind` is decided by the code that renders the string, never by parsing
+        // one back: this repository has been bitten three times by two copies of
+        // one string (#452, #454, #456), and #765 removed a tally that tried to
+        // recognise markers in text.
+        let _ = conn.execute(
+            "CREATE TABLE IF NOT EXISTS fold_markers (
+                id      INTEGER PRIMARY KEY,
+                fold_id INTEGER NOT NULL,
+                ts      INTEGER NOT NULL,
+                scope   TEXT NOT NULL,
+                session TEXT NOT NULL DEFAULT '',
+                agent_id TEXT NOT NULL DEFAULT 'unknown',
+                kind    TEXT NOT NULL,
+                handle  TEXT NOT NULL DEFAULT '',
+                lines   INTEGER NOT NULL,
+                bytes   INTEGER NOT NULL
+            )",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fold_markers_handle ON fold_markers(handle)",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fold_markers_ts ON fold_markers(ts)",
+            [],
+        );
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ledger_folds_fold ON ledger_folds(fold_id)",
             [],
@@ -2299,6 +2333,39 @@ impl SqliteBackend {
         let _ = tx.commit();
     }
 
+    /// Retrieve rate per marker shape, over the last `days`.
+    ///
+    /// Joined on the handle, which is the only thing that ties a retrieval to the
+    /// marker that caused it. `retrieve_events` predates `fold_markers`, so a
+    /// retrieval of a marker written before #766 finds no row here and is absent
+    /// rather than counted against some other shape: window the query and read
+    /// `folds` before reading the rate.
+    pub fn marker_retrieve_rates(&self, days: i64) -> Vec<MarkerRate> {
+        let Ok(conn) = self.pool.get() else {
+            return Vec::new();
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT m.kind, COUNT(*),
+                    SUM(CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END)
+               FROM fold_markers m
+               LEFT JOIN retrieve_events r ON r.hash = m.handle
+              WHERE m.ts >= strftime('%s','now') - (?1 * 86400)
+              GROUP BY m.kind
+              ORDER BY 3 DESC",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map(params![days], |r| {
+            Ok(MarkerRate {
+                kind: r.get(0)?,
+                folds: r.get(1)?,
+                retrieved: r.get(2).unwrap_or(0),
+            })
+        });
+        rows.map(|rs| rs.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+    }
+
     /// Records what one call's folds drew on, grouped by origin and source agent.
     ///
     /// Written after the view is decided rather than while it is being built, so
@@ -2311,6 +2378,7 @@ impl SqliteBackend {
         agent_id: &str,
         session: &str,
         folds: &[FoldRecord],
+        markers: &[MarkerRecord],
     ) {
         if folds.is_empty() {
             return;
@@ -2355,6 +2423,29 @@ impl SqliteBackend {
                     f.payload_bytes as i64,
                     session,
                     fold_id
+                ]);
+            }
+        }
+        {
+            let Ok(mut stmt) = tx.prepare_cached(
+                "INSERT INTO fold_markers
+                     (fold_id, ts, scope, session, agent_id, kind, handle, lines, bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            ) else {
+                let _ = tx.commit();
+                return;
+            };
+            for m in markers {
+                let _ = stmt.execute(params![
+                    fold_id,
+                    ts,
+                    scope,
+                    session,
+                    agent_id,
+                    m.kind,
+                    m.handle,
+                    m.lines as i64,
+                    m.bytes as i64,
                 ]);
             }
         }
@@ -3110,6 +3201,33 @@ impl EngineTotals {
 }
 
 #[derive(Debug, Clone)]
+/// How often one marker shape sent a reader back for the bytes.
+///
+/// The whole point of recording the kind (#766). A shape with a high retrieve
+/// rate is one that did not answer the question it interrupted, which is a work
+/// queue rather than an opinion about wording.
+pub struct MarkerRate {
+    pub kind: String,
+    pub folds: i64,
+    pub retrieved: i64,
+}
+
+/// One marker a reader was actually handed, at the grain `ledger_folds` cannot
+/// reach: that table groups a call's folds by (origin, source agent), and a
+/// marker is per run.
+///
+/// `kind` comes from the arm that rendered the string, so a wording change moves
+/// the label with it (#766). `handle` is what joins a later `retrieve_events`
+/// row back to the marker that sent the reader looking, which is the measurement
+/// this exists for: a marker shape with a high retrieve rate is one that did not
+/// answer the question it interrupted.
+pub struct MarkerRecord {
+    pub kind: &'static str,
+    pub handle: String,
+    pub lines: usize,
+    pub bytes: usize,
+}
+
 pub struct FoldRecord {
     /// The agent that was shown these lines first, from `ledger_lines.agent_id`.
     pub source_agent: String,
@@ -4026,6 +4144,7 @@ mod tests {
                     payload_bytes: 2_000,
                 },
             ],
+            &[],
         );
 
         // A second fold, same second, same session, same payload size, and it
@@ -4043,6 +4162,7 @@ mod tests {
                 whole_output: false,
                 payload_bytes: 2_000,
             }],
+            &[],
         );
 
         // A third fold sharing the second, the session, the agent, the scope and
@@ -4060,6 +4180,7 @@ mod tests {
                 whole_output: false,
                 payload_bytes: 2_000,
             }],
+            &[],
         );
 
         // A fourth fold with no payload size: summable, never divisible.
@@ -4075,6 +4196,7 @@ mod tests {
                 whole_output: false,
                 payload_bytes: 0,
             }],
+            &[],
         );
 
         // Force every row into one second. The recorder stamps wall clock, so a
