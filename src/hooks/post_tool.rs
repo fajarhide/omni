@@ -320,7 +320,7 @@ fn declined(
                 normalized.content.len(),
                 "own recovery command",
                 normalized.host_session_id.as_deref().unwrap_or(""),
-                &normalized.agent_id,
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
             );
         }
         return Some(Declined::KeepsTheseBytes);
@@ -350,7 +350,7 @@ fn declined(
                 normalized.content.len(),
                 &format::passthrough_reason(kind),
                 normalized.host_session_id.as_deref().unwrap_or(""),
-                &normalized.agent_id,
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
             );
         }
         return Some(Declined::KeepsTheseBytes);
@@ -394,7 +394,7 @@ fn declined(
                 normalized.content.len(),
                 "host output cap",
                 normalized.host_session_id.as_deref().unwrap_or(""),
-                &normalized.agent_id,
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
             );
         }
         return Some(Declined::KeepsAPreview);
@@ -870,7 +870,7 @@ pub fn process_payload(
                 content.len(),
                 "would have dropped the failure",
                 normalized.host_session_id.as_deref().unwrap_or(""),
-                &normalized.agent_id,
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
             );
         }
         final_out = content.to_string();
@@ -958,7 +958,7 @@ pub fn process_payload(
                 content.len(),
                 "below guardrail",
                 normalized.host_session_id.as_deref().unwrap_or(""),
-                &normalized.agent_id,
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
             );
         }
 
@@ -1591,6 +1591,32 @@ mod tests {
         assert_eq!(
             by_agent[0].0, "claude_code",
             "the hook has to record the agent it resolved, not a default: {by_agent:?}"
+        );
+
+        // #774 review. Codex sends a Claude-Code-shaped payload, so the id the
+        // payload implies and the id the host resolves to are different values,
+        // and `stats_agent_id` is the one distillation already books under. A
+        // column added for attribution that files a Codex decline under Claude
+        // Code is worse than no column at all.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let codex = serde_json::json!({
+            "action": "run",
+            "command": "kubectl get pods -o json",
+            "result": body,
+        })
+        .to_string();
+        assert!(
+            process_payload(&codex, Some(store.clone()), None).is_none(),
+            "the same structured payload has to be declined in Codex's shape too"
+        );
+
+        let by_agent = store.passthrough_bytes_by_agent(1);
+        assert_eq!(by_agent.len(), 1, "one decline, one door: {by_agent:?}");
+        assert_ne!(
+            by_agent[0].0, "claude_code",
+            "a Codex decline was filed under Claude Code, which is the \
+             misattribution this column exists to prevent: {by_agent:?}"
         );
     }
 
