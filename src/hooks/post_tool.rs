@@ -945,7 +945,26 @@ pub fn process_payload(
     // partial is a false claim about a complete answer (#335). `Soft` is decided
     // on the byte ratio alone, and folding a repeated prefix shrinks bytes
     // without losing a line.
-    if route == Route::Soft && distilled_lines <= content.lines().count() {
+    //
+    // Weighed on the distiller's own ratio, not the delivered one (#775). `route`
+    // above is computed from `final_out`, which the ledger has already folded, so
+    // a payload the distiller never touched can land in `Soft` on the strength of
+    // a fold and collect a banner announcing partial recognition of an output
+    // nothing was lost from. Reproduced with 16 of 40 lines already seen: the
+    // reply carried `16 lines already shown` with a handle, 24 lines verbatim,
+    // and `[Partial signal]` under an answer that was complete.
+    //
+    // The banner is the distiller's claim about its own reading, so it is the
+    // distiller's ratio that decides whether it is made.
+    let distiller_ratio = 1.0 - (distilled_len as f32 / content.len().max(1) as f32);
+    let distiller_route = if distiller_ratio >= keep_threshold {
+        Route::Keep
+    } else if distiller_ratio >= soft_threshold {
+        Route::Soft
+    } else {
+        Route::Passthrough
+    };
+    if distiller_route == Route::Soft && distilled_lines <= content.lines().count() {
         final_out.push_str("\n[Partial signal]\n");
     }
 
@@ -1605,6 +1624,58 @@ mod tests {
         );
 
         assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
+    }
+
+    /// #775, second half. `[Partial signal]` says the pipeline recognised some of
+    /// the output and not all of it, which is a claim about the distiller. The
+    /// route it was read from is computed after the ledger folds, so a payload
+    /// the distiller never touched could land in `Soft` on the strength of a fold
+    /// and collect the banner over an answer nothing was lost from.
+    ///
+    /// Sixteen of forty lines seen earlier: the fold is announced with a handle,
+    /// the other twenty four are verbatim, and the reply used to end with a
+    /// banner calling that partial.
+    #[test]
+    fn a_fold_does_not_make_the_signal_partial() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let lines: Vec<String> = (0..40)
+            .map(|i| {
+                format!(
+                    "2026-09-04T10:{i:02}:00Z INFO  worker {i} finished batch {} in {}ms",
+                    i * 7,
+                    11 + i
+                )
+            })
+            .collect();
+        let seen = format!("{}\n", lines[..16].join("\n"));
+        let whole = format!("{}\n", lines.join("\n"));
+        let payload = |cmd: &str, body: &str| {
+            serde_json::json!({
+                "session_id": "s-775b",
+                "tool_name": "Bash",
+                "tool_input": {"command": cmd},
+                "tool_response": {"stdout": body, "stderr": ""}
+            })
+            .to_string()
+        };
+
+        let _ = process_payload(
+            &payload("tail -16 app.log", &seen),
+            Some(store.clone()),
+            None,
+        );
+        let out = process_payload(&payload("cat app.log", &whole), Some(store.clone()), None)
+            .expect("a partial repeat is foldable");
+
+        assert!(
+            out.contains("already shown"),
+            "the fixture has to fold part of the reply or it proves nothing: {out}"
+        );
+        assert!(
+            !out.contains("[Partial signal]"),
+            "a complete answer was labelled partial because the ledger folded it: {out}"
+        );
     }
 
     /// #775. Two accountings of one payload landed in one blob and their sum
