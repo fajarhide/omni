@@ -1598,6 +1598,16 @@ mod tests {
         // and `stats_agent_id` is the one distillation already books under. A
         // column added for attribution that files a Codex decline under Claude
         // Code is worse than no column at all.
+        //
+        // **This arm does not prove that on its own, and saying so is the point.**
+        // The divergence needs a Claude-Code-shaped payload with the environment
+        // naming another host (`resolve_agent_id`, `normalize.rs:294`), and a test
+        // may not set that: `cargo` runs tests in parallel and a process-wide
+        // variable decides what a concurrently running test sees, which is the
+        // failure CONTRIBUTING.md calls out. The resolution rule is tested where
+        // it can be, on the pure function, at `normalize.rs:990`. What this arm
+        // holds is the weaker property that a decline is filed under the host the
+        // hook resolved rather than a constant.
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
         let codex = serde_json::json!({
