@@ -8,6 +8,211 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-09-04
+
+### Changed
+- **The head to head is published again, and it does not favour us (#712)**: the
+  comparison against rtk, lean-ctx, caveman and headroom was withdrawn in #710 because
+  the corpus behind it had been deleted, and the re-run that was supposed to replace it
+  had two silent arms. #711 fixed one. The other was calling `caveman tools compress`,
+  and nothing on the measuring machine answers to a bare `caveman`: pointed at
+  `caveman-shrink`, `tools compress` is not a subcommand it knows, so it falls through
+  to shrink mode and hands the payload back with `"ratio":0`. An arm reporting zero on
+  every trace reads as an arm that lost. `caveman-engine compress` is the entry point
+  that works. All four arms now run on every `make bench`, resolved from the machine
+  rather than from four environment variables somebody has to remember, and the rows
+  land in `docs/benchmarks/<version>.json` and in the generated table in the README and
+  on the benchmarks page, so the comparison is a build output that cannot drift from
+  its corpus again. A named arm that produces no row now aborts the artifact instead of
+  being published as a zero. On the frozen corpus OMNI is last of the four rows that
+  carry a ledger: headroom's cross-turn dedup takes 5.8% where ours takes 4.9% over
+  identical filters and identical blocks, and our filter tier is the weakest of the
+  three at 1.4% against 2.1%. `OMNI_BENCH_ARMS=off` skips the competitor arms, which
+  take the run from about 40 seconds to about 20 minutes.
+
+### Fixed
+- **The project scope replaced whole replies, leaving the reader nothing (#705)**:
+  a freshly dispatched subagent's first command came back as
+  `[OMNI: identical to 40 lines from an earlier session, none shown here]` and no
+  content at all, and it was never a subagent property: a second session on the same
+  project got the identical empty reply with the identical handle. A reviewer
+  dispatched onto a pull request had to pipe files through `base64` to read the code
+  it was sent to review. The session scope may still fold a whole reply, because that
+  reader is holding the bytes. The project scope may not: it answers for lines the
+  reader has never seen, so it now folds only part of a payload and always leaves real
+  lines to weigh the marker against. Not the reader's own set, which the report
+  proposed and the corpus falsifies: all four recorded whole-output project folds that
+  name a session happened in a session already holding 261 to 1,369 lines of its own,
+  the 1,319-byte case in the report included. Priced over this store the class is 10
+  folds and 32,104 bytes, 1.51% of every byte folded, against the 678,585 bytes the
+  partial arm keeps.
+- **A third of all traffic was filed under `cd` (#706)**: command classes were keyed
+  on the first two words of the recorded string, and half of what an agent runs is a
+  multi-line block whose first line changes directory. So `omni stats --view
+  commands`, `omni context --tokens` and the per-agent map all answered "where did
+  your bytes go" with the name of a directory change, 7,222 calls deep on this
+  machine's corpus, and the answer was true and unusable. The key is now the segment
+  that actually wrote the output, the same predicate the pipeline routes on, so the
+  block is filed under the program that produced the bytes. A leading loop keyword
+  goes the same way, since `do` names no program either, and the program is reduced
+  to its file name so `/opt/homebrew/bin/python3` and `python3` are one row. The
+  local absolute path that used to head the table goes with the `cd`: 6 of 2,051
+  classes still carry one, against the single heaviest class before.
+- **The headroom arm of the replay benchmark had never run (#711)**: pointing
+  `OMNI_BENCH_HEADROOM` at the `headroom` command handed
+  `spec_from_file_location` a console script, so the driver could not import
+  anything and the harness printed "headroom arm did not run" instead of a
+  number. It printed that every time, and headroom is the one competitor that
+  ships live cross-turn dedup, so the arm the comparison exists for was the arm
+  that was always absent. The command now resolves to the module file through
+  its own interpreter, which works whichever python it was installed under, and
+  a named arm that produces no number fails the run rather than narrating its
+  own absence. First measurement on the recorded corpus, 9,469 traces: their
+  dedup 6.7% against our ledger 6.3% on identical blocks.
+- **The ledger claimed lines the host never delivered (#716)**: Claude Code caps
+  Bash output at 30,000 bytes, writes the full text to a file, and shows the model
+  a 2 KB preview instead. The gate that declines those payloads read
+  `tool_response.stdout`, but `normalize` takes a Claude Code payload's text from
+  `content`, `file.content` or `stdout`, and the host sends plenty of over-cap
+  results in the first two. Those runs were recorded as delivered, so a later
+  `tail` of the same file came back as `[OMNI: 90 lines already shown]` for lines
+  that had never been in context: a 620-line file was unreachable by `tail`, by
+  `sed`, and by any ordinary command, with nothing in either marker to say so. The
+  gate now measures whichever field `normalize` actually read, in its own
+  precedence, still on one field so a large stdout beside a large stderr is not
+  mistaken for a truncated result.
+- **A declined payload's bytes never reached the context breakdown (#725)**: six reasons
+  hand a payload straight back, and every one of them returned before the accounting, so
+  `omni context --tokens` reported those turns lighter than they were. Measured on this
+  machine over 23 days: 569 calls and 1.37 MB missing, of which the host-cap branch the
+  report named was 19 calls. The count now happens at the shared exit. The one branch
+  deliberately left uncounted is that same host cap: Claude Code writes the raw output to
+  a file and keeps a preview, 2,233 characters for a 36.1 KB reply on record, so booking
+  the 30,000 the hook was handed would overstate the turn rather than correct it.
+- **A redacted empty default came back as broken syntax (#726)**: reading a
+  `.tsx` component to plan an edit to it, `apiKey = "",` was delivered as
+  `apiKey = "[REDACTED]"`, with no comma and no credential anywhere in the file.
+  Two defects on one line. The value reaches the redactor with its quotes and
+  its trailing punctuation attached, so an empty string never read as empty and
+  every key called `apiKey`, `token` or `password` had its default rewritten
+  whatever it held. The replacement then consumed everything after the opening
+  quote, which is the punctuation loss #486 fixed for HCL and did not generalise
+  past a value with nothing after it. An agent that copies the delivered line
+  into an edit writes a syntax error, and nothing in the output says the
+  punctuation moved. The literal between the quotes now decides whether there is
+  a secret to hide, single quotes keep their delimiter the way double quotes
+  already did, and trailing punctuation comes back with the line. Anything else
+  after the closing quote could be a second literal and is still redacted.
+- **A competitor arm that changed nothing was published as a measured loss (#733)**:
+  every arm in the head-to-head hands back the raw payload when its binary fails,
+  `rtk_out` from three separate paths, so a tool that cannot spawn or cannot parse its
+  arguments does not go silent the way #711's headroom arm did. It emits a full table of
+  unchanged bytes and lands as a tidy 0.0% row, which is what `caveman tools compress`
+  did for four releases, and #730's presence check cannot see it because the row is
+  there. A named arm whose filter-only row saved nothing now aborts the artifact instead
+  of publishing the zero. headroom is not probed that way on purpose: its arm already
+  panics when it produces no number, and a headroom that deduped nothing would read as
+  the filters-only figure rather than as zero. What the machine could not find is
+  recorded in `arms_absent`, so a three-arm table can no longer be read as a four-arm
+  comparison, and `OMNI_BENCH_ARMS=off` works again after #732 made an empty `arms` read
+  as a failed measurement.
+- **A `tail -5` came back as a handle and none of its five lines (#735)**:
+  the coverage floor added by #543 and tightened by #643 asks what share of the
+  *payload* a fold took, and a compound reply hides the answer. The reported call was
+  `cat notes.md; echo ---; tail -5 index.md`, where every line of the `tail` was folded
+  through the project scope and the run still measured 45%, because the `cat` in front
+  of it paid for the other 55%. The floor never looked, #705's whole-output guard never
+  fired because the `cat` survived, and the reader got a header announcing content
+  followed by a marker instead of it, then spent an `omni retrieve` to get back 965
+  bytes the fold had saved 910 of. Nothing at that stage can find a command boundary
+  inside a joined payload, so the ledger now asks the command rather than the bytes: a
+  `head` or `tail` counting lines has already named the answer, so its retrieval is not
+  a risk the project scope is taking, it is the outcome. Only the project scope is
+  refused, since the session scope's reader is holding the bytes and its handle costs
+  nothing. `tail -f` and `head -c` do not count, because neither names a set of lines.
+  Deliberately narrower than `registry::passes_through_verbatim`, which reaches the same
+  conclusion one stage earlier for the collapse fallback: its list carries `cat` and
+  `grep`, and those are where the project scope earns most of what it earns. Measured
+  over the 7 days in `ledger_folds`, 569 folds and 564,995 bytes: dropping the size
+  precondition on the existing floor instead, which is what the report first proposed,
+  would give up 170,518 bytes, 30.2% of every byte folded, and still miss this case.
+- **The ledger was told which command it was answering on one door of three (#736)**:
+  `Ledger::from` names the command a reply belongs to, and only `fold_cross_turn`
+  passed it. `process_payload`, which is where a Bash reply actually meets the ledger,
+  and `pipe::distill`, which is where an `omni exec` reply does, both left it empty,
+  though each had the command in scope. An empty source never equals a recorded one, so
+  #622's differing-source clause could not fire on either: a marker there either named a
+  source it should not have or, on a first sighting, said nothing while the ledger knew
+  better. It also made #735's guard inert on the only path that had reported the defect,
+  which is how the same fix could pass its unit test and change nothing in the shipped
+  binary. Driving the built binary through `--post-hook`, a repeat now reads
+  `200 lines not shown here from cat handlers.log` where it read `200 lines not shown
+  here`. Same shape as #452, #454 and #456: one pipeline, more than one entrance, and a
+  fix applied to whichever entrance the report came through.
+- **`grep -rn head src/` turned off the project scope (#738)**: the line-budget predicate
+  added in #737 matched `head` or `tail` anywhere in the command string, so any search
+  whose *pattern* was one of those words, or any pipeline ending `| grep tail`, read as a
+  reader rationing its own output. It failed safe, since the reader kept its content, but
+  it gave up folds for nothing on two shapes this repository runs constantly. The name now
+  counts only in command position: the first word of the reply, or the first word after a
+  shell separator. A separator glued to the following token (`cat a.md;tail -5 b`) is not
+  recognised and that shape folds as before, which is a deliberate limit rather than an
+  oversight: agents write the spaced form, and a tokeniser is a larger thing than this
+  predicate deserves. Raised by review on the pull request that shipped the defect and
+  merged ahead of the fix, which is the second time in three pull requests.
+- **Nothing asserted that the ledger folds across a branch switch (#739)**: the host's
+  prompt cache is pinned to the git snapshot it started on, so a checkout or a new commit
+  starts the next session cold even where the bytes are identical. The ledger's project
+  scope is keyed on the repository root and never reads a ref, which is the one saving in
+  this lane the cache structurally cannot make, and it was true only by construction. A
+  test now primes a project scope, switches branch and lands a commit under it with real
+  git, and asserts a new session still gets the fold.
+- **A `sed` range of a source file came back as a marker on its first appearance (#741)**:
+  `sed -n 60,200p` of a React component, in a context cleared moments earlier, returned 28
+  lines of the `steps.map` render branch as `[OMNI: 28 lines not shown here]`, and the next
+  step was editing that render path to add a case. An edit written against a marker is a
+  wrong edit, which is a worse outcome than the wasted retrieval #735 described. The ledger
+  behaved as designed: the lines were seen in an earlier session of the same project and
+  the marker used the project-scope wording that does not claim this context saw them. The
+  design was one command family too narrow. #737 taught the ledger to step aside when a
+  command names its own line budget and covered only `head` and `tail`, and
+  `sed -n 60,200p` names its lines exactly as `tail -5` does. `sed` addresses that name
+  line numbers now count, quoted or bare, single line or range. A pattern address
+  (`/failed/p`) and a substitution do not: those filter, which is a different claim from
+  naming the lines wanted. `awk` stays uncovered on purpose, because its line selection is
+  an expression rather than a flag and the obvious guess matches `{print NR}`, which prints
+  line numbers rather than selecting them.
+- **The ledger folded the lines a multi-line command asked for (#750, #751)**: reading
+  the line budget in command position (#742) read that position off the previous token,
+  and `split_whitespace` has already eaten the newline, so `cd repo` followed by
+  `sed -n '58,95p' src/app.tsx` on the next line was one long command and the guard was
+  off. Replayed over the 4,193 commands recorded here, the narrowing gave up the guard on
+  168 of them and 136 of those to a newline. The question is now asked per command rather
+  than per reply, so a newline separates, a `sed` address cannot be read out of a later
+  command, `sudo` and `env VAR=1` step aside, and a wrapper such as
+  `docker exec app tail -5 app.log` keeps the lines it named.
+- **A re-run was told its lines were shown, not that they were unchanged (#755)**: a poll
+  run a second time asks whether the value moved, and when it has not, that is the answer.
+  The run marker said `N lines already shown`, which puts the bytes behind a handle
+  without saying they are this command's own output and identical to last time, so a
+  reply whose surviving half was an unrelated table read as a complete result. The source
+  clause already knew: #622 recorded a source only when it differed from the command being
+  answered, so the case that most needs naming collapsed into the same absence as
+  "nothing recorded". A same-command run now says `N lines identical to an earlier run`,
+  and a different command still names itself.
+- **The benchmark measured a ledger with its guards switched off (#760)**: `make bench`
+  replayed the frozen corpus through a ledger that was never told which command produced
+  the payload, so every rule that reads the command was inert in the one place this
+  project measures itself: the `from` clause, the line budget that leaves a `tail -5`
+  alone, and the wording a re-run gets. Found by measuring 0.7.8 against `main`, where
+  every class came back byte-identical because three of the four changes in that range
+  could not reach the harness. With it fixed, on the same corpus and the same commit, the
+  ledger arm reads **3.0% where it published 4.9%**, and file reads read 1.5% where they
+  published 4.3%. Only the arms that use our ledger move; the filters and the three
+  competitor engines are unchanged. Artifacts now carry
+  `harness.ledger_knows_the_command`, so a measurement taken before this is visibly not
+  comparable with one taken after.
+
 ## [0.7.8] - 2026-08-26
 
 ### Added
