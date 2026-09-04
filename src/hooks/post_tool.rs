@@ -1555,6 +1555,45 @@ mod tests {
         assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
     }
 
+    /// #773. The column is only worth having if the hook writes it, and the
+    /// first version of this test asserted the store method with the agent
+    /// passed in by hand, which passed with the hook blanked.
+    ///
+    /// Driven through `process_payload` for that reason: a structured payload is
+    /// declined by the format gate, and the row it leaves has to name the agent
+    /// it was declined for.
+    #[test]
+    fn a_declined_payload_records_the_agent_the_hook_resolved() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let body: String = format!(
+            "[{}]",
+            (0..40)
+                .map(|i| format!(r#"{{"id":{i},"state":"Running"}}"#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let payload = serde_json::json!({
+            "session_id": "s-773",
+            "tool_name": "Bash",
+            "tool_input": {"command": "kubectl get pods -o json"},
+            "tool_response": {"stdout": body, "stderr": ""}
+        })
+        .to_string();
+
+        assert!(
+            process_payload(&payload, Some(store.clone()), None).is_none(),
+            "a structured payload has to be declined or this proves nothing"
+        );
+
+        let by_agent = store.passthrough_bytes_by_agent(1);
+        assert_eq!(by_agent.len(), 1, "one decline, one door: {by_agent:?}");
+        assert_eq!(
+            by_agent[0].0, "claude_code",
+            "the hook has to record the agent it resolved, not a default: {by_agent:?}"
+        );
+    }
+
     /// #519 at the boundary where it was reported. The ledger folds the whole
     /// payload, and the rewind marker used to measure "what survived" *after*
     /// that fold, so it counted the ledger's own marker as surviving content and
