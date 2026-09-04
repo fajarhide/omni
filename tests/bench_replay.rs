@@ -790,7 +790,6 @@ fn replay_execution_traces_net_savings() {
     // nothing but this file's own reporting line, so setting it relabelled the
     // output without moving the arm (#472).
     let project_scope = std::env::var("OMNI_BENCH_PROJECT").ok().as_deref() != Some("off");
-    let (mut mark_session, mut mark_project) = (0u64, 0u64);
     // #450's three gates, in repeated bytes the ledger never got to claim.
     let mut gap_seen = GapSeen::default();
     let (mut gap_structured, mut gap_under_floor, mut gap_processed) = (0u64, 0u64, 0u64);
@@ -993,31 +992,22 @@ fn replay_execution_traces_net_savings() {
         let l = match after_ledger {
             Some(view) => {
                 ledger_calls += 1;
-                // Counted on marker lines, not anywhere in the payload. A
-                // substring scan reads a surviving line that quotes the wording
-                // as a fold, and this repository writes those strings into its
-                // own changelog and docs, so the corpus really carries them
-                // (#557 learned the same thing about a different guard).
+                // No marker tally here any more, and the deletion is the point.
                 //
-                // Every session wording, not one string: a same-command re-run
-                // says `identical to an earlier run` since #755, and counting
-                // only the older phrase dropped those folds from the tally while
-                // the number carried on looking plausible.
-                let markers: Vec<&str> =
-                    view.lines().filter(|l| l.starts_with("[OMNI: ")).collect();
-                mark_session += markers
-                    .iter()
-                    .filter(|l| {
-                        l.contains("lines already shown")
-                            || l.contains("identical to an earlier run")
-                    })
-                    .count() as u64;
-                // `shown here` and not the whole phrase: a project run says
-                // `not shown here` and a project whole-output fold says
-                // `none shown here`, while neither session form contains it
-                // (#567). Counting the old phrase would silently drop every run
-                // marker from the tally.
-                mark_project += markers.iter().filter(|l| l.contains("shown here")).count() as u64;
+                // Counting by string cannot be made correct from this side. A
+                // substring scan reads a surviving line that quotes the wording;
+                // filtering on the `[OMNI: ` prefix reads a surviving line that
+                // starts with it, and this repository writes exactly those lines
+                // into its changelog and its manual, so the corpus carries them.
+                // #557 is the same lesson one guard earlier: identity has to come
+                // from the side that produced the string, never from parsing it
+                // back.
+                //
+                // The ledger does not report which marker shape it rendered yet.
+                // That is #766, and the split comes back when it lands. What is
+                // reported below is `ledger_calls`, which is the count of replies
+                // the ledger folded, taken from `Option::Some` rather than from
+                // text, and which content cannot spoof.
                 view.len() as u64
             }
             None => o,
@@ -1250,7 +1240,7 @@ fn replay_execution_traces_net_savings() {
         ratio(out_total.saturating_sub(ledger_total), avail_total)
     );
     println!(
-        "ledger arm:      project_scope={project_scope} floor_mult={} bytes={ledger_total} markers: {mark_session} session, {mark_project} project",
+        "ledger arm:      project_scope={project_scope} floor_mult={} bytes={ledger_total} folds: {ledger_calls} replies (marker shapes pending #766)",
         omni::guard::limits::PROJECT_FLOOR_MULT
     );
 
