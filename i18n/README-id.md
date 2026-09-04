@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Agent Anda membayar dua kali untuk output yang sudah pernah dilihatnya.</b> OMNI menggantinya dengan handle yang bisa diambil kembali: <b>97,2%</b> untuk file yang dibaca dua kali. Sepanjang satu sesi ia mengambil sekitar seperempat dari pengulangan yang benar-benar ada di pekerjaan Anda, yang di korpus di bawah berarti <b>4,5%</b> dari byte pembacaan file. Seberapa berulang pekerjaan Anda yang menentukan Anda mendarat di mana antara keduanya. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka di sini bisa diputar ulang di riwayat Anda sendiri.</em>
+    <em><b>Agent Anda membayar dua kali untuk output yang sudah pernah dilihatnya.</b> OMNI menggantinya dengan handle yang bisa diambil kembali: <b>97,2%</b> untuk file yang dibaca dua kali. Sepanjang satu sesi ia mengambil sekitar sepersepuluh dari pengulangan yang benar-benar ada di pekerjaan Anda, yang di korpus di bawah berarti <b>1,5%</b> dari byte pembacaan file. Seberapa berulang pekerjaan Anda yang menentukan Anda mendarat di mana antara keduanya. Tidak ada yang dihapus, tidak ada yang dikarang, dan setiap angka di sini bisa diputar ulang di riwayat Anda sendiri.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -143,7 +143,7 @@ tidak ikut terhapus.
   satu kolom, datar di kolom lain, dan hanya satu dari keduanya yang merupakan fakta
   tentang OMNI.
 * **Korpus ini tidak kedaluwarsa.** Ia beku di disk dan hash-nya ada di
-  `docs/benchmarks/0.7.7.json`, jadi angka di atas bisa diperiksa terhadap byte yang
+  `docs/benchmarks/0.7.9.json`, jadi angka di atas bisa diperiksa terhadap byte yang
   sama di rilis berikutnya, bukan terhadap apa pun yang tersisa dari tujuh hari
   terakhir. Jalankan harness-nya di riwayat Anda sendiri untuk angka tentang beban
   kerja Anda.

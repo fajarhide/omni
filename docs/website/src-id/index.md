@@ -153,12 +153,15 @@ dibaca agent Anda dua kali kembali **97,2%** lebih kecil pada bacaan keduanya, d
 satu itu sifat mekanismenya: ia bereproduksi di mesin mana pun, kapan pun diminta.
 
 Sepanjang satu korpus penuh, angkanya jadi sifat korpusnya. Pada korpus 9.478 perintah
-yang dibekukan sebagai `0b63218ef78a1edb`, ledger memangkas **4,5%** dari pembacaan
+yang dibekukan sebagai `0b63218ef78a1edb`, ledger memangkas **1,5%** dari pembacaan
 file, karena pembacaan file di sana rata-rata 2,1 KB. Satu minggu sebelumnya yang
 pembacaan filenya rata-rata 12,4 KB memberi dua puluh kali lebih banyak, dengan kode
-yang sama. Yang hampir tidak bergerak di antara keduanya adalah porsi pengulangan
-tersedia yang benar-benar diambil ledger, **10,7%** secara agregat, dan itulah angka
-yang menggambarkan OMNI alih-alih menggambarkan minggunya.
+yang sama, dan itulah yang membuat angka byte jadi sifat minggunya, bukan sifat OMNI.
+
+Porsi pengulangan tersedia yang benar-benar diambil ledger adalah **10,7%** secara
+agregat di korpus ini. Angka padanannya untuk minggu yang lebih awal itu diukur sebelum
+#760, ketika benchmark belum bisa melihat guard milik ledger sendiri, jadi keduanya tidak
+sebanding dan halaman ini berhenti berpura-pura sebanding.
 
 File yang berubah di antara dua bacaan tetap dilipat di sekitar perubahannya. Tiap lipatan
 mempertahankan jumlah baris yang digantikannya, jadi baris yang tidak berpindah tetap ada

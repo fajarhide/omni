@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Agent của bạn trả tiền hai lần cho output nó đã thấy rồi.</b> OMNI trả lại một handle lấy lại được thay vì thế: <b>97,2%</b> với tệp đọc hai lần. Trên cả một phiên làm việc nó lấy khoảng một phần tư lượng lặp lại thực sự có trong công việc của bạn, tức <b>4,5%</b> số byte đọc tệp trên tập dữ liệu bên dưới. Công việc của bạn lặp lại nhiều hay ít quyết định bạn nằm ở đâu giữa hai con số đó. Không xoá gì, không bịa gì, và mọi con số ở đây đều phát lại được trên chính lịch sử của bạn.</em>
+    <em><b>Agent của bạn trả tiền hai lần cho output nó đã thấy rồi.</b> OMNI trả lại một handle lấy lại được thay vì thế: <b>97,2%</b> với tệp đọc hai lần. Trên cả một phiên làm việc nó lấy khoảng một phần mười lượng lặp lại thực sự có trong công việc của bạn, tức <b>1,5%</b> số byte đọc tệp trên tập dữ liệu bên dưới. Công việc của bạn lặp lại nhiều hay ít quyết định bạn nằm ở đâu giữa hai con số đó. Không xoá gì, không bịa gì, và mọi con số ở đây đều phát lại được trên chính lịch sử của bạn.</em>
 </p>
 
 [🇺🇸 English](../README.md) | [🇯🇵 日本語](README-ja.md) | [🇨🇳 简体中文](README-zh.md) | [🇸🇦 العربية](README-ar.md) | [🇮🇩 Bahasa Indonesia](README-id.md) | [🇻🇳 Tiếng Việt](README-vi.md) | [🇰🇷 한국어](README-ko.md)
@@ -142,7 +142,7 @@ cắt mất.
   hơn ở cùng lớp đó, trên cùng mã nguồn, trong khi capture rate gần như không đổi. Hai
   mươi lần ở một cột, phẳng ở cột kia, và chỉ một trong hai là sự thật về OMNI.
 * **Tập dữ liệu này không hết hạn.** Nó nằm cố định trên đĩa và băm của nó có trong
-  `docs/benchmarks/0.7.7.json`, nên các con số trên có thể được kiểm lại trên đúng những
+  `docs/benchmarks/0.7.9.json`, nên các con số trên có thể được kiểm lại trên đúng những
   byte đó ở bản phát hành sau, thay vì trên bất cứ gì bảy ngày vừa rồi còn giữ. Hãy chạy
   bộ đo trên lịch sử của chính bạn để có con số về khối lượng công việc của bạn.
 * **Nó trả lại byte thay vì bịa ra một khoản tiết kiệm.** Khi không có gì an toàn để

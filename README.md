@@ -3,7 +3,7 @@
 
 <h1>OMNI</h1>
 <p align="center">
-    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice. Across a whole session it takes about a quarter of the repetition your work actually contains, which was <b>4.5%</b> of file-read bytes on the corpus below. How repetitive your work is decides where you land between those two. Nothing deleted, nothing invented, and every number here replays on your own history.</em>
+    <em><b>Your agent pays twice for output it has already seen.</b> OMNI hands back a retrievable handle instead: <b>97.2%</b> off a file it reads twice. Across a whole session it takes about a tenth of the repetition your work actually contains, which was <b>1.5%</b> of file-read bytes on the corpus below. How repetitive your work is decides where you land between those two. Nothing deleted, nothing invented, and every number here replays on your own history.</em>
 </p>
 
 [🇺🇸 English](README.md) | [🇯🇵 日本語](i18n/README-ja.md) | [🇨🇳 简体中文](i18n/README-zh.md) | [🇸🇦 العربية](i18n/README-ar.md) | [🇮🇩 Bahasa Indonesia](i18n/README-id.md) | [🇻🇳 Tiếng Việt](i18n/README-vi.md) | [🇰🇷 한국어](i18n/README-ko.md)

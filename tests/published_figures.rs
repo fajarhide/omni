@@ -42,6 +42,13 @@ const RETIRED: &[&str] = &[
     "49.4", // lean-ctx compress
     "61.4", // rtk + our ledger
     "61.7", // caveman + our ledger
+    // #760, and the third time in one session that a figure was fixed in English
+    // and left standing in six translations. These were measured by a harness
+    // that built its ledger without ever naming the command, so every rule the
+    // ledger has that reads the command was switched off in the measurement.
+    "4.5",  // file read with the ledger, the hero line's second half
+    "24.1", // capture rate, aggregate
+    "23.3", // capture rate, aggregate, one release later
             // rtk alone (6.2) and caveman alone (6.8) are deliberately absent. The
             // match is a substring, so `6.2` also hits every `0.6.2` in a changelog
             // link or a version string. A two-significant-digit figure cannot be
