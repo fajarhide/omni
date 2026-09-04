@@ -993,19 +993,31 @@ fn replay_execution_traces_net_savings() {
         let l = match after_ledger {
             Some(view) => {
                 ledger_calls += 1;
-                // Every session wording, not one string. A same-command re-run
+                // Counted on marker lines, not anywhere in the payload. A
+                // substring scan reads a surviving line that quotes the wording
+                // as a fold, and this repository writes those strings into its
+                // own changelog and docs, so the corpus really carries them
+                // (#557 learned the same thing about a different guard).
+                //
+                // Every session wording, not one string: a same-command re-run
                 // says `identical to an earlier run` since #755, and counting
                 // only the older phrase dropped those folds from the tally while
                 // the number carried on looking plausible.
-                mark_session += (view.matches("lines already shown").count()
-                    + view.matches("identical to an earlier run").count())
-                    as u64;
+                let markers: Vec<&str> =
+                    view.lines().filter(|l| l.starts_with("[OMNI: ")).collect();
+                mark_session += markers
+                    .iter()
+                    .filter(|l| {
+                        l.contains("lines already shown")
+                            || l.contains("identical to an earlier run")
+                    })
+                    .count() as u64;
                 // `shown here` and not the whole phrase: a project run says
                 // `not shown here` and a project whole-output fold says
                 // `none shown here`, while neither session form contains it
                 // (#567). Counting the old phrase would silently drop every run
                 // marker from the tally.
-                mark_project += view.matches("shown here").count() as u64;
+                mark_project += markers.iter().filter(|l| l.contains("shown here")).count() as u64;
                 view.len() as u64
             }
             None => o,
