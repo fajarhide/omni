@@ -28,25 +28,13 @@ impl AgentIntegration for ClaudeIntegration {
     }
 
     fn install(&self, exe_path: &str) -> anyhow::Result<()> {
-        let (path, mut val) = initialize_settings()?;
-        let _ = backup_settings(&path);
-
-        install_omni_hooks(&mut val, exe_path);
-        let new_content = serde_json::to_string_pretty(&val)?;
-        fs::write(&path, new_content)?;
-        crate::agent_report!(
-            "  {} {} installed in Claude settings",
-            "✓".green(),
-            "Hooks".bold()
-        );
-
+        install_hooks(exe_path)?;
         install_mcp_server(exe_path)?;
         crate::agent_report!(
             "  {} {} registered in .claude.json",
             "✓".green(),
             "MCP Server".bold()
         );
-
         Ok(())
     }
 
@@ -256,24 +244,24 @@ impl AgentIntegration for ClaudeIntegration {
             }
         }
         if !mcp_found {
-            if fix_mode {
-                if let Ok(exe_path) = std::env::current_exe() {
-                    crate::agents::report_fix(
-                        "MCP Server:",
-                        "registered",
-                        self.install(&exe_path.to_string_lossy()),
-                        warnings,
-                    );
-                }
-            } else {
-                crate::agent_report!(
-                    "   {:<15} {}",
-                    "MCP Server:".bright_black(),
-                    "[WARNING] no MCP server found".yellow().bold()
-                );
-                warnings.push("MCP Server is not configured. Run `omni init`.".to_string());
-                all_ok = false;
-            }
+            // #757. Absence is a state here, not a fault. The hooks are what
+            // shortens output on this host; the MCP server is a convenience whose
+            // two tool definitions sit in the prefix of every request, and the
+            // host discards the whole prompt cache when an MCP server connects or
+            // disconnects with its tools loaded. Someone who ran
+            // `omni init --hook`, or who removed the entry on purpose after
+            // reading that, was being told their install was broken and then
+            // having the decision undone by the next `doctor --fix`.
+            //
+            // So it reports, and says how to add it, and neither fails the check
+            // nor repairs what nobody broke.
+            let _ = fix_mode;
+            crate::agent_report!(
+                "   {:<15} {}  {}",
+                "MCP Server:".bright_black(),
+                "[not registered]".bright_black(),
+                "optional here, `omni init --mcp` adds it".bright_black()
+            );
         }
 
         all_ok
@@ -556,6 +544,28 @@ pub fn install_omni_hooks(val: &mut Value, exe_path: &str) {
         hooks.entry("FileChanged").or_insert_with(|| json!([])),
         &hook_cmd,
     );
+}
+
+/// The half of the install that does the work.
+///
+/// Separate from the MCP registration because `omni init --hook` has promised
+/// "Only install hooks" since it shipped and installed both anyway, which is the
+/// shape of #151: a flag the parser accepts and the code ignores. On this host
+/// the hooks are what shortens output and the MCP server is a convenience whose
+/// tool definitions sit in the prefix of every request, so wanting one without
+/// the other is an ordinary preference and not a broken install (#757).
+pub fn install_hooks(exe_path: &str) -> anyhow::Result<()> {
+    let (path, mut val) = initialize_settings()?;
+    let _ = backup_settings(&path);
+
+    install_omni_hooks(&mut val, exe_path);
+    fs::write(&path, serde_json::to_string_pretty(&val)?)?;
+    crate::agent_report!(
+        "  {} {} installed in Claude settings",
+        "✓".green(),
+        "Hooks".bold()
+    );
+    Ok(())
 }
 
 pub fn install_mcp_server(exe_path: &str) -> anyhow::Result<()> {
