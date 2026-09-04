@@ -1022,12 +1022,29 @@ pub fn process_payload(
         // bought a marker announcing `1 bytes omitted` on top of two fold
         // markers that already accounted for all 40 lines. Every number was
         // true and their sum was not.
-        if distilled_len + marker.len() < content.len() {
+        // Two tests, and they ask different questions (#775).
+        //
+        // The first is whether the cut this marker describes can pay for it.
+        // Reading `final_out` alone let the *ledger's* saving buy a marker about
+        // the *distiller's* cut: on a re-run of `git log --oneline -40` the
+        // distiller cut one byte, the ledger folded the reply to a few lines, and
+        // the reply carried `1 bytes omitted` over fold markers that already
+        // accounted for every line. Both figures true, their sum impossible.
+        //
+        // The second is whether the reply that results is still smaller than what
+        // the command produced, which is #268 and #269 and is about every byte
+        // this function has appended, including a `[Partial signal]` added after
+        // the distiller's numbers were taken. Dropping it handed 104 bytes back
+        // for 99, caught by `never_hands_back_more_bytes_than_the_command_produced`
+        // rather than by review.
+        if distilled_len + marker.len() < content.len()
+            && final_out.len() + marker.len() < content.len()
+        {
             final_out.push_str(&marker);
             if !rewind_hash.is_empty() {
                 route = Route::Rewind;
             }
-        } else if ledger_folded {
+        } else if ledger_folded && final_out.len() < content.len() {
             // The marker cannot pay for the distiller's cut, so it is not
             // printed. The ledger's fold is a different saving with its own
             // markers and its own handles, and throwing it away here cost the
@@ -1037,6 +1054,12 @@ pub fn process_payload(
             //
             // Nothing is left unreachable. The handle is cleared because no
             // marker names it, and every folded run carries its own.
+            //
+            // The size test is not decoration. `never_hands_back_more_bytes_than_
+            // the_command_produced` caught the first version of this arm handing
+            // 104 bytes back for 99: a fold on a tiny payload can cost more than
+            // it saves, and the old passthrough was what capped that. Keeping the
+            // fold is only right when the fold is smaller.
             rewind_hash.clear();
         } else {
             final_out = content.to_string();
