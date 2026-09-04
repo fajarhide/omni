@@ -926,6 +926,18 @@ impl SqliteBackend {
             "ALTER TABLE passthrough_events ADD COLUMN reason TEXT NOT NULL DEFAULT 'unrecorded'",
             [],
         );
+        // #773. The table could not say which door a decline came through, so it
+        // could not say what share of what OMNI declines was declined on behalf
+        // of a model. `session` is not that test: `host output cap` fires only
+        // for `claude_code`, and 20 of its 39 rows carry no session id.
+        //
+        // Old rows read `unknown` rather than being guessed at. The door cannot
+        // be recovered after the fact, so any query about the split windows
+        // itself, the same rule the `reason` column above already needs.
+        let _ = conn.execute(
+            "ALTER TABLE passthrough_events ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'unknown'",
+            [],
+        );
         // Rows written before this column predate the flag entirely, so 0 means
         // "not recorded" and not "was a partial fold". Queries about the floor
         // have to bound themselves by ts for that reason.
@@ -1496,17 +1508,54 @@ impl SqliteBackend {
     /// JSON" and "declined because no distiller could parse it" call for
     /// opposite work, and the second is the only direct evidence that the
     /// never-fabricate invariant is doing any.
-    pub fn record_passthrough(&self, command: &str, bytes: usize, reason: &str, session: &str) {
+    pub fn record_passthrough(
+        &self,
+        command: &str,
+        bytes: usize,
+        reason: &str,
+        session: &str,
+        agent_id: &str,
+    ) {
         let conn = match self.pool.get() {
             Ok(c) => c,
             Err(_) => return,
         };
         let now = chrono::Utc::now().timestamp();
         let _ = conn.execute(
-            "INSERT INTO passthrough_events (command, bytes, ts, reason, session)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![command, bytes as i64, now, reason, session],
+            "INSERT INTO passthrough_events (command, bytes, ts, reason, session, agent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![command, bytes as i64, now, reason, session, agent_id],
         );
+    }
+
+    /// What each door declined, in bytes, over the last `days`.
+    ///
+    /// The question `passthrough_events` could not answer until #773: what share
+    /// of what OMNI declines was declined on behalf of a model. `session` is not
+    /// that test, since a hook payload can arrive without one, so this groups by
+    /// the agent the row was recorded for.
+    ///
+    /// Rows written before the column read `unknown`, which is why the window
+    /// matters: a query over all time is mostly a report about a column that did
+    /// not exist yet.
+    pub fn passthrough_bytes_by_agent(&self, days: i64) -> Vec<(String, i64, i64)> {
+        let Ok(conn) = self.pool.get() else {
+            return Vec::new();
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT agent_id, COUNT(*), SUM(bytes)
+               FROM passthrough_events
+              WHERE ts >= strftime('%s','now') - (?1 * 86400)
+              GROUP BY agent_id
+              ORDER BY 3 DESC",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map(params![days], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2).unwrap_or(0)))
+        });
+        rows.map(|rs| rs.filter_map(Result::ok).collect())
+            .unwrap_or_default()
     }
 
     /// How many payloads each gate declined, newest window first.
@@ -3902,9 +3951,15 @@ mod tests {
     #[test]
     fn counts_passthroughs_by_the_gate_that_declined_them() {
         let (store, _d) = get_temp_store();
-        store.record_passthrough("kubectl get pods -o json", 900, "structured json", "s1");
-        store.record_passthrough("gh api repos", 700, "structured json", "s1");
-        store.record_passthrough("cargo build", 500, "below guardrail", "s2");
+        store.record_passthrough(
+            "kubectl get pods -o json",
+            900,
+            "structured json",
+            "s1",
+            "claude_code",
+        );
+        store.record_passthrough("gh api repos", 700, "structured json", "s1", "claude_code");
+        store.record_passthrough("cargo build", 500, "below guardrail", "s2", "claude_code");
 
         let by_reason = store.passthrough_reasons(0);
 
@@ -5450,13 +5505,62 @@ mod tests {
         assert!(store.get_agent_breakdown(0).unwrap().is_empty());
     }
 
+    /// #773. The table could say what OMNI declined and not who it declined for,
+    /// and `session` is not that test: a hook payload can arrive without a
+    /// session id, so `host output cap`, a branch that only fires for
+    /// `claude_code`, had 20 of its 39 rows carrying none.
+    ///
+    /// That gap made #608 unsizeable. Its case rests on 12.33 MB of structured
+    /// payload having no downstream reader, and the share of that which ever
+    /// entered a model's context is the only part the ledger could take.
+    #[test]
+    fn a_decline_records_which_agent_it_was_declined_for() {
+        let (store, _dir) = get_temp_store();
+        store.record_passthrough(
+            "kubectl get pods -o json",
+            900,
+            "structured:json",
+            "",
+            "claude_code",
+        );
+        store.record_passthrough("jq . big.json", 700, "structured:json", "", "terminal");
+        store.record_passthrough("cat notes.md", 100, "below guardrail", "s1", "claude_code");
+
+        let by_agent: std::collections::HashMap<String, (i64, i64)> = store
+            .passthrough_bytes_by_agent(1)
+            .into_iter()
+            .map(|(agent, calls, bytes)| (agent, (calls, bytes)))
+            .collect();
+
+        assert_eq!(
+            by_agent.get("claude_code").copied(),
+            Some((2, 1_000)),
+            "the hook door has to be countable on its own: {by_agent:?}"
+        );
+        assert_eq!(
+            by_agent.get("terminal").copied(),
+            Some((1, 700)),
+            "the pipe door has to be countable on its own: {by_agent:?}"
+        );
+        assert!(
+            by_agent.values().all(|(_, bytes)| *bytes > 0),
+            "an empty session must not be read as a door: {by_agent:?}"
+        );
+    }
+
     /// #672. Every other time-series table is pruned by `cleanup_old` and this
     /// one was not, so it kept command strings past the window the rest honour.
     /// A user who shortens retention got it everywhere except here.
     #[test]
     fn the_retention_window_reaches_the_passthrough_log() {
         let (store, _dir) = get_temp_store();
-        store.record_passthrough("kubectl get pods", 900, "structured:json", "s1");
+        store.record_passthrough(
+            "kubectl get pods",
+            900,
+            "structured:json",
+            "s1",
+            "claude_code",
+        );
         store
             .pool
             .get()
@@ -5466,7 +5570,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        store.record_passthrough("cargo build", 500, "below guardrail", "s1");
+        store.record_passthrough("cargo build", 500, "below guardrail", "s1", "claude_code");
 
         store.cleanup_old(30);
 
@@ -5484,11 +5588,29 @@ mod tests {
     #[test]
     fn a_decline_is_attributed_to_the_session_that_made_it() {
         let (store, _dir) = get_temp_store();
-        store.record_passthrough("kubectl get pods", 900, "structured:json", "mine");
-        store.record_passthrough("terraform plan", 800, "structured:json", "theirs");
-        store.record_passthrough("cargo build", 500, "below guardrail", "theirs");
+        store.record_passthrough(
+            "kubectl get pods",
+            900,
+            "structured:json",
+            "mine",
+            "claude_code",
+        );
+        store.record_passthrough(
+            "terraform plan",
+            800,
+            "structured:json",
+            "theirs",
+            "claude_code",
+        );
+        store.record_passthrough(
+            "cargo build",
+            500,
+            "below guardrail",
+            "theirs",
+            "claude_code",
+        );
         // Pipe mode, where the host sends no id at all.
-        store.record_passthrough("sort -u", 400, "below guardrail", "");
+        store.record_passthrough("sort -u", 400, "below guardrail", "", "claude_code");
 
         assert_eq!(
             store.passthrough_reasons_for(0, Some("mine")),

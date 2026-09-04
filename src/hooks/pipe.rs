@@ -89,6 +89,7 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
                 passthrough.len(),
                 "own recovery command",
                 "",
+                &resolve_pipe_agent_id(),
             );
         }
         return Ok(());
@@ -140,7 +141,12 @@ pub fn run_inner<R: Read, W: Write, E: Write>(
                 // Pipe mode has no host session id. Empty says that, where the
                 // `SessionState` fallback would say "whenever OMNI last started"
                 // and group 16 project paths under one id (#118, #672).
+                //
+                // The agent id is what tells this row from a hook row, since an
+                // empty session does not: a hook payload can arrive without one
+                // too (#773).
                 "",
+                &resolve_pipe_agent_id(),
             );
         }
         return Ok(());
