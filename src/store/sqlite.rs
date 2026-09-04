@@ -2340,15 +2340,27 @@ impl SqliteBackend {
     /// retrieval of a marker written before #766 finds no row here and is absent
     /// rather than counted against some other shape: window the query and read
     /// `folds` before reading the rate.
+    ///
+    /// `EXISTS` rather than a join, and the difference is not style (#771 review).
+    /// A handle is the SHA of the content, so the same bytes folded twice carry
+    /// the same handle, and a plain `LEFT JOIN` then multiplies a marker by every
+    /// retrieval that ever matched it: `COUNT(*)` stops counting markers and the
+    /// sum stops counting pulls. This asks one question per marker instead, which
+    /// is "was this content ever fetched after this marker was shown".
+    ///
+    /// The bound that remains, stated rather than hidden: two markers of the same
+    /// content, in different shapes, are both credited by one retrieval. Content
+    /// addressing is what makes a handle worth having, and separating those two
+    /// would need a per-marker id the retrieval path does not carry.
     pub fn marker_retrieve_rates(&self, days: i64) -> Vec<MarkerRate> {
         let Ok(conn) = self.pool.get() else {
             return Vec::new();
         };
         let Ok(mut stmt) = conn.prepare(
             "SELECT m.kind, COUNT(*),
-                    SUM(CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END)
+                    SUM(EXISTS (SELECT 1 FROM retrieve_events r
+                                 WHERE r.hash = m.handle AND r.ts >= m.ts))
                FROM fold_markers m
-               LEFT JOIN retrieve_events r ON r.hash = m.handle
               WHERE m.ts >= strftime('%s','now') - (?1 * 86400)
               GROUP BY m.kind
               ORDER BY 3 DESC",
@@ -2553,6 +2565,10 @@ impl SqliteBackend {
         // its deletion in the same commit as its schema rather than a follow-up.
         let _ = conn.execute(
             "DELETE FROM ledger_folds WHERE ts < ?1",
+            params![ts_threshold],
+        );
+        let _ = conn.execute(
+            "DELETE FROM fold_markers WHERE ts < ?1",
             params![ts_threshold],
         );
 

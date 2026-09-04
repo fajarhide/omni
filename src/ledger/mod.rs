@@ -1315,6 +1315,26 @@ mod tests {
                 .map(|r| (&r.kind, r.folds, r.retrieved))
                 .collect::<Vec<_>>()
         );
+
+        // #771 review. A handle is the SHA of its content, so one pulled twice
+        // used to multiply its own marker through the join: the fold count
+        // stopped counting markers and the retrieval sum stopped counting
+        // answered questions.
+        store.record_retrieve_event("omni retrieve", handle, "claude_code");
+        let twice = store.marker_retrieve_rates(1);
+        let after_two = twice
+            .iter()
+            .find(|r| r.kind == "session_rerun")
+            .expect("the re-run row survives a second pull");
+        assert_eq!(
+            (after_two.folds, after_two.retrieved),
+            (1, 1),
+            "pulling one handle twice has to stay one marker and one answered question: {:?}",
+            twice
+                .iter()
+                .map(|r| (&r.kind, r.folds, r.retrieved))
+                .collect::<Vec<_>>()
+        );
     }
 
     /// #627. A fold archives the run it replaced, never the reply, so the handle
