@@ -192,9 +192,12 @@ fn rewind_marker(
         return (String::new(), String::new());
     }
     let lost = if omitted_lines > 0 {
-        format!("{omitted_lines} lines")
+        let unit = if omitted_lines == 1 { "line" } else { "lines" };
+        format!("{omitted_lines} {unit}")
     } else {
-        format!("{} bytes", content.len().saturating_sub(kept_bytes))
+        let bytes = content.len().saturating_sub(kept_bytes);
+        let unit = if bytes == 1 { "byte" } else { "bytes" };
+        format!("{bytes} {unit}")
     };
 
     if content.len() > crate::guard::limits::MAX_REWIND_BYTES {
@@ -838,6 +841,10 @@ pub fn process_payload(
     // (#519). Same defect as #301, one stage further up.
     let distilled_lines = final_out.lines().count();
     let distilled_len = final_out.len();
+    // Whether the stage after this one changed the reply, which the banner block
+    // below has to know: its `else` arm throws the reply away, and that is only
+    // correct when the distiller was the only stage that touched it (#775).
+    let mut ledger_folded = false;
 
     if let (Some(s), Some(session)) = (store.as_ref(), normalized.host_session_id.as_deref())
         && !crate::pipeline::format::refuses_the_ledger(&final_out)
@@ -856,6 +863,7 @@ pub fn process_payload(
             .project(&final_out)
     {
         final_out = view;
+        ledger_folded = true;
     }
 
     // The post-condition (#458). Every invariant above constrains what a stage
@@ -1004,11 +1012,32 @@ pub fn process_payload(
         // reply with fewer facts and more tokens, which is #268 and #269 on 102
         // and 90 byte payloads. Below that floor, hand back what the command
         // produced instead.
-        if final_out.len() + marker.len() < content.len() {
+        //
+        // Weighed against the distiller's own output, not the delivered one
+        // (#775). The numbers in this marker describe the distiller's cut, so
+        // the test that decides whether it is worth printing has to describe the
+        // same stage. Reading `final_out` let the ledger pay for it: on a
+        // re-run of `git log --oneline -40` the distiller cut a single byte, the
+        // ledger folded the reply to 4 lines, and the saving the ledger made
+        // bought a marker announcing `1 bytes omitted` on top of two fold
+        // markers that already accounted for all 40 lines. Every number was
+        // true and their sum was not.
+        if distilled_len + marker.len() < content.len() {
             final_out.push_str(&marker);
             if !rewind_hash.is_empty() {
                 route = Route::Rewind;
             }
+        } else if ledger_folded {
+            // The marker cannot pay for the distiller's cut, so it is not
+            // printed. The ledger's fold is a different saving with its own
+            // markers and its own handles, and throwing it away here cost the
+            // whole of it: on a re-run of `git log --oneline -40` this arm
+            // turned a 3,257 byte reply that had been folded to 325 into a
+            // passthrough, because the distiller had cut one byte.
+            //
+            // Nothing is left unreachable. The handle is cleared because no
+            // marker names it, and every folded run carries its own.
+            rewind_hash.clear();
         } else {
             final_out = content.to_string();
             route = Route::Passthrough;
@@ -1553,6 +1582,54 @@ mod tests {
         );
 
         assert_eq!(retrieval, None, "a retrieval must reach the agent verbatim");
+    }
+
+    /// #775. Two accountings of one payload landed in one blob and their sum
+    /// exceeded the input. The distiller cut a single byte from
+    /// `git log --oneline -40`, the ledger then folded the reply to a few lines,
+    /// and the banner announced `1 bytes omitted` on top of fold markers that
+    /// already accounted for all 40. Every number was true and the arithmetic a
+    /// reader can do was not.
+    ///
+    /// The banner is weighed against the distiller's own output now, since that
+    /// is the stage its numbers describe. The first version of this fix weighed
+    /// it correctly and then let the old `else` arm throw the ledger's fold away
+    /// with it, turning a 3,257 byte reply that had been folded to 325 into a
+    /// passthrough. Both halves are asserted here for that reason.
+    #[test]
+    fn a_folded_reply_carries_no_second_accounting_of_itself() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let body: String = (0..40)
+            .map(|i| {
+                format!(
+                    "{:07x} fix(scope): the {i}th change to something
+",
+                    i * 2_654_435
+                )
+            })
+            .collect();
+        let payload = serde_json::json!({
+            "session_id": "s-775",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git log --oneline -40"},
+            "tool_response": {"stdout": body, "stderr": ""}
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(store.clone()), None);
+        let second = process_payload(&payload, Some(store.clone()), None)
+            .expect("a re-run of a recorded reply has to fold, not pass through");
+
+        assert!(
+            !second.contains("omitted"),
+            "a second accounting was printed over folds that already cover the \
+             payload: {second}"
+        );
+        assert!(
+            second.contains("identical to an earlier run") || second.contains("already shown"),
+            "the ledger's fold was thrown away with the banner: {second}"
+        );
     }
 
     /// #773. The column is only worth having if the hook writes it, and the
