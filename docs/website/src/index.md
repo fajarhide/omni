@@ -132,7 +132,7 @@ Across a whole corpus the figure is a property of the corpus instead. On the 9,4
 command corpus frozen as `0b63218ef78a1edb` the ledger takes **4.5%** off file reads,
 because file reads there average 2.1 KB. An earlier week whose file reads averaged
 12.4 KB gave up twenty times more, on the same code. What barely moved between the two
-is the share of the available repetition the ledger actually took, **24.1%** in
+is the share of the available repetition the ledger actually took, **10.7%** in
 aggregate, and that is the number that describes OMNI rather than the week.
 
 A file that changed between the two reads still folds around the change. Each fold keeps

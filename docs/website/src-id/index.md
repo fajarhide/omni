@@ -157,7 +157,7 @@ yang dibekukan sebagai `0b63218ef78a1edb`, ledger memangkas **4,5%** dari pembac
 file, karena pembacaan file di sana rata-rata 2,1 KB. Satu minggu sebelumnya yang
 pembacaan filenya rata-rata 12,4 KB memberi dua puluh kali lebih banyak, dengan kode
 yang sama. Yang hampir tidak bergerak di antara keduanya adalah porsi pengulangan
-tersedia yang benar-benar diambil ledger, **24,1%** secara agregat, dan itulah angka
+tersedia yang benar-benar diambil ledger, **10,7%** secara agregat, dan itulah angka
 yang menggambarkan OMNI alih-alih menggambarkan minggunya.
 
 File yang berubah di antara dua bacaan tetap dilipat di sekitar perubahannya. Tiap lipatan

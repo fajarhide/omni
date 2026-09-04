@@ -210,7 +210,7 @@ corpus cannot be checked by anyone, us included.
 On a corpus of 9,478 real command executions that reached a model, 8.42 MB over 70
 sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
 
-* **1.4% from the filters, 5.1% with the ledger**, and the ledger took **24.1% of
+* **1.4% from the filters, 3.0% with the ledger**, and the ledger took **10.7% of
   all the repetition that was there to take**. The last figure is the one that
   describes OMNI. The first two describe this corpus.
 * **Read the corpus before the number.** This one is shell-heavy, so it
@@ -220,7 +220,7 @@ sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
   Twentyfold in one column, flat in the other, and only one of those two is a fact
   about OMNI.
 * **This corpus does not expire.** It is frozen on disk and its hash is in
-  `docs/benchmarks/0.7.8.json`, so the numbers above can be checked against the
+  `docs/benchmarks/0.7.9.json`, so the numbers above can be checked against the
   same bytes next release instead of against whatever the last seven days held.
   Run the harness on your own history for a figure about your workload.
 * **It hands bytes back rather than inventing a saving.** Where there is nothing

@@ -133,7 +133,7 @@ một câu xin bạn tin.
 qua 70 phiên, được đóng băng trên đĩa và băm thành `0b63218ef78a1edb` để nó không bị
 cắt mất.
 
-* **1,4%** từ bộ lọc, **5,1%** khi có ledger, và ledger lấy **24,1% toàn bộ lượng lặp
+* **1,4%** từ bộ lọc, **3,0%** khi có ledger, và ledger lấy **10,7% toàn bộ lượng lặp
   lại thực sự có ở đó để lấy**. Con số cuối mới là con số nói về OMNI. Hai con số đầu
   nói về tập dữ liệu này.
 * **Đọc tập dữ liệu trước khi đọc con số.** Tập này nghiêng nhiều về lệnh shell, nên nó

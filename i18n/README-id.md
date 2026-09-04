@@ -132,7 +132,7 @@ Diukur pada korpus 9.478 eksekusi perintah nyata yang sampai ke model, 8,42 MB
 sepanjang 70 sesi, dibekukan di disk dan diberi hash `0b63218ef78a1edb` supaya ia
 tidak ikut terhapus.
 
-* **1,4%** dari filter, **5,1%** dengan ledger, dan ledger mengambil **24,1% dari
+* **1,4%** dari filter, **3,0%** dengan ledger, dan ledger mengambil **10,7% dari
   seluruh pengulangan yang memang ada untuk diambil**. Angka terakhir itu yang
   menggambarkan OMNI. Dua yang pertama menggambarkan korpus ini.
 * **Baca korpusnya sebelum angkanya.** Korpus ini berat ke perintah shell, jadi ia

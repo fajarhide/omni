@@ -30,7 +30,23 @@ Per class, with the ledger: file read 4.3% to **1.5%**, other 4.6% to 2.8%, git 
 rate goes 23.3% to 10.7%.
 
 Only the arms that use our ledger move, which is the check that the change is what it
-claims to be. Filters do not touch the ledger and read 1.4% either way, and the three
+claims to be.
+
+**Where the 1.9 points went**, measured by switching each guard off on the same corpus and
+the same commit. Every one of them exists to stop a fold that should not happen, so this is
+the price of the ledger behaving, not a regression:
+
+| ledger arm | aggregate |
+| --- | --- |
+| guards invisible to the harness, as published in 0.7.8 | 4.9% |
+| naming the source switched off (`from` clause, re-run wording) | 4.3% |
+| line budget switched off (`tail -5`, `sed -n 60,200p` fold again) | 3.4% |
+| **shipped, every guard on** | **3.0%** |
+
+Naming the source costs 1.3 points and the line budget 0.4. The rest is the two
+interacting: a marker that carries a source is longer, and marker length decides which
+runs are worth folding at all.
+
 competitor engines are untouched.
 
 The tables below are left as they were measured, because deleting a published number is
@@ -48,7 +64,8 @@ at seven days, so none of them can be re-derived. This one is a file. That is th
 of #704: a release-over-release delta was previously a code change and a corpus change
 added together, with no way to separate them.
 
-**1.4% from the filters. 5.1% with the ledger.** 98.4% of calls saved nothing, 1.6%
+**1.4% from the filters. 3.0% with the ledger**, the second re-measured under #760;
+this section first published 5.1%. 98.4% of calls saved nothing, 1.6%
 shrank, and **no call came back larger**. Tokens, `cl100k_base` as a proxy for a
 vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
 
