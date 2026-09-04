@@ -1268,6 +1268,31 @@ mod tests {
             rates.iter().all(|r| r.retrieved == 0),
             "nothing was retrieved in this test, so the rate has to read zero"
         );
+
+        // The join is the deliverable, so it is asserted rather than assumed. An
+        // earlier draft of this test passed with the handle column written blank,
+        // which would have shipped a retrieve rate that is always zero.
+        let handle = again
+            .split("omni retrieve ")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("the marker carries a handle");
+        store.record_retrieve_event("omni retrieve", handle, "claude_code");
+
+        let after = store.marker_retrieve_rates(1);
+        let rerun = after
+            .iter()
+            .find(|r| r.kind == "session_rerun")
+            .expect("the re-run row is still there");
+        assert_eq!(
+            rerun.retrieved,
+            1,
+            "following the handle back has to land on the shape that printed it: {:?}",
+            after
+                .iter()
+                .map(|r| (&r.kind, r.folds, r.retrieved))
+                .collect::<Vec<_>>()
+        );
     }
 
     /// #627. A fold archives the run it replaced, never the reply, so the handle
