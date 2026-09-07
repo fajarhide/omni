@@ -1366,7 +1366,10 @@ mod tests {
             ("secret", " self.secret"),
             // The shape that makes the rule non-negotiable: a JWT is
             // alphanumeric runs joined by dots.
-            ("token", " eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.dBjftJeZ4CVP"),
+            (
+                "token",
+                " eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.dBjftJeZ4CVP",
+            ),
         ] {
             assert!(
                 redact_assignment(key, value).is_some(),
