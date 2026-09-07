@@ -685,6 +685,56 @@ fn looks_like_shell_expansion(value: &str) -> bool {
     rest.starts_with(['(', '{']) || rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
 }
 
+/// Source that names a value instead of holding one, so redacting it destroys
+/// the line and hides nothing.
+///
+/// `looks_like_shell_expansion` above already carries this idea for `$VAR`, and
+/// says why it applies to every pattern where the identifier rule does not: an
+/// expansion carries no credential material whatever the key is called. Code has
+/// two more shapes with that property, a call and a dotted reference, plus the
+/// null literals. This matters because `token`, `secret`, `password` and
+/// `api_key` are ordinary local names in auth code, which is the code most
+/// likely to be read carefully, and `token = token.strip()` was delivered as
+/// `token = [REDACTED]` (#783).
+///
+/// Three deliberate narrowings, because the direction of doubt in this file has
+/// not changed and a false negative here prints a secret:
+///
+/// - **Unquoted only.** A credential is written as a literal, so anything
+///   opening with a quote keeps the old reading.
+/// - **No quote anywhere in the value**, which is why `os.environ["TOK"]` from
+///   #783's repro stays redacted. Allowing them would wave through
+///   `token = decrypt("ghp_real")`, and telling a subscript key apart from a
+///   hardcoded argument needs a parser rather than a predicate.
+/// - **A bare identifier is not here.** `hunter2` has exactly that shape, and
+///   #559 already settled that `pass=hello` stays redacted. A call or a dot is
+///   required, so `token = other_var` is still cut.
+fn references_instead_of_holding(value: &str) -> bool {
+    let v = value.trim().trim_end_matches([',', ';']).trim();
+    if v.is_empty() {
+        return false;
+    }
+    // A keyword is the whole value or it is not one, so this runs before the
+    // shape rules rather than as another charset exception.
+    const NULLISH: &[&str] = &["none", "null", "nil", "undefined", "true", "false"];
+    if NULLISH.iter().any(|k| v.eq_ignore_ascii_case(k)) {
+        return true;
+    }
+    if !v.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        return false;
+    }
+    // Whitespace would let a second token hide behind the first, so the whole
+    // value has to be one reference expression.
+    if v.chars().any(|c| c.is_whitespace() || matches!(c, '"' | '\'')) {
+        return false;
+    }
+    if !v.contains(['(', '.']) {
+        return false;
+    }
+    v.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '(' | ')' | '[' | ']'))
+}
+
 /// One line's redaction decision and its replacement, so the two callers cannot
 /// disagree about either.
 ///
@@ -707,6 +757,7 @@ fn redact_assignment(key: &str, value: &str) -> Option<String> {
     if !is_sensitive_key(key)
         || (literal.trim().is_empty() && is_only_punctuation(tail))
         || looks_like_shell_expansion(value)
+        || references_instead_of_holding(value)
     {
         return None;
     }
@@ -1256,6 +1307,56 @@ mod tests {
                 redact_assignment(key, value),
                 Some(expected.to_string()),
                 "{key}={value} kept a literal the reader should not see"
+            );
+        }
+    }
+
+    /// #783. `redact_sensitive_assignments` checked the key and never the value,
+    /// so reading source code with a local named `token` delivered
+    /// `token = token.strip()` as `token = [REDACTED]`. An agent then reasons
+    /// about the function from a line that was never there, and can write the
+    /// corrupted line back out in an edit.
+    ///
+    /// The second table is the point, and it is larger than the first on
+    /// purpose: a rule that only proves the code shapes survive is
+    /// indistinguishable from deleting the `TOKEN` pattern. Two rows in it are
+    /// cases #783 asked for and this fix deliberately does not give, so a later
+    /// reader can see they were decided rather than missed.
+    #[test]
+    fn a_reference_names_a_credential_and_a_literal_holds_one() {
+        for (key, value) in [
+            ("token", " token.strip()"),
+            ("token", " get_token()"),
+            ("token", " None"),
+            ("token", " null"),
+            ("api_key", " cfg.api_key"),
+            ("PASSWORD", " os.getenv()"),
+            ("secret", " self.secret"),
+        ] {
+            assert_eq!(
+                redact_assignment(key, value),
+                None,
+                "{key}={value} names a value rather than holding one, and was destroyed"
+            );
+        }
+
+        for (key, value) in [
+            // A bare identifier is the shape `hunter2` has, so #559's call
+            // stands and this stays cut even though #783 listed it.
+            ("token", " other_var"),
+            // A quote anywhere means a literal could be hiding in an argument,
+            // so `os.environ["TOK"]` from the repro is cut with it.
+            ("token", " os.environ[\"TOK\"]"),
+            ("token", " decrypt(\"ghp_realLookingValue1234\")"),
+            // The credential the repro was actually there to protect.
+            ("token", " \"ghp_realLookingValueHere1234\""),
+            // Whitespace would let a second token hide behind a reference.
+            ("token", " cfg.token \"sk-ant-real\""),
+            ("PASSWORD", " hunter2"),
+        ] {
+            assert!(
+                redact_assignment(key, value).is_some(),
+                "{key}={value} could carry a credential and was delivered"
             );
         }
     }
