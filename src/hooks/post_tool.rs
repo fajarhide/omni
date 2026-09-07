@@ -175,6 +175,42 @@ fn rewind_marker(
     kept_lines: usize,
     kept_bytes: usize,
 ) -> (String, String) {
+    // Only a cut that will name a handle archives one. These are the same two
+    // cases `rewind_marker_text` renders without a handle, asked here so a
+    // restructure that cut no line and a payload over the cap keep their rows
+    // out of `rewind_store`.
+    let archivable = kept_lines <= content.lines().count()
+        && content.len() <= crate::guard::limits::MAX_REWIND_BYTES;
+    let hash = archivable
+        .then(|| store.and_then(|s| s.store_rewind(content, content.len())))
+        .flatten()
+        .unwrap_or_default();
+    (
+        rewind_marker_text(content, kept_lines, kept_bytes, &hash),
+        hash,
+    )
+}
+
+/// A handle of the real width, for pricing a marker that has not been archived.
+const HANDLE_SHAPE: &str = "0000000000000000";
+
+/// What the marker for this cut would cost, with nothing written.
+///
+/// The floor test moved in front of the ledger (#778) and cannot archive there:
+/// every call it declines hands the command's own bytes back, so a row written
+/// for it is a row for content nobody lost, which is the waste
+/// `rewind_marker`'s placement was moved to avoid.
+///
+/// Rendered rather than measured, so there is no second copy of the marker's
+/// shape to drift. An archive that fails prints a shorter marker, so this
+/// over-estimates only in the direction of handing the raw bytes back.
+fn rewind_marker_cost(content: &str, kept_lines: usize, kept_bytes: usize) -> usize {
+    rewind_marker_text(content, kept_lines, kept_bytes, HANDLE_SHAPE).len()
+}
+
+/// The marker itself, given the handle the content was archived under, or an
+/// empty one when it was not.
+fn rewind_marker_text(content: &str, kept_lines: usize, kept_bytes: usize, hash: &str) -> String {
     let input_lines = content.lines().count();
     let omitted_lines = input_lines.saturating_sub(kept_lines);
     // Lines are what a reader can act on, but a distillation can also shorten
@@ -189,7 +225,7 @@ fn rewind_marker(
     // in-place shortening keeps the count equal, which is why the test is `>`
     // and not `>=`: that case is real loss and still gets its byte figure.
     if kept_lines > input_lines {
-        return (String::new(), String::new());
+        return String::new();
     }
     let lost = if omitted_lines > 0 {
         let unit = if omitted_lines == 1 { "line" } else { "lines" };
@@ -201,13 +237,10 @@ fn rewind_marker(
     };
 
     if content.len() > crate::guard::limits::MAX_REWIND_BYTES {
-        return (
-            format!(
-                "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
-                content.len(),
-                crate::guard::limits::MAX_REWIND_BYTES
-            ),
-            String::new(),
+        return format!(
+            "\n[OMNI: {lost} omitted, full output not archived: {} bytes over the {} byte rewind cap]\n",
+            content.len(),
+            crate::guard::limits::MAX_REWIND_BYTES
         );
     }
     // A failed write reads the same as no store at all, because what the reader
@@ -215,15 +248,10 @@ fn rewind_marker(
     // The old code took the key `store_rewind` returned on every path, including
     // a swallowed insert, and printed `omni_retrieve("<key>")` for a row that was
     // never written (#388).
-    match store.and_then(|s| s.store_rewind(content, content.len())) {
-        Some(hash) => (
-            format!("\n[OMNI: {lost} omitted, omni retrieve {hash} for full output]\n"),
-            hash,
-        ),
-        None => (
-            format!("\n[OMNI: {lost} omitted, full output not archived]\n"),
-            String::new(),
-        ),
+    if hash.is_empty() {
+        format!("\n[OMNI: {lost} omitted, full output not archived]\n")
+    } else {
+        format!("\n[OMNI: {lost} omitted, omni retrieve {hash} for full output]\n")
     }
 }
 
@@ -841,10 +869,29 @@ pub fn process_payload(
     // (#519). Same defect as #301, one stage further up.
     let distilled_lines = final_out.lines().count();
     let distilled_len = final_out.len();
-    // Whether the stage after this one changed the reply, which the banner block
-    // below has to know: its `else` arm throws the reply away, and that is only
-    // correct when the distiller was the only stage that touched it (#775).
-    let mut ledger_folded = false;
+
+    // #778. A cut the marker cannot pay for is never delivered: the reply is
+    // handed back whole instead. The ledger runs first though, and once it has
+    // folded that reply the cut is unannounced and unreachable, because the fold
+    // markers account for the lines they replaced and nothing accounts for the
+    // bytes the distiller took. Bounded by the marker's own length, and one byte
+    // in the case that found it, which is still the one thing this pipeline may
+    // not do.
+    //
+    // So the ledger is handed what the command produced, and the distiller's
+    // numbers below say it cut nothing, because nothing it cut survives. Every
+    // stage still answers for its own bytes: no marker is printed over another
+    // stage's saving (#775), the fold is kept rather than thrown away with the
+    // cut (#777), and `execution_traces` keeps storing the reply as delivered.
+    let (distilled_lines, distilled_len) = if distilled_len >= content.len()
+        || distilled_len + rewind_marker_cost(&content, distilled_lines, distilled_len)
+            < content.len()
+    {
+        (distilled_lines, distilled_len)
+    } else {
+        final_out = content.to_string();
+        (content.lines().count(), content.len())
+    };
 
     if let (Some(s), Some(session)) = (store.as_ref(), normalized.host_session_id.as_deref())
         && !crate::pipeline::format::refuses_the_ledger(&final_out)
@@ -863,7 +910,6 @@ pub fn process_payload(
             .project(&final_out)
     {
         final_out = view;
-        ledger_folded = true;
     }
 
     // The post-condition (#458). Every invariant above constrains what a stage
@@ -1063,23 +1109,6 @@ pub fn process_payload(
             if !rewind_hash.is_empty() {
                 route = Route::Rewind;
             }
-        } else if ledger_folded && final_out.len() < content.len() {
-            // The marker cannot pay for the distiller's cut, so it is not
-            // printed. The ledger's fold is a different saving with its own
-            // markers and its own handles, and throwing it away here cost the
-            // whole of it: on a re-run of `git log --oneline -40` this arm
-            // turned a 3,257 byte reply that had been folded to 325 into a
-            // passthrough, because the distiller had cut one byte.
-            //
-            // Nothing is left unreachable. The handle is cleared because no
-            // marker names it, and every folded run carries its own.
-            //
-            // The size test is not decoration. `never_hands_back_more_bytes_than_
-            // the_command_produced` caught the first version of this arm handing
-            // 104 bytes back for 99: a fold on a tiny payload can cost more than
-            // it saves, and the old passthrough was what capped that. Keeping the
-            // fold is only right when the fold is smaller.
-            rewind_hash.clear();
         } else {
             final_out = content.to_string();
             route = Route::Passthrough;
@@ -1723,6 +1752,64 @@ mod tests {
         assert!(
             second.contains("identical to an earlier run") || second.contains("already shown"),
             "the ledger's fold was thrown away with the banner: {second}"
+        );
+    }
+
+    /// #778. A cut too small to announce is never delivered on its own: the
+    /// marker costs more than it saved, so the reply is handed back whole. The
+    /// ledger ran first though, and #777 kept its fold rather than throwing it
+    /// away, which left the distiller's cut inside a reply nothing accounted
+    /// for: the fold markers answer for the lines they replaced and no marker
+    /// answers for the bytes the distiller took. One byte, in the case that
+    /// found it, and still the one thing this pipeline may not do.
+    ///
+    /// Asserted as the property rather than as a branch, because the branch is
+    /// gone: what the command printed is in the reply or behind a handle the
+    /// reply names.
+    #[test]
+    fn every_byte_is_in_the_reply_or_behind_a_handle_it_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        let body: String = (0..40)
+            .map(|i| {
+                format!(
+                    "{:07x} fix(scope): the {i}th change to something\n",
+                    i * 2_654_435
+                )
+            })
+            .collect();
+        let payload = serde_json::json!({
+            "session_id": "s-778",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git log --oneline -40"},
+            "tool_response": {"stdout": body, "stderr": ""}
+        })
+        .to_string();
+
+        let _ = process_payload(&payload, Some(store.clone()), None);
+        let second = process_payload(&payload, Some(store.clone()), None)
+            .expect("a re-run of a recorded reply has to fold, not pass through");
+        assert!(
+            second.len() < body.len(),
+            "nothing was folded, so this proves nothing: {second}"
+        );
+
+        // Split rather than sliced: the handle is the leading hex run of what
+        // follows the phrase every marker names it with.
+        let mut reachable = String::new();
+        for part in second.split("omni retrieve ").skip(1) {
+            let handle: String = part.chars().take_while(char::is_ascii_hexdigit).collect();
+            if let Some(text) = store.retrieve_rewind(&handle) {
+                reachable.push_str(&text);
+            }
+        }
+        assert!(
+            !reachable.is_empty(),
+            "the reply names no handle that resolves: {second}"
+        );
+        assert!(
+            format!("{second}{reachable}").contains(body.as_str()),
+            "bytes the command printed are in neither the reply nor its handles"
         );
     }
 
