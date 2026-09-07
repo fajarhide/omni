@@ -43,7 +43,7 @@ use std::collections::{HashMap, HashSet};
 use crate::guard::limits::{
     MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, MIN_WHOLE_OUTPUT_FOLD, PROJECT_FLOOR_MULT,
 };
-use crate::pipeline::registry;
+use crate::pipeline::{producer, registry};
 use crate::store::sqlite::Store;
 
 /// How much of a source name a marker will carry.
@@ -561,7 +561,21 @@ impl<'a> Ledger<'a> {
             } else if seen.source == self.source {
                 SourceOfSighting::ThisCommandAgain
             } else {
-                SourceOfSighting::Another(seen.source.clone())
+                // A recorded source is the whole command string, and naming a
+                // prefix of it names a different command. 28.7% of sourced lines
+                // here were recorded against a multi-line command and 86.6% of
+                // those begin with `cd <path>`, so a quarter of every `from`
+                // clause was crediting the bytes to a chdir, which writes no
+                // stdout at all (#779). `sole_output_command` is the same
+                // predicate that decides which segment a distiller may claim, so
+                // the marker and the routing agree by construction, and its
+                // `None` is the honest answer for a chain with two producers:
+                // stdout is one stream and nothing marks which of them wrote a
+                // given line, so no clause is printed rather than picking one.
+                match producer::sole_output_command(&seen.source) {
+                    Some(cmd) => SourceOfSighting::Another(cmd.to_string()),
+                    None => SourceOfSighting::Unrecorded,
+                }
             }
         };
         let origin_of = |h: &String| {
@@ -1232,8 +1246,10 @@ mod tests {
             .project(&format!("{}{metrics}", fresh_block("phase")))
             .expect("the same block under another command is projectable");
 
+        // `from for p in` until #779, which is the loop header and printed
+        // nothing. The clause names the stage that wrote the bytes instead.
         assert!(
-            elsewhere.contains("already shown") && elsewhere.contains("from for p in"),
+            elsewhere.contains("already shown") && elsewhere.contains("from grep ^is_read_only"),
             "a different command still has to name the source it is standing in \
              for (#622): {elsewhere}"
         );
@@ -2271,6 +2287,65 @@ mod tests {
         assert!(
             !same.contains(" from "),
             "re-reading one file paid for a source clause it did not need: {same}"
+        );
+    }
+
+    /// #779. The clause named a command that cannot have printed the lines: a
+    /// bare `cd`, and a `for` loop's header. Both are the first segment of a
+    /// multi-line command whose *later* segment did the printing, and the label
+    /// was built from the first line of the raw source. A reader who chased the
+    /// name found nothing, and one subagent read the mismatch as `Read` handing
+    /// back another file's content and re-read the whole tree to be sure.
+    ///
+    /// Both arms are asserted because they are different answers. One producer
+    /// behind a chdir is nameable and gets named; two producers are not, and
+    /// stdout carries nothing saying which of them wrote a given line, so the
+    /// clause goes away rather than picking one.
+    #[test]
+    fn a_fold_names_the_command_that_printed_the_lines() {
+        let (store, _d) = temp_store();
+        let shared: String = (1..=20)
+            .map(|i| format!("    key_{i:02} = \"value_{i:02}\"\n"))
+            .collect();
+        let file = |name: &str| {
+            let uniq: String = (1..=30)
+                .map(|i| format!("  uniq_{name}_{i:02} = {i}\n"))
+                .collect();
+            format!("name = \"{name}\"\n{shared}{uniq}")
+        };
+
+        Ledger::new(&store, "s1")
+            .from("cd /Users/someone/project/repo\ncat charlie.tf")
+            .project(&file("charlie"));
+        let named = Ledger::new(&store, "s1")
+            .from("cat delta.tf")
+            .project(&file("delta"))
+            .expect("the shared block repeats and is worth a marker");
+        assert!(
+            named.contains("from cat charlie.tf"),
+            "the fold did not name the segment that printed the lines: {named}"
+        );
+        assert!(
+            !named.contains("cd /Users"),
+            "the fold credited the bytes to a chdir, which prints nothing: {named}"
+        );
+
+        // Two producers, so there is nothing honest to name. A fresh scope, or
+        // the rows above answer for these lines first.
+        Ledger::new(&store, "s2")
+            .from("for f in charlie.tf delta.tf; do echo \"===== $f\"; cat -n \"$f\"; done")
+            .project(&file("charlie"));
+        let unnamed = Ledger::new(&store, "s2")
+            .from("cat delta.tf")
+            .project(&file("delta"))
+            .expect("the shared block repeats and is worth a marker");
+        assert!(
+            unnamed.contains("already shown"),
+            "dropping the clause dropped the fold with it: {unnamed}"
+        );
+        assert!(
+            !unnamed.contains(" from "),
+            "a chain with two producers named one of them: {unnamed}"
         );
     }
 
