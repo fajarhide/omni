@@ -1338,6 +1338,19 @@ mod tests {
         );
     }
 
+    /// #779 review. Routing reads `do cat $f` as `do` and has since the loop
+    /// rule shipped, so the keyword stays on the routing answer. A marker names
+    /// the command to a reader, and a reader cannot run `do cat $f`.
+    #[test]
+    fn names_the_command_inside_a_clause_without_its_keyword() {
+        use crate::pipeline::producer::without_clause_prefix;
+        assert_eq!(without_clause_prefix("do cat $f"), "cat $f");
+        assert_eq!(without_clause_prefix("then echo hi"), "echo hi");
+        assert_eq!(without_clause_prefix("cat $f"), "cat $f");
+        // Nothing but keywords, so there is no command to name.
+        assert_eq!(without_clause_prefix("do then"), "do then");
+    }
+
     #[test]
     fn treats_a_variable_assignment_as_printing_nothing() {
         assert_eq!(
