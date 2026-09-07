@@ -472,6 +472,29 @@ pub(crate) fn program_name(command: &str) -> &str {
         .unwrap_or(first)
 }
 
+/// The command inside a clause, for naming it to a reader.
+///
+/// `sole_output_command` keeps the keyword that opened the clause, because it
+/// answers a routing question and `program_name` has read `do echo noise` as
+/// `do` since the loop rule shipped. Changing that re-routes every shell loop,
+/// which is a measurement rather than a review fix.
+///
+/// A marker asks a different question, and `from do cat $f` names a fragment no
+/// shell would run (#779 review). The keyword list has one copy, so this lives
+/// next to it rather than in the caller.
+pub fn without_clause_prefix(command: &str) -> &str {
+    let mut rest = command.trim_start();
+    while let Some((word, tail)) = split_word(rest) {
+        if !CLAUSE_PREFIXES.contains(&word) {
+            return rest;
+        }
+        rest = tail.trim_start();
+    }
+    // Every word was a keyword, so there is no command inside the clause and
+    // the whole fragment is as good a name as any.
+    command
+}
+
 /// `i=0` and `f=path/to.yaml` set a variable and print nothing. Distinguished
 /// from a command by the `=` before any `/`, so `./bin/x=y` is still a command.
 pub(crate) fn is_assignment(word: &str) -> bool {
