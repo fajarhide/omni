@@ -723,14 +723,16 @@ fn references_instead_of_holding(value: &str) -> bool {
     if !v.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
         return false;
     }
-    // Whitespace would let a second token hide behind the first, so the whole
-    // value has to be one reference expression.
-    if v.chars().any(|c| c.is_whitespace() || matches!(c, '"' | '\'')) {
-        return false;
-    }
     if !v.contains(['(', '.']) {
         return false;
     }
+    // This charset is the whole of the second and third narrowings above, so do
+    // not add a quote or a space to it. Excluding the quote is what keeps
+    // `decrypt("ghp_real")` redacted, and excluding whitespace is what stops a
+    // second token hiding behind a reference in `cfg.token "sk-ant-real"`. An
+    // earlier version repeated both as their own guard clause; the break test
+    // stayed green with that clause deleted, which is how it was found to be
+    // dead rather than defensive.
     v.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '(' | ')' | '[' | ']'))
 }
