@@ -573,7 +573,9 @@ impl<'a> Ledger<'a> {
                 // stdout is one stream and nothing marks which of them wrote a
                 // given line, so no clause is printed rather than picking one.
                 match producer::sole_output_command(&seen.source) {
-                    Some(cmd) => SourceOfSighting::Another(cmd.to_string()),
+                    Some(cmd) => {
+                        SourceOfSighting::Another(producer::without_clause_prefix(cmd).to_string())
+                    }
                     None => SourceOfSighting::Unrecorded,
                 }
             }
@@ -2346,6 +2348,22 @@ mod tests {
         assert!(
             !unnamed.contains(" from "),
             "a chain with two producers named one of them: {unnamed}"
+        );
+
+        // One producer, inside a loop. `sole_output_command` keeps the keyword
+        // that opened the clause because routing has read it that way since the
+        // loop rule shipped, and `from do cat "$f"` names a fragment no shell
+        // would run.
+        Ledger::new(&store, "s3")
+            .from("for f in charlie.tf; do cat -n \"$f\"; done")
+            .project(&file("charlie"));
+        let in_a_loop = Ledger::new(&store, "s3")
+            .from("cat delta.tf")
+            .project(&file("delta"))
+            .expect("the shared block repeats and is worth a marker");
+        assert!(
+            in_a_loop.contains("from cat -n \"$f\""),
+            "the clause kept the keyword that opened the loop body: {in_a_loop}"
         );
     }
 
