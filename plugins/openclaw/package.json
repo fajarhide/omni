@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
-    "openclaw": "^2026.8.2",
+    "openclaw": "^2026.9.2",
     "typescript": "^7.0.2"
   },
   "openclaw": {
