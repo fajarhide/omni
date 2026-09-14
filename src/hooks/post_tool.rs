@@ -727,7 +727,11 @@ pub fn process_payload(
         return reply;
     }
 
-    if content.len() < 50 {
+    // Too short to be worth a pass, unless it holds a secret: `KEY=hunter2` fits
+    // well under 50 bytes and was delivered as printed (#800).
+    if content.len() < 50
+        && crate::distillers::system_ops::redact_sensitive_assignments(&content).is_none()
+    {
         return None;
     }
 
@@ -806,7 +810,11 @@ pub fn process_payload(
         // `kubectl get pods -o json | jq -r '...'` and lets collapse rewrite a
         // payload the next step parses, and it sees `cd` in `cd x && cat file`
         // and collapses a file read the same way (#269, #235).
-        let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
+        // A redaction saves almost nothing, and collapsing the raw `content` in its
+        // place delivered `printenv`'s password as printed (#800).
+        let redacted = distilled.contains("[REDACTED]") && !content.contains("[REDACTED]");
+        let output = if !redacted
+            && !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
             && output_command
                 .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
         {
@@ -2102,6 +2110,30 @@ mod tests {
             out.contains("[REDACTED]"),
             "the reply must carry the redacted form:\n{out}"
         );
+    }
+
+    /// #800. The test above ends in `grep`, which skips the collapse fallback, so
+    /// it never met the path that threw the redaction away. `printenv` does.
+    #[test]
+    fn a_redaction_survives_the_collapse_fallback() {
+        for stdout in [
+            "HOME=/root\nDB_PASSWORD=hunter2-synthetic\nPATH=/usr/bin\n",
+            "HOME=/root\nDB_PASSWORD=hunter2\nPATH=/usr/bin\n",
+        ] {
+            let payload = json!({
+                "tool_name": "Bash",
+                "tool_input": {"command": "printenv"},
+                "tool_response": {"stdout": stdout, "stderr": "", "interrupted": false}
+            });
+            let out = process_payload(&payload.to_string(), None, None).unwrap_or_else(|| {
+                panic!("{} B: no reply, so the secret was delivered", stdout.len())
+            });
+            assert!(
+                !out.contains("hunter2"),
+                "the secret reached the agent:\n{out}"
+            );
+            assert!(out.contains("[REDACTED]"), "{out}");
+        }
     }
 
     /// #335: `distill_grep_output` folds a repeated `path:` prefix into a header,
