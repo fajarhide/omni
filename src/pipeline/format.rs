@@ -32,6 +32,7 @@ pub enum Structured {
     Yaml,
     Tsv,
     Csv,
+    Base64,
 }
 
 impl Structured {
@@ -42,6 +43,7 @@ impl Structured {
             Structured::Yaml => "yaml",
             Structured::Tsv => "tsv",
             Structured::Csv => "csv",
+            Structured::Base64 => "base64",
         }
     }
 }
@@ -96,6 +98,27 @@ pub fn sniff(input: &str) -> Option<Structured> {
         .or_else(|| sniff_json_shaped(trimmed))
         .or_else(|| sniff_yaml(trimmed))
         .or_else(|| sniff_delimited(trimmed))
+        .or_else(|| sniff_base64(trimmed))
+}
+
+/// Below this a run of the alphabet is as likely a hash or a token as a payload.
+const MIN_BASE64_BYTES: usize = 256;
+
+/// Base64 exists to be pasted somewhere verbatim, so one changed character
+/// corrupts what is built from it, and a fold removes the reprint that would
+/// repair it (#798). One long line, or lines wrapped at a fixed width with a
+/// shorter last one: a list of names made of the same alphabet has neither shape.
+fn sniff_base64(trimmed: &str) -> Option<Structured> {
+    let lines: Vec<&str> = trimmed.lines().map(str::trim_end).collect();
+    let (last, body) = lines.split_last()?;
+    let width = lines[0].len();
+    let wrapped = body.iter().all(|l| l.len() == width) && last.len() <= width;
+    let alphabet = |l: &&str| {
+        l.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+    };
+    (trimmed.len() >= MIN_BASE64_BYTES && width >= 60 && wrapped && lines.iter().all(alphabet))
+        .then_some(Structured::Base64)
 }
 
 /// True when `input` must not be compressed.
@@ -434,6 +457,24 @@ mod tests {
         assert!(!opens_block_scalar("  cmd: sh -c \"a | b\""));
         assert!(opens_block_scalar("  cmd: |"));
         assert!(opens_block_scalar("  cmd: |2-"));
+    }
+
+    /// #798. One long line and a fixed-width wrap stay verbatim. Names, hashes and
+    /// prose drawn from the same alphabet do not, or the ledger loses `ls` and
+    /// `git log --format=%H` for nothing.
+    #[test]
+    fn sniffs_base64_by_its_shape_and_not_its_alphabet() {
+        assert_eq!(sniff(&"QkJC".repeat(1000)), Some(Structured::Base64));
+        let mut wrapped = format!("{}\n", "QUJD".repeat(19)).repeat(4);
+        wrapped.push_str("QUI=\n");
+        assert_eq!(sniff(&wrapped), Some(Structured::Base64));
+
+        let names: String = (0..60).map(|i| format!("release{i}\n")).collect();
+        let hashes = format!("{}\n", "a".repeat(40)).repeat(20);
+        let prose = "the quick brown fox jumps over the lazy dog ".repeat(10);
+        for text in [names.as_str(), hashes.as_str(), prose.as_str(), "QkJD"] {
+            assert_eq!(sniff(text), None, "{text}");
+        }
     }
 
     #[test]

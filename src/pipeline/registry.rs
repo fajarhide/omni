@@ -1000,8 +1000,25 @@ pub fn resolve_distiller(command: &str) -> Distillation {
     // npm/pnpm/yarn/bun. Both halves of the old arm returned the same distiller,
     // so the subcommand check it carried decided nothing; it is gone rather than
     // preserved as decoration.
-    if matches!(base, "npm" | "npx" | "pnpm" | "yarn" | "bun") {
+    if matches!(base, "npm" | "pnpm" | "yarn" | "bun") {
         return Distillation::JsTs;
+    }
+
+    // `npx` runs whatever it is handed, and `tsx`, `prisma` or a script print no
+    // summary line: a 7 line report came back as its last line (#797). Route by
+    // the program it launches, and hand back anything that is not a JS tool.
+    if base == "npx" {
+        let launched = command
+            .split_whitespace()
+            .skip_while(|t| t.rsplit('/').next() != Some("npx"))
+            .skip(1)
+            .skip_while(|t| t.starts_with('-'))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return match resolve_distiller(&launched) {
+            d @ (Distillation::JsTs | Distillation::Test) => d,
+            _ => Distillation::Passthrough,
+        };
     }
 
     // The caller's own filter, which is in `passes_through_verbatim` and so has
@@ -1504,5 +1521,27 @@ mod tests {
         let p2 = resolve_profile_for_chain("pytest");
         assert_eq!(p1.segmentation, p2.segmentation);
         assert_eq!(p1.collapse, p2.collapse);
+    }
+
+    /// #797. A JS tool behind `npx` keeps its distiller; a script runner with no
+    /// summary line is handed back rather than cut to its last line.
+    #[test]
+    fn npx_routes_by_the_program_it_launches() {
+        for cmd in ["npx vitest run", "npx -y tsc --noEmit", "npx jest"] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::JsTs),
+                "{cmd}"
+            );
+        }
+        for cmd in [
+            "npx tsx /tmp/report.mts",
+            "npx prisma migrate status",
+            "npx",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::Passthrough),
+                "{cmd}"
+            );
+        }
     }
 }

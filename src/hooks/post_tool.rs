@@ -512,6 +512,7 @@ fn fold_cross_turn(
         // refuses a view it cannot renumber. Saying so here keeps the refusal and
         // the bookkeeping in one place (#657).
         .renumbered(normalized.tool_name == "Read")
+        .windowed(normalized.windowed)
         .project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host
@@ -611,15 +612,20 @@ fn distil_tool_reply(
                     .unwrap_or(0)
             };
 
-            return Some(reply_through_ledger(
-                store,
-                normalized,
-                content,
+            // A window is lines the reader picked, and a summary of a slice says
+            // "None in the full file" about imports sitting above it (#799).
+            let distilled = (!normalized.windowed).then(|| {
                 crate::distillers::readfile::distill_readfile_with_context(
                     content,
                     filepath,
                     count_dependents,
-                ),
+                )
+            });
+            return Some(reply_through_ledger(
+                store,
+                normalized,
+                content,
+                distilled.flatten(),
             ));
         }
         "Grep" => {
@@ -3767,6 +3773,26 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         });
         let out = process_payload(&input.to_string(), None, None);
         assert!(out.is_none());
+    }
+
+    /// #799. The same payload `distills_large_rust_readfile` summarises comes back
+    /// whole once the `Read` names a window.
+    #[test]
+    fn a_read_window_is_not_summarised_as_the_whole_file() {
+        let body: String = (0..120)
+            .map(|i| format!("pub fn function_{i}() -> i32 {{\n    let x = {i};\n    println!(\"computing result for iteration\");\n    x\n}}\n\n"))
+            .collect();
+        let read = |tool_input: serde_json::Value| {
+            json!({ "tool_name": "Read", "tool_input": tool_input, "tool_response": { "content": body } })
+                .to_string()
+        };
+        let whole = process_payload(&read(json!({ "path": "src/big.rs" })), None, None);
+        assert!(
+            whole.is_some_and(|o| o.contains("OMNI ReadFile")),
+            "fixture no longer clears the distiller's gate, so the window arm proves nothing"
+        );
+        let window = read(json!({ "path": "src/big.rs", "offset": 780, "limit": 340 }));
+        assert_eq!(process_payload(&window, None, None), None);
     }
 
     #[test]
