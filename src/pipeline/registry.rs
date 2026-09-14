@@ -585,6 +585,11 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         || lists_containers(command)
         // A kubectl listing that has no columns to summarise (#301).
         || lists_kubectl_names(command)
+        // A log stream is the answer, and the generic summariser kept five copies
+        // of one ERROR while the INFO lines walking a pool from 1/5 to 5/5 went
+        // (#789). 148 of 155 recorded `kubectl logs` in 30 days already passed
+        // through; the other seven saved about 22 KB.
+        || (base == "kubectl" && command.split_whitespace().any(|t| t == "logs"))
         // A wrapper whose stdout belongs to whatever it ran inside (#234).
         || wraps_another_command(command)
 }
@@ -1521,6 +1526,26 @@ mod tests {
         let p2 = resolve_profile_for_chain("pytest");
         assert_eq!(p1.segmentation, p2.segmentation);
         assert_eq!(p1.collapse, p2.collapse);
+    }
+
+    /// #789. A log stream passes through however the command is prefixed, and a
+    /// resource table still reaches the kubectl distiller.
+    #[test]
+    fn kubectl_logs_pass_through_and_kubectl_get_does_not() {
+        for cmd in [
+            "kubectl -n demo logs payment-api-0 --tail=60",
+            "kubectl --context cluster-a logs -l app=api",
+            "C=cluster-a kubectl --context $C logs -n argocd sts/controller",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::Passthrough),
+                "{cmd}"
+            );
+        }
+        assert!(matches!(
+            resolve_distiller("kubectl get pods -n demo"),
+            Distillation::Cloud(_)
+        ));
     }
 
     /// #797. A JS tool behind `npx` keeps its distiller; a script runner with no

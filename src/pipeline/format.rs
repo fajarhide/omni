@@ -117,8 +117,22 @@ fn sniff_base64(trimmed: &str) -> Option<Structured> {
         l.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
     };
-    (trimmed.len() >= MIN_BASE64_BYTES && width >= 60 && wrapped && lines.iter().all(alphabet))
-        .then_some(Structured::Base64)
+    // Encoded bytes mix at least two of upper, lower and digit. A run of one
+    // letter does not, and a 30 KB line of `x` is the host-cap test's fixture.
+    let classes = [
+        u8::is_ascii_uppercase,
+        u8::is_ascii_lowercase,
+        u8::is_ascii_digit,
+    ]
+    .iter()
+    .filter(|class| trimmed.bytes().any(|b| class(&b)))
+    .count();
+    (trimmed.len() >= MIN_BASE64_BYTES
+        && width >= 60
+        && wrapped
+        && classes >= 2
+        && lines.iter().all(alphabet))
+    .then_some(Structured::Base64)
 }
 
 /// True when `input` must not be compressed.
@@ -465,14 +479,21 @@ mod tests {
     #[test]
     fn sniffs_base64_by_its_shape_and_not_its_alphabet() {
         assert_eq!(sniff(&"QkJC".repeat(1000)), Some(Structured::Base64));
-        let mut wrapped = format!("{}\n", "QUJD".repeat(19)).repeat(4);
-        wrapped.push_str("QUI=\n");
+        let mut wrapped = format!("{}\n", "QkJC".repeat(19)).repeat(4);
+        wrapped.push_str("Qg==\n");
         assert_eq!(sniff(&wrapped), Some(Structured::Base64));
 
         let names: String = (0..60).map(|i| format!("release{i}\n")).collect();
         let hashes = format!("{}\n", "a".repeat(40)).repeat(20);
         let prose = "the quick brown fox jumps over the lazy dog ".repeat(10);
-        for text in [names.as_str(), hashes.as_str(), prose.as_str(), "QkJD"] {
+        let one_letter = "x".repeat(30_000);
+        for text in [
+            names.as_str(),
+            hashes.as_str(),
+            prose.as_str(),
+            one_letter.as_str(),
+            "QkJD",
+        ] {
             assert_eq!(sniff(text), None, "{text}");
         }
     }
