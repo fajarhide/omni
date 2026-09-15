@@ -36,7 +36,7 @@ jobs:
       # Prebuilt binaries. `cargo install --locked` compiled both of these from
       # source on every run, minutes of a 13 minute job spent rebuilding tools
       # that publish releases (#179).
-      - uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+      - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: cargo-insta,cargo-audit
 
