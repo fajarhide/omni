@@ -110,11 +110,12 @@ Pipeline mengenali sebagian keluarannya, tapi tidak semuanya.
 [OMNI: output truncated, 50000 of 180000 bytes kept]
 ```
 
-Potongan terakhir sebelum sebuah jawaban dikirim, di 50 KB. Awal dan akhirnya dipertahankan,
-karena build atau test run menaruh putusannya di bagian akhir, dan penanda ini menyebut
-berapa banyak bagian tengah yang dibuang. Keluaran tanpa jeda baris untuk dipotong dihitung
-dalam byte. Handle ada kalau bagian yang dibuang diarsipkan; tanpa handle pun penandanya
-tetap menyebut apa yang dibuang.
+Potongan terakhir sebelum sebuah jawaban dikirim, di 50 KB. Bentuk barisnya mempertahankan
+awal dan akhir, karena build atau test run menaruh putusannya di bagian akhir, dan penanda
+ini menyebut berapa banyak bagian tengah yang dibuang. Bentuk byte dipakai ketika tidak ada
+struktur baris di dalam anggarannya, dan ia hanya mempertahankan awalnya, jadi satu baris
+yang sangat panjang kehilangan ekornya. Handle ada kalau bagian yang dibuang diarsipkan;
+tanpa handle pun penandanya tetap menyebut apa yang dibuang.
 
 ```
 [OMNI: 2 sensitive value(s) redacted]
@@ -126,8 +127,9 @@ baca di sekitar nilai tetap ada, jadi baris yang diredaksi masih bisa di-parse.
 
 Namanya yang menentukan, dicocokkan per kata yang dipisah garis bawah sehingga `PASSED` dan
 `AUTHORS` tidak ikut: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`,
-`CREDENTIAL`, `CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, dan apa pun yang diawali `API_`,
-`AWS_`, `GITHUB_` atau `ANTHROPIC_`. Beberapa nilai dibiarkan karena tidak memuat kredensial
+`CREDENTIAL`, `CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, `MONGO_URL`, `CLIENT_SECRET`,
+`ACCESS_KEY`, `PRIVATE_KEY`, dan apa pun yang diawali `API_`, `AWS_`, `GITHUB_`,
+`ANTHROPIC_`, `OPENAI_` atau `GEMINI_`. Beberapa nilai dibiarkan karena tidak memuat kredensial
 apa pun namanya: nilai kosong, ekspansi shell seperti `$DB_PASSWORD`, pemanggilan tanpa
 kutip, atau `null`.
 

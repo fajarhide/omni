@@ -104,10 +104,11 @@ The pipeline recognised some of the output but not all of it.
 [OMNI: output truncated, 50000 of 180000 bytes kept]
 ```
 
-The last cut before a reply leaves, at 50 KB. It keeps the start and the end, because a
-build or a test run puts its verdict last, and says how much of the middle went. Output
-with no line breaks to cut at is counted in bytes instead. The handle is there when the
-dropped part was archived; without one, the marker still says what was removed.
+The last cut before a reply leaves, at 50 KB. The line form keeps the start and the end,
+because a build or a test run puts its verdict last, and says how much of the middle went.
+The byte form is what you get when there is no line structure inside the budget, and it
+keeps the start only, so a single enormous line loses its tail. The handle is there when
+the dropped part was archived; without one, the marker still says what was removed.
 
 ```
 [OMNI: 2 sensitive value(s) redacted]
@@ -119,8 +120,9 @@ punctuation around the value stay, so a redacted line still parses.
 
 The name decides, matched per underscore-separated word so `PASSED` and `AUTHORS` are not
 caught: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`, `CREDENTIAL`,
-`CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, and anything starting `API_`, `AWS_`,
-`GITHUB_` or `ANTHROPIC_`. Some values are left alone because they hold no credential
+`CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, `MONGO_URL`, `CLIENT_SECRET`, `ACCESS_KEY`,
+`PRIVATE_KEY`, and anything starting `API_`, `AWS_`, `GITHUB_`, `ANTHROPIC_`, `OPENAI_`
+or `GEMINI_`. Some values are left alone because they hold no credential
 whatever the name: an empty value, a shell expansion like `$DB_PASSWORD`, an unquoted call
 or `null`.
 
