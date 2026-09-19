@@ -585,6 +585,11 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         || lists_containers(command)
         // A kubectl listing that has no columns to summarise (#301).
         || lists_kubectl_names(command)
+        // A log stream is the answer, and the generic summariser kept five copies
+        // of one ERROR while the INFO lines walking a pool from 1/5 to 5/5 went
+        // (#789). 148 of 155 recorded `kubectl logs` in 30 days already passed
+        // through; the other seven saved about 22 KB.
+        || kubectl_subcommand(command) == Some("logs")
         // A wrapper whose stdout belongs to whatever it ran inside (#234).
         || wraps_another_command(command)
 }
@@ -680,6 +685,81 @@ fn lists_containers(command: &str) -> bool {
         Some("container") => matches!(tokens.next(), Some("ls") | Some("ps")),
         _ => false,
     }
+}
+
+/// The kubectl verbs this has to tell apart from a flag's value. Not the whole
+/// surface: a verb missing from here only means the token after an unlisted
+/// value-taking flag is read as the verb, which is what the list is for.
+const KUBECTL_VERBS: &[&str] = &[
+    "logs",
+    "get",
+    "describe",
+    "apply",
+    "delete",
+    "create",
+    "edit",
+    "patch",
+    "exec",
+    "run",
+    "rollout",
+    "scale",
+    "top",
+    "events",
+    "port-forward",
+    "cp",
+    "attach",
+    "explain",
+    "diff",
+    "wait",
+    "label",
+    "annotate",
+    "set",
+    "replace",
+    "debug",
+    "drain",
+    "cordon",
+    "uncordon",
+    "taint",
+    "proxy",
+    "auth",
+    "config",
+    "version",
+    "api-resources",
+    "api-versions",
+    "cluster-info",
+];
+
+/// The kubectl verb, with global flags and the values they take stepped over.
+///
+/// Matching `logs` anywhere in the string also claims `kubectl get pod logs`,
+/// where it is a resource name and the reply is a table worth shortening
+/// (PR #809 review).
+fn kubectl_subcommand(command: &str) -> Option<&str> {
+    // Found by name rather than by position: a recorded command is as often
+    // `C=cluster-a kubectl …` or `cd repo && kubectl …` as it is bare.
+    let mut tokens = command
+        .split_whitespace()
+        .map(|t| t.trim_matches('"'))
+        .skip_while(|t| t.rsplit('/').next() != Some("kubectl"))
+        .skip(1)
+        .peekable();
+    while let Some(token) = tokens.next() {
+        if !token.starts_with('-') {
+            return Some(token);
+        }
+        // A flag's value is stepped over, and the verb list is what decides
+        // which of the two a token is. Enumerating the flags that take a value
+        // missed `--request-timeout 60s logs`, and `60s` then read as the verb,
+        // which put a log stream back through the summariser (PR #809 review).
+        if !token.contains('=')
+            && tokens
+                .peek()
+                .is_some_and(|next| !next.starts_with('-') && !KUBECTL_VERBS.contains(next))
+        {
+            tokens.next();
+        }
+    }
+    None
 }
 
 /// `kubectl` asked for a list of names rather than a table of state.
@@ -1000,8 +1080,50 @@ pub fn resolve_distiller(command: &str) -> Distillation {
     // npm/pnpm/yarn/bun. Both halves of the old arm returned the same distiller,
     // so the subcommand check it carried decided nothing; it is gone rather than
     // preserved as decoration.
-    if matches!(base, "npm" | "npx" | "pnpm" | "yarn" | "bun") {
+    if matches!(base, "npm" | "pnpm" | "yarn" | "bun") {
         return Distillation::JsTs;
+    }
+
+    // `npx` runs whatever it is handed, and `tsx`, `prisma` or a script print no
+    // summary line: a 7 line report came back as its last line (#797). Route by
+    // the program it launches, and hand back anything that is not a JS tool.
+    if base == "npx" {
+        let mut rest = command
+            .split_whitespace()
+            .skip_while(|t| t.rsplit('/').next() != Some("npx"))
+            .skip(1);
+        let mut launched: Vec<&str> = Vec::new();
+        while let Some(token) = rest.next() {
+            if !token.starts_with('-') {
+                launched.push(token);
+                break;
+            }
+            // `-p typescript tsc` names the package to fetch, not the program to
+            // run, so its value is stepped over or it reads as the program and
+            // the real tool loses its distiller (PR #809 review).
+            // The value-taking options npx documents. An unlisted one leaves its
+            // value read as the program, which resolves to passthrough: a missed
+            // compression rather than a lost answer (PR #809 review).
+            if matches!(
+                token,
+                "-p" | "--package"
+                    | "-c"
+                    | "--call"
+                    | "--node-options"
+                    | "--registry"
+                    | "--userconfig"
+                    | "--cache"
+                    | "--shell"
+                    | "--npm"
+            ) {
+                rest.next();
+            }
+        }
+        launched.extend(rest);
+        return match resolve_distiller(&launched.join(" ")) {
+            d @ (Distillation::JsTs | Distillation::Test) => d,
+            _ => Distillation::Passthrough,
+        };
     }
 
     // The caller's own filter, which is in `passes_through_verbatim` and so has
@@ -1504,5 +1626,64 @@ mod tests {
         let p2 = resolve_profile_for_chain("pytest");
         assert_eq!(p1.segmentation, p2.segmentation);
         assert_eq!(p1.collapse, p2.collapse);
+    }
+
+    /// #789. A log stream passes through however the command is prefixed, and a
+    /// resource table still reaches the kubectl distiller.
+    #[test]
+    fn kubectl_logs_pass_through_and_kubectl_get_does_not() {
+        for cmd in [
+            "kubectl -n demo logs payment-api-0 --tail=60",
+            "kubectl --context cluster-a logs -l app=api",
+            "kubectl --request-timeout 60s logs payment-api-0",
+            // A boolean flag right in front of the verb: the value rule alone
+            // eats `logs` here, and the verb list is what keeps it.
+            "kubectl --insecure-skip-tls-verify logs payment-api-0",
+            "C=cluster-a kubectl --context $C logs -n argocd sts/controller",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::Passthrough),
+                "{cmd}"
+            );
+        }
+        // `logs` as a resource name is not a log stream.
+        for cmd in [
+            "kubectl get pods -n demo",
+            "kubectl get pod logs",
+            "kubectl describe pod logs",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::Cloud(_)),
+                "{cmd}"
+            );
+        }
+    }
+
+    /// #797. A JS tool behind `npx` keeps its distiller; a script runner with no
+    /// summary line is handed back rather than cut to its last line.
+    #[test]
+    fn npx_routes_by_the_program_it_launches() {
+        for cmd in [
+            "npx vitest run",
+            "npx -y tsc --noEmit",
+            "npx jest",
+            "npx -p typescript tsc --noEmit",
+            "npx --registry https://registry.npmjs.org tsc --noEmit",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::JsTs),
+                "{cmd}"
+            );
+        }
+        for cmd in [
+            "npx tsx /tmp/report.mts",
+            "npx prisma migrate status",
+            "npx",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::Passthrough),
+                "{cmd}"
+            );
+        }
     }
 }

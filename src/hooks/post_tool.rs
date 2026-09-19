@@ -365,28 +365,9 @@ fn declined(
         return Some(Declined::KeepsTheseBytes);
     }
 
-    // Format-safe gate: structured payloads are parsed by whatever reads them next,
-    // so every lossy stage below, including the >2MB head/tail trim, would corrupt
-    // them. Emit nothing: the host keeps the original bytes at zero marker cost.
-    // `refuses_lossy_stages`, not `sniff`, so the reason this declines is the
-    // question being asked rather than a classifier's return value. `kind` is
-    // still needed for the recorded reason, so the classifier is called for that
-    // and the gate is the predicate (#699).
-    if crate::pipeline::format::refuses_lossy_stages(&normalized.content)
-        && let Some(kind) = format::sniff(&normalized.content)
-    {
-        if let Some(s) = store {
-            s.record_passthrough(
-                &normalized.command,
-                normalized.content.len(),
-                &format::passthrough_reason(kind),
-                normalized.host_session_id.as_deref().unwrap_or(""),
-                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
-            );
-        }
-        return Some(Declined::KeepsTheseBytes);
-    }
-
+    // Asked before the format gate below. An over-cap payload is the host's
+    // preview whatever shape it has, and a base64 body that sniffs structured
+    // would otherwise be booked as bytes the reader received (PR #809 review).
     // The host capped this payload, which means the command produced more than
     // arrived here, and above that size Claude Code persists the **raw** output
     // to a file, previews the **raw** first 2 KB, and drops whatever the hook
@@ -429,6 +410,27 @@ fn declined(
             );
         }
         return Some(Declined::KeepsAPreview);
+    }
+    // Format-safe gate: structured payloads are parsed by whatever reads them next,
+    // so every lossy stage below, including the >2MB head/tail trim, would corrupt
+    // them. Emit nothing: the host keeps the original bytes at zero marker cost.
+    // `refuses_lossy_stages`, not `sniff`, so the reason this declines is the
+    // question being asked rather than a classifier's return value. `kind` is
+    // still needed for the recorded reason, so the classifier is called for that
+    // and the gate is the predicate (#699).
+    if crate::pipeline::format::refuses_lossy_stages(&normalized.content)
+        && let Some(kind) = format::sniff(&normalized.content)
+    {
+        if let Some(s) = store {
+            s.record_passthrough(
+                &normalized.command,
+                normalized.content.len(),
+                &format::passthrough_reason(kind),
+                normalized.host_session_id.as_deref().unwrap_or(""),
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
+            );
+        }
+        return Some(Declined::KeepsTheseBytes);
     }
 
     None
@@ -512,6 +514,7 @@ fn fold_cross_turn(
         // refuses a view it cannot renumber. Saying so here keeps the refusal and
         // the bookkeeping in one place (#657).
         .renumbered(normalized.tool_name == "Read")
+        .windowed(normalized.windowed)
         .project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host
@@ -611,15 +614,20 @@ fn distil_tool_reply(
                     .unwrap_or(0)
             };
 
-            return Some(reply_through_ledger(
-                store,
-                normalized,
-                content,
+            // A window is lines the reader picked, and a summary of a slice says
+            // "None in the full file" about imports sitting above it (#799).
+            let distilled = (!normalized.windowed).then(|| {
                 crate::distillers::readfile::distill_readfile_with_context(
                     content,
                     filepath,
                     count_dependents,
-                ),
+                )
+            });
+            return Some(reply_through_ledger(
+                store,
+                normalized,
+                content,
+                distilled.flatten(),
             ));
         }
         "Grep" => {
@@ -721,7 +729,11 @@ pub fn process_payload(
         return reply;
     }
 
-    if content.len() < 50 {
+    // Too short to be worth a pass, unless it holds a secret: `KEY=hunter2` fits
+    // well under 50 bytes and was delivered as printed (#800).
+    if content.len() < 50
+        && crate::distillers::system_ops::redact_sensitive_assignments(&content).is_none()
+    {
         return None;
     }
 
@@ -759,6 +771,13 @@ pub fn process_payload(
     // has to stand down for it: `git status && find .` was claimed by anything
     // keyed on `^git\b`, exactly as the git distiller did (#264).
     let output_command = crate::pipeline::registry::sole_output_command(clean_command);
+
+    // Whether this payload has a value the redactor hides. Asked of the raw
+    // content, because reading it off the `[REDACTED]` marker misses the case
+    // where the command printed that word itself, and the fallback then restores
+    // the raw bytes over a secret that was correctly hidden (PR #809 review).
+    let holds_a_secret =
+        crate::distillers::system_ops::redact_sensitive_assignments(&content).is_some();
 
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
@@ -800,7 +819,10 @@ pub fn process_payload(
         // `kubectl get pods -o json | jq -r '...'` and lets collapse rewrite a
         // payload the next step parses, and it sees `cd` in `cd x && cat file`
         // and collapses a file read the same way (#269, #235).
-        let output = if !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
+        // A redaction saves almost nothing, and collapsing the raw `content` in its
+        // place delivered `printenv`'s password as printed (#800).
+        let output = if !holds_a_secret
+            && !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
             && output_command
                 .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
         {
@@ -1020,7 +1042,7 @@ pub fn process_payload(
     // back under "nothing worth a deletion" would put the password on screen. The
     // guardrail exists to stop OMNI deleting an answer, not to stop it hiding a
     // credential (#342).
-    let redacted_here = final_out.contains("[REDACTED]") && !content.contains("[REDACTED]");
+    let redacted_here = holds_a_secret;
 
     // Measure ratio strictly
     if !redacted_here && final_out.len() >= content.len() * 9 / 10 {
@@ -2096,6 +2118,34 @@ mod tests {
             out.contains("[REDACTED]"),
             "the reply must carry the redacted form:\n{out}"
         );
+    }
+
+    /// #800. The test above ends in `grep`, which skips the collapse fallback, so
+    /// it never met the path that threw the redaction away. `printenv` does.
+    #[test]
+    fn a_redaction_survives_the_collapse_fallback() {
+        for stdout in [
+            "HOME=/root\nDB_PASSWORD=hunter2-synthetic\nPATH=/usr/bin\n",
+            "HOME=/root\nDB_PASSWORD=hunter2\nPATH=/usr/bin\n",
+            // The command printed the word itself, which is what reading the
+            // marker rather than asking the redactor could not tell apart
+            // (PR #809 review).
+            "STATUS=[REDACTED]\nDB_PASSWORD=hunter2-synthetic\nPATH=/usr/bin\n",
+        ] {
+            let payload = json!({
+                "tool_name": "Bash",
+                "tool_input": {"command": "printenv"},
+                "tool_response": {"stdout": stdout, "stderr": "", "interrupted": false}
+            });
+            let out = process_payload(&payload.to_string(), None, None).unwrap_or_else(|| {
+                panic!("{} B: no reply, so the secret was delivered", stdout.len())
+            });
+            assert!(
+                !out.contains("hunter2"),
+                "the secret reached the agent:\n{out}"
+            );
+            assert!(out.contains("[REDACTED]"), "{out}");
+        }
     }
 
     /// #335: `distill_grep_output` folds a repeated `path:` prefix into a header,
@@ -3767,6 +3817,26 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         });
         let out = process_payload(&input.to_string(), None, None);
         assert!(out.is_none());
+    }
+
+    /// #799. The same payload `distills_large_rust_readfile` summarises comes back
+    /// whole once the `Read` names a window.
+    #[test]
+    fn a_read_window_is_not_summarised_as_the_whole_file() {
+        let body: String = (0..120)
+            .map(|i| format!("pub fn function_{i}() -> i32 {{\n    let x = {i};\n    println!(\"computing result for iteration\");\n    x\n}}\n\n"))
+            .collect();
+        let read = |tool_input: serde_json::Value| {
+            json!({ "tool_name": "Read", "tool_input": tool_input, "tool_response": { "content": body } })
+                .to_string()
+        };
+        let whole = process_payload(&read(json!({ "path": "src/big.rs" })), None, None);
+        assert!(
+            whole.is_some_and(|o| o.contains("OMNI ReadFile")),
+            "fixture no longer clears the distiller's gate, so the window arm proves nothing"
+        );
+        let window = read(json!({ "path": "src/big.rs", "offset": 780, "limit": 340 }));
+        assert_eq!(process_payload(&window, None, None), None);
     }
 
     #[test]

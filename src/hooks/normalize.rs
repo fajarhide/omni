@@ -85,6 +85,9 @@ pub struct NormalizedInput {
     /// subagent with the parent's history and claims "already shown" about bytes
     /// that context never received (#581).
     pub host_agent_id: Option<String>,
+    /// A `Read` that named an `offset` or `limit`: the lines are a window the
+    /// reader picked (#796, #799). Only Claude Code's shape is read.
+    pub windowed: bool,
 }
 
 /// Append the `[stderr]` section, when the stream actually carries something.
@@ -329,6 +332,9 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         /// it the `Read` arm sees `"unknown"` as the path, so `readfile`'s
         /// per-language distillation cannot pick a language (#172).
         file_path: Option<String>,
+        /// A `Read` window. Only presence matters, so any JSON value counts.
+        offset: Option<Value>,
+        limit: Option<Value>,
     }
 
     let parsed: ClaudeInput = serde_json::from_str(input).ok()?;
@@ -406,6 +412,10 @@ fn normalize_claude_code(input: &str, agent_id: String) -> Option<NormalizedInpu
         // returning None, but not whether it happens. `passes_through_failed_
         // command_payload` locks the behaviour, not the mechanism.
         failed: false,
+        windowed: parsed
+            .tool_input
+            .as_ref()
+            .is_some_and(|i| i.offset.is_some() || i.limit.is_some()),
         raw_response: parsed.tool_response,
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
@@ -510,6 +520,7 @@ fn normalize_pi(input: &str, agent_id: String) -> Option<NormalizedInput> {
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
@@ -573,6 +584,7 @@ fn normalize_opencode(input: &str, agent_id: String) -> Option<NormalizedInput> 
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
@@ -648,6 +660,7 @@ fn normalize_vscode_continue(input: &str, agent_id: String) -> Option<Normalized
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
@@ -690,6 +703,7 @@ fn normalize_codex(input: &str, agent_id: String) -> Option<NormalizedInput> {
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
@@ -780,6 +794,7 @@ fn normalize_plugin(input: &str, host: String, agent_id: String) -> Option<Norma
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
@@ -803,6 +818,7 @@ fn normalize_aider(input: &str, agent_id: String) -> Option<NormalizedInput> {
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
@@ -846,6 +862,7 @@ fn normalize_generic_mcp(input: &str, agent_id: String) -> Option<NormalizedInpu
         // Set by `normalize` for every agent; see the field's doc comment.
         host_session_id: None,
         host_agent_id: None,
+        windowed: false,
     })
 }
 
