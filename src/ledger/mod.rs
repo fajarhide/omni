@@ -2059,7 +2059,7 @@ mod tests {
             ("plain", "@@ -1,3 +1,33 @@\n".to_string(), ""),
             (
                 "color",
-                format!("\u{1b}[36m@@ -1,3 +1,33 @@\u{1b}[m\n"),
+                "\u{1b}[36m@@ -1,3 +1,33 @@\u{1b}[m\n".to_string(),
                 "\u{1b}[32m",
             ),
             ("combined", "@@@ -1,3 -1,3 +1,33 @@@\n".to_string(), ""),
