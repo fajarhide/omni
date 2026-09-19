@@ -99,6 +99,50 @@ pipeline took.
 
 The pipeline recognised some of the output but not all of it.
 
+```
+[OMNI: output truncated, 1200 of 4000 lines kept, 2800 dropped from the middle, omni retrieve 0000000000000000]
+[OMNI: output truncated, 50000 of 180000 bytes kept]
+```
+
+The last cut before a reply leaves, at 50 KB. The line form keeps the start and the end,
+because a build or a test run puts its verdict last, and says how much of the middle went.
+The byte form is what you get when there is no line structure inside the budget, and it
+keeps the start only, so a single enormous line loses its tail. The handle is there when
+the dropped part was archived; without one, the marker still says what was removed.
+
+```
+[OMNI: 2 sensitive value(s) redacted]
+```
+
+Credential redaction on command output. A line that assigns a value to a sensitive name
+had that value replaced with `[REDACTED]`, and this counts the lines. Quotes and the
+punctuation around the value stay, so a redacted line still parses.
+
+The name decides, matched per underscore-separated word so `PASSED` and `AUTHORS` are not
+caught: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`, `CREDENTIAL`,
+`CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, `MONGO_URL`, `CLIENT_SECRET`, `ACCESS_KEY`,
+`PRIVATE_KEY`, and anything starting `API_`, `AWS_`, `GITHUB_`, `ANTHROPIC_`, `OPENAI_`
+or `GEMINI_`. Some values are left alone because they hold no credential
+whatever the name: an empty value, a shell expansion like `$DB_PASSWORD`, an unquoted call
+or `null`.
+
+`KEY` on its own is the weak pattern, since `key=` is ordinary code. Under it the value has
+a say too, and a short lowercase identifier or a `{` expression passes. Under every other
+pattern the value never argues, so `hunter2` and `decrypt("ghp_x")` are cut. When in doubt
+the value is cut: hiding a harmless value costs a re-read, and printing a real one cannot
+be undone.
+
+Redaction protects what the agent receives, not your disk. OMNI's local trace store keeps
+the raw output, secret included, for seven days.
+
+```
+[OMNI: Re-injecting critical files due to Warning pressure]
+```
+
+When the context is under pressure (`Warning` or `Critical`), OMNI periodically puts up to
+three of your `pinned_files` back in front of the agent, each cut to about 400 characters.
+Nothing was removed; what follows the line is added.
+
 ## Reading a percentage correctly
 
 The worst bugs in this project's history reported the **highest** reductions. A

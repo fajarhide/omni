@@ -105,6 +105,51 @@ dan berapa lama pipeline-nya berjalan.
 
 Pipeline mengenali sebagian keluarannya, tapi tidak semuanya.
 
+```
+[OMNI: output truncated, 1200 of 4000 lines kept, 2800 dropped from the middle, omni retrieve 0000000000000000]
+[OMNI: output truncated, 50000 of 180000 bytes kept]
+```
+
+Potongan terakhir sebelum sebuah jawaban dikirim, di 50 KB. Bentuk barisnya mempertahankan
+awal dan akhir, karena build atau test run menaruh putusannya di bagian akhir, dan penanda
+ini menyebut berapa banyak bagian tengah yang dibuang. Bentuk byte dipakai ketika tidak ada
+struktur baris di dalam anggarannya, dan ia hanya mempertahankan awalnya, jadi satu baris
+yang sangat panjang kehilangan ekornya. Handle ada kalau bagian yang dibuang diarsipkan;
+tanpa handle pun penandanya tetap menyebut apa yang dibuang.
+
+```
+[OMNI: 2 sensitive value(s) redacted]
+```
+
+Redaksi kredensial pada keluaran perintah. Baris yang memberi nilai ke nama yang sensitif
+nilainya diganti `[REDACTED]`, dan penanda ini menghitung barisnya. Tanda kutip dan tanda
+baca di sekitar nilai tetap ada, jadi baris yang diredaksi masih bisa di-parse.
+
+Namanya yang menentukan, dicocokkan per kata yang dipisah garis bawah sehingga `PASSED` dan
+`AUTHORS` tidak ikut: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`,
+`CREDENTIAL`, `CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, `MONGO_URL`, `CLIENT_SECRET`,
+`ACCESS_KEY`, `PRIVATE_KEY`, dan apa pun yang diawali `API_`, `AWS_`, `GITHUB_`,
+`ANTHROPIC_`, `OPENAI_` atau `GEMINI_`. Beberapa nilai dibiarkan karena tidak memuat kredensial
+apa pun namanya: nilai kosong, ekspansi shell seperti `$DB_PASSWORD`, pemanggilan tanpa
+kutip, atau `null`.
+
+`KEY` sendirian adalah pola lemah, karena `key=` adalah kode biasa. Di bawah pola itu nilainya
+ikut menentukan, dan identifier pendek berhuruf kecil atau ekspresi `{` dibiarkan. Di bawah
+pola lainnya nilai tidak pernah ikut menentukan, jadi `hunter2` dan `decrypt("ghp_x")` tetap
+dipotong. Kalau ragu, nilainya dipotong: menyembunyikan nilai yang aman hanya berongkos satu
+baca ulang, sedangkan mencetak kredensial asli tidak bisa ditarik kembali.
+
+Redaksi melindungi apa yang diterima agent, bukan disk Anda. Penyimpanan trace lokal OMNI
+menyimpan keluaran mentahnya, termasuk kredensialnya, selama tujuh hari.
+
+```
+[OMNI: Re-injecting critical files due to Warning pressure]
+```
+
+Saat konteks tertekan (`Warning` atau `Critical`), OMNI secara berkala menaruh kembali sampai
+tiga berkas `pinned_files` Anda di depan agent, masing-masing dipotong sekitar 400 karakter.
+Tidak ada yang dibuang; isi sesudah baris itu adalah tambahan.
+
 ## Membaca persentase dengan benar
 
 Bug-bug terburuk dalam sejarah proyek ini melaporkan pengurangan **paling
