@@ -687,6 +687,48 @@ fn lists_containers(command: &str) -> bool {
     }
 }
 
+/// The kubectl verbs this has to tell apart from a flag's value. Not the whole
+/// surface: a verb missing from here only means the token after an unlisted
+/// value-taking flag is read as the verb, which is what the list is for.
+const KUBECTL_VERBS: &[&str] = &[
+    "logs",
+    "get",
+    "describe",
+    "apply",
+    "delete",
+    "create",
+    "edit",
+    "patch",
+    "exec",
+    "run",
+    "rollout",
+    "scale",
+    "top",
+    "events",
+    "port-forward",
+    "cp",
+    "attach",
+    "explain",
+    "diff",
+    "wait",
+    "label",
+    "annotate",
+    "set",
+    "replace",
+    "debug",
+    "drain",
+    "cordon",
+    "uncordon",
+    "taint",
+    "proxy",
+    "auth",
+    "config",
+    "version",
+    "api-resources",
+    "api-versions",
+    "cluster-info",
+];
+
 /// The kubectl verb, with global flags and the values they take stepped over.
 ///
 /// Matching `logs` anywhere in the string also claims `kubectl get pod logs`,
@@ -699,28 +741,21 @@ fn kubectl_subcommand(command: &str) -> Option<&str> {
         .split_whitespace()
         .map(|t| t.trim_matches('"'))
         .skip_while(|t| t.rsplit('/').next() != Some("kubectl"))
-        .skip(1);
+        .skip(1)
+        .peekable();
     while let Some(token) = tokens.next() {
         if !token.starts_with('-') {
             return Some(token);
         }
-        if matches!(
-            token,
-            "-n" | "--namespace"
-                | "--context"
-                | "-l"
-                | "--selector"
-                | "--kubeconfig"
-                | "-o"
-                | "--output"
-                | "-c"
-                | "--container"
-                | "--as"
-                | "--cluster"
-                | "--user"
-                | "--server"
-                | "--token"
-        ) {
+        // A flag's value is stepped over, and the verb list is what decides
+        // which of the two a token is. Enumerating the flags that take a value
+        // missed `--request-timeout 60s logs`, and `60s` then read as the verb,
+        // which put a log stream back through the summariser (PR #809 review).
+        if !token.contains('=')
+            && tokens
+                .peek()
+                .is_some_and(|next| !next.starts_with('-') && !KUBECTL_VERBS.contains(next))
+        {
             tokens.next();
         }
     }
@@ -1066,9 +1101,20 @@ pub fn resolve_distiller(command: &str) -> Distillation {
             // `-p typescript tsc` names the package to fetch, not the program to
             // run, so its value is stepped over or it reads as the program and
             // the real tool loses its distiller (PR #809 review).
+            // The value-taking options npx documents. An unlisted one leaves its
+            // value read as the program, which resolves to passthrough: a missed
+            // compression rather than a lost answer (PR #809 review).
             if matches!(
                 token,
-                "-p" | "--package" | "-c" | "--call" | "--node-options"
+                "-p" | "--package"
+                    | "-c"
+                    | "--call"
+                    | "--node-options"
+                    | "--registry"
+                    | "--userconfig"
+                    | "--cache"
+                    | "--shell"
+                    | "--npm"
             ) {
                 rest.next();
             }
@@ -1589,6 +1635,7 @@ mod tests {
         for cmd in [
             "kubectl -n demo logs payment-api-0 --tail=60",
             "kubectl --context cluster-a logs -l app=api",
+            "kubectl --request-timeout 60s logs payment-api-0",
             "C=cluster-a kubectl --context $C logs -n argocd sts/controller",
         ] {
             assert!(
@@ -1618,6 +1665,7 @@ mod tests {
             "npx -y tsc --noEmit",
             "npx jest",
             "npx -p typescript tsc --noEmit",
+            "npx --registry https://registry.npmjs.org tsc --noEmit",
         ] {
             assert!(
                 matches!(resolve_distiller(cmd), Distillation::JsTs),
