@@ -1636,6 +1636,9 @@ mod tests {
             "kubectl -n demo logs payment-api-0 --tail=60",
             "kubectl --context cluster-a logs -l app=api",
             "kubectl --request-timeout 60s logs payment-api-0",
+            // A boolean flag right in front of the verb: the value rule alone
+            // eats `logs` here, and the verb list is what keeps it.
+            "kubectl --insecure-skip-tls-verify logs payment-api-0",
             "C=cluster-a kubectl --context $C logs -n argocd sts/controller",
         ] {
             assert!(
