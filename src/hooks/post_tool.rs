@@ -365,28 +365,9 @@ fn declined(
         return Some(Declined::KeepsTheseBytes);
     }
 
-    // Format-safe gate: structured payloads are parsed by whatever reads them next,
-    // so every lossy stage below, including the >2MB head/tail trim, would corrupt
-    // them. Emit nothing: the host keeps the original bytes at zero marker cost.
-    // `refuses_lossy_stages`, not `sniff`, so the reason this declines is the
-    // question being asked rather than a classifier's return value. `kind` is
-    // still needed for the recorded reason, so the classifier is called for that
-    // and the gate is the predicate (#699).
-    if crate::pipeline::format::refuses_lossy_stages(&normalized.content)
-        && let Some(kind) = format::sniff(&normalized.content)
-    {
-        if let Some(s) = store {
-            s.record_passthrough(
-                &normalized.command,
-                normalized.content.len(),
-                &format::passthrough_reason(kind),
-                normalized.host_session_id.as_deref().unwrap_or(""),
-                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
-            );
-        }
-        return Some(Declined::KeepsTheseBytes);
-    }
-
+    // Asked before the format gate below. An over-cap payload is the host's
+    // preview whatever shape it has, and a base64 body that sniffs structured
+    // would otherwise be booked as bytes the reader received (PR #809 review).
     // The host capped this payload, which means the command produced more than
     // arrived here, and above that size Claude Code persists the **raw** output
     // to a file, previews the **raw** first 2 KB, and drops whatever the hook
@@ -429,6 +410,27 @@ fn declined(
             );
         }
         return Some(Declined::KeepsAPreview);
+    }
+    // Format-safe gate: structured payloads are parsed by whatever reads them next,
+    // so every lossy stage below, including the >2MB head/tail trim, would corrupt
+    // them. Emit nothing: the host keeps the original bytes at zero marker cost.
+    // `refuses_lossy_stages`, not `sniff`, so the reason this declines is the
+    // question being asked rather than a classifier's return value. `kind` is
+    // still needed for the recorded reason, so the classifier is called for that
+    // and the gate is the predicate (#699).
+    if crate::pipeline::format::refuses_lossy_stages(&normalized.content)
+        && let Some(kind) = format::sniff(&normalized.content)
+    {
+        if let Some(s) = store {
+            s.record_passthrough(
+                &normalized.command,
+                normalized.content.len(),
+                &format::passthrough_reason(kind),
+                normalized.host_session_id.as_deref().unwrap_or(""),
+                &crate::hooks::normalize::stats_agent_id(&normalized.agent),
+            );
+        }
+        return Some(Declined::KeepsTheseBytes);
     }
 
     None
@@ -770,6 +772,13 @@ pub fn process_payload(
     // keyed on `^git\b`, exactly as the git distiller did (#264).
     let output_command = crate::pipeline::registry::sole_output_command(clean_command);
 
+    // Whether this payload has a value the redactor hides. Asked of the raw
+    // content, because reading it off the `[REDACTED]` marker misses the case
+    // where the command printed that word itself, and the fallback then restores
+    // the raw bytes over a secret that was correctly hidden (PR #809 review).
+    let holds_a_secret =
+        crate::distillers::system_ops::redact_sensitive_assignments(&content).is_some();
+
     let session_guard = session.as_ref().and_then(|l| l.lock().ok());
     let mut collapse_savings_data = None;
     let (final_out, filter_name) = {
@@ -812,8 +821,7 @@ pub fn process_payload(
         // and collapses a file read the same way (#269, #235).
         // A redaction saves almost nothing, and collapsing the raw `content` in its
         // place delivered `printenv`'s password as printed (#800).
-        let redacted = distilled.contains("[REDACTED]") && !content.contains("[REDACTED]");
-        let output = if !redacted
+        let output = if !holds_a_secret
             && !crate::guard::limits::beats_guardrail(distilled.len(), content.len())
             && output_command
                 .is_some_and(|c| !crate::pipeline::registry::passes_through_verbatim(c))
@@ -1034,7 +1042,7 @@ pub fn process_payload(
     // back under "nothing worth a deletion" would put the password on screen. The
     // guardrail exists to stop OMNI deleting an answer, not to stop it hiding a
     // credential (#342).
-    let redacted_here = final_out.contains("[REDACTED]") && !content.contains("[REDACTED]");
+    let redacted_here = holds_a_secret;
 
     // Measure ratio strictly
     if !redacted_here && final_out.len() >= content.len() * 9 / 10 {
@@ -2119,6 +2127,10 @@ mod tests {
         for stdout in [
             "HOME=/root\nDB_PASSWORD=hunter2-synthetic\nPATH=/usr/bin\n",
             "HOME=/root\nDB_PASSWORD=hunter2\nPATH=/usr/bin\n",
+            // The command printed the word itself, which is what reading the
+            // marker rather than asking the redactor could not tell apart
+            // (PR #809 review).
+            "STATUS=[REDACTED]\nDB_PASSWORD=hunter2-synthetic\nPATH=/usr/bin\n",
         ] {
             let payload = json!({
                 "tool_name": "Bash",

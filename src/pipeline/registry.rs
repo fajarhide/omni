@@ -589,7 +589,7 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         // of one ERROR while the INFO lines walking a pool from 1/5 to 5/5 went
         // (#789). 148 of 155 recorded `kubectl logs` in 30 days already passed
         // through; the other seven saved about 22 KB.
-        || (base == "kubectl" && command.split_whitespace().any(|t| t == "logs"))
+        || kubectl_subcommand(command) == Some("logs")
         // A wrapper whose stdout belongs to whatever it ran inside (#234).
         || wraps_another_command(command)
 }
@@ -685,6 +685,46 @@ fn lists_containers(command: &str) -> bool {
         Some("container") => matches!(tokens.next(), Some("ls") | Some("ps")),
         _ => false,
     }
+}
+
+/// The kubectl verb, with global flags and the values they take stepped over.
+///
+/// Matching `logs` anywhere in the string also claims `kubectl get pod logs`,
+/// where it is a resource name and the reply is a table worth shortening
+/// (PR #809 review).
+fn kubectl_subcommand(command: &str) -> Option<&str> {
+    // Found by name rather than by position: a recorded command is as often
+    // `C=cluster-a kubectl …` or `cd repo && kubectl …` as it is bare.
+    let mut tokens = command
+        .split_whitespace()
+        .map(|t| t.trim_matches('"'))
+        .skip_while(|t| t.rsplit('/').next() != Some("kubectl"))
+        .skip(1);
+    while let Some(token) = tokens.next() {
+        if !token.starts_with('-') {
+            return Some(token);
+        }
+        if matches!(
+            token,
+            "-n" | "--namespace"
+                | "--context"
+                | "-l"
+                | "--selector"
+                | "--kubeconfig"
+                | "-o"
+                | "--output"
+                | "-c"
+                | "--container"
+                | "--as"
+                | "--cluster"
+                | "--user"
+                | "--server"
+                | "--token"
+        ) {
+            tokens.next();
+        }
+    }
+    None
 }
 
 /// `kubectl` asked for a list of names rather than a table of state.
@@ -1013,14 +1053,28 @@ pub fn resolve_distiller(command: &str) -> Distillation {
     // summary line: a 7 line report came back as its last line (#797). Route by
     // the program it launches, and hand back anything that is not a JS tool.
     if base == "npx" {
-        let launched = command
+        let mut rest = command
             .split_whitespace()
             .skip_while(|t| t.rsplit('/').next() != Some("npx"))
-            .skip(1)
-            .skip_while(|t| t.starts_with('-'))
-            .collect::<Vec<_>>()
-            .join(" ");
-        return match resolve_distiller(&launched) {
+            .skip(1);
+        let mut launched: Vec<&str> = Vec::new();
+        while let Some(token) = rest.next() {
+            if !token.starts_with('-') {
+                launched.push(token);
+                break;
+            }
+            // `-p typescript tsc` names the package to fetch, not the program to
+            // run, so its value is stepped over or it reads as the program and
+            // the real tool loses its distiller (PR #809 review).
+            if matches!(
+                token,
+                "-p" | "--package" | "-c" | "--call" | "--node-options"
+            ) {
+                rest.next();
+            }
+        }
+        launched.extend(rest);
+        return match resolve_distiller(&launched.join(" ")) {
             d @ (Distillation::JsTs | Distillation::Test) => d,
             _ => Distillation::Passthrough,
         };
@@ -1542,17 +1596,29 @@ mod tests {
                 "{cmd}"
             );
         }
-        assert!(matches!(
-            resolve_distiller("kubectl get pods -n demo"),
-            Distillation::Cloud(_)
-        ));
+        // `logs` as a resource name is not a log stream.
+        for cmd in [
+            "kubectl get pods -n demo",
+            "kubectl get pod logs",
+            "kubectl describe pod logs",
+        ] {
+            assert!(
+                matches!(resolve_distiller(cmd), Distillation::Cloud(_)),
+                "{cmd}"
+            );
+        }
     }
 
     /// #797. A JS tool behind `npx` keeps its distiller; a script runner with no
     /// summary line is handed back rather than cut to its last line.
     #[test]
     fn npx_routes_by_the_program_it_launches() {
-        for cmd in ["npx vitest run", "npx -y tsc --noEmit", "npx jest"] {
+        for cmd in [
+            "npx vitest run",
+            "npx -y tsc --noEmit",
+            "npx jest",
+            "npx -p typescript tsc --noEmit",
+        ] {
             assert!(
                 matches!(resolve_distiller(cmd), Distillation::JsTs),
                 "{cmd}"

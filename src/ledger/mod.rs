@@ -559,13 +559,18 @@ impl<'a> Ledger<'a> {
         // A diff's changed lines are the same kind of line (#788). `+ foo` shown
         // by an earlier `git show` is a different fact from `+ foo` staged now, and
         // folding them left a reviewed diff holding only its context.
-        let is_diff = lines.iter().any(|l| l.starts_with("@@ "));
+        // `git diff --color` paints the hunk header and the changed lines, and a
+        // combined diff opens `@@@`, so both are read past the colour (PR #809
+        // review).
+        let is_diff = lines
+            .iter()
+            .any(|l| without_ansi_prefix(l).starts_with("@@"));
         let never_fold: HashSet<&String> = hashes
             .iter()
             .zip(lines.iter())
             .filter(|(_, line)| {
                 crate::pipeline::semantic::carries_failure(line)
-                    || (is_diff && line.starts_with(['+', '-', '@']))
+                    || (is_diff && without_ansi_prefix(line).starts_with(['+', '-', '@']))
             })
             .map(|(hash, _)| hash)
             .collect();
@@ -1165,6 +1170,22 @@ fn names_line_numbers(arg: &str) -> bool {
 /// Trimmed, so the same line reached through `sed -n` and through `cat` is one
 /// line rather than two. Hashed rather than stored whole because the table is
 /// keyed on it and a 4 KB line would otherwise become a 4 KB index entry.
+/// The line with any leading ANSI colour sequences removed.
+///
+/// Slices here are proven to sit on a char boundary rather than assumed to: the
+/// escape is one ASCII byte and `find('m')` returns the index of another.
+#[allow(clippy::string_slice)]
+fn without_ansi_prefix(line: &str) -> &str {
+    let mut rest = line;
+    while let Some(after) = rest.strip_prefix('\u{1b}') {
+        match after.find('m') {
+            Some(end) => rest = &after[end + 1..],
+            None => return rest,
+        }
+    }
+    rest
+}
+
 pub fn line_key(line: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -2031,26 +2052,38 @@ mod tests {
     #[test]
     fn a_diff_keeps_its_changed_lines() {
         let (store, _d) = temp_store();
-        let added: String = (0..30)
-            .map(|i| format!("+    let value_{i} = compute({i});\n"))
-            .collect();
-        let payload = |header: &str, tag: &str| format!("{header}{added}{}", fresh_block(tag));
+        let line = |i: usize| format!("    let value_{i} = compute({i});");
+        // Plain, coloured and combined. A `git diff --color` paints both the
+        // header and the changed lines, so the arms differ in what they paint.
+        for (scope, header, paint) in [
+            ("plain", "@@ -1,3 +1,33 @@\n".to_string(), ""),
+            (
+                "color",
+                format!("\u{1b}[36m@@ -1,3 +1,33 @@\u{1b}[m\n"),
+                "\u{1b}[32m",
+            ),
+            ("combined", "@@@ -1,3 -1,3 +1,33 @@@\n".to_string(), ""),
+        ] {
+            let added: String = (0..30).map(|i| format!("{paint}+{}\n", line(i))).collect();
+            Ledger::new(&store, scope).project(&added);
+            let diff = format!("{header}{added}{}", fresh_block(scope));
+            let view = Ledger::new(&store, scope)
+                .project(&diff)
+                .unwrap_or_else(|| diff.clone());
+            assert!(
+                view.contains(&added),
+                "{scope}: a changed line was folded out of a diff: {view}"
+            );
+        }
 
-        Ledger::new(&store, "plain").project(&added);
-        let folded = Ledger::new(&store, "plain")
-            .project(&payload("", "plain"))
+        // The control: the same lines with no hunk header still fold, so the
+        // guard reads the diff shape rather than refusing every repeat.
+        let added: String = (0..30).map(|i| format!("+{}\n", line(i))).collect();
+        Ledger::new(&store, "flat").project(&added);
+        let folded = Ledger::new(&store, "flat")
+            .project(&format!("{added}{}", fresh_block("flat")))
             .expect("the same lines without a hunk header fold");
         assert!(folded.contains("already shown"), "{folded}");
-
-        Ledger::new(&store, "diff").project(&added);
-        let diff = payload("@@ -1,3 +1,33 @@\n", "diff");
-        let view = Ledger::new(&store, "diff")
-            .project(&diff)
-            .unwrap_or_else(|| diff.clone());
-        assert!(
-            view.contains(&added),
-            "a + line was folded out of a diff: {view}"
-        );
     }
 
     /// The predicate on its own, in both directions. A line budget counts and a
