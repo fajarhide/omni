@@ -906,7 +906,19 @@ impl<'a> Ledger<'a> {
         // nothing, which is what `rations_its_output` gives `head` and `tail`. A
         // re-run printing the identical result still folds, because there the
         // identity is the answer.
-        if filters_its_own_output(&self.source) && !planned.iter().all(|&fold| fold) {
+        // Narrowed to a fold that draws on something else. A re-run of the same
+        // command printing the same lines is the case #755 settled: there the
+        // identity is the answer and a partial fold says so in words. What the
+        // report hit was another command's output subtracted from a fresh grep.
+        if filters_its_own_output(&self.source)
+            && !planned.iter().all(|&fold| fold)
+            && planned.iter().zip(&runs).any(|(&fold, run)| {
+                fold && run
+                    .seen
+                    .as_ref()
+                    .is_some_and(|s| !matches!(s.source, SourceOfSighting::ThisCommandAgain))
+            })
+        {
             return None;
         }
 
@@ -2060,22 +2072,28 @@ mod tests {
         let shown: String = (0..14).map(line).collect();
         let grep = "grep -n \"^  test(\" apps/server/src/http/platform-orgs.test.ts";
 
-        Ledger::new(&store, "s1").from(grep).project(&shown);
-
+        // The reported shape: the lines were printed by something else, and the
+        // grep that follows is a fresh question about the file.
+        Ledger::new(&store, "s1")
+            .from("cd /tmp/pr-928 && cat apps/server/src/http/platform-orgs.test.ts")
+            .project(&shown);
         let partial: String = (0..28).map(line).collect();
         assert!(
             Ledger::new(&store, "s1")
                 .from(grep)
                 .project(&partial)
                 .is_none(),
-            "half the matches were a repeat, so the whole reply has to be delivered"
+            "half the matches came from another command, so the reply goes whole"
         );
 
-        let whole = Ledger::new(&store, "s1")
+        // The same command run again, printing what it printed before: the
+        // identity is the answer, which is #755 and stays.
+        Ledger::new(&store, "s2").from(grep).project(&shown);
+        let again = Ledger::new(&store, "s2")
             .from(grep)
-            .project(&shown)
-            .expect("an identical re-run still folds");
-        assert!(whole.contains("identical"), "{whole}");
+            .project(&format!("{}{shown}", fresh_block("new match")))
+            .expect("a re-run of the same command still folds");
+        assert!(again.contains("identical to an earlier run"), "{again}");
     }
 
     /// #796. A `Read` names its window in `offset` and `limit`, never in the path
