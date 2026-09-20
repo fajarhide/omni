@@ -1378,7 +1378,7 @@ mod tests {
             .project(&format!("{}{block}", fresh_block("phase")))
             .expect("the same block under another command is projectable");
 
-        let rates = store.marker_retrieve_rates(1);
+        let rates = store.marker_retrieve_rates(0);
         let by_kind: std::collections::HashMap<&str, i64> =
             rates.iter().map(|r| (r.kind.as_str(), r.folds)).collect();
 
@@ -1413,7 +1413,7 @@ mod tests {
             .expect("the marker carries a handle");
         store.record_retrieve_event("omni retrieve", handle, "claude_code");
 
-        let after = store.marker_retrieve_rates(1);
+        let after = store.marker_retrieve_rates(0);
         let rerun = after
             .iter()
             .find(|r| r.kind == "session_rerun")
@@ -1433,7 +1433,7 @@ mod tests {
         // stopped counting markers and the retrieval sum stopped counting
         // answered questions.
         store.record_retrieve_event("omni retrieve", handle, "claude_code");
-        let twice = store.marker_retrieve_rates(1);
+        let twice = store.marker_retrieve_rates(0);
         let after_two = twice
             .iter()
             .find(|r| r.kind == "session_rerun")

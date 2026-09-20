@@ -291,7 +291,7 @@ const FLAGS: super::Flags = &[
     ),
     (
         "--view <name>",
-        "summary | detail | projects | context | rerun | share",
+        "summary | detail | projects | context | rerun | folds | share",
     ),
     (
         "--limit <n>",
@@ -414,6 +414,9 @@ fn view(args: &[String]) -> &'static str {
             "projects" | "project" => "project",
             "context" => "context",
             "rerun" => "rerun",
+            // The ledger's own calibration. `calibration` is accepted too,
+            // because that is the word a reader reaches for first (#816).
+            "folds" | "calibration" => "folds",
             "share" => "share",
             _ => "summary",
         };
@@ -490,6 +493,7 @@ fn renderer(view: &str, json: bool, card: bool) -> &'static str {
         (_, true, _) => "json",
         ("share", ..) => "share",
         ("rerun", ..) => "rerun",
+        ("folds", ..) => "folds",
         ("context", ..) => "context",
         ("project", ..) => "project",
         ("detail" | "commands", ..) => "detail",
@@ -522,6 +526,10 @@ fn print_help() {
         "#".bright_black()
     );
     println!(
+        "  omni stats --view folds  {} What a fold claimed, and what came back",
+        "#".bright_black()
+    );
+    println!(
         "  omni stats --json        {} Machine-readable for CI/CD",
         "#".bright_black()
     );
@@ -542,6 +550,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         "card" => run_card(args, store),
         "share" => run_share(args, store),
         "rerun" => run_rerun(args, store),
+        "folds" => run_folds(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
@@ -2015,6 +2024,84 @@ fn build_stats_json(store: &Store, since: i64) -> Result<StatsJson> {
 /// input would score 100%. This measures whether the agent had to run the
 /// command again, which is the closest thing to ground truth on whether the
 /// bytes removed were the ones it needed.
+/// The ledger's calibration, which nothing printed before (#816).
+///
+/// A fold is a claim: the reader does not need these bytes. A retrieve on that
+/// marker's handle is the reader disagreeing. `marker_retrieve_rates` has
+/// computed the pair since #771 and had no caller outside tests, so every guard
+/// in the ledger has been tuned from reports rather than from its own rate.
+///
+/// No verdict colour and no threshold. There is no measured bar yet, and a
+/// number that looks judged when nothing judged it is the defect this project
+/// exists to fight.
+fn run_folds(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
+    let rows = store.marker_retrieve_rates(since);
+
+    super::print_header(Some("folds"), Some(period_label));
+
+    if rows.is_empty() {
+        println!("  No marker recorded in this window.");
+        println!("  A marker is recorded from the release that added `fold_markers`, so a");
+        println!("  store written by an earlier binary holds none, however many folds it made.");
+        print_separator();
+        println!();
+        return Ok(());
+    }
+
+    println!(
+        " {:<38} {:>7} {:>10} {:>7}",
+        "Marker", "folds", "retrieved", "rate"
+    );
+    println!(
+        " {:\u{2500}<38} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        ""
+    );
+
+    let (mut folds, mut retrieved) = (0i64, 0i64);
+    for r in &rows {
+        folds += r.folds;
+        retrieved += r.retrieved;
+        println!(
+            " {:<38} {:>7} {:>10} {:>6.1}%",
+            r.kind,
+            format_number(r.folds as u64),
+            format_number(r.retrieved as u64),
+            rate_pct(r.folds, r.retrieved)
+        );
+    }
+
+    if rows.len() > 1 {
+        println!(
+            " {:\u{2500}<38} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            ""
+        );
+        println!(
+            " {:<38} {:>7} {:>10} {:>6.1}%",
+            "all markers",
+            format_number(folds as u64),
+            format_number(retrieved as u64),
+            rate_pct(folds, retrieved)
+        );
+    }
+
+    println!("\n  A retrieve on a marker's handle is the reader asking back for the bytes");
+    println!("  the marker said it did not need. The shape with the highest rate is the");
+    println!("  guard to look at first.");
+    print_separator();
+    println!();
+    Ok(())
+}
+
+/// Retrieved as a share of folds, zero when there were none, so an empty shape
+/// reads as nothing happened rather than as a perfect score.
+fn rate_pct(folds: i64, retrieved: i64) -> f64 {
+    if folds <= 0 {
+        return 0.0;
+    }
+    100.0 * retrieved as f64 / folds as f64
+}
+
 fn run_rerun(args: &[String], store: &Store) -> Result<()> {
     let (period_label, since) = scope(args);
     let mut rows = store.rerun_breakdown(since)?;
@@ -2198,12 +2285,24 @@ mod tests {
 
     /// The same for the view, and then for the whole decision. The output formats
     /// are weighed against the view rather than being views themselves: reading
+    /// #816. A shape with no folds reads as nothing happened. Reporting 100%
+    /// or dividing by zero would both be claims the data cannot support.
+    #[test]
+    fn a_shape_with_no_folds_has_no_rate() {
+        assert_eq!(rate_pct(0, 0), 0.0);
+        assert_eq!(rate_pct(4, 1), 25.0);
+        assert_eq!(rate_pct(2, 2), 100.0);
+    }
+
     /// `--card` as one meant `--view detail --card` wrote no image.
     #[test]
     fn the_renderer_table_settles_the_formats_against_the_view() {
         let args = |flags: &[&str]| flags.iter().map(|f| f.to_string()).collect::<Vec<_>>();
 
         assert_eq!(view(&args(&[])), "summary");
+        // #816. The calibration view, under both spellings.
+        assert_eq!(view(&args(&["--view", "folds"])), "folds");
+        assert_eq!(view(&args(&["--view", "calibration"])), "folds");
         assert_eq!(view(&args(&["--view", "detail"])), "detail");
         assert_eq!(view(&args(&["--view=projects"])), "project");
         assert_eq!(view(&args(&["--detail"])), "detail");
@@ -2256,6 +2355,10 @@ mod tests {
         );
 
         assert_eq!(renderer("summary", false, false), "summary");
+        // A view of its own, and the two formats still outrank it (#816).
+        assert_eq!(renderer("folds", false, false), "folds");
+        assert_eq!(renderer("folds", true, false), "json");
+        assert_eq!(renderer("folds", false, true), "card");
         assert_eq!(renderer("detail", true, false), "json");
         assert_eq!(
             renderer("project", true, false),

@@ -308,6 +308,14 @@ done
 # Greptile on #714: this loop searched only the default view while claiming both
 # share the word, which is the check naming a property it did not test. Each word
 # is now asserted in both outputs, so a rewording in either view fails.
+# #816. The calibration view has to reach a person: `marker_retrieve_rates` was
+# computed and read by nothing outside tests for two releases. An empty store
+# prints the empty state, which is what a fresh smoke run has.
+FOLDS_OUT="$($OMNI stats --view folds 2>&1 || true)"
+check "folds view renders" "$FOLDS_OUT" "folds"
+check "folds view says why it is empty" "$FOLDS_OUT" "No marker recorded"
+check "calibration is accepted too" "$($OMNI stats --view calibration 2>&1 || true)" "folds"
+
 DEFAULT_OUT="$($OMNI stats 2>&1 || true)"
 for WORD in "folded" "distilled" "left alone" "where the bytes were"; do
     check "default has '$WORD'" "$DEFAULT_OUT" "$WORD"

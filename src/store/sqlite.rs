@@ -2409,7 +2409,7 @@ impl SqliteBackend {
     /// the same content folded twice with a pull in between, inside one second.
     /// `>` would drop the common case to avoid the rare one. Resolving the tie for
     /// real needs sub-second timestamps on both tables (#771 review).
-    pub fn marker_retrieve_rates(&self, days: i64) -> Vec<MarkerRate> {
+    pub fn marker_retrieve_rates(&self, since: i64) -> Vec<MarkerRate> {
         let Ok(conn) = self.pool.get() else {
             return Vec::new();
         };
@@ -2418,13 +2418,13 @@ impl SqliteBackend {
                     SUM(EXISTS (SELECT 1 FROM retrieve_events r
                                  WHERE r.hash = m.handle AND r.ts >= m.ts))
                FROM fold_markers m
-              WHERE m.ts >= strftime('%s','now') - (?1 * 86400)
+              WHERE m.ts >= ?1
               GROUP BY m.kind
               ORDER BY 3 DESC",
         ) else {
             return Vec::new();
         };
-        let rows = stmt.query_map(params![days], |r| {
+        let rows = stmt.query_map(params![since], |r| {
             Ok(MarkerRate {
                 kind: r.get(0)?,
                 folds: r.get(1)?,
