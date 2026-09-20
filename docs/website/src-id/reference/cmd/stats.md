@@ -14,7 +14,7 @@ model. Umur sesi, perintah teratas, rute dan agent pindah ke `--view detail`.
 | flag | efeknya |
 |---|---|
 | `--since <jendela>` | `hour`, `today`, `week`, `month` (bawaan), `all` |
-| `--view <nama>` | `summary` (bawaan), `detail`, `commands`, `projects`, `context`, `rerun`, `share` |
+| `--view <nama>` | `summary` (bawaan), `detail`, `commands`, `projects`, `context`, `rerun`, `folds`, `share` |
 | `--limit <n>` | Jumlah baris di tampilan tabel, bawaan 10, `0` untuk semua |
 | `--json` | Bisa dibaca mesin, ikut jendela `--since` |
 | `--card` | Tulis ringkasan sebagai gambar, berukuran untuk unggahan media sosial |
@@ -31,6 +31,25 @@ karena menyebutnya hanya bisa berarti menulis berkasnya; `--json` mengalahkan `-
 karena laporan yang bisa dibaca mesin cuma satu dan bukan per tampilan. Dulu keduanya
 dibaca sebagai tampilan, dan begitulah `--view detail --card` sampai tidak menulis gambar
 sama sekali.
+
+## `--view folds` adalah kalibrasi ledger atas dirinya sendiri
+
+Sebuah fold adalah klaim: pembaca tidak membutuhkan byte ini. Sebuah retrieve atas handle
+penanda itu adalah pembaca yang membantahnya. Tampilan ini menaruh keduanya bersebelahan,
+per bentuk penanda, sehingga penjaga dengan angka tertinggi adalah yang pertama dilihat.
+
+```sh
+omni stats --view folds              # 30 hari terakhir
+omni stats --view calibration --since week
+```
+
+`calibration` adalah tampilan yang sama, dengan kata yang lebih dulu terpikir oleh
+kebanyakan pembaca.
+
+Tidak ada ambang dan tidak ada warna vonis di dalamnya. Belum ada batas yang pernah
+diukur, dan angka yang tampak sudah dinilai padahal belum adalah cacat yang justru
+diperangi proyek ini. Penyimpanan yang ditulis sebelum penanda mulai direkam akan
+mengatakannya, bukan mencetak nol yang terkesan sempurna.
 
 ## `--rerun` yang wajib diketahui
 
