@@ -899,6 +899,17 @@ impl<'a> Ledger<'a> {
             }
         }
 
+        // #814, the separable half of #795. `grep` is the caller's own filter, so
+        // the pattern already picked every line in the reply and a partial fold
+        // answers a different question rather than the same one shorter: 9 of 11
+        // matches folded came back reading as a file with two matches. Whole or
+        // nothing, which is what `rations_its_output` gives `head` and `tail`. A
+        // re-run printing the identical result still folds, because there the
+        // identity is the answer.
+        if filters_its_own_output(&self.source) && !planned.iter().all(|&fold| fold) {
+            return None;
+        }
+
         // #658, then #664. A host that renumbers what it is handed cannot take
         // survivors sitting in two blocks. #658 answered that by folding only down
         // to the first survivor, which left everything below the first change on
@@ -1127,6 +1138,21 @@ fn segment_rations_its_output(segment: &str) -> bool {
             "sed" => tokens[i + 1..].iter().any(|a| names_line_numbers(a)),
             _ => false,
         }
+    })
+}
+
+/// Whether the caller's own pattern picked these lines (#814).
+///
+/// `registry::passes_through_verbatim` reaches the same conclusion one stage
+/// earlier, for the collapse fallback, and for the same reason: a second filter
+/// cannot know what the first was looking for.
+fn filters_its_own_output(command: &str) -> bool {
+    command.split(['\n', ';', '|', '&']).any(|segment| {
+        let tokens: Vec<&str> = segment.split_whitespace().collect();
+        tokens.iter().enumerate().any(|(i, tok)| {
+            opens_a_command(&tokens, i)
+                && matches!(tok.rsplit('/').next().unwrap_or(tok), "grep" | "rg" | "ag")
+        })
     })
 }
 
@@ -2015,6 +2041,41 @@ mod tests {
             view.contains("handler finished request 0"),
             "the budgeted arm kept the marker out but lost the lines anyway: {view}"
         );
+    }
+
+    /// #814, split out of #795. Every line of a `grep` reply is the answer the
+    /// pattern asked for, so a partial fold reads as a different answer: 9 of 11
+    /// matches folded came back looking like a file with two matches. A re-run
+    /// that prints the identical result still folds, because there the identity
+    /// is what was asked.
+    #[test]
+    fn a_grep_folds_whole_or_not_at_all() {
+        let (store, _d) = temp_store();
+        let line = |i: usize| {
+            format!(
+                "{}:  test(\"case {i} keeps the platform admin check honest\", async () => {{\n",
+                100 + i * 7
+            )
+        };
+        let shown: String = (0..14).map(line).collect();
+        let grep = "grep -n \"^  test(\" apps/server/src/http/platform-orgs.test.ts";
+
+        Ledger::new(&store, "s1").from(grep).project(&shown);
+
+        let partial: String = (0..28).map(line).collect();
+        assert!(
+            Ledger::new(&store, "s1")
+                .from(grep)
+                .project(&partial)
+                .is_none(),
+            "half the matches were a repeat, so the whole reply has to be delivered"
+        );
+
+        let whole = Ledger::new(&store, "s1")
+            .from(grep)
+            .project(&shown)
+            .expect("an identical re-run still folds");
+        assert!(whole.contains("identical"), "{whole}");
     }
 
     /// #796. A `Read` names its window in `offset` and `limit`, never in the path
