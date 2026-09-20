@@ -73,18 +73,21 @@ fn git_subcommand(command: &str) -> Option<&str> {
     // Quote aware: `split_whitespace` cuts `-C "path with spaces"` into three
     // words, and the third then reads as the verb (PR #812 review).
     let mut tokens = crate::pipeline::producer::words(command)
-        .map(|t| t.trim_matches('"'))
-        .skip_while(|t| t.rsplit('/').next() != Some("git"))
+        .skip_while(|t| t.trim_matches('"').rsplit('/').next() != Some("git"))
         .skip(1)
         .peekable();
-    while let Some(token) = tokens.next() {
+    while let Some(raw) = tokens.next() {
+        let token = raw.trim_matches('"');
         if !token.starts_with('-') {
             return Some(token);
         }
+        // The verb test reads the raw token: `git -C "diff" status` names a
+        // directory, and a quoted word is a value however it is spelled
+        // (PR #812 review).
         if !token.contains('=')
             && tokens
                 .peek()
-                .is_some_and(|next| !next.starts_with('-') && !GIT_VERBS.contains(next))
+                .is_some_and(|next| !next.starts_with('-') && !unquoted_verb(next, GIT_VERBS))
         {
             tokens.next();
         }
@@ -760,6 +763,15 @@ fn lists_containers(command: &str) -> bool {
     }
 }
 
+/// Whether a raw token is a verb rather than a flag's value.
+///
+/// Quoted means value: `git -C "diff" status` names a directory called `diff`
+/// and `kubectl --context "logs" get pods` a context called `logs`, and reading
+/// either as the verb picks the wrong profile entirely (PR #812 review).
+fn unquoted_verb(raw: &str, verbs: &[&str]) -> bool {
+    !raw.starts_with(['"', '\'']) && verbs.contains(&raw)
+}
+
 /// The kubectl verbs this has to tell apart from a flag's value. Not the whole
 /// surface: a verb missing from here only means the token after an unlisted
 /// value-taking flag is read as the verb, which is what the list is for.
@@ -811,11 +823,11 @@ fn kubectl_subcommand(command: &str) -> Option<&str> {
     // Found by name rather than by position: a recorded command is as often
     // `C=cluster-a kubectl …` or `cd repo && kubectl …` as it is bare.
     let mut tokens = crate::pipeline::producer::words(command)
-        .map(|t| t.trim_matches('"'))
-        .skip_while(|t| t.rsplit('/').next() != Some("kubectl"))
+        .skip_while(|t| t.trim_matches('"').rsplit('/').next() != Some("kubectl"))
         .skip(1)
         .peekable();
-    while let Some(token) = tokens.next() {
+    while let Some(raw) = tokens.next() {
+        let token = raw.trim_matches('"');
         if !token.starts_with('-') {
             return Some(token);
         }
@@ -826,7 +838,7 @@ fn kubectl_subcommand(command: &str) -> Option<&str> {
         if !token.contains('=')
             && tokens
                 .peek()
-                .is_some_and(|next| !next.starts_with('-') && !KUBECTL_VERBS.contains(next))
+                .is_some_and(|next| !next.starts_with('-') && !unquoted_verb(next, KUBECTL_VERBS))
         {
             tokens.next();
         }
@@ -1740,6 +1752,8 @@ mod tests {
             "git -c core.pager=cat diff",
             // A path with spaces is one word to the shell, and has to be one here.
             "git -C \"/tmp/some path/repo\" diff",
+            // A directory called `diff` is a value, not the verb.
+            "git -C \"/tmp/diff\" diff",
             "cd /tmp/repo && git diff",
         ] {
             assert_eq!(
@@ -1751,6 +1765,11 @@ mod tests {
         // `--stat` is a file list rather than hunks, and stays where it was.
         assert_eq!(
             resolve_profile_for_chain("git -C /tmp/repo diff --stat").segmentation,
+            SegmentationMode::Line
+        );
+        // The verb after a quoted value that spells one: `status`, not `diff`.
+        assert_eq!(
+            resolve_profile_for_chain("git -C \"diff\" status").segmentation,
             SegmentationMode::Line
         );
     }
@@ -1778,6 +1797,8 @@ mod tests {
             "kubectl get pods -n demo",
             "kubectl get pod logs",
             "kubectl describe pod logs",
+            // A context called `logs` is a value, so this is a `get`.
+            "kubectl --context \"logs\" get pods",
         ] {
             assert!(
                 matches!(resolve_distiller(cmd), Distillation::Cloud(_)),
