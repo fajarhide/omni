@@ -312,9 +312,11 @@ done
 # computed and read by nothing outside tests for two releases. An empty store
 # prints the empty state, which is what a fresh smoke run has.
 FOLDS_OUT="$($OMNI stats --view folds 2>&1 || true)"
-check "folds view renders" "$FOLDS_OUT" "folds"
+# The header, not the word: `folds` appears in the summary view's prose too, so
+# the loose check passed with the dispatch arm deleted.
+check "folds view renders" "$FOLDS_OUT" "OMNI . folds"
 check "folds view says why it is empty" "$FOLDS_OUT" "No marker recorded"
-check "calibration is accepted too" "$($OMNI stats --view calibration 2>&1 || true)" "folds"
+check "calibration is accepted too" "$($OMNI stats --view calibration 2>&1 || true)" "OMNI . folds"
 
 DEFAULT_OUT="$($OMNI stats 2>&1 || true)"
 for WORD in "folded" "distilled" "left alone" "where the bytes were"; do
