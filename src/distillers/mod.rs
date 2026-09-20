@@ -296,6 +296,30 @@ mod tests {
         assert!(!passes_through_verbatim("kubectl get pods -A"));
     }
 
+    /// #819, end to end. 400 progress rows in front of one panic: the header is
+    /// the only line naming the test and the source location, and it came back
+    /// missing while 96 `Compiling` rows survived. The command is a shell script
+    /// on purpose, because that is what leaves `tool_family` unset.
+    #[test]
+    fn a_panic_survives_four_hundred_progress_lines() {
+        let mut input: String = (0..400)
+            .map(|i| format!("   Compiling crate_{i} v0.1.{i} (/tmp/demo/vendor/crate_{i})\n"))
+            .collect();
+        input.push_str("running 3 tests\ntest parses_empty_input ... ok\n");
+        input.push_str("thread 'keeps_order_under_load' panicked at tests/widget.rs:91:5:\n");
+        input.push_str("assertion `left == right` failed: rows came back unsorted\n");
+
+        let cmd = "./synth_big.sh";
+        let segments = crate::pipeline::scorer::score_with_command(&input, cmd, None);
+        let out = distill_with_command(&segments, &input, cmd, None);
+
+        assert!(
+            out.contains("panicked at tests/widget.rs:91:5"),
+            "the line naming the test and its location was cut: {}",
+            crate::util::text::safe_slice(&out, 400)
+        );
+    }
+
     /// From #129: a `make` target runs several programs and hands back their
     /// concatenated output with no delimiter, so no single-tool distiller can
     /// speak for it. `BuildDistiller` took the whole buffer and answered

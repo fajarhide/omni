@@ -213,6 +213,13 @@ fn is_critical(lower_text: &str, tool_family: Option<&str>) -> bool {
         || lower_text.contains("fatal:")
         || lower_text.contains("exception:")
         || lower_text.contains("panic:")
+        // The Rust runtime's own shape, `thread '...' panicked at src/lib.rs:9:5:`.
+        // It was here already, but only under the `cargo`/`rustc` tool family, so
+        // a panic printed through a shell script, a make target or any test
+        // wrapper tiered as ordinary context: on a 408 line payload the one line
+        // carrying the test name and the source location lost its place to 96
+        // `Compiling` rows (#819). Nothing about a panic is cargo-specific.
+        || lower_text.contains("panicked at")
         || lower_text.starts_with("error ")
         || lower_text.contains("build failed")
         // `> Build error occurred` is what the bundler prints above the frame,
@@ -708,6 +715,21 @@ mod tests {
     #[test]
     fn test_is_critical_generic() {
         assert!(is_critical("fatal: not a git repository", None));
+    }
+
+    /// #819. `panicked at` was known to the `cargo` arm only, so the same panic
+    /// printed by a shell script, a make target or any test wrapper tiered as
+    /// ordinary context. Nothing about a panic is cargo-specific, and the line
+    /// carries the test name and the source location.
+    #[test]
+    fn a_panic_is_critical_whatever_printed_it() {
+        let header = "thread 'keeps_order_under_load' panicked at tests/widget.rs:91:5:";
+        assert!(is_critical(&header.to_lowercase(), None));
+        assert_eq!(classify_block(&[header], None).0, SemanticClass::Critical);
+        assert_eq!(
+            classify_block(&[header], Some("make")).0,
+            SemanticClass::Critical
+        );
     }
 
     #[test]
