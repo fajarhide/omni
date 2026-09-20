@@ -358,6 +358,44 @@ mod tests {
         );
     }
 
+    /// #807. Claude Code hands a subagent the parent's `session_id` and tells
+    /// them apart by `agent_id`, so the scope is `<session>/<agent>` (#581).
+    /// Forgetting the bare id left that scope answering for a context the
+    /// compaction took with it, and the reply said `already shown` about lines
+    /// nobody was holding any more.
+    #[test]
+    fn forgets_the_subagent_scopes_of_that_session_too() {
+        let (store, _dir) = get_store();
+        let session = Arc::new(Mutex::new(SessionState::new()));
+        let text: String = (0..60)
+            .map(|i| format!("2026-09-20T00:00:{i:02}Z  worker {i} finished the batch\n"))
+            .collect();
+
+        for scope in ["sess-sub", "sess-sub/agent-9"] {
+            let ledger = crate::ledger::Ledger::new(&store, scope);
+            ledger.project(&text);
+            assert!(
+                ledger.project(&text).is_some(),
+                "{scope}: the fixture must fold before the compaction"
+            );
+        }
+
+        let input = json!({
+            "hook_event_name": "PreCompact",
+            "session_id": "sess-sub",
+        })
+        .to_string();
+        process_payload(&input, Arc::clone(&store), session);
+
+        for scope in ["sess-sub", "sess-sub/agent-9"] {
+            assert_eq!(
+                crate::ledger::Ledger::new(&store, scope).project(&text),
+                None,
+                "{scope}: still folding after the compaction"
+            );
+        }
+    }
+
     #[test]
     fn emits_no_reply_because_the_event_accepts_no_content() {
         let (store, _dir) = get_store();
