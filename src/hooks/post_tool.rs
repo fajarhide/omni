@@ -397,7 +397,15 @@ fn declined(
                 .or_else(|| r.get("stdout"))
         })
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|s| s.len() >= crate::guard::limits::HOST_OUTPUT_CAP);
+        // The host's cut lands one byte short of the cap, every time: four of
+        // four truncated payloads in this machine's trace store arrive with
+        // stdout at exactly 29,999 bytes, the last of them a 620 line file that
+        // stops at line 590. Tested at `>= 30,000` the gate therefore never fired
+        // for a truncated Bash reply, and the ledger booked all 1,186 lines as
+        // delivered, so a later `tail` folded 90 the session never received
+        // (#808, and #716 before it). Declining a genuine 29,999 byte reply
+        // costs a compression; booking a truncated one costs the answer.
+        .is_some_and(|s| s.len() + 1 >= crate::guard::limits::HOST_OUTPUT_CAP);
 
     if normalized.agent_id == "claude_code" && host_capped {
         if let Some(s) = store {
@@ -2534,9 +2542,15 @@ mod tests {
     }
 
     /// The counter-case, with size as the only variable: the same command and
-    /// the same kind of content, just under the cap, must still be distilled.
+    /// the same kind of content, under the cap, must still be distilled.
     /// Otherwise the fix reads as "stop working above 30 KB" rather than "stop
     /// booking what the host discards".
+    ///
+    /// `cap - 1` used to be this fixture and is now the other side of the line:
+    /// the host's own cut lands there, four of four in the trace store (#808), so
+    /// a payload of exactly that length cannot be told from a truncated one and
+    /// the gate claims it. The cost is a compression lost on a genuine 29,999
+    /// byte reply, against booking a truncated one as delivered.
     #[test]
     fn still_distills_just_under_the_host_cap() {
         let noisy = |len: usize| {
@@ -2555,7 +2569,7 @@ mod tests {
         let under = json!({
             "tool_name": "Bash",
             "tool_input": {"command": cmd},
-            "tool_response": bash_response(&noisy(cap - 1)),
+            "tool_response": bash_response(&noisy(cap - 2)),
         })
         .to_string();
         let at = json!({
@@ -2636,6 +2650,20 @@ mod tests {
                                 "startLine": 1, "numLines": 700, "totalLines": 700}}),
             ),
             ("stdout", json!({"stdout": body, "stderr": ""})),
+            // The size the host's own cut produces. Measured, not assumed: four
+            // of four truncated payloads in the trace store arrive at exactly
+            // this length, and the gate's `>= cap` never met any of them (#808).
+            (
+                "stdout at the host's cut",
+                json!({
+                    "stdout": crate::util::text::safe_slice(
+                        &body,
+                        crate::guard::limits::HOST_OUTPUT_CAP - 1,
+                    )
+                    .to_string(),
+                    "stderr": "Shell cwd was reset to /tmp\n",
+                }),
+            ),
         ];
 
         for (field, response) in shapes {
