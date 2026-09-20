@@ -70,8 +70,9 @@ const GIT_VERBS: &[&str] = &[
 /// verb after either has to survive both. The verb list decides which of the two
 /// a token is rather than enumerating every flag git accepts.
 fn git_subcommand(command: &str) -> Option<&str> {
-    let mut tokens = command
-        .split_whitespace()
+    // Quote aware: `split_whitespace` cuts `-C "path with spaces"` into three
+    // words, and the third then reads as the verb (PR #812 review).
+    let mut tokens = crate::pipeline::producer::words(command)
         .map(|t| t.trim_matches('"'))
         .skip_while(|t| t.rsplit('/').next() != Some("git"))
         .skip(1)
@@ -809,8 +810,7 @@ const KUBECTL_VERBS: &[&str] = &[
 fn kubectl_subcommand(command: &str) -> Option<&str> {
     // Found by name rather than by position: a recorded command is as often
     // `C=cluster-a kubectl …` or `cd repo && kubectl …` as it is bare.
-    let mut tokens = command
-        .split_whitespace()
+    let mut tokens = crate::pipeline::producer::words(command)
         .map(|t| t.trim_matches('"'))
         .skip_while(|t| t.rsplit('/').next() != Some("kubectl"))
         .skip(1)
@@ -1715,8 +1715,12 @@ mod tests {
                 continue;
             }
             let body = std::fs::read_to_string(&path).expect("read");
+            // Any spelling of the call, not only the qualified one: a `use` of
+            // the function walks past the first version of this guard (PR #812
+            // review). `resolve_profile_for_chain(` does not contain this
+            // needle, so the allowed call stays allowed.
             assert!(
-                !body.contains("registry::resolve_profile("),
+                !body.contains("resolve_profile("),
                 "{}: a chain is the shape a hook receives, so it has to use \
                  resolve_profile_for_chain",
                 path.display()
@@ -1734,6 +1738,8 @@ mod tests {
             "git -C /tmp/repo diff",
             "git --no-pager -C /tmp/repo diff",
             "git -c core.pager=cat diff",
+            // A path with spaces is one word to the shell, and has to be one here.
+            "git -C \"/tmp/some path/repo\" diff",
             "cd /tmp/repo && git diff",
         ] {
             assert_eq!(

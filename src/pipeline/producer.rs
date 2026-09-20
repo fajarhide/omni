@@ -395,7 +395,10 @@ fn split_word(s: &str) -> Option<(&str, &str)> {
     Some((s.get(..end)?, s.get(end..)?))
 }
 
-fn words(s: &str) -> impl Iterator<Item = &str> {
+/// Also read by `registry`'s subcommand readers, which have to step over a
+/// global flag's value and cannot afford `git -C "path with spaces" diff` to
+/// arrive as three words (PR #812 review).
+pub(crate) fn words(s: &str) -> impl Iterator<Item = &str> {
     let mut rest = s;
     std::iter::from_fn(move || {
         let (word, tail) = split_word(rest)?;
