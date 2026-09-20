@@ -521,12 +521,8 @@ fn fold_cross_turn(
         // Only `Read` hands its payload back as numbered content, so only `Read`
         // refuses a view it cannot renumber. Saying so here keeps the refusal and
         // the bookkeeping in one place (#657).
-        .renumbered(normalized.tool_name == "Read")
+        .tool(&normalized.tool_name)
         .windowed(normalized.windowed)
-        // The `Grep` tool is the same filter a shell `grep` is, and its command
-        // is a pattern or a path rather than something the ledger can read
-        // (#814 review).
-        .searched(normalized.tool_name == "Grep")
         .project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host

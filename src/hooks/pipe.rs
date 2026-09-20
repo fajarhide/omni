@@ -374,6 +374,8 @@ fn distill(
             // one pipeline, two entrances, a fix applied to whichever one the
             // report happened to come through.
             .from(command_name.unwrap_or(""))
+            // This door only ever carries shell output (#822).
+            .tool("Bash")
             .by(resolve_pipe_agent_id())
             .project(&output)
     {
