@@ -2305,6 +2305,7 @@ impl SqliteBackend {
         &self,
         scope: &str,
         hashes: &[String],
+        not_older_than: i64,
     ) -> std::collections::HashMap<String, SeenLine> {
         let mut found = std::collections::HashMap::new();
         let Ok(conn) = self.pool.get() else {
@@ -2323,14 +2324,19 @@ impl SqliteBackend {
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT line_hash, agent_id, source FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
+                "SELECT line_hash, agent_id, source FROM ledger_lines \
+                  WHERE scope = ? AND ts >= ? AND line_hash IN ({placeholders})"
             );
             let Ok(mut stmt) = conn.prepare_cached(&sql) else {
                 continue;
             };
-            let params: Vec<&dyn rusqlite::ToSql> = std::iter::once(&scope as &dyn rusqlite::ToSql)
-                .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
-                .collect();
+            let params: Vec<&dyn rusqlite::ToSql> = [
+                &scope as &dyn rusqlite::ToSql,
+                &not_older_than as &dyn rusqlite::ToSql,
+            ]
+            .into_iter()
+            .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
+            .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |r| {
                 Ok((
                     r.get::<_, String>(0)?,

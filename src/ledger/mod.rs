@@ -551,9 +551,16 @@ impl<'a> Ledger<'a> {
         // did not. A line in both belongs to the session: that is the claim that
         // is free, and taking the weaker one would cost the agent a retrieval for
         // content it is holding.
-        let in_session = self.store.ledger_seen(&self.scope, &hashes);
+        // The session scope has no age bound: the reader is holding those bytes
+        // however long ago they arrived, which is the whole claim.
+        let in_session = self.store.ledger_seen(&self.scope, &hashes, 0);
+        // The project scope does. Those lines went somewhere else, and a sighting
+        // from yesterday is a bet on a context that has been gone for hours
+        // (#795).
+        let fresh_enough =
+            chrono::Utc::now().timestamp() - crate::guard::limits::PROJECT_SIGHTING_MAX_AGE_SECS;
         let in_project = match &self.project {
-            Some(p) => self.store.ledger_seen(p, &hashes),
+            Some(p) => self.store.ledger_seen(p, &hashes, fresh_enough),
             None => HashMap::new(),
         };
         // A line that states a failure is never folded, however often it has been
@@ -2069,6 +2076,61 @@ mod tests {
         assert!(
             view.contains("handler finished request 0"),
             "the budgeted arm kept the marker out but lost the lines anyway: {view}"
+        );
+    }
+
+    /// #795. The project scope is a bet that another session is alive, or was
+    /// minutes ago. A sighting from yesterday is a different claim: that context
+    /// has been gone for hours, the marker names a command the reader cannot
+    /// place, and in the report it named a directory that no longer existed.
+    ///
+    /// Both arms on one store, because the age is the only variable that may
+    /// separate them.
+    #[test]
+    fn a_project_fold_needs_a_fresh_sighting() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Store::open_path(&db).expect("store");
+        let repeated = project_repeat();
+
+        // A scope per arm, and each arm its own fresh block. Sharing one scope
+        // makes the second fold a whole-output repeat, which #705 refuses on its
+        // own, and the test then passes with the bound removed.
+        // A writer per project scope. Sharing one session scope makes the second
+        // call a repeat, and what gets recorded is then the marker that was
+        // delivered rather than the lines, so the second project scope stays
+        // empty and the arm below proves nothing.
+        for (session, scope) in [("writer-a", "/repo-fresh"), ("writer-b", "/repo-stale")] {
+            Ledger::new(&store, session)
+                .with_project(scope)
+                .project(&repeated);
+        }
+
+        let fresh_payload = format!("{repeated}{}", fresh_block("cache probe"));
+        let fresh = Ledger::new(&store, "reader-1")
+            .with_project("/repo-fresh")
+            .project(&fresh_payload)
+            .expect("a sighting from a session still running folds");
+        assert!(fresh.contains("not shown here"), "{fresh}");
+
+        let aged = crate::guard::limits::PROJECT_SIGHTING_MAX_AGE_SECS + 60;
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let moved = conn
+            .execute(
+                "UPDATE ledger_lines SET ts = ts - ?1 WHERE scope = '/repo-stale'",
+                [aged],
+            )
+            .expect("age the rows");
+        drop(conn);
+        assert!(moved > 0, "nothing was aged, so the arm proves nothing");
+
+        let stale_payload = format!("{repeated}{}", fresh_block("queue probe"));
+        let stale = Ledger::new(&store, "reader-2")
+            .with_project("/repo-stale")
+            .project(&stale_payload);
+        assert!(
+            stale.is_none(),
+            "a sighting older than the bound was folded anyway: {stale:?}"
         );
     }
 
