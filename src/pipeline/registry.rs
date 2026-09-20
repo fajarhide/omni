@@ -22,6 +22,75 @@ impl Default for ToolProfile {
     }
 }
 
+/// The git verbs this has to tell apart from a global flag's value, the same
+/// question `KUBECTL_VERBS` answers for `kubectl` (#805).
+const GIT_VERBS: &[&str] = &[
+    "diff",
+    "show",
+    "whatchanged",
+    "log",
+    "status",
+    "add",
+    "commit",
+    "branch",
+    "checkout",
+    "switch",
+    "restore",
+    "merge",
+    "rebase",
+    "fetch",
+    "pull",
+    "push",
+    "stash",
+    "tag",
+    "blame",
+    "grep",
+    "ls-files",
+    "rev-parse",
+    "remote",
+    "config",
+    "clean",
+    "reset",
+    "cherry-pick",
+    "describe",
+    "worktree",
+    "apply",
+    "bisect",
+    "submodule",
+    "shortlog",
+    "reflog",
+    "archive",
+    "init",
+    "clone",
+];
+
+/// The git subcommand, with the global flags in front of it stepped over.
+///
+/// `-C <dir>` and `-c <key>=<value>` take a value, `--no-pager` does not, and a
+/// verb after either has to survive both. The verb list decides which of the two
+/// a token is rather than enumerating every flag git accepts.
+fn git_subcommand(command: &str) -> Option<&str> {
+    let mut tokens = command
+        .split_whitespace()
+        .map(|t| t.trim_matches('"'))
+        .skip_while(|t| t.rsplit('/').next() != Some("git"))
+        .skip(1)
+        .peekable();
+    while let Some(token) = tokens.next() {
+        if !token.starts_with('-') {
+            return Some(token);
+        }
+        if !token.contains('=')
+            && tokens
+                .peek()
+                .is_some_and(|next| !next.starts_with('-') && !GIT_VERBS.contains(next))
+        {
+            tokens.next();
+        }
+    }
+    None
+}
+
 /// Shell builtins that write nothing to stdout, so their presence in a chain
 pub fn resolve_profile(command: &str) -> ToolProfile {
     if command.is_empty() {
@@ -34,8 +103,11 @@ pub fn resolve_profile(command: &str) -> ToolProfile {
 
     // 1. Git: Hunk based
     if base == "git" {
-        let parts: Vec<&str> = cmd_lower.split_whitespace().collect();
-        let sub = parts.get(1).copied().unwrap_or("");
+        // The verb, not the word after `git`: `git -C repo diff` read `-C` as the
+        // subcommand, fell to line segmentation, and the diff distiller then had
+        // no hunk header inside a segment to walk, so it kept the `@@` lines and
+        // dropped all 83 changed ones (#805).
+        let sub = git_subcommand(&cmd_lower).unwrap_or("");
         match sub {
             "diff" | "show" | "whatchanged" if !cmd_lower.contains("--stat") => {
                 return ToolProfile {
@@ -1626,6 +1698,55 @@ mod tests {
         let p2 = resolve_profile_for_chain("pytest");
         assert_eq!(p1.segmentation, p2.segmentation);
         assert_eq!(p1.collapse, p2.collapse);
+    }
+
+    /// #805, the other half. A hook that resolves the profile from the first
+    /// token reads `cd repo && git diff` as a `cd`, which is generic line
+    /// segmentation, and the diff distiller then keeps only its headers. #339
+    /// fixed that for `post_tool` and left `pipe` on the direct resolver, so the
+    /// same payload compressed differently depending on which door it came
+    /// through. Asserted over the source because the call site is the defect.
+    #[test]
+    fn no_hook_resolves_a_profile_from_the_first_token() {
+        let hooks = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/hooks");
+        for entry in std::fs::read_dir(hooks).expect("src/hooks") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let body = std::fs::read_to_string(&path).expect("read");
+            assert!(
+                !body.contains("registry::resolve_profile("),
+                "{}: a chain is the shape a hook receives, so it has to use \
+                 resolve_profile_for_chain",
+                path.display()
+            );
+        }
+    }
+
+    /// #805. The verb decides the profile, and a global flag in front of it hid
+    /// it: `git -C repo diff` segmented by line, which left the diff distiller
+    /// with no hunk header inside a segment and cost all 83 changed lines.
+    #[test]
+    fn a_git_global_flag_does_not_hide_the_subcommand() {
+        for cmd in [
+            "git diff",
+            "git -C /tmp/repo diff",
+            "git --no-pager -C /tmp/repo diff",
+            "git -c core.pager=cat diff",
+            "cd /tmp/repo && git diff",
+        ] {
+            assert_eq!(
+                resolve_profile_for_chain(cmd).segmentation,
+                SegmentationMode::GitHunk,
+                "{cmd}"
+            );
+        }
+        // `--stat` is a file list rather than hunks, and stays where it was.
+        assert_eq!(
+            resolve_profile_for_chain("git -C /tmp/repo diff --stat").segmentation,
+            SegmentationMode::Line
+        );
     }
 
     /// #789. A log stream passes through however the command is prefixed, and a

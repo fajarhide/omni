@@ -256,7 +256,11 @@ fn distill(
         let cmd = command_name.unwrap_or("");
 
         // Pure Command Architecture: Resolve profile
-        let profile = crate::pipeline::registry::resolve_profile(cmd);
+        // The chain resolver, the one `post_tool` has used since #339. Reading
+        // the first token made `cd repo && git diff` a `cd`, which is generic
+        // line segmentation, and the diff distiller then kept only its headers
+        // (#805).
+        let profile = crate::pipeline::registry::resolve_profile_for_chain(cmd);
 
         // Score and distill the tool's REAL output. #116: a distiller parses
         // its input, so feeding it `collapse`'s `[N similar lines collapsed]`
