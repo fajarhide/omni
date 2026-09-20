@@ -1195,7 +1195,10 @@ fn opens_a_command(tokens: &[&str], i: usize) -> bool {
 fn introduces_a_command(token: &str) -> bool {
     matches!(
         token.rsplit('/').next().unwrap_or(token),
-        "sudo" | "env" | "time" | "nohup"
+        // `command` is the shell builtin that runs the next word as a program,
+        // bypassing a function or alias of the same name. It introduces a
+        // command exactly as `env` does (#814 review).
+        "sudo" | "env" | "time" | "nohup" | "command"
     ) || token.split_once('=').is_some_and(|(name, _)| {
         !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
     })
@@ -2085,6 +2088,12 @@ mod tests {
         };
         let shown: String = (0..14).map(line).collect();
         let grep = "grep -n \"^  test(\" apps/server/src/http/platform-orgs.test.ts";
+
+        // `command grep` is the same filter: the builtin only decides which
+        // program runs (#814 review).
+        assert!(filters_its_own_output("command grep -rn handler src/"));
+        assert!(filters_its_own_output("sudo rg --hidden pattern ."));
+        assert!(!filters_its_own_output("cat notes.md"));
 
         // The reported shape: the lines were printed by something else, and the
         // grep that follows is a fresh question about the file.
