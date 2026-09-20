@@ -2529,12 +2529,21 @@ impl SqliteBackend {
     /// missed reduction; not forgetting means telling an agent it has content its
     /// context no longer contains, which is the same defect that cancelled the
     /// project-scoped ledger (#401).
-    pub fn ledger_forget(&self, scope: &str) -> usize {
+    pub fn ledger_forget(&self, session: &str) -> usize {
         let Ok(conn) = self.pool.get() else {
             return 0;
         };
-        conn.execute("DELETE FROM ledger_lines WHERE scope = ?1", params![scope])
-            .unwrap_or(0)
+        // A subagent's scope is `<session>/<agent>` (#581), and taking the bare
+        // session id left those rows standing: the parent compacts, the scope
+        // that survives keeps answering "already shown", and nothing in the
+        // reply says the lines went with the summary (#807). `substr` rather
+        // than `LIKE`, so an id carrying `_` or `%` cannot widen the delete.
+        conn.execute(
+            "DELETE FROM ledger_lines
+              WHERE scope = ?1 OR substr(scope, 1, length(?1) + 1) = ?1 || '/'",
+            params![session],
+        )
+        .unwrap_or(0)
     }
 
     /// Pages in the file and how many of them are free, or `None` when the
