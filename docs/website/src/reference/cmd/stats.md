@@ -20,7 +20,7 @@ period.
 | flag | effect |
 |---|---|
 | `--since <window>` | `hour`, `today`, `week`, `month` (default), `all` |
-| `--view <name>` | `summary` (default), `detail`, `projects`, `context`, `rerun`, `share` |
+| `--view <name>` | `summary` (default), `detail`, `projects`, `context`, `rerun`, `folds`, `share` |
 | `--limit <n>` | Rows in a table view, default 10, `0` for all. Read by `detail`, `projects` and `rerun`; a table it cuts says how many rows it hid |
 | `--json` | Machine readable, scoped by `--since` |
 | `--card` | Write the summary as an image, sized for social posts |
@@ -37,6 +37,24 @@ the detail view and always did.
 since naming it can only mean writing the file; `--json` outranks `--view`, since there is
 one machine-readable report and it is not per view. Both used to be read as views, which is
 how `--view detail --card` came to write no image.
+
+## `--view folds` is the ledger's own calibration
+
+A fold is a claim: the reader does not need these bytes. A retrieve on that marker's
+handle is the reader disagreeing. This view puts the two side by side, per marker
+shape, so the guard with the highest rate is the one to look at.
+
+```sh
+omni stats --view folds              # the last 30 days
+omni stats --view calibration --since week
+```
+
+`calibration` is the same view under the word most readers reach for first.
+
+There is no threshold and no verdict colour in it. No bar has been measured yet, and a
+number that looks judged when nothing judged it is the defect this project exists to
+fight. A store written before markers were recorded says so rather than printing a
+confident zero.
 
 ## `--rerun` is the one to know
 
