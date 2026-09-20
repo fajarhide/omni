@@ -349,6 +349,12 @@ pub struct Ledger<'a> {
     /// Whether the caller picked a window of its source, which a `Read` path
     /// cannot say the way `tail -5` does (#796). Same guard as `rations_its_output`.
     windowed: bool,
+    /// Whether the caller's own pattern picked these lines, said by the hook
+    /// rather than read off the command: the `Grep` tool's reply carries a
+    /// pattern or a path where a shell command would be, and on some hosts
+    /// nothing at all, so the command string cannot answer for it (#814, and
+    /// the review of it).
+    searched: bool,
     /// Who is being shown these lines, recorded and read by nothing (#509).
     ///
     /// The project scope is keyed on the directory alone, so two agents in one
@@ -441,6 +447,7 @@ impl<'a> Ledger<'a> {
             source: String::new(),
             renumbered: false,
             windowed: false,
+            searched: false,
             agent: "unknown".to_string(),
         }
     }
@@ -473,6 +480,13 @@ impl<'a> Ledger<'a> {
     /// Says the caller asked for a window of its source rather than all of it.
     pub fn windowed(mut self, yes: bool) -> Self {
         self.windowed = yes;
+        self
+    }
+
+    /// Says this reply is a search result, so the caller's pattern already chose
+    /// every line in it.
+    pub fn searched(mut self, yes: bool) -> Self {
+        self.searched = yes;
         self
     }
 
@@ -910,7 +924,7 @@ impl<'a> Ledger<'a> {
         // command printing the same lines is the case #755 settled: there the
         // identity is the answer and a partial fold says so in words. What the
         // report hit was another command's output subtracted from a fresh grep.
-        if filters_its_own_output(&self.source)
+        if (self.searched || filters_its_own_output(&self.source))
             && !planned.iter().all(|&fold| fold)
             && planned.iter().zip(&runs).any(|(&fold, run)| {
                 fold && run
