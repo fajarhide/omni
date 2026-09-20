@@ -2131,9 +2131,14 @@ mod tests {
     fn a_grep_tool_reply_is_not_folded_in_part() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // One path per line, and no comma anywhere: a shared prefix is hoisted by
+        // `distill_grep` so the recorded bytes stop matching, and one comma per
+        // line reads as CSV to `format::sniff`, which refuses the ledger
+        // outright. Either mistake makes this test pass whatever the guard does,
+        // and the first version of it made both.
         let line = |i: usize| {
             format!(
-                "src/app/routes.ts:{}:  registerRoute(\"/api/v{i}\", handler);\n",
+                "src/app/route-{i}.ts:{}:  registerRoute handler for /api/v{i} in the router\n",
                 40 + i * 3
             )
         };
