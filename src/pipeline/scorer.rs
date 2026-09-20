@@ -449,7 +449,11 @@ mod tests {
         let input2 = "test result: FAILED\npanicked at something\njust some context\nnoise line";
         let segments2 = score_segments(input2, SegmentationMode::Line, None, "test");
         assert_eq!(segments2[0].tier, SignalTier::Critical); // test result: FAILED
-        assert_eq!(segments2[1].tier, SignalTier::Important); // panicked at (Context boosted to Important)
+        // #819. `panicked at` is the failure itself, not context beside one.
+        // This read Important because the tier came from the positional boost
+        // after `test result: FAILED`, which is the same line surviving by
+        // luck rather than by being recognised.
+        assert_eq!(segments2[1].tier, SignalTier::Critical);
         assert_eq!(segments2[2].tier, SignalTier::Important); // boosted
         assert_eq!(segments2[3].tier, SignalTier::Important); // boosted
 
