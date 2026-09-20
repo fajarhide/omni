@@ -349,6 +349,12 @@ pub struct Ledger<'a> {
     /// Whether the caller picked a window of its source, which a `Read` path
     /// cannot say the way `tail -5` does (#796). Same guard as `rations_its_output`.
     windowed: bool,
+    /// Whether the caller's own pattern picked these lines, said by the hook
+    /// rather than read off the command: the `Grep` tool's reply carries a
+    /// pattern or a path where a shell command would be, and on some hosts
+    /// nothing at all, so the command string cannot answer for it (#814, and
+    /// the review of it).
+    searched: bool,
     /// Who is being shown these lines, recorded and read by nothing (#509).
     ///
     /// The project scope is keyed on the directory alone, so two agents in one
@@ -441,6 +447,7 @@ impl<'a> Ledger<'a> {
             source: String::new(),
             renumbered: false,
             windowed: false,
+            searched: false,
             agent: "unknown".to_string(),
         }
     }
@@ -473,6 +480,13 @@ impl<'a> Ledger<'a> {
     /// Says the caller asked for a window of its source rather than all of it.
     pub fn windowed(mut self, yes: bool) -> Self {
         self.windowed = yes;
+        self
+    }
+
+    /// Says this reply is a search result, so the caller's pattern already chose
+    /// every line in it.
+    pub fn searched(mut self, yes: bool) -> Self {
+        self.searched = yes;
         self
     }
 
@@ -899,6 +913,29 @@ impl<'a> Ledger<'a> {
             }
         }
 
+        // #814, the separable half of #795. `grep` is the caller's own filter, so
+        // the pattern already picked every line in the reply and a partial fold
+        // answers a different question rather than the same one shorter: 9 of 11
+        // matches folded came back reading as a file with two matches. Whole or
+        // nothing, which is what `rations_its_output` gives `head` and `tail`. A
+        // re-run printing the identical result still folds, because there the
+        // identity is the answer.
+        // Narrowed to a fold that draws on something else. A re-run of the same
+        // command printing the same lines is the case #755 settled: there the
+        // identity is the answer and a partial fold says so in words. What the
+        // report hit was another command's output subtracted from a fresh grep.
+        if (self.searched || filters_its_own_output(&self.source))
+            && !planned.iter().all(|&fold| fold)
+            && planned.iter().zip(&runs).any(|(&fold, run)| {
+                fold && run
+                    .seen
+                    .as_ref()
+                    .is_some_and(|s| !matches!(s.source, SourceOfSighting::ThisCommandAgain))
+            })
+        {
+            return None;
+        }
+
         // #658, then #664. A host that renumbers what it is handed cannot take
         // survivors sitting in two blocks. #658 answered that by folding only down
         // to the first survivor, which left everything below the first change on
@@ -1130,6 +1167,21 @@ fn segment_rations_its_output(segment: &str) -> bool {
     })
 }
 
+/// Whether the caller's own pattern picked these lines (#814).
+///
+/// `registry::passes_through_verbatim` reaches the same conclusion one stage
+/// earlier, for the collapse fallback, and for the same reason: a second filter
+/// cannot know what the first was looking for.
+fn filters_its_own_output(command: &str) -> bool {
+    command.split(['\n', ';', '|', '&']).any(|segment| {
+        let tokens: Vec<&str> = segment.split_whitespace().collect();
+        tokens.iter().enumerate().any(|(i, tok)| {
+            opens_a_command(&tokens, i)
+                && matches!(tok.rsplit('/').next().unwrap_or(tok), "grep" | "rg" | "ag")
+        })
+    })
+}
+
 /// Whether the token at `i` is the first word of its segment's command.
 ///
 /// The segment already ends at the next separator, so this only has to step over
@@ -1143,7 +1195,10 @@ fn opens_a_command(tokens: &[&str], i: usize) -> bool {
 fn introduces_a_command(token: &str) -> bool {
     matches!(
         token.rsplit('/').next().unwrap_or(token),
-        "sudo" | "env" | "time" | "nohup"
+        // `command` is the shell builtin that runs the next word as a program,
+        // bypassing a function or alias of the same name. It introduces a
+        // command exactly as `env` does (#814 review).
+        "sudo" | "env" | "time" | "nohup" | "command"
     ) || token.split_once('=').is_some_and(|(name, _)| {
         !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
     })
@@ -2015,6 +2070,53 @@ mod tests {
             view.contains("handler finished request 0"),
             "the budgeted arm kept the marker out but lost the lines anyway: {view}"
         );
+    }
+
+    /// #814, split out of #795. Every line of a `grep` reply is the answer the
+    /// pattern asked for, so a partial fold reads as a different answer: 9 of 11
+    /// matches folded came back looking like a file with two matches. A re-run
+    /// that prints the identical result still folds, because there the identity
+    /// is what was asked.
+    #[test]
+    fn a_grep_folds_whole_or_not_at_all() {
+        let (store, _d) = temp_store();
+        let line = |i: usize| {
+            format!(
+                "{}:  test(\"case {i} keeps the platform admin check honest\", async () => {{\n",
+                100 + i * 7
+            )
+        };
+        let shown: String = (0..14).map(line).collect();
+        let grep = "grep -n \"^  test(\" apps/server/src/http/platform-orgs.test.ts";
+
+        // `command grep` is the same filter: the builtin only decides which
+        // program runs (#814 review).
+        assert!(filters_its_own_output("command grep -rn handler src/"));
+        assert!(filters_its_own_output("sudo rg --hidden pattern ."));
+        assert!(!filters_its_own_output("cat notes.md"));
+
+        // The reported shape: the lines were printed by something else, and the
+        // grep that follows is a fresh question about the file.
+        Ledger::new(&store, "s1")
+            .from("cd /tmp/pr-928 && cat apps/server/src/http/platform-orgs.test.ts")
+            .project(&shown);
+        let partial: String = (0..28).map(line).collect();
+        assert!(
+            Ledger::new(&store, "s1")
+                .from(grep)
+                .project(&partial)
+                .is_none(),
+            "half the matches came from another command, so the reply goes whole"
+        );
+
+        // The same command run again, printing what it printed before: the
+        // identity is the answer, which is #755 and stays.
+        Ledger::new(&store, "s2").from(grep).project(&shown);
+        let again = Ledger::new(&store, "s2")
+            .from(grep)
+            .project(&format!("{}{shown}", fresh_block("new match")))
+            .expect("a re-run of the same command still folds");
+        assert!(again.contains("identical to an earlier run"), "{again}");
     }
 
     /// #796. A `Read` names its window in `offset` and `limit`, never in the path

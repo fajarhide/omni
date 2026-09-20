@@ -523,6 +523,10 @@ fn fold_cross_turn(
         // the bookkeeping in one place (#657).
         .renumbered(normalized.tool_name == "Read")
         .windowed(normalized.windowed)
+        // The `Grep` tool is the same filter a shell `grep` is, and its command
+        // is a pattern or a path rather than something the ledger can read
+        // (#814 review).
+        .searched(normalized.tool_name == "Grep")
         .project_reporting_shift(&text);
 
     // #557. A `Read` payload is handed back as `file.content` and the host
@@ -2125,6 +2129,50 @@ mod tests {
         assert!(
             out.contains("[REDACTED]"),
             "the reply must carry the redacted form:\n{out}"
+        );
+    }
+
+    /// #814 review. The `Grep` tool filters exactly as a shell `grep` does, and
+    /// its command is a pattern or a path, so the ledger cannot read the guard
+    /// off the command string the way it does for Bash. The hook says it.
+    #[test]
+    fn a_grep_tool_reply_is_not_folded_in_part() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).expect("store"));
+        // One path per line, and no comma anywhere: a shared prefix is hoisted by
+        // `distill_grep` so the recorded bytes stop matching, and one comma per
+        // line reads as CSV to `format::sniff`, which refuses the ledger
+        // outright. Either mistake makes this test pass whatever the guard does,
+        // and the first version of it made both.
+        let line = |i: usize| {
+            format!(
+                "src/app/route-{i}.ts:{}:  registerRoute handler for /api/v{i} in the router\n",
+                40 + i * 3
+            )
+        };
+
+        let shown: String = (0..16).map(line).collect();
+        let cat = json!({
+            "session_id": "grep-tool",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat src/app/routes.ts"},
+            "tool_response": {"stdout": shown, "stderr": "", "interrupted": false},
+        })
+        .to_string();
+        process_payload(&cat, Some(store.clone()), None);
+
+        let matches: String = (0..32).map(line).collect();
+        let grep = json!({
+            "session_id": "grep-tool",
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "registerRoute", "path": "src/app"},
+            "tool_response": {"content": matches},
+        })
+        .to_string();
+        let out = process_payload(&grep, Some(store), None).unwrap_or_default();
+        assert!(
+            !out.contains("already shown"),
+            "half the matches came from the cat, so the reply goes whole: {out}"
         );
     }
 
