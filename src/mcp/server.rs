@@ -155,7 +155,16 @@ pub struct OmniServer {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OmniRetrieveParams {
-    pub hash: String,
+    // Not a doc comment: schemars puts one in the advertised schema, and that
+    // schema is billed on every session (#609).
+    //
+    // Every marker says `omni retrieve <handle>`, and so does the CLI's usage
+    // line, so an agent that copies what it was told to run sent `handle` and got
+    // `missing field hash` back (#826). The schema now names what the marker
+    // names; `hash` stays as an alias so a caller written against the old field
+    // keeps working.
+    #[serde(alias = "hash")]
+    pub handle: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -269,15 +278,15 @@ pub struct OmniSignalExtractParams {
 impl OmniServer {
     #[tool(
         name = "omni_retrieve",
-        description = "Retrieve full content omitted by OMNI distillation (Hash from OMNI notice)"
+        description = "Retrieve full content omitted by OMNI distillation (handle from the marker)"
     )]
     pub async fn omni_retrieve(&self, params: Parameters<OmniRetrieveParams>) -> String {
-        let hash = params.0.hash;
-        if let Some(content) = self.store.retrieve_rewind(&hash) {
-            self.store.record_rewind_pull(&hash);
+        let handle = params.0.handle;
+        if let Some(content) = self.store.retrieve_rewind(&handle) {
+            self.store.record_rewind_pull(&handle);
             content
         } else {
-            format!("Not found: {}", hash)
+            format!("Not found: {}", handle)
         }
     }
 
@@ -1737,7 +1746,7 @@ mod tests {
         let server = OmniServer { store, session };
         let output = server
             .omni_retrieve(Parameters(OmniRetrieveParams {
-                hash: "abc".to_string(),
+                handle: "abc".to_string(),
             }))
             .await;
         assert_eq!(output, "Not found: abc");
@@ -1747,16 +1756,38 @@ mod tests {
     async fn test_omni_retrieve_returns_stored_content() {
         let dir = tempdir().unwrap();
         let store = Arc::new(Store::open_path(&dir.path().join("omni.db")).unwrap());
-        let hash = store
+        let handle = store
             .store_rewind_whole("testing_payload")
             .expect("archived");
         let session = Arc::new(Mutex::new(SessionState::new()));
 
         let server = OmniServer { store, session };
         let output = server
-            .omni_retrieve(Parameters(OmniRetrieveParams { hash }))
+            .omni_retrieve(Parameters(OmniRetrieveParams { handle }))
             .await;
         assert_eq!(output, "testing_payload");
+    }
+
+    /// #826. The marker says `omni retrieve <handle>`, so an agent that copies it
+    /// sends `handle`; every caller written before this sends `hash`. Both have
+    /// to land on the same field or one of the two readers of a marker cannot
+    /// spend it.
+    #[tokio::test]
+    async fn the_word_in_the_marker_and_the_old_field_both_deserialize() {
+        let by_marker: OmniRetrieveParams =
+            serde_json::from_str(r#"{"handle":"1921a5ca788d987e"}"#).expect("handle");
+        assert_eq!(by_marker.handle, "1921a5ca788d987e");
+
+        let by_old_name: OmniRetrieveParams =
+            serde_json::from_str(r#"{"hash":"1921a5ca788d987e"}"#).expect("hash still accepted");
+        assert_eq!(by_old_name.handle, "1921a5ca788d987e");
+
+        let schema = schemars::schema_for!(OmniRetrieveParams);
+        let json = serde_json::to_string(&schema).expect("schema");
+        assert!(
+            json.contains("handle"),
+            "the schema an agent reads must name what the marker names: {json}"
+        );
     }
 
     #[tokio::test]
