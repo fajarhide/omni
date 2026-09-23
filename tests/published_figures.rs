@@ -98,6 +98,22 @@ fn version_key(path: &Path) -> Vec<u64> {
         .collect()
 }
 
+/// Whether this artifact is the local corpus's, whose figures the README's main
+/// table quotes.
+///
+/// #838 added a second family, `<version>-swebench-corpus.json`, measured on a
+/// different workload. Today it sorts below the plain artifact only because
+/// `9-swebench-corpus` fails to parse and reads as 0, and that is luck rather
+/// than a rule: a run of the public corpus at a version with no local run beside
+/// it would sort highest and the checks below would hold the README's main table
+/// against a measurement it does not describe. So a stem that is not purely a
+/// version is not this family.
+fn is_plain_version(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| !s.is_empty() && s.split('.').all(|p| p.parse::<u64>().is_ok()))
+}
+
 /// The newest measurement, which is what copy is allowed to quote.
 fn artifact() -> serde_json::Value {
     let dir = root().join("docs/benchmarks");
@@ -106,6 +122,7 @@ fn artifact() -> serde_json::Value {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter(|p| is_plain_version(p))
         .map(|p| (version_key(&p), p))
         .collect();
     // Greptile on #710. Sorted by version, not lexicographically: `0.7.10.json`

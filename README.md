@@ -263,6 +263,43 @@ repetition that was there it actually took:
 Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.9.
 <!-- omni:corpus-table:end -->
 
+### A second corpus, and this one you can rebuild
+
+The corpus above is frozen on one machine and its payloads stay local, so the
+numbers survive a release but you cannot check them yourself. This one you can.
+40 [SWE-bench Verified](https://www.swebench.com/) instances, 10 public
+repositories pinned at their base commits, replayed with a fixed exploration
+script. No model, no API key, no container, so rebuilding it costs nothing:
+
+```sh
+python3 scripts/build-swebench-corpus.py --instances 40 --stride 12
+CORPUS_DIR=swebench-corpus ./scripts/bench.sh
+```
+
+<!-- omni:swebench-table:start -->
+| Class | Calls | Input | Filters | + ledger | Available | Captured |
+|---|---|---|---|---|---|---|
+| file read | 86 | 2.07 MB | 26.8% | 32.3% | 25.8% | **28.7%** |
+| search | 80 | 0.13 MB | 11.2% | 11.2% | 46.8% | **0.0%** |
+| git | 120 | 0.06 MB | 0.0% | 2.5% | 18.3% | **13.9%** |
+| **aggregate** | 286 | 2.26 MB | 25.2% | 30.3% | 27.0% | **24.9%** |
+
+Measured by `make bench` over 286 traces (2.26 MB, 40 sessions), corpus `b96069c55304aa55`, OMNI 0.7.9.
+<!-- omni:swebench-table:end -->
+
+**Same code, same build, 25.2% here against 0.9% there.** The difference is the
+workload and nothing else. This corpus is 85% `cat` of source files, which is the
+case the ledger is built for and the case the shell-heavy corpus above says it
+understates. Read both before quoting either.
+
+It is also the narrower measurement, and in two ways worth naming. The commands
+are a fixed script rather than what a model chose, and three whole files per
+instance is the generous end of what a solver reads. And whether OMNI costs an
+agent its task success is a different question, answered by running a real agent
+against both `OMNI_PASSTHROUGH` settings and scoring pass rates, which costs money
+and is not answered here.
+
+
 `available` is the ceiling. The ledger substitutes lines it has already delivered,
 so it cannot fold what was never repeated, and `captured` is the share of that it
 took. The two columns answer different questions: the saving describes this corpus,
