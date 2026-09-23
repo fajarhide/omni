@@ -21,13 +21,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CORPUS="$ROOT/bench-corpus/traces.jsonl"
-MANIFEST="$ROOT/bench-corpus/manifest.json"
+# `CORPUS_DIR` picks which corpus to replay. The default is the frozen local one
+# (#704); `swebench-corpus` is the public one anyone can rebuild (#838), and the
+# artifact is named after it so the two never overwrite each other.
+CORPUS_DIR="${CORPUS_DIR:-$ROOT/bench-corpus}"
+CORPUS="$CORPUS_DIR/traces.jsonl"
+MANIFEST="$CORPUS_DIR/manifest.json"
 OUT_DIR="$ROOT/docs/benchmarks"
+CORPUS_NAME="$(basename "$CORPUS_DIR")"
+SUFFIX=""
+[ "$CORPUS_NAME" = "bench-corpus" ] || SUFFIX="-$CORPUS_NAME"
 
 if [ ! -f "$CORPUS" ]; then
   echo "no frozen corpus at $CORPUS" >&2
   echo "build it: python3 docs/internal/runbooks/build-bench-corpus.py" >&2
+  echo "or the public one: python3 scripts/build-swebench-corpus.py" >&2
   exit 1
 fi
 
@@ -84,10 +92,13 @@ mkdir -p "$OUT_DIR"
 # is left null instead of defaulted: a benchmark that reports 0 where it failed
 # to read is the failure mode this whole ticket is about.
 python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" "${ARMS_RUN[*]:-}" \
-  "${ARMS_ABSENT[*]:-}" <<'PY'
+  "${ARMS_ABSENT[*]:-}" "$SUFFIX" <<'PY'
 import json, re, sys
 
 log, manifest_path, version, commit, out_dir, dirty, arms_run, arms_absent = sys.argv[1:9]
+# The corpus names the file, never the version: `OMNI 0.7.9-swebench-corpus` read
+# as a release that does not exist in the generated footer (#838).
+suffix = sys.argv[9] if len(sys.argv) > 9 else ""
 text = open(log, errors="replace").read()
 manifest = json.load(open(manifest_path))
 
@@ -353,7 +364,7 @@ if inert:
         f"a measured loss: {'; '.join(inert)}"
     )
 
-path = f"{out_dir}/{version}.json"
+path = f"{out_dir}/{version}{suffix}.json"
 with open(path, "w") as fh:
     json.dump(report, fh, indent=2, sort_keys=True)
     fh.write("\n")

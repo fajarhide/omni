@@ -1,0 +1,82 @@
+{
+  "commit": "5bf930a",
+  "corpus": {
+    "buckets": [
+      [
+        0,
+        264
+      ],
+      [
+        264,
+        2000
+      ],
+      [
+        2000,
+        10000
+      ],
+      [
+        10000,
+        4611686018427387904
+      ]
+    ],
+    "bytes": 2259278,
+    "class_bytes": {
+      "cat": 1910349,
+      "find": 63514,
+      "git": 60072,
+      "grep": 66676,
+      "sed": 158667
+    },
+    "class_floor": 0.005,
+    "sessions": 40,
+    "sha256": "6d8bb2238d1a3a7bf814af292ff490779c114c0ea184c4d8559e84dfe251cd53",
+    "traces": 286
+  },
+  "dirty_tree": true,
+  "harness": {
+    "ledger_knows_the_command": true
+  },
+  "result": {
+    "arms": {},
+    "arms_absent": [],
+    "by_class": {
+      "aggregate": {
+        "calls": 286,
+        "capture_rate_pct": 24.9,
+        "filters_pct": 25.2,
+        "input_bytes": 2259278,
+        "repetition_available_pct": 27.0,
+        "with_ledger_pct": 30.3
+      },
+      "file read": {
+        "calls": 86,
+        "capture_rate_pct": 28.7,
+        "filters_pct": 26.8,
+        "input_bytes": 2069016,
+        "repetition_available_pct": 25.8,
+        "with_ledger_pct": 32.3
+      },
+      "git": {
+        "calls": 120,
+        "capture_rate_pct": 13.9,
+        "filters_pct": 0.0,
+        "input_bytes": 60072,
+        "repetition_available_pct": 18.3,
+        "with_ledger_pct": 2.5
+      },
+      "search": {
+        "calls": 80,
+        "capture_rate_pct": 0.0,
+        "filters_pct": 11.2,
+        "input_bytes": 130190,
+        "repetition_available_pct": 46.8,
+        "with_ledger_pct": 11.2
+      }
+    },
+    "ledger_claimed_pct": 5.0,
+    "net_savings_pct": 25.2,
+    "repeated_bytes_pct": 20.2,
+    "traces_replayed": 286
+  },
+  "version": "0.7.9"
+}

@@ -98,14 +98,46 @@ fn version_key(path: &Path) -> Vec<u64> {
         .collect()
 }
 
+/// Whether this artifact is the local corpus's, whose figures the README's main
+/// table quotes.
+///
+/// #838 added a second family, `<version>-swebench-corpus.json`, measured on a
+/// different workload. Today it sorts below the plain artifact only because
+/// `9-swebench-corpus` fails to parse and reads as 0, and that is luck rather
+/// than a rule: a run of the public corpus at a version with no local run beside
+/// it would sort highest and the checks below would hold the README's main table
+/// against a measurement it does not describe. So a stem that is not purely a
+/// version is not this family.
+fn is_plain_version(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| !s.is_empty() && s.split('.').all(|p| p.parse::<u64>().is_ok()))
+}
+
 /// The newest measurement, which is what copy is allowed to quote.
 fn artifact() -> serde_json::Value {
+    newest_artifact(&|p| is_plain_version(p)).expect("at least one docs/benchmarks/*.json")
+}
+
+/// The newest artifact of the public corpus's family, if it has one yet.
+fn swebench_artifact() -> Option<serde_json::Value> {
+    newest_artifact(&|p| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.ends_with(SWE_SUFFIX))
+    })
+}
+
+const SWE_SUFFIX: &str = "-swebench-corpus";
+
+fn newest_artifact(keep: &dyn Fn(&Path) -> bool) -> Option<serde_json::Value> {
     let dir = root().join("docs/benchmarks");
     let mut paths: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(&dir)
         .expect("docs/benchmarks exists; run `make bench`")
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter(|p| keep(p))
         .map(|p| (version_key(&p), p))
         .collect();
     // Greptile on #710. Sorted by version, not lexicographically: `0.7.10.json`
@@ -113,9 +145,9 @@ fn artifact() -> serde_json::Value {
     // exists the checks below start validating the copy against a stale corpus and
     // passing. The artifacts are named by version, so read them as versions.
     paths.sort();
-    let newest = &paths.last().expect("at least one docs/benchmarks/*.json").1;
+    let newest = &paths.last()?.1;
     let text = std::fs::read_to_string(newest).expect("read artifact");
-    serde_json::from_str(&text).expect("artifact is JSON")
+    Some(serde_json::from_str(&text).expect("artifact is JSON"))
 }
 
 fn read(path: &Path) -> String {
@@ -166,15 +198,37 @@ fn the_archive_names_the_current_corpus() {
 
 #[test]
 fn the_generated_table_was_produced_from_the_current_corpus() {
-    let data = artifact();
+    region_matches_its_artifact(
+        &artifact(),
+        "<!-- omni:corpus-table:start -->",
+        "<!-- omni:corpus-table:end -->",
+    );
+}
+
+/// #838, PR #841 review. The public corpus's region had no check at all, so a
+/// stale or hand-edited table there stayed green while the one beside it was
+/// held to the artifact. Same rule, second family.
+#[test]
+fn the_swebench_table_was_produced_from_its_own_artifact() {
+    let Some(data) = swebench_artifact() else {
+        return; // No public-corpus run in this tree, so there is nothing to hold.
+    };
+    region_matches_its_artifact(
+        &data,
+        "<!-- omni:swebench-table:start -->",
+        "<!-- omni:swebench-table:end -->",
+    );
+}
+
+fn region_matches_its_artifact(data: &serde_json::Value, start: &str, end: &str) {
     let sha = data["corpus"]["sha256"].as_str().expect("corpus.sha256");
     let short = &sha[..16];
     let readme = read(&root().join("README.md"));
     let region = readme
-        .split_once("<!-- omni:corpus-table:start -->")
-        .and_then(|(_, rest)| rest.split_once("<!-- omni:corpus-table:end -->"))
+        .split_once(start)
+        .and_then(|(_, rest)| rest.split_once(end))
         .map(|(inner, _)| inner.to_string())
-        .expect("README carries the generated corpus-table region");
+        .unwrap_or_else(|| panic!("README carries the region at {start}"));
     assert!(
         region.contains(short),
         "the README's generated table does not name corpus `{short}`; \

@@ -59,3 +59,9 @@ docs/website/src-id/media/
 # being committed by anyone who renders the book locally.
 docs/website/src/wl/
 docs/website/src-id/wl/
+
+# #838. The public corpus is rebuildable from `scripts/build-swebench-corpus.py`
+# and the instance list in its manifest, so it is 2.3 MB nobody needs in history.
+# Unlike `bench-corpus/`, which is a local secret, this one is ignored in the repo
+# because anyone running the script produces it.
+swebench-corpus/
