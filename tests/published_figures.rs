@@ -90,9 +90,15 @@ fn claim_files() -> Vec<PathBuf> {
 /// number sorts first rather than panicking: the artifact directory is not a place
 /// to be strict about someone's stray file.
 fn version_key(path: &Path) -> Vec<u64> {
+    // The family suffix comes off first, or `0.7.10-swebench-corpus` and
+    // `0.7.9-swebench-corpus` both key as `[0, 7, 0]`, the tie falls through to the
+    // path, and `0.7.10` loses to `0.7.9` on the leading `1`. Caught by the region
+    // check reporting `0.7.10` as a number the artifact does not hold, which is
+    // the gate finding the defect in itself.
     path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("")
+        .trim_end_matches(SWE_SUFFIX)
         .split('.')
         .map(|part| part.parse().unwrap_or(0))
         .collect()

@@ -210,7 +210,7 @@ corpus cannot be checked by anyone, us included.
 On a corpus of 9,478 real command executions that reached a model, 8.42 MB over 70
 sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
 
-* **1.4% from the filters, 3.0% with the ledger**, and the ledger took **10.7% of
+* **0.8% from the filters, 2.4% with the ledger**, and the ledger took **10.3% of
   all the repetition that was there to take**. The last figure is the one that
   describes OMNI. The first two describe this corpus.
 * **Read the corpus before the number.** This one is shell-heavy, so it
@@ -241,26 +241,26 @@ repetition that was there it actually took:
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
 |---|---|---|---|---|---|---|
-| other | 6,457 | 4.81 MB | 0.8% | 2.8% | 15.9% | **12.4%** |
-| file read | 1,056 | 1.89 MB | 0.0% | 1.5% | 17.7% | **8.3%** |
-| git | 899 | 0.86 MB | 5.1% | 6.4% | 18.4% | **7.5%** |
-| search | 810 | 0.77 MB | 3.4% | 4.0% | 6.5% | **10.2%** |
-| infra | 215 | 0.14 MB | 3.2% | 3.6% | 5.5% | **6.8%** |
+| other | 6,457 | 4.81 MB | 0.8% | 2.8% | 15.9% | **12.6%** |
+| file read | 1,056 | 1.89 MB | 0.0% | 1.5% | 17.7% | **8.5%** |
+| git | 899 | 0.86 MB | 0.0% | 1.3% | 19.8% | **6.7%** |
+| search | 810 | 0.77 MB | 3.4% | 3.4% | 6.5% | **0.0%** |
+| infra | 215 | 0.14 MB | 2.4% | 2.7% | 5.5% | **5.2%** |
 | build and test | 41 | 0.02 MB | 9.0% | 10.7% | 21.7% | **8.6%** |
-| **aggregate** | 9,478 | 8.49 MB | 1.4% | 3.0% | 15.6% | **10.7%** |
+| **aggregate** | 9,478 | 8.49 MB | 0.8% | 2.4% | 15.7% | **10.3%** |
 
 | Arm | bytes | saved |
 |---|---|---|
-| headroom dedup, omni's filters | 8,486,830 to 7,992,449 | 5.8% |
+| headroom dedup, omni's filters | 8,486,830 to 8,061,205 | 5.0% |
 | lean-ctx `compress` | 8,486,830 to 8,076,957 | 4.8% |
-| caveman + omni's ledger | 8,486,830 to 8,177,033 | 3.7% |
-| rtk + omni's ledger | 8,486,830 to 8,170,668 | 3.7% |
-| **omni, with the ledger** | 8,486,830 to 8,232,391 | 3.0% |
+| caveman + omni's ledger | 8,486,830 to 8,174,311 | 3.7% |
+| rtk + omni's ledger | 8,486,830 to 8,174,685 | 3.7% |
+| **omni, with the ledger** | 8,486,830 to 8,281,114 | 2.4% |
 | caveman `compress` | 8,486,830 to 8,311,999 | 2.1% |
 | rtk `pipe` | 8,486,830 to 8,308,491 | 2.1% |
-| omni, filters only | 8,486,830 to 8,371,362 | 1.4% |
+| omni, filters only | 8,486,830 to 8,417,541 | 0.8% |
 
-Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.9.
+Measured by `make bench` over 9,478 traces (8.42 MB, 70 sessions), corpus `0b63218ef78a1edb`, OMNI 0.7.10.
 <!-- omni:corpus-table:end -->
 
 ### A second corpus, and this one you can rebuild
@@ -284,10 +284,10 @@ CORPUS_DIR=swebench-corpus ./scripts/bench.sh
 | git | 120 | 0.06 MB | 0.0% | 2.5% | 18.3% | **13.9%** |
 | **aggregate** | 286 | 2.26 MB | 25.2% | 30.3% | 27.0% | **24.9%** |
 
-Measured by `make bench` over 286 traces (2.26 MB, 40 sessions), corpus `6d8bb2238d1a3a7b`, OMNI 0.7.9.
+Measured by `make bench` over 286 traces (2.26 MB, 40 sessions), corpus `6d8bb2238d1a3a7b`, OMNI 0.7.10.
 <!-- omni:swebench-table:end -->
 
-**Same code, same build, 25.2% here against 0.9% there.** The difference is the
+**Same code, same build, 25.2% here against 0.8% there.** The difference is the
 workload and nothing else. This corpus is 85% `cat` of source files, which is the
 case the ledger is built for and the case the shell-heavy corpus above says it
 understates. Read both before quoting either.

@@ -8,6 +8,260 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-09-23
+
+### Added
+- **The ledger records which marker shape it rendered (#766)**: `ledger_folds` groups a
+  call's folds by origin and source agent and carries no handle, so it could say how much
+  was folded and never which of the five marker wordings a reader met, nor whether anyone
+  went back for the bytes. Three wording changes shipped on reasoning alone for that
+  reason. `fold_markers` records the shape and the handle at the grain a marker lives at,
+  the shape comes from the arm that renders the string rather than from parsing one back,
+  and `marker_retrieve_rates` joins the handle to a later retrieval. A shape with a high
+  retrieve rate is one that did not answer the question it interrupted.
+- **`omni stats --view folds` prints what a fold claimed and what came back (#816).** A
+  fold says the reader does not need these bytes; a retrieve on that marker's handle says
+  it did. The pair has been computed since #771 and read by nothing outside tests, so the
+  ledger's guards were tuned from bug reports rather than from its own rate. The view
+  lists folds, retrieves and the rate per marker shape, with no verdict colour and no
+  threshold, because no bar has been measured yet. `--view calibration` is the same view.
+  A store written before markers were recorded says so instead of printing a confident
+  zero.
+- **The signal classifiers can be scored against a labelled corpus (#818).**
+  `cargo run --example sample_blocks` takes a stratified sample of `bench-corpus` and
+  writes one row per block with the tier `semantic::classify_block` gave it, which is the
+  classifier every scoring path uses. `scripts/score_labels.py` turns a labelled copy of
+  that sample into precision, recall and a miss rate for the Critical tier, and exits
+  non-zero when the miss rate regresses against a pinned baseline, so the bench can gate
+  on it. Labelling itself stays a separate step: 27.2% of the corpus carries an employer,
+  client or infrastructure name and 4.2% an assignment to a credential-shaped key, so
+  nothing in it may be handed to an outside labeller as it stands. The sampler runs the
+  shipping redactor over every block and holds back anything matching the operator's own
+  patterns, read from a file rather than carried in this repository.
+  The sample is drawn by a hash of each trace's key rather than in corpus order, so it
+  spreads across a class instead of grading the oldest traces in it, and a trace whose
+  blocks are all held back does not spend the class's quota.
+- **A fold records which tool produced the reply (#822).** `fold_markers` kept the marker
+  shape and never the surface, so a rate could say `project_run` is retrieved more often
+  than `session_run` and never say whether that lands on `Read`, `Grep` or a shell
+  command. `omni stats --view folds` groups by both now. Rows written before the column
+  read `unrecorded` rather than being attributed by guesswork. The ledger takes the tool
+  name once instead of the two booleans the hook derived from it, `renumbered` (#657) and
+  `searched` (#814), which is one fact travelling once.
+- **A second benchmark corpus, and one anyone can rebuild (#838).**
+  `scripts/build-swebench-corpus.py` turns SWE-bench Verified instances into a corpus in
+  the existing schema: it clones each repository at its pinned base commit and replays a
+  fixed exploration script, with no model, no API key and no container, so a reader can
+  rebuild it byte for byte and check the number rather than trust it. `scripts/bench.sh`
+  takes `CORPUS_DIR` and names its artifact after the corpus, so the two series never
+  overwrite each other. On 40 instances across 10 repositories the same build reads 25.2%
+  against 0.9% on the local corpus; the difference is the workload, which is 85% source
+  file reads here against a shell-heavy mix there. The commands are a fixed script rather
+  than an agent's choices, and whether OMNI costs task success is a separate question that
+  needs a real agent and a budget.
+
+### Fixed
+- **`omni init --hook` registered an MCP server it said it would not (#757)**: the flag has
+  read "Only install hooks" since it shipped and installed both halves anyway, and then
+  `omni doctor` called the resulting state a broken install and `omni doctor --fix` undid
+  it. Three ways of overruling a choice the CLI offered in the first place. `--hook` and
+  `--mcp` now install the half they name, naming the host or both halves still gets both,
+  and an absent MCP registration on Claude Code is reported as what it is rather than as a
+  fault: the hooks are what shortens output there, and the server is a convenience whose
+  tool definitions sit in the prefix of every request.
+- **A decline now records who it was declined for (#773)**: `passthrough_events` carried the
+  command, the byte count and the reason, and no agent, so OMNI could say what it handed
+  back and never what share of it was handed back to a model rather than to a shell. The
+  obvious proxy is wrong: a hook payload can arrive with no session id, and `host output
+  cap`, a branch that only fires for Claude Code, has 20 of its 39 rows carrying none. The
+  column makes the split a fact, and `passthrough_bytes_by_agent` reports it. Rows written
+  before it read `unknown` rather than being guessed at.
+- **A folded reply carried a second accounting of itself (#775)**: on a re-run of
+  `git log --oneline -40` the distiller cut a single byte, the ledger folded the reply to a
+  few lines, and a banner then announced `1 bytes omitted` on top of fold markers that
+  already accounted for all 40 lines. Every figure was true and the arithmetic a reader can
+  do was not. The banner is weighed against the distiller's own output now, since that is
+  the stage its numbers describe, and when it cannot pay for itself the reply keeps the
+  ledger's fold instead of being thrown away: the first cut of this fix turned a 3,257 byte
+  reply folded to 325 into a passthrough. Singulars too, so no more `1 bytes`.
+- **A folded reply was labelled a partial signal (#775)**: `[Partial signal]` says the
+  pipeline recognised some of the output and not all of it, which is a claim about the
+  distiller, and it was being read off a route computed after the ledger folds. So a
+  payload the distiller never touched could reach that route on the strength of a fold and
+  carry the banner over an answer nothing was lost from: 16 of 40 lines folded with a
+  handle, 24 verbatim, and the reply calling itself partial. The banner now reads the
+  distiller's own ratio. The pipe door was checked and never had this: its ledger runs
+  after the banner, so its ratio was already the distiller's.
+- **A cut too small to announce no longer disappears under a fold (#778)**: when the
+  distiller's cut was smaller than the marker that would name it, the marker was not
+  printed and the reply was handed back whole, so nothing was lost. Since #777 the
+  ledger's fold is kept in that situation, and the fold markers answer for the lines
+  they replaced while nothing answered for the bytes the distiller took. Under 80 bytes,
+  and one byte in the case that found it, but unannounced and unreachable is the one
+  thing this pipeline is not allowed to do. The floor is now tested before the ledger
+  runs and the ledger is handed what the command produced, so the fold is still kept and
+  every stage still answers for its own bytes. Measured first: the arm has not been
+  reached once in 745 recorded fold calls, so this is a guarantee being closed rather
+  than a saving being recovered.
+- **A fold names the command that printed the lines, not the one in front of it (#779)**: the
+  `from` clause was built from the first line of the recorded source, and a recorded source
+  is the whole command string. 28.7% of sourced lines here were recorded against a
+  multi-line command and 86.6% of those open with `cd <path>`, so a quarter of every `from`
+  clause credited the bytes to a chdir, which writes no stdout at all; a `for` header
+  claimed 18 lines a `cat` inside the loop had printed. One subagent read the mismatch as
+  the `Read` tool returning another file's content and re-read the whole tree before it
+  would trust it. The clause now resolves the source through the same predicate that
+  decides which segment a distiller may claim, so a single producer behind a chdir is named
+  correctly and a chain with two producers carries no clause: stdout is one stream and
+  nothing in it says which of them wrote a given line.
+- **A value that names a credential is no longer destroyed like one.**
+  `redact_sensitive_assignments` checked the key and never looked at the value, so any
+  line assigning to a variable called `token`, `secret`, `password` or `api_key` arrived
+  with its right-hand side replaced, even when that side was plainly code. Reading a
+  Python file with a loop variable named `token`, the line `token = token.strip()` was
+  delivered as `token = [REDACTED]`, and the marker gave no hint the cut was a false
+  positive: six of seven lines in the reported repro lost their value and only one was a
+  credential. An unquoted call and the null literals now pass through for every pattern,
+  the way a `$VAR` expansion already did, because neither holds credential material
+  whatever the key is named. Under those strong patterns nothing else changed, so a bare
+  identifier (`hunter2` has that shape), anything carrying a quote
+  (`decrypt("ghp_real")`) and any dotted value are still cut, the last because a JWT is
+  alphanumeric runs joined by dots and nothing separates it from `cfg.api_key`. The weak
+  `KEY` pattern keeps the wider exceptions it already had from #486 and #530.
+- **A diff keeps its changed lines when the same text was shown earlier (#788).** The
+  already-shown fold matched a `+` or `-` line against identical text printed before, for
+  example by a `git show` of the commit that first added it, and folded it. Reviewing a
+  staged diff then delivered the unchanged context and none of the additions or
+  deletions, with nothing saying a changed line was gone. In a payload carrying a `@@ `
+  hunk header, `+`, `-` and `@@` lines are now never folded, the exemption failure lines
+  already had.
+- **`kubectl logs` passes through (#789).** The kubectl summariser kept up to ten
+  severity-matched lines, so an 18 line application log came back as five copies of one
+  ERROR, and the 13 INFO lines walking a connection pool from `1/5` to `5/5`, which were
+  the cause, went behind a handle. A log stream is the answer the caller asked for.
+  Measured before choosing: of 155 recorded `kubectl logs` calls over 30 days, 148
+  already passed through and the other seven saved about 22 KB.
+- **A project-scope fold needs a sighting from the last six hours (#795).** The project
+  scope replaces lines another session was shown, and the marker says so. What makes that
+  a fair bet is that the other session is alive, or was minutes ago. A day-old sighting is
+  a different claim: in the report a `grep` came back with 9 of its 11 matches behind a
+  handle, credited to a session from the previous day and a directory that no longer
+  existed. Six hours is measured rather than guessed: across 734 project folds in 30 days
+  of the maintainer's store, the freshest line in the scope was 0 seconds old at the
+  median, 259 at p99 and 1,178 at the worst, so the bound refuses nothing that was
+  recorded. The session scope keeps no bound, because there the reader is holding the
+  bytes however long ago they arrived.
+  A line delivered in full again refreshes its sighting, so the bound asks when the bytes
+  last reached an agent rather than when they first did.
+- **A `Read` with `offset` or `limit` is no longer folded against project history
+  (#796).** The ledger's line-budget guard reads the command, and for a `Read` the command
+  is the bare path, so a window picked to see one model's fields came back with those
+  fields replaced by a handle, and the host then refused the same `Read` again as
+  unchanged. The Claude Code normalizer now reads the window, and a windowed `Read` gets
+  the guard `tail -5` and `sed -n 60,200p` already had: session-scope folds still apply,
+  project-scope ones do not.
+- **`npx` is routed by the program it launches (#797).** Every `npx` command went to the
+  JS/TS distiller, so `npx tsx report.mts` printing seven result lines came back as its
+  last line, `console errors: none`, which reads the same for a finished run and one that
+  stopped halfway. A JS tool or test runner behind `npx` keeps its distiller, and anything
+  else passes through.
+- **Base64 is treated as structured, so neither the distillers nor the ledger touch it
+  (#798).** A reprinted base64 payload was replaced by an `already shown` marker, which
+  broke the obvious repair for a damaged paste, and the first print had passed through
+  only because `tr` sits on the passthrough list. The format sniffer now recognises one
+  line of the base64 alphabet, or lines wrapped at a fixed width of 60 or more, from
+  256 bytes up and mixing at least two of upper case, lower case and digits. Lists of
+  names or short hashes, and a long run of one letter, do not match.
+- **`readfile` no longer summarises a `Read` window as the whole file (#799).** A 340 line
+  window of a Rust file cleared the distiller's token gate and came back as
+  `Imports: None in the full file` with no lines of content, while the file's `use` lines
+  sat above the window. A `Read` that names `offset` or `limit` now skips the distiller.
+- **A redacted secret is no longer handed back raw by the collapse fallback (#800).**
+  Redaction ran on every payload, but its output is barely shorter than the input, so for
+  any command outside the verbatim list the post-hook replaced it with a collapse of the
+  raw output, which carried no `[REDACTED]`, and the guardrail then returned the original
+  bytes. `printenv`, `set`, `export -p` and `echo` delivered `DB_PASSWORD=` in full while
+  `cat .env` and `env` were redacted. A distilled output that redacted something now skips
+  the fallback. A payload under 50 bytes skipped redaction altogether, so a bare
+  `DB_PASSWORD=hunter2` was delivered on every command; the size floor now stands aside
+  when there is something to redact.
+- **A `git diff` keeps its changed lines whatever flags precede the subcommand (#805).**
+  `resolve_profile` read the word after `git` as the verb, so `git -C repo diff` was not a
+  diff: it segmented by line, and the diff distiller then had no hunk header inside a
+  segment to walk. On a 3.7 KB diff it kept the two `@@` lines and dropped all 83 changed
+  ones. The verb is now read positionally, past the global flags and the values they take.
+  The `omni exec` path resolved its profile from the first token as well, which made
+  `cd repo && git diff` a `cd`; it now uses the chain resolver the Bash hook has used
+  since #339.
+- **Compaction forgets a session's subagent scopes too (#807).** The ledger's licence is
+  that the reader is still holding the bytes a handle replaces, and compaction is where
+  that stops being true, so `PreCompact` clears the shown set. It cleared the bare
+  session id only, while a subagent's scope is `<session>/<agent>`, so those rows kept
+  answering `already shown` for a context the summary had taken away. The reported
+  main-agent case did not reproduce on 0.7.9 or on `main`: across the nine compacted
+  sessions in this machine's store, holding 19,853 ledger lines, none is older than its
+  session's last compaction.
+- **Output the host truncated is no longer booked as delivered (#808).** Claude Code cuts
+  an over-cap Bash reply one byte short of the 30,000 byte cap: four of four truncated
+  payloads in this machine's trace store arrive with stdout at exactly 29,999 bytes, the
+  last a 620 line file that stops at line 590. The gate tested `>= 30,000`, so it never met
+  one, and the ledger recorded all 1,186 lines as shown. A later `tail` of the same file
+  then folded 90 lines the session had never received, which is #716 returning through an
+  off-by-one.
+- **A `grep` reply folds whole or not at all (#814).** The pattern already picked every
+  line, so folding some of them answers a different question rather than the same one
+  shorter: 9 of 11 matches replaced by a handle came back reading as a file with two
+  matches. `grep`, `rg` and `ag` now get the guard `head`, `tail` and a `sed` range
+  already had. A re-run that prints the identical result still folds as a whole, which is
+  the case where the identity is the answer. Split out of #795, whose other half, whether
+  a project-scope fold may draw on another session at all, is still open.
+- **A Rust panic is a failure whatever printed it (#819).** `panicked at` was known to the
+  `cargo` and `rustc` arm of the tier check only, so the same panic arriving through a
+  shell script, a make target or any test wrapper scored as ordinary context. On a 408
+  line payload the reader kept 96 `Compiling` rows and lost the one line naming the test
+  and the source location, under a marker that only said how many lines went. The generic
+  list carried the Go shape, `panic:`, and not the Rust one.
+- **`omni_retrieve` takes the word the marker prints (#826).** Every marker ends in
+  `omni retrieve <handle>` and so does the CLI's usage line, but the MCP tool's field was
+  named `hash`, so an agent that copied what it was told to run got `missing field hash`
+  back and the content stayed behind the handle. The field is `handle` now, with `hash`
+  kept as an alias so a caller written against the old name keeps working.
+- **A unified diff is delivered as it was printed (#832).** `git apply` and `patch` parse a
+  diff the way `jq` parses JSON, so it now sits on the same gate rather than being guarded
+  one stage at a time. Three things were rewriting it at once on 0.7.9: the distiller
+  replaced the `diff --git`, `index`, `--- a/…` and `+++ b/…` header with a bare `b/…`, the
+  ledger folded the context lines away because an earlier `cat` of the same file had shown
+  them, and the `@@ -5,7 +5,7 @@` header was left claiming seven lines on each side of a
+  hunk that showed two. `git apply --check` answered `patch fragment without header`, and a
+  reader taking the header at face value believed six lines of context had been inspected
+  and found unchanged. Guarding only the changed lines had already been tried and does not
+  cover this: #788 and #805 report the mirror of it. `git diff --stat` and `git show --stat`
+  carry neither marker and are still distilled.
+- **A `gh` listing is delivered whole (#833).** `gh issue list --limit 20` returned twenty
+  rows and the reader got ten, under `... [10 more items, use --limit to see more]`, which
+  names a flag the command already carried: raising it returns more rows from `gh` and the
+  reply is still ten. #235 narrowed this summariser to the `list` subcommands on the
+  grounds that `--limit` was the tell, and #833 is that the advice is wrong on the one
+  surface it was left. Every row of a listing is an item the caller asked to see, which is
+  the rule `find` (#198), `ls` and `ps` (#200), `docker ps` (#233) and `kubectl` (#301)
+  already have. #314 closed this class for `aws s3 ls` and `gcloud` at one occurrence each
+  and said a family earns the guard once it shows real volume: 219 `gh` commands in 7 days
+  on the reporting machine, 37 of them list shaped, against 14 `kubectl`. The summariser
+  had no other caller and is deleted rather than guarded.
+- **`rmcp` moves to 2.1 (#836).** GHSA-9g45-5xwm-f3wc, custom HTTP headers leaking to
+  cross-origin redirect targets, is fixed in 2.1.0. OMNI speaks MCP over stdio and builds
+  `rmcp` with `transport-io` only, so the advisory's HTTP client path is not one this binary
+  runs; the bump closes the alert that printed on every push rather than a reachable
+  vulnerability.
+- **The figures writer picks its artifact by version, and the gate ignores a foreign one
+  (#840).** `sorted(["0.7.9.json", "0.7.10.json"])[-1]` is `0.7.9.json`, so from 0.7.10
+  onward the writer that regenerates the README's table would have taken the previous
+  release's numbers, and the gate that checks the table would have passed on them. The CI
+  gate itself already ordered by parsed version; what it lacked was a rule against the
+  second artifact family #838 adds, which sorted below the local one by the accident of
+  failing to parse rather than by anything stated. An artifact whose name is not purely a
+  version is now not a candidate for the main table.
+
 ## [0.7.9] - 2026-09-04
 
 ### Changed
