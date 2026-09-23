@@ -661,6 +661,8 @@ pub fn passes_through_verbatim(command: &str) -> bool {
         || lists_containers(command)
         // A kubectl listing that has no columns to summarise (#301).
         || lists_kubectl_names(command)
+        // A `gh` or `glab` listing, for the same reason (#833).
+        || lists_vcs_items(command)
         // A log stream is the answer, and the generic summariser kept five copies
         // of one ERROR while the INFO lines walking a pool from 1/5 to 5/5 went
         // (#789). 148 of 155 recorded `kubectl logs` in 30 days already passed
@@ -761,6 +763,38 @@ fn lists_containers(command: &str) -> bool {
         Some("container") => matches!(tokens.next(), Some("ls") | Some("ps")),
         _ => false,
     }
+}
+
+/// A `gh` or `glab` enumeration: `gh issue list`, `gh run list`, `gh secret list`.
+///
+/// Every row is an item the caller asked to see, and `VcsDistiller` cuts them to
+/// the first ten and appends `... [N more items, use --limit to see more]`. That
+/// advice names a flag the command already carried: `gh issue list --limit 20`
+/// returns twenty rows from `gh`, the reader gets ten, and raising the limit
+/// returns more rows and still shows ten (#833).
+///
+/// The same rule `find` (#198), `ls` and `ps` (#200), `docker ps` (#233) and
+/// `kubectl` (#301) already have. #314 closed this class as a recorded
+/// non-decision for `aws s3 ls` and `gcloud`, at one occurrence each, and said a
+/// family earns a predicate here once it shows real volume. Measured on the
+/// reporting machine over 7 days: 219 `gh` commands, 37 of them list shaped,
+/// against 14 `kubectl`.
+///
+/// Shaped as noun then verb rather than "contains `list`", so `gh api` keeps the
+/// narrowing #235 gave it and a path or a label called `list` is not a verb.
+fn lists_vcs_items(command: &str) -> bool {
+    let mut words = crate::pipeline::producer::words(command)
+        .map(|t| t.trim_matches(['"', '\'']))
+        .filter(|t| !t.starts_with('-'));
+    let base = words
+        .next()
+        .and_then(|w| std::path::Path::new(w).file_name()?.to_str());
+    if !matches!(base, Some("gh") | Some("glab")) {
+        return false;
+    }
+    // Noun, then verb. `gh issue list` and `gh run list` qualify; `gh api
+    // repos/o/r/issues` does not, whatever the path spells.
+    words.next().is_some() && words.next() == Some("list")
 }
 
 /// Whether a raw token is a verb rather than a flag's value.
@@ -976,22 +1010,6 @@ fn shell_split_tokens(input: &str, max_tokens: usize) -> Vec<String> {
     tokens
 }
 
-/// `gh` and `glab` are wrappers: `gh pr list` prints the enumeration
-/// `VcsDistiller` was written to summarise, and `gh api …` prints whatever the
-/// endpoint returned. The distiller cuts to the first 10 lines on size alone,
-/// with no grammar check, so a Swift file fetched through
-/// `gh api … | base64 -d | sed -n '285,340p'` lost 37 of its 56 lines under
-/// `... [37 more items, use --limit to see more]`, a flag neither `gh api`
-/// nor `sed` has, so the suggested recovery could not be run (#235). The same
-/// cut took a Homebrew cask down to 10 lines and stripped its blank lines on
-/// the way (#226).
-///
-/// `--limit` is the tell: it belongs to the `list` subcommands and nothing else,
-/// so those are the only outputs this distiller can honestly claim.
-fn is_vcs_list_command(command: &str) -> bool {
-    command.split_whitespace().any(|t| t == "list")
-}
-
 /// `--stat`, `--numstat`, `--name-only` and `--name-status` exist only to make
 /// git emit a file list. The flag is a reliable signal in a way the subcommand
 /// is not: `git show` without one prints a diff and is legitimately distillable,
@@ -1032,7 +1050,6 @@ pub enum Distillation {
     Git,
     Database,
     Security,
-    Vcs,
     Test,
     Build,
     JsTs,
@@ -1077,12 +1094,16 @@ pub fn resolve_distiller(command: &str) -> Distillation {
         return Distillation::Security;
     }
 
+    // `gh` and `glab` are wrappers. `gh api` prints whatever the endpoint
+    // returned, and `gh <noun> list` prints an enumeration where every row is an
+    // item the caller asked to see. #235 narrowed the summariser to the `list`
+    // subcommands on the grounds that `--limit` was the tell; #833 is that the
+    // advice is wrong on the one surface it was left: `gh issue list --limit 20`
+    // returns twenty rows, the reader gets ten, and raising the limit returns
+    // more rows and still shows ten. Nothing here has a summary to give that the
+    // caller did not already ask for, so the whole family passes through.
     if matches!(base, "gh" | "hub" | "glab") {
-        return if is_vcs_list_command(command) {
-            Distillation::Vcs
-        } else {
-            Distillation::Passthrough
-        };
+        return Distillation::Passthrough;
     }
 
     if matches!(
@@ -1346,6 +1367,35 @@ mod tests {
         assert!(!lists_containers("docker compose ps"));
         assert!(!lists_containers("kubectl get pods"));
         assert!(!lists_containers("ps aux"));
+    }
+
+    /// #833. The counter-case matters more than the case here: `gh api` was
+    /// narrowed out of this distiller once already (#235), when a Swift file
+    /// fetched through it lost 37 of 56 lines under an invitation to raise a
+    /// `--limit` that `gh api` does not have.
+    #[test]
+    fn claims_only_the_gh_listing_subcommands() {
+        assert!(lists_vcs_items("gh issue list"));
+        assert!(lists_vcs_items("gh pr list --repo owner/name"));
+        assert!(lists_vcs_items("gh run list -R owner/name --limit 40"));
+        assert!(lists_vcs_items("gh secret list"));
+        assert!(lists_vcs_items("glab mr list"));
+        assert!(lists_vcs_items("/opt/homebrew/bin/gh release list"));
+
+        // A flag's value never sits between the noun and the verb, because `gh`
+        // takes its flags after the subcommand. The filter drops the flag and
+        // keeps the value, so a form that did would need position tracking; the
+        // CLI does not offer one, and inventing it here would be a guard for a
+        // command nobody can type.
+        assert!(lists_vcs_items("gh issue list --limit 40 --state open"));
+
+        assert!(!lists_vcs_items("gh api repos/owner/name/issues"));
+        assert!(!lists_vcs_items("gh issue view 833"));
+        assert!(!lists_vcs_items("gh pr diff 835"));
+        assert!(!lists_vcs_items("gh repo clone owner/name"));
+        // The word without the shape: a label, not a verb.
+        assert!(!lists_vcs_items("gh issue create --label list"));
+        assert!(!lists_vcs_items("kubectl get pods"));
     }
 
     /// #277: a reshaping tail owns the payload, and the list is the measured one

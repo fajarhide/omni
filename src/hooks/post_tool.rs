@@ -3852,6 +3852,51 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         }
     }
 
+    /// #833, PR #839 review. Routing and `passes_through_verbatim` are tested
+    /// separately, and either alone leaves the listing cut: routing hands the
+    /// payload back, the collapse fallback folds it up again, and that is #214.
+    /// This is the only test that asks what arrives in the reply.
+    ///
+    /// Shaped against the gates, the way its `grep` sibling below is. `gh`
+    /// resolves to `CollapseMode::Log`, which groups on the level token, so a
+    /// listing of tab separated columns never reaches the collapser and a test
+    /// built from one passes with the predicate deleted. Measured with it
+    /// deleted and this payload: 120 rows came back as
+    /// `120 INFO entries (collapsed from 120 lines)`.
+    #[test]
+    fn a_gh_listing_reaches_the_reader_whole() {
+        let listing: String = (0..120)
+            .map(|i| {
+                format!(
+                    "INFO:runner:workflow CI run_{i}: completed success in 2m30s (attempt 1/3)\n"
+                )
+            })
+            .collect();
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": { "command": "gh run list --repo owner/name --limit 120" },
+            "tool_response": { "stdout": listing, "stderr": "", "interrupted": false }
+        });
+
+        let delivered = match process_payload(&input.to_string(), None, None) {
+            None => listing.clone(),
+            Some(out) => {
+                let v: serde_json::Value = serde_json::from_str(&out).expect("valid hook json");
+                v["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+                    .as_str()
+                    .expect("stdout is a string")
+                    .to_string()
+            }
+        };
+
+        for line in listing.lines() {
+            assert!(
+                delivered.contains(line),
+                "a row of the listing did not reach the reader: {line:?}"
+            );
+        }
+    }
+
     /// #832 reverses what this test used to assert. A unified diff is parsed by
     /// `git apply` and `patch`, and every rewrite of it produced a diff no tool
     /// accepts: the header replaced by a bare `b/test.txt`, the context lines
