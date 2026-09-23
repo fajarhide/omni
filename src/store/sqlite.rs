@@ -957,6 +957,15 @@ impl SqliteBackend {
             "ALTER TABLE ledger_folds ADD COLUMN session TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // #822. A marker recorded which shape it rendered and never which tool
+        // produced the reply, so a report could say `project_run` is retrieved
+        // more often than `session_run` and never which surface that lands on.
+        // Rows written before this carry an empty string, which is the honest
+        // answer rather than a guess from the scope.
+        let _ = conn.execute(
+            "ALTER TABLE fold_markers ADD COLUMN tool TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         // #665. One fold writes a row per (origin, source agent) pair, and until
         // this column nothing recorded which rows belonged together. Reporting
         // had to infer it from (second, session, agent, scope, payload size),
@@ -1001,6 +1010,7 @@ impl SqliteBackend {
                 scope   TEXT NOT NULL,
                 session TEXT NOT NULL DEFAULT '',
                 agent_id TEXT NOT NULL DEFAULT 'unknown',
+                tool    TEXT NOT NULL DEFAULT '',
                 kind    TEXT NOT NULL,
                 handle  TEXT NOT NULL DEFAULT '',
                 lines   INTEGER NOT NULL,
@@ -2414,21 +2424,22 @@ impl SqliteBackend {
             return Vec::new();
         };
         let Ok(mut stmt) = conn.prepare(
-            "SELECT m.kind, COUNT(*),
+            "SELECT m.kind, m.tool, COUNT(*),
                     SUM(EXISTS (SELECT 1 FROM retrieve_events r
                                  WHERE r.hash = m.handle AND r.ts >= m.ts))
                FROM fold_markers m
               WHERE m.ts >= ?1
-              GROUP BY m.kind
-              ORDER BY 3 DESC",
+              GROUP BY m.kind, m.tool
+              ORDER BY 4 DESC",
         ) else {
             return Vec::new();
         };
         let rows = stmt.query_map(params![since], |r| {
             Ok(MarkerRate {
                 kind: r.get(0)?,
-                folds: r.get(1)?,
-                retrieved: r.get(2).unwrap_or(0),
+                tool: r.get(1).unwrap_or_default(),
+                folds: r.get(2)?,
+                retrieved: r.get(3).unwrap_or(0),
             })
         });
         rows.map(|rs| rs.filter_map(Result::ok).collect())
@@ -2446,6 +2457,7 @@ impl SqliteBackend {
         scope: &str,
         agent_id: &str,
         session: &str,
+        tool: &str,
         folds: &[FoldRecord],
         markers: &[MarkerRecord],
     ) {
@@ -2498,8 +2510,8 @@ impl SqliteBackend {
         {
             let Ok(mut stmt) = tx.prepare_cached(
                 "INSERT INTO fold_markers
-                     (fold_id, ts, scope, session, agent_id, kind, handle, lines, bytes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                     (fold_id, ts, scope, session, agent_id, tool, kind, handle, lines, bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             ) else {
                 let _ = tx.commit();
                 return;
@@ -2511,6 +2523,7 @@ impl SqliteBackend {
                     scope,
                     session,
                     agent_id,
+                    tool,
                     m.kind,
                     m.handle,
                     m.lines as i64,
@@ -3290,6 +3303,9 @@ impl EngineTotals {
 /// queue rather than an opinion about wording.
 pub struct MarkerRate {
     pub kind: String,
+    /// The tool whose reply the marker replaced, empty for a row written before
+    /// the column existed (#822).
+    pub tool: String,
     pub folds: i64,
     pub retrieved: i64,
 }
@@ -4177,6 +4193,60 @@ mod tests {
         }
     }
 
+    /// #822. A marker recorded its shape and never the tool behind the reply,
+    /// so a rate could say `project_run` is retrieved more often than
+    /// `session_run` and never which surface that lands on. Grouped by both now.
+    #[test]
+    fn a_marker_records_the_tool_that_produced_the_reply() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open_path(&dir.path().join("omni.db")).expect("store");
+        let fold = || FoldRecord {
+            source_agent: "claude_code".to_string(),
+            origin: "project",
+            lines: 12,
+            bytes: 300,
+            whole_output: false,
+            payload_bytes: 1_200,
+        };
+        let marker = |handle: &str| MarkerRecord {
+            kind: "project_run",
+            handle: handle.to_string(),
+            lines: 12,
+            bytes: 300,
+        };
+
+        store.ledger_record_folds(
+            "/proj",
+            "claude_code",
+            "s1",
+            "Read",
+            &[fold()],
+            &[marker("aaaa")],
+        );
+        store.ledger_record_folds(
+            "/proj",
+            "claude_code",
+            "s1",
+            "Bash",
+            &[fold()],
+            &[marker("bbbb")],
+        );
+        store.record_retrieve_event("omni retrieve", "aaaa", "claude_code");
+
+        let rates = store.marker_retrieve_rates(0);
+        let read = rates
+            .iter()
+            .find(|r| r.tool == "Read")
+            .expect("the Read marker is its own row");
+        let bash = rates
+            .iter()
+            .find(|r| r.tool == "Bash")
+            .expect("the Bash marker is its own row");
+        assert_eq!((read.folds, read.retrieved), (1, 1), "{rates:?}");
+        assert_eq!((bash.folds, bash.retrieved), (1, 0), "{rates:?}");
+        assert_eq!(read.kind, "project_run");
+    }
+
     /// #665. The one percentage `omni stats` printed was the distiller averaged
     /// over every call OMNI deliberately declined, and `ledger_folds` was not
     /// read at all. On the maintainer's machine that reported 4.5% for a week in
@@ -4214,6 +4284,7 @@ mod tests {
             "/proj",
             "claude_code",
             "s1",
+            "Bash",
             &[
                 FoldRecord {
                     source_agent: "claude_code".to_string(),
@@ -4242,6 +4313,7 @@ mod tests {
             "/proj",
             "claude_code",
             "s1",
+            "Bash",
             &[FoldRecord {
                 source_agent: "claude_code".to_string(),
                 origin: "project",
@@ -4260,6 +4332,7 @@ mod tests {
             "/proj",
             "claude_code",
             "s1",
+            "Bash",
             &[FoldRecord {
                 source_agent: "codex".to_string(),
                 origin: "session",
@@ -4276,6 +4349,7 @@ mod tests {
             "/proj",
             "claude_code",
             "s1",
+            "Bash",
             &[FoldRecord {
                 source_agent: "claude_code".to_string(),
                 origin: "session",

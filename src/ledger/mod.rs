@@ -345,16 +345,17 @@ pub struct Ledger<'a> {
     /// start line the caller controls. A host that does cannot take a view whose
     /// survivors sit in two blocks, so that view is never built and never booked
     /// (#657).
-    renumbered: bool,
+    /// The tool whose reply this is, as the hook normalised it.
+    ///
+    /// Two questions were passed in beside each other before, both derived
+    /// from this one string: whether the host renumbers what it is handed
+    /// (#657) and whether the caller's own pattern picked the lines (#814).
+    /// A third would have followed. The string is also what a fold records,
+    /// so a report can group by the surface it happened on (#822).
+    tool: String,
     /// Whether the caller picked a window of its source, which a `Read` path
     /// cannot say the way `tail -5` does (#796). Same guard as `rations_its_output`.
     windowed: bool,
-    /// Whether the caller's own pattern picked these lines, said by the hook
-    /// rather than read off the command: the `Grep` tool's reply carries a
-    /// pattern or a path where a shell command would be, and on some hosts
-    /// nothing at all, so the command string cannot answer for it (#814, and
-    /// the review of it).
-    searched: bool,
     /// Who is being shown these lines, recorded and read by nothing (#509).
     ///
     /// The project scope is keyed on the directory alone, so two agents in one
@@ -445,9 +446,8 @@ impl<'a> Ledger<'a> {
             scope: scope.into(),
             project: None,
             source: String::new(),
-            renumbered: false,
+            tool: String::new(),
             windowed: false,
-            searched: false,
             agent: "unknown".to_string(),
         }
     }
@@ -465,28 +465,33 @@ impl<'a> Ledger<'a> {
         self
     }
 
-    /// Says the host will renumber whatever lines it is handed, which decides
-    /// whether a split view is worth building at all.
+    /// Names the tool whose reply this is, which is what the two questions
+    /// below are asked of.
     ///
-    /// Only `Read` does: its payload goes back as `file.content` and the host
-    /// renders it with `cat -n` from `startLine`. One starting number cannot
-    /// describe survivors sitting at two different offsets, so the caller drops
-    /// such a view, and a fold nobody delivers must not reach the books.
-    pub fn renumbered(mut self, yes: bool) -> Self {
-        self.renumbered = yes;
+    /// `Read` is renumbered: its payload goes back as `file.content` and the
+    /// host renders it with `cat -n` from `startLine`, so one starting number
+    /// cannot describe survivors at two offsets and such a view is never built
+    /// (#657). `Grep` filters: the caller's pattern already chose every line,
+    /// and the command string cannot say so because it carries a pattern or a
+    /// path (#814).
+    pub fn tool(mut self, name: &str) -> Self {
+        self.tool = name.to_string();
         self
+    }
+
+    /// Whether the host numbers the lines it is handed.
+    fn renumbers(&self) -> bool {
+        self.tool == "Read"
+    }
+
+    /// Whether the caller's own pattern picked every line in this reply.
+    fn filters_its_reply(&self) -> bool {
+        self.tool == "Grep"
     }
 
     /// Says the caller asked for a window of its source rather than all of it.
     pub fn windowed(mut self, yes: bool) -> Self {
         self.windowed = yes;
-        self
-    }
-
-    /// Says this reply is a search result, so the caller's pattern already chose
-    /// every line in it.
-    pub fn searched(mut self, yes: bool) -> Self {
-        self.searched = yes;
         self
     }
 
@@ -661,7 +666,7 @@ impl<'a> Ledger<'a> {
                 }
             })
             .unwrap_or(FoldShift::None);
-        let projected = projected.filter(|_| !(self.renumbered && shifts == FoldShift::Interior));
+        let projected = projected.filter(|_| !(self.renumbers() && shifts == FoldShift::Interior));
 
         // Record what the agent was handed, which is not always what it was
         // given (#465). A run replaced by a marker never reached the context, so
@@ -743,6 +748,7 @@ impl<'a> Ledger<'a> {
                 scope,
                 &self.agent,
                 session_of(&self.scope),
+                &self.tool,
                 &folds,
                 markers,
             );
@@ -924,7 +930,7 @@ impl<'a> Ledger<'a> {
         // command printing the same lines is the case #755 settled: there the
         // identity is the answer and a partial fold says so in words. What the
         // report hit was another command's output subtracted from a fresh grep.
-        if (self.searched || filters_its_own_output(&self.source))
+        if (self.filters_its_reply() || filters_its_own_output(&self.source))
             && !planned.iter().all(|&fold| fold)
             && planned.iter().zip(&runs).any(|(&fold, run)| {
                 fold && run
@@ -952,8 +958,8 @@ impl<'a> Ledger<'a> {
             .filter(|(_, fold)| **fold)
             .flat_map(|(run, _)| run.start..run.end)
             .collect();
-        let pad =
-            self.renumbered && FoldShift::of(&planned_folds, lines.len(), 0) == FoldShift::Interior;
+        let pad = self.renumbers()
+            && FoldShift::of(&planned_folds, lines.len(), 0) == FoldShift::Interior;
 
         let mut out = String::with_capacity(payload_bytes);
         let mut folded: HashSet<usize> = HashSet::new();

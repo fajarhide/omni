@@ -2050,11 +2050,11 @@ fn run_folds(args: &[String], store: &Store) -> Result<()> {
     }
 
     println!(
-        " {:<38} {:>7} {:>10} {:>7}",
-        "Marker", "folds", "retrieved", "rate"
+        " {:<26} {:<10} {:>7} {:>10} {:>7}",
+        "Marker", "tool", "folds", "retrieved", "rate"
     );
     println!(
-        " {:\u{2500}<38} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        " {:\u{2500}<26} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
         ""
     );
 
@@ -2063,8 +2063,14 @@ fn run_folds(args: &[String], store: &Store) -> Result<()> {
         folds += r.folds;
         retrieved += r.retrieved;
         println!(
-            " {:<38} {:>7} {:>10} {:>6.1}%",
+            " {:<26} {:<10} {:>7} {:>10} {:>6.1}%",
             r.kind,
+            // Empty for a marker written before the column existed (#822).
+            if r.tool.is_empty() {
+                "unrecorded"
+            } else {
+                &r.tool
+            },
             format_number(r.folds as u64),
             format_number(r.retrieved as u64),
             rate_pct(r.folds, r.retrieved)
@@ -2073,12 +2079,13 @@ fn run_folds(args: &[String], store: &Store) -> Result<()> {
 
     if rows.len() > 1 {
         println!(
-            " {:\u{2500}<38} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            " {:\u{2500}<26} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
             ""
         );
         println!(
-            " {:<38} {:>7} {:>10} {:>6.1}%",
+            " {:<26} {:<10} {:>7} {:>10} {:>6.1}%",
             "all markers",
+            "",
             format_number(folds as u64),
             format_number(retrieved as u64),
             rate_pct(folds, retrieved)
