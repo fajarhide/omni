@@ -284,7 +284,7 @@ CORPUS_DIR=swebench-corpus ./scripts/bench.sh
 | git | 120 | 0.06 MB | 0.0% | 2.5% | 18.3% | **13.9%** |
 | **aggregate** | 286 | 2.26 MB | 25.2% | 30.3% | 27.0% | **24.9%** |
 
-Measured by `make bench` over 286 traces (2.26 MB, 40 sessions), corpus `b96069c55304aa55`, OMNI 0.7.9.
+Measured by `make bench` over 286 traces (2.26 MB, 40 sessions), corpus `6d8bb2238d1a3a7b`, OMNI 0.7.9.
 <!-- omni:swebench-table:end -->
 
 **Same code, same build, 25.2% here against 0.9% there.** The difference is the

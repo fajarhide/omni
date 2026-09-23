@@ -1,5 +1,5 @@
 {
-  "commit": "16e8f93",
+  "commit": "5bf930a",
   "corpus": {
     "buckets": [
       [
@@ -19,17 +19,17 @@
         4611686018427387904
       ]
     ],
-    "bytes": 2259116,
+    "bytes": 2259278,
     "class_bytes": {
-      "cat": 1910195,
+      "cat": 1910349,
       "find": 63514,
-      "git": 60067,
+      "git": 60072,
       "grep": 66676,
-      "sed": 158664
+      "sed": 158667
     },
     "class_floor": 0.005,
     "sessions": 40,
-    "sha256": "b96069c55304aa5522649dba39f10878b2dd9b0d8dfc3af2621c05ac638e61e8",
+    "sha256": "6d8bb2238d1a3a7bf814af292ff490779c114c0ea184c4d8559e84dfe251cd53",
     "traces": 286
   },
   "dirty_tree": true,
