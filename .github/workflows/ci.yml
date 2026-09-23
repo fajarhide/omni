@@ -26,7 +26,7 @@ jobs:
       # Pinned rather than `stable`. `rust-toolchain.toml` pins 1.97.0, so asking
       # for `stable` made rustup fetch a second toolchain that was then never
       # used. Keep this in step with the pin, the way `release.yml` has to (#179).
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: "1.97.0"
           components: rustfmt, clippy
@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: "1.97.0"
 
