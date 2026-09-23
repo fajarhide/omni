@@ -11,7 +11,6 @@ pub mod search;
 pub mod security;
 pub mod system_ops;
 pub mod test;
-pub mod vcs;
 
 pub trait Distiller: Send + Sync {
     /// `None` means "I could not read this input". The dispatch boundary then
@@ -131,7 +130,6 @@ fn route(
         Distillation::Git => git::GitDistiller.distill(segments, input, session),
         Distillation::Database => database::DatabaseDistiller.distill(segments, input, session),
         Distillation::Security => security::SecurityDistiller.distill(segments, input, session),
-        Distillation::Vcs => vcs::VcsDistiller.distill(segments, input, session),
         Distillation::Test => test::TestDistiller.distill(segments, input, session),
         Distillation::Build => build::BuildDistiller.distill(segments, input, session),
         Distillation::JsTs => jsts::JsTsDistiller.distill(segments, input, session),
@@ -848,10 +846,12 @@ mod tests {
         }
     }
 
-    /// The gate must not disarm the distiller it guards: a real `gh pr list` is
-    /// still an enumeration `--limit` can re-fetch, so it still summarises.
+    /// #833 reverses what this test asserted. `gh pr list` was the one surface
+    /// #235 left the summariser, on the grounds that `--limit` could re-fetch the
+    /// rest. It cannot: `gh issue list --limit 20` returns twenty rows, ten reach
+    /// the reader, and raising the limit returns more rows and still shows ten.
     #[test]
-    fn still_summarises_a_real_gh_list() {
+    fn hands_back_a_real_gh_list() {
         let mut listing = String::new();
         for i in 1..=25 {
             listing.push_str(&format!(
@@ -862,10 +862,7 @@ mod tests {
         let cmd = "gh pr list --limit 25";
         let segments = scorer::score_with_command(&listing, cmd, None);
         let out = distill_with_command(&segments, &listing, cmd, None);
-        assert!(
-            out.contains("more items"),
-            "a gh list should still be summarised:\n{out}"
-        );
+        assert_eq!(out, listing, "a gh list was summarised");
     }
 
     /// The gate must not disarm the distiller it guards: a plain `git log` is
