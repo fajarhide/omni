@@ -2093,10 +2093,10 @@ mod tests {
         let store = Store::open_path(&db).expect("store");
         let repeated = project_repeat();
 
-        // A scope per arm, and each arm its own fresh block. Sharing one scope
-        // makes the second fold a whole-output repeat, which #705 refuses on its
-        // own, and the test then passes with the bound removed.
-        // A writer per project scope. Sharing one session scope makes the second
+        // A scope per arm, each with its own writer and its own fresh block.
+        // Sharing one scope makes the second fold a whole-output repeat, which
+        // #705 refuses on its own, and the test then passes with the bound
+        // removed. Sharing one session scope makes the second
         // call a repeat, and what gets recorded is then the marker that was
         // delivered rather than the lines, so the second project scope stays
         // empty and the arm below proves nothing.
@@ -2131,6 +2131,61 @@ mod tests {
         assert!(
             stale.is_none(),
             "a sighting older than the bound was folded anyway: {stale:?}"
+        );
+    }
+
+    /// #795, PR #825 review. The bound asks when these bytes last reached an
+    /// agent, so a line shown again now is fresh again however old the first
+    /// sighting is. Recording it with `INSERT OR IGNORE` would keep the first
+    /// timestamp and refuse the fold the day after a repository is first read.
+    ///
+    /// The attribution is asserted in the same test because only `ts` may move:
+    /// the marker names the command that first showed the line (#622).
+    #[test]
+    fn a_line_shown_again_is_fresh_again() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("omni.db");
+        let store = Store::open_path(&db).expect("store");
+        let repeated = project_repeat();
+
+        Ledger::new(&store, "writer-a")
+            .with_project("/repo")
+            .by("claude_code")
+            .project(&repeated);
+
+        let aged = crate::guard::limits::PROJECT_SIGHTING_MAX_AGE_SECS + 60;
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let moved = conn
+            .execute("UPDATE ledger_lines SET ts = ts - ?1", [aged])
+            .expect("age the rows");
+        drop(conn);
+        assert!(moved > 0, "nothing was aged, so the test proves nothing");
+
+        // Stale, so this one is refused and the lines are delivered verbatim.
+        // That delivery is the repeat sighting.
+        let refused = Ledger::new(&store, "writer-b")
+            .with_project("/repo")
+            .by("codex")
+            .project(&format!("{repeated}{}", fresh_block("cache probe")));
+        assert!(refused.is_none(), "the aged sighting folded: {refused:?}");
+
+        let after = Ledger::new(&store, "reader-1")
+            .with_project("/repo")
+            .project(&format!("{repeated}{}", fresh_block("queue probe")))
+            .expect("the repeat sighting is minutes old and folds");
+        assert!(after.contains("not shown here"), "{after}");
+
+        let conn = rusqlite::Connection::open(&db).expect("open");
+        let first: String = conn
+            .query_row(
+                "SELECT DISTINCT agent_id FROM ledger_lines WHERE scope = '/repo'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("one agent recorded");
+        assert_eq!(
+            first, "claude_code",
+            "the repeat sighting overwrote whose bytes the fold is replacing"
         );
     }
 

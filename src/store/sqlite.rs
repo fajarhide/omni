@@ -2373,14 +2373,21 @@ impl SqliteBackend {
         };
         {
             let Ok(mut stmt) = tx.prepare_cached(
-                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO ledger_lines (scope, line_hash, ts, agent_id, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(scope, line_hash) DO UPDATE SET ts = excluded.ts",
             ) else {
                 return;
             };
-            // `INSERT OR IGNORE` keeps the first writer, so `source` names the
-            // command that actually showed the line rather than the last one to
-            // repeat it. That is the property the marker's claim rests on (#622).
+            // The conflict arm keeps the first writer's `agent_id` and `source`, so
+            // they still name the command that actually showed the line rather than
+            // the last one to repeat it. That is the property the marker's claim
+            // rests on (#622).
+            //
+            // `ts` is the exception and moves, because the freshness cutoff asks
+            // when these bytes last reached an agent, not when they first did
+            // (#795). Only lines this call delivered in full are passed here, so a
+            // line that was folded away cannot refresh its own sighting.
             for h in hashes {
                 let _ = stmt.execute(params![scope, h, ts, agent_id, source]);
             }
