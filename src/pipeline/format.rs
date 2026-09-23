@@ -122,23 +122,20 @@ pub fn sniff(input: &str) -> Option<Structured> {
 /// `git diff --stat` and `git show --stat` carry neither marker and are still
 /// distilled, which is the enumeration surface and a different question.
 fn sniff_diff(trimmed: &str) -> Option<Structured> {
-    let mut saw_minus = false;
-    let mut saw_plus = false;
-    for line in trimmed.lines().map(without_ansi_prefix) {
-        // `diff --git` alone is decisive: `git log -p` and a saved patch both
-        // open with it, and nothing else does.
-        if line.starts_with("diff --git ") {
-            return Some(Structured::Diff);
-        }
-        // Otherwise the file header has to be there, in order, before a hunk, so
-        // prose quoting `@@` never reaches the gate.
-        saw_minus |= line.starts_with("--- ");
-        saw_plus |= saw_minus && line.starts_with("+++ ");
-        if saw_plus && line.starts_with("@@") {
-            return Some(Structured::Diff);
-        }
+    let lines: Vec<&str> = trimmed.lines().map(without_ansi_prefix).collect();
+    // `diff --git` alone is decisive: `git log -p` and a saved patch both open
+    // with it, and nothing else does.
+    if lines.iter().any(|l| l.starts_with("diff --git ")) {
+        return Some(Structured::Diff);
     }
-    None
+    // Otherwise the three header lines have to be consecutive, which they are in
+    // every `diff -u` and every `git format-patch`. Remembering them separately
+    // matched a build log that printed `--- FAIL:` early, `+++` later and `@@`
+    // later still, and passed the whole payload through (PR #835 review).
+    lines
+        .windows(3)
+        .any(|w| w[0].starts_with("--- ") && w[1].starts_with("+++ ") && w[2].starts_with("@@ -"))
+        .then_some(Structured::Diff)
 }
 
 /// The line with any leading ANSI colour sequences removed.
@@ -588,6 +585,15 @@ mod tests {
         // A `+++` that never had a `---` above it is a decoration, not a header.
         let banner = "+++ release notes +++\n@@ everything changed @@\n";
         assert_eq!(sniff(banner), None);
+
+        // The three markers in order but scattered: Go prints `--- FAIL:` per
+        // test, and a payload that happens to hold the other two further down is
+        // still a build log (PR #835 review).
+        let scattered = "--- FAIL: TestAlpha (0.00s)\n                         ok  \texample/pkg\t0.4s\n                         +++ regenerated fixtures\n                         running 3 checks\n                         @@ summary @@\n";
+        // Asked of the detector itself: `--- ` at the head also reads as a YAML
+        // document start, which claims it first in the chain and is conservative
+        // in the same direction, so `sniff` alone would not prove this.
+        assert_eq!(sniff_diff(scattered), None);
     }
 
     #[test]
