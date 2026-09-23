@@ -43,6 +43,7 @@ use std::collections::{HashMap, HashSet};
 use crate::guard::limits::{
     MIN_LEDGER_INPUT, MIN_LEDGER_RUN_GAIN, MIN_WHOLE_OUTPUT_FOLD, PROJECT_FLOOR_MULT,
 };
+use crate::pipeline::format::without_ansi_prefix;
 use crate::pipeline::{producer, registry};
 use crate::store::sqlite::Store;
 
@@ -1238,22 +1239,6 @@ fn names_line_numbers(arg: &str) -> bool {
 /// Trimmed, so the same line reached through `sed -n` and through `cat` is one
 /// line rather than two. Hashed rather than stored whole because the table is
 /// keyed on it and a 4 KB line would otherwise become a 4 KB index entry.
-/// The line with any leading ANSI colour sequences removed.
-///
-/// Slices here are proven to sit on a char boundary rather than assumed to: the
-/// escape is one ASCII byte and `find('m')` returns the index of another.
-#[allow(clippy::string_slice)]
-fn without_ansi_prefix(line: &str) -> &str {
-    let mut rest = line;
-    while let Some(after) = rest.strip_prefix('\u{1b}') {
-        match after.find('m') {
-            Some(end) => rest = &after[end + 1..],
-            None => return rest,
-        }
-    }
-    rest
-}
-
 pub fn line_key(line: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();

@@ -167,18 +167,20 @@ fn chatty_build_log_still_compresses_through_pipe() {
     );
 }
 
+/// #832 moved the diff from the first group to the second. It used to be asked
+/// to compress here, beside the build log above; a unified diff is parsed by
+/// `git apply` and `patch`, and what came back failed `git apply --check` with
+/// `patch fragment without header`.
+///
+/// The build log test above stays as it is, because it is the guard against this
+/// gate swallowing plain text.
 #[test]
-fn git_diff_still_compresses_through_pipe() {
+fn git_diff_goes_through_the_pipe_unchanged() {
     let raw = fixture("git_diff_multi_file.txt");
 
     let out = pipe_through(&raw, "git diff");
 
-    assert!(
-        out.len() < raw.len(),
-        "git diff must still compress: {} → {} bytes",
-        raw.len(),
-        out.len()
-    );
+    assert_eq!(out, raw, "a unified diff was rewritten on the pipe path");
 }
 
 #[test]

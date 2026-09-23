@@ -181,16 +181,17 @@ mod tests {
         // 50-line fixture that marker ate the saving and the hook correctly
         // declined, so a routing test failed for a reason that had nothing to do
         // with routing.
-        let diff_str = "diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n".to_string();
-        let mut big_diff = diff_str.clone();
+        // Not a diff: a unified diff passes through untouched since #832, and a
+        // routing test must not depend on a payload the pipeline declines.
+        let mut noisy = "build started\nERROR: disk full on node 7\nbuild finished\n".to_string();
         for _ in 0..400 {
-            big_diff.push_str(" \n");
+            noisy.push_str(" \n");
         }
 
         let input = json!({
             "tool_name": "Bash",
-            "tool_input": { "command": "git diff" },
-            "tool_response": { "content": big_diff }
+            "tool_input": { "command": "cargo build" },
+            "tool_response": { "content": noisy }
         });
 
         let out = process_payload(&input.to_string(), store, session);
@@ -283,16 +284,17 @@ mod tests {
 
         // Padded past the rewind marker's cost, for the reason in
         // `routes_post_tool_use_to_correct_handler`.
-        let mut big_diff = "diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n".to_string();
+        // Not a diff, for the reason in `routes_post_tool_use_to_correct_handler`.
+        let mut noisy = "build started\nERROR: disk full on node 7\nbuild finished\n".to_string();
         for _ in 0..400 {
-            big_diff.push_str(" \n");
+            noisy.push_str(" \n");
         }
 
         let input = json!({
             "hookEventName": "ToolResult",
             "tool_name": "Bash",
-            "tool_input": { "command": "git diff" },
-            "tool_response": { "content": big_diff }
+            "tool_input": { "command": "cargo build" },
+            "tool_response": { "content": noisy }
         });
 
         let out = process_payload(&input.to_string(), store, session);

@@ -106,13 +106,15 @@ check "OMNI_MCP_TOOLS=all restores every tool" "$ALL_OUT" "25 of 25"
 
 # ─── 4. PostToolUse Hook E2E ─────────────────────────────
 echo "▸ Scenario 4: PostToolUse Hook E2E"
-FIXTURE_CONTENT=$(cat tests/fixtures/git_diff_multi_file.txt)
+# Not the diff fixture. Since #832 a unified diff passes through untouched, so
+# seeding the store with one leaves every stats view below with nothing to show.
+FIXTURE_CONTENT=$(cat tests/fixtures/heavy_noise.txt)
 INPUT_LEN=${#FIXTURE_CONTENT}
 HOOK_JSON=$(cat <<EOF
 {
   "hook_event_name": "PostToolUse",
   "tool_name": "Bash",
-  "tool_input": {"command": "git diff HEAD~1"},
+  "tool_input": {"command": "docker build ."},
   "tool_response": {
     "content": $(echo "$FIXTURE_CONTENT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
   }
@@ -142,7 +144,7 @@ fi
 
 # ─── 5. Pipe Mode ────────────────────────────────────────
 echo "▸ Scenario 5: Pipe Mode"
-PIPE_INPUT=$(cat tests/fixtures/git_diff_multi_file.txt)
+PIPE_INPUT=$(cat tests/fixtures/heavy_noise.txt)
 PIPE_OUT=$(echo "$PIPE_INPUT" | "$OMNI" 2>/dev/null)
 PIPE_EXIT=$?
 # Bytes on both sides, explicitly. `${#var}` counts characters under a UTF-8
@@ -162,6 +164,25 @@ if [ "$PIPE_OUT_LEN" -gt "$PIPE_INPUT_LEN" ]; then
     ls -la "${OMNI_HOME:-$HOME/.omni}" 2>&1 | sed 's/^/  ls| /' | head -8
     printf '%s' "$PIPE_OUT" | sed 's/^/  out| /' | tail -12
 fi
+
+# ─── 5b. A diff survives the shipped binary (#832) ───────
+#
+# `cargo test` covers the pipe path with the library; this covers the binary a
+# person installs. Byte for byte, because the failure it guards against is a
+# diff that still looks like one and no longer applies: on 0.7.9 the header
+# became a bare `b/sample.py`, the context lines were folded away and the `@@`
+# counts were left claiming the original hunk.
+DIFF_IN=$(cat tests/fixtures/git_diff_multi_file.txt)
+DIFF_OUT=$(printf '%s' "$DIFF_IN" | "$OMNI" 2>/dev/null)
+if [ "$DIFF_OUT" = "$DIFF_IN" ]; then
+    echo "  ✓ a unified diff comes back unchanged"
+    PASS=$((PASS + 1))
+else
+    echo "  ✗ a unified diff was rewritten"
+    printf '%s' "$DIFF_OUT" | sed 's/^/  out| /' | head -8
+    FAIL=$((FAIL + 1))
+fi
+TOTAL=$((TOTAL + 1))
 
 # ─── 6. SessionStart Mock ────────────────────────────────
 echo "▸ Scenario 6: SessionStart Hook"

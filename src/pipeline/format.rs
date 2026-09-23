@@ -33,6 +33,7 @@ pub enum Structured {
     Tsv,
     Csv,
     Base64,
+    Diff,
 }
 
 impl Structured {
@@ -44,6 +45,7 @@ impl Structured {
             Structured::Tsv => "tsv",
             Structured::Csv => "csv",
             Structured::Base64 => "base64",
+            Structured::Diff => "diff",
         }
     }
 }
@@ -93,12 +95,68 @@ pub fn sniff(input: &str) -> Option<Structured> {
 
     // NDJSON sits between the two JSON checks: a `{…}\n{…}` stream is bracketed like
     // a JSON document but only parses line by line.
-    sniff_json(trimmed)
+    // First, because a diff of a JSON or CSV file is a diff and nothing else, and
+    // its markers are unambiguous enough to decide that in one pass.
+    sniff_diff(trimmed)
+        .or_else(|| sniff_json(trimmed))
         .or_else(|| sniff_ndjson(trimmed))
         .or_else(|| sniff_json_shaped(trimmed))
         .or_else(|| sniff_yaml(trimmed))
         .or_else(|| sniff_delimited(trimmed))
         .or_else(|| sniff_base64(trimmed))
+}
+
+/// A unified diff is parsed by `git apply` and `patch` the way JSON is parsed by
+/// `jq`, so every stage that rewrites it produces a diff no tool accepts (#832).
+///
+/// Three things broke at once on 0.7.9: the distiller replaced the `diff --git`,
+/// `index`, `--- a/…` and `+++ b/…` header with a bare `b/…`, the ledger folded
+/// away the context lines because an earlier `cat` of the same file had shown
+/// them, and `@@ -5,7 +5,7 @@` was left claiming seven lines on each side of a
+/// hunk that now showed two. `git apply --check` answered `patch fragment
+/// without header`.
+///
+/// Guarding the changed lines is not enough and was already tried: #788 and #805
+/// report the mirror, `+`/`-` dropped and the context kept.
+///
+/// `git diff --stat` and `git show --stat` carry neither marker and are still
+/// distilled, which is the enumeration surface and a different question.
+fn sniff_diff(trimmed: &str) -> Option<Structured> {
+    let lines: Vec<&str> = trimmed.lines().map(without_ansi_prefix).collect();
+    // `diff --git` alone is decisive: `git log -p` and a saved patch both open
+    // with it, and nothing else does.
+    if lines.iter().any(|l| l.starts_with("diff --git ")) {
+        return Some(Structured::Diff);
+    }
+    // Otherwise the three header lines have to be consecutive, which they are in
+    // every `diff -u` and every `git format-patch`. Remembering them separately
+    // matched a build log that printed `--- FAIL:` early, `+++` later and `@@`
+    // later still, and passed the whole payload through (PR #835 review).
+    lines
+        .windows(3)
+        .any(|w| w[0].starts_with("--- ") && w[1].starts_with("+++ ") && w[2].starts_with("@@ -"))
+        .then_some(Structured::Diff)
+}
+
+/// The line with any leading ANSI colour sequences removed.
+///
+/// Colour survives into the payload when git is asked for it explicitly, so a
+/// painted `diff --git` would otherwise read as prose. The ledger reads hunk
+/// headers past the same colour (PR #809 review) and calls this rather than
+/// keeping a second copy (#699).
+///
+/// Slices here are proven to sit on a char boundary rather than assumed to: the
+/// escape is one ASCII byte and `find('m')` returns the index of another.
+#[allow(clippy::string_slice)]
+pub(crate) fn without_ansi_prefix(line: &str) -> &str {
+    let mut rest = line;
+    while let Some(after) = rest.strip_prefix('\u{1b}') {
+        match after.find('m') {
+            Some(end) => rest = &after[end + 1..],
+            None => return rest,
+        }
+    }
+    rest
 }
 
 /// Below this a run of the alphabet is as likely a hash or a token as a payload.
@@ -479,6 +537,63 @@ mod tests {
         for text in [names.as_str(), hashes.as_str(), prose.as_str(), "QkJD"] {
             assert_eq!(sniff(text), None, "{text}");
         }
+    }
+
+    /// #832. Every stage that rewrote a unified diff produced one no tool
+    /// accepts, so the diff joins JSON and base64 on the gate instead of getting
+    /// a guard per stage. `git apply --check` answered `patch fragment without
+    /// header` on what the pipeline delivered.
+    #[test]
+    fn a_unified_diff_refuses_every_lossy_stage() {
+        let diff = "diff --git a/sample.py b/sample.py\n\
+                    index 383e130..c8b88a1 100644\n\
+                    --- a/sample.py\n\
+                    +++ b/sample.py\n\
+                    @@ -5,7 +5,7 @@ def beta():\n\
+                    \x20    return 2\n\
+                    -    return 3\n\
+                    +    return 33\n";
+        assert_eq!(sniff(diff), Some(Structured::Diff));
+        assert!(refuses_lossy_stages(diff));
+        assert!(
+            refuses_the_ledger(diff),
+            "the ledger folded the context lines"
+        );
+
+        // No `diff --git` line: `diff -u` and a saved patch open on the header
+        // pair, and the hunk has to follow it.
+        let plain = "--- old.txt\t2026-09-01\n+++ new.txt\t2026-09-02\n@@ -1 +1 @@\n-a\n+b\n";
+        assert_eq!(sniff(plain), Some(Structured::Diff));
+
+        // Colour survives when git is asked for it, and a painted header would
+        // otherwise read as prose.
+        let painted = "\x1b[1mdiff --git a/x b/x\x1b[m\n\x1b[36m@@ -1 +1 @@\x1b[m\n-a\n+b\n";
+        assert_eq!(sniff(painted), Some(Structured::Diff));
+    }
+
+    /// The counterweight: the gate must not swallow the enumeration surfaces the
+    /// distillers exist for. `--stat` carries neither marker, and prose quoting a
+    /// hunk header has no file header above it.
+    #[test]
+    fn a_diffstat_and_a_quoted_hunk_are_not_diffs() {
+        let stat = " src/main.rs | 12 ++++++------\n src/lib.rs  |  4 ++--\n 2 files changed, 8 insertions(+), 8 deletions(-)\n";
+        assert_eq!(sniff(stat), None);
+
+        let prose = "The hunk header @@ -5,7 +5,7 @@ says seven lines.\nIt showed two.\n";
+        assert_eq!(sniff(prose), None);
+
+        // A `+++` that never had a `---` above it is a decoration, not a header.
+        let banner = "+++ release notes +++\n@@ everything changed @@\n";
+        assert_eq!(sniff(banner), None);
+
+        // The three markers in order but scattered: Go prints `--- FAIL:` per
+        // test, and a payload that happens to hold the other two further down is
+        // still a build log (PR #835 review).
+        let scattered = "--- FAIL: TestAlpha (0.00s)\n                         ok  \texample/pkg\t0.4s\n                         +++ regenerated fixtures\n                         running 3 checks\n                         @@ summary @@\n";
+        // Asked of the detector itself: `--- ` at the head also reads as a YAML
+        // document start, which claims it first in the chain and is conservative
+        // in the same direction, so `sniff` alone would not prove this.
+        assert_eq!(sniff_diff(scattered), None);
     }
 
     #[test]
