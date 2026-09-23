@@ -2315,6 +2315,7 @@ impl SqliteBackend {
         &self,
         scope: &str,
         hashes: &[String],
+        not_older_than: i64,
     ) -> std::collections::HashMap<String, SeenLine> {
         let mut found = std::collections::HashMap::new();
         let Ok(conn) = self.pool.get() else {
@@ -2333,14 +2334,19 @@ impl SqliteBackend {
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT line_hash, agent_id, source FROM ledger_lines WHERE scope = ? AND line_hash IN ({placeholders})"
+                "SELECT line_hash, agent_id, source FROM ledger_lines \
+                  WHERE scope = ? AND ts >= ? AND line_hash IN ({placeholders})"
             );
             let Ok(mut stmt) = conn.prepare_cached(&sql) else {
                 continue;
             };
-            let params: Vec<&dyn rusqlite::ToSql> = std::iter::once(&scope as &dyn rusqlite::ToSql)
-                .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
-                .collect();
+            let params: Vec<&dyn rusqlite::ToSql> = [
+                &scope as &dyn rusqlite::ToSql,
+                &not_older_than as &dyn rusqlite::ToSql,
+            ]
+            .into_iter()
+            .chain(chunk.iter().map(|h| *h as &dyn rusqlite::ToSql))
+            .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |r| {
                 Ok((
                     r.get::<_, String>(0)?,
@@ -2377,14 +2383,21 @@ impl SqliteBackend {
         };
         {
             let Ok(mut stmt) = tx.prepare_cached(
-                "INSERT OR IGNORE INTO ledger_lines (scope, line_hash, ts, agent_id, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO ledger_lines (scope, line_hash, ts, agent_id, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(scope, line_hash) DO UPDATE SET ts = excluded.ts",
             ) else {
                 return;
             };
-            // `INSERT OR IGNORE` keeps the first writer, so `source` names the
-            // command that actually showed the line rather than the last one to
-            // repeat it. That is the property the marker's claim rests on (#622).
+            // The conflict arm keeps the first writer's `agent_id` and `source`, so
+            // they still name the command that actually showed the line rather than
+            // the last one to repeat it. That is the property the marker's claim
+            // rests on (#622).
+            //
+            // `ts` is the exception and moves, because the freshness cutoff asks
+            // when these bytes last reached an agent, not when they first did
+            // (#795). Only lines this call delivered in full are passed here, so a
+            // line that was folded away cannot refresh its own sighting.
             for h in hashes {
                 let _ = stmt.execute(params![scope, h, ts, agent_id, source]);
             }

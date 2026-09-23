@@ -140,6 +140,22 @@ pub const PROJECT_FLOOR_MULT: usize = 3;
 /// 1 KB is the top of the measured range rather than a knee. Nothing above it was
 /// observed either way, so this floors what is known to lose and leaves the rest
 /// folding. n=4, one machine, window bounded by the 2026-08-11 store reset.
+/// How old a line may be and still be folded from the **project** scope.
+///
+/// The project scope is the one claim the reader cannot check: those lines went
+/// to another session, and the marker says so. What makes it a fair bet is that
+/// the other session is alive, or was minutes ago, so the bytes are still what
+/// this repository is about. A day-old sighting is a different claim, and #795
+/// is what it costs: a `grep` folded 9 of 11 matches against a session from the
+/// previous day, naming a directory that no longer existed.
+///
+/// Six hours because the cost is measured rather than guessed. Over 734
+/// project-scope folds in 30 days of this machine's store, the freshest line in
+/// the scope at fold time was 0 seconds old at the median, 259 at p99 and 1,178
+/// at the maximum, so a bound twenty times the worst case refuses nothing that
+/// was recorded.
+pub const PROJECT_SIGHTING_MAX_AGE_SECS: i64 = 6 * 3600;
+
 pub const MIN_WHOLE_OUTPUT_FOLD: usize = 1024;
 
 /// Output must be under this percentage of the input to count as a real
