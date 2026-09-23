@@ -220,7 +220,7 @@ sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
   Twentyfold in one column, flat in the other, and only one of those two is a fact
   about OMNI.
 * **This corpus does not expire.** It is frozen on disk and its hash is in
-  `docs/benchmarks/0.7.9.json`, so the numbers above can be checked against the
+  `docs/benchmarks/0.7.10.json`, so the numbers above can be checked against the
   same bytes next release instead of against whatever the last seven days held.
   Run the harness on your own history for a figure about your workload.
 * **It hands bytes back rather than inventing a saving.** Where there is nothing

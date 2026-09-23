@@ -143,7 +143,7 @@ tidak ikut terhapus.
   satu kolom, datar di kolom lain, dan hanya satu dari keduanya yang merupakan fakta
   tentang OMNI.
 * **Korpus ini tidak kedaluwarsa.** Ia beku di disk dan hash-nya ada di
-  `docs/benchmarks/0.7.9.json`, jadi angka di atas bisa diperiksa terhadap byte yang
+  `docs/benchmarks/0.7.10.json`, jadi angka di atas bisa diperiksa terhadap byte yang
   sama di rilis berikutnya, bukan terhadap apa pun yang tersisa dari tujuh hari
   terakhir. Jalankan harness-nya di riwayat Anda sendiri untuk angka tentang beban
   kerja Anda.
