@@ -3852,8 +3852,13 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         }
     }
 
+    /// #832 reverses what this test used to assert. A unified diff is parsed by
+    /// `git apply` and `patch`, and every rewrite of it produced a diff no tool
+    /// accepts: the header replaced by a bare `b/test.txt`, the context lines
+    /// folded away, and `@@ -1,1 +1,2 @@` left claiming counts the hunk no longer
+    /// showed.
     #[test]
-    fn bash_tool_with_git_diff_output() {
+    fn a_git_diff_is_delivered_unchanged() {
         let diff_str = "diff --git a/test.txt b/test.txt\nindex 123..456 100644\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n+new line 2\n".to_string();
 
         let mut big_diff = diff_str.clone();
@@ -3869,12 +3874,10 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
                 "content": big_diff
             }
         });
-        let out = process_payload(&input.to_string(), None, None);
-        assert!(out.is_some());
-        let res = out.expect("must succeed");
-        assert!(res.contains("hookEventName"));
-        assert!(res.contains("PostToolUse"));
-        assert!(res.contains("test.txt"));
+        assert!(
+            process_payload(&input.to_string(), None, None).is_none(),
+            "a unified diff was rewritten"
+        );
     }
 
     #[test]
@@ -5084,15 +5087,17 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
 
     #[test]
     fn prefers_content_field_over_stdout() {
-        let mut big_diff = "diff --git a/test.txt b/test.txt\nindex 123..456 100644\n--- a/test.txt\n+++ b/test.txt\n@@ -1,1 +1,2 @@\n-old\n+new line 1\n+new line 2\n".to_string();
-        for _ in 0..50 {
-            big_diff.push_str(" \n");
+        // Not a diff: since #832 one passes through, and this test is about which
+        // field is read, not about diffs.
+        let mut noisy = "build started\nERROR: disk full on node 7\nbuild finished\n".to_string();
+        for _ in 0..400 {
+            noisy.push_str(" \n");
         }
         let input = json!({
             "tool_name": "Bash",
-            "tool_input": { "command": "git diff" },
+            "tool_input": { "command": "cargo build" },
             "tool_response": {
-                "content": big_diff,
+                "content": noisy,
                 "stdout": "should be ignored when content is present"
             }
         });
@@ -5100,8 +5105,12 @@ src/distillers/system_ops.rs:849:                is_sensitive_key(key),
         assert!(out.is_some());
         let res = out.expect("must succeed");
         assert!(
-            res.contains("test.txt"),
+            res.contains("disk full on node 7"),
             "content field should be used, not stdout"
+        );
+        assert!(
+            !res.contains("should be ignored"),
+            "stdout was read while content was present"
         );
     }
 
