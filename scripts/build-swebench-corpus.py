@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -69,6 +70,34 @@ def get(url, tries=5):
             wait = 2**attempt
             print(f"  {e}, retrying in {wait}s", file=sys.stderr)
             time.sleep(wait)
+
+
+def fetch_all():
+    """Every row, so a selection can be made by name rather than by position."""
+    rows = []
+    while len(rows) < 500:
+        url = ROWS.format(offset=len(rows), length=min(100, 500 - len(rows)))
+        page = json.loads(get(url))["rows"]
+        if not page:
+            break
+        rows.extend(row["row"] for row in page)
+    return rows
+
+
+def fetch_by_id(ids):
+    """The rows a previous build used, in the order that build used them.
+
+    Selecting by position is not a pinning: the dataset is live, and a row edited
+    or reordered upstream changes what `--instances 40 --stride 12` picks while
+    the manifest still claims the same source (PR #841 review). The instance list
+    in the manifest is the input, so a rebuild reads it rather than re-deriving
+    the same guess.
+    """
+    by_id = {r["instance_id"]: r for r in fetch_all()}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        sys.exit(f"instances no longer in the dataset: {', '.join(missing)}")
+    return [by_id[i] for i in ids]
 
 
 def fetch_instances(count, offset, stride):
@@ -154,19 +183,24 @@ def commands_for(inst):
     files = patched_files(inst["patch"])
     if not files:
         return []
-    pkg = files[0].split("/")[0]
-    sym = symbol(inst["patch"], files)
+    # Quoted, every one. These are paths and identifiers out of an HTTP response
+    # being interpolated into `bash -c`, and a row carrying a shell
+    # metacharacter would run whatever it liked as the person building the corpus
+    # (PR #841 review). The shell stays because the pipes are the point.
+    pkg = shlex.quote(files[0].split("/")[0])
+    sym = shlex.quote(symbol(inst["patch"], files))
+    paths = [shlex.quote(f) for f in files]
     cmds = [
         "git log --oneline -10",
         "git show --stat HEAD",
         f"find {pkg} -name '*.py' | sort | head -50",
-        f"grep -rn '{sym}' --include='*.py' {pkg} | sort | head -40",
+        f"grep -rn {sym} --include='*.py' {pkg} | sort | head -40",
     ]
     # The files themselves, which is where the bytes are, capped so one enormous
     # instance cannot dominate the corpus.
-    cmds += [f"cat {f}" for f in files[:3]]
+    cmds += [f"cat {f}" for f in paths[:3]]
     # A window into the first one, the shape a `Read` with offset and limit takes.
-    cmds.append(f"sed -n '1,120p' {files[0]}")
+    cmds.append(f"sed -n '1,120p' {paths[0]}")
     cmds.append("git diff --stat HEAD~1 HEAD")
     return cmds
 
@@ -183,7 +217,12 @@ def build(args):
     os.makedirs(cache, exist_ok=True)
     os.makedirs(args.out, exist_ok=True)
 
-    instances = fetch_instances(args.instances, args.offset, args.stride)
+    if args.from_manifest:
+        ids = json.load(open(args.from_manifest))["instances"]
+        instances = fetch_by_id(ids)
+        print(f"rebuilding the {len(ids)} instances named in the manifest", file=sys.stderr)
+    else:
+        instances = fetch_instances(args.instances, args.offset, args.stride)
     print(f"{len(instances)} instances from SWE-bench Verified", file=sys.stderr)
 
     traces, entries = [], []
@@ -215,6 +254,11 @@ def build(args):
             payload = run(cmd, work).replace(work, MOUNT)
             if not payload:
                 continue
+            # Encoded once. `len()` on a `str` counts characters, and every size
+            # here is compared against byte gates and against a Rust pipeline that
+            # counts bytes, so a source file with one accented identifier would
+            # undercount and could land in the wrong bucket (PR #841 review).
+            size = len(payload.encode())
             trace_id += 1
             traces.append(
                 {
@@ -231,14 +275,14 @@ def build(args):
                 }
             )
             klass = cmd.split()[0]
-            class_bytes[klass] += len(payload)
+            class_bytes[klass] += size
             entries.append(
                 {
                     "id": trace_id,
                     "seq": seq,
                     "class": klass,
-                    "bytes": len(payload),
-                    "bucket": bucket_of(len(payload)),
+                    "bytes": size,
+                    "bucket": bucket_of(size),
                     "sha256": hashlib.sha256(payload.encode()).hexdigest(),
                 }
             )
@@ -256,7 +300,7 @@ def build(args):
         "instances": used,
         "traces": len(traces),
         "sessions": len(used),
-        "bytes": sum(len(t["payload"]) for t in traces),
+        "bytes": sum(len(t["payload"].encode()) for t in traces),
         "buckets": [list(b) for b in BUCKETS],
         "class_bytes": dict(sorted(class_bytes.items())),
         "entries": entries,
@@ -283,6 +327,10 @@ def main():
     ap.add_argument("--instances", type=int, default=20)
     ap.add_argument("--offset", type=int, default=0)
     ap.add_argument("--stride", type=int, default=1)
+    ap.add_argument(
+        "--from-manifest",
+        help="rebuild exactly the instances a previous manifest names",
+    )
     ap.add_argument("--out", default="swebench-corpus")
     ap.add_argument("--cache", default="~/.cache/omni-swebench")
     build(ap.parse_args())
