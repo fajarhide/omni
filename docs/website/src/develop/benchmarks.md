@@ -148,8 +148,10 @@ above our own stack: the ledger is identical in all three rows and only the filt
 underneath it differ.
 
 Both of our rows fell from 0.7.9, where they read 3.0% and 1.4%. That is #815 and #832
-refusing folds and rewrites that were producing a wrong answer, not the engine getting
-worse, and the gap to headroom widened by the same amount.
+refusing folds and rewrites that were producing a wrong answer, rather than the engine
+getting worse. headroom's row fell with them, 5.8% to 5.0%, because that arm runs its
+dedup over our filters, so the gap between the two ledgers narrowed slightly, 2.8 points
+to 2.6.
 
 lean-ctx beating our filters by 4.0 points is the largest single gap here and it is not
 argued away. It is a deep compressor rather than a per-command filter, and the same

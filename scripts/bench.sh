@@ -93,7 +93,7 @@ mkdir -p "$OUT_DIR"
 # to read is the failure mode this whole ticket is about.
 python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" "${ARMS_RUN[*]:-}" \
   "${ARMS_ABSENT[*]:-}" "$SUFFIX" <<'PY'
-import json, re, sys
+import json, os, re, sys
 
 log, manifest_path, version, commit, out_dir, dirty, arms_run, arms_absent = sys.argv[1:9]
 # The corpus names the file, never the version: `OMNI 0.7.9-swebench-corpus` read
@@ -320,6 +320,13 @@ required = dict(report["result"])
 # than a failed read. Required whenever an arm was asked for, and only then.
 if not arms_run.split():
     required.pop("arms", None)
+# `OMNI_BENCH_NO_TOKENS=1` tells the replay to skip tokenization, which is the slow
+# half and a documented way to run this. Absent totals are the correct answer there,
+# and requiring them aborted the whole bench without writing an artifact, for a
+# measurement that is about bytes (PR #843 review).
+if os.environ.get("OMNI_BENCH_NO_TOKENS"):
+    required.pop("tokens_before", None)
+    required.pop("tokens_after", None)
 missing = [k for k, v in required.items() if v is None or v == {}]
 if missing:
     sys.exit(f"replay output did not carry: {', '.join(missing)}")
