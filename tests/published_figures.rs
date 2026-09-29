@@ -317,30 +317,64 @@ fn region_matches_its_artifact(data: &serde_json::Value, start: &str, end: &str)
 /// #842. The benchmarks page regenerates its table from the artifact and hand
 /// writes the sentence above it, so the two drifted a whole release apart: the
 /// table said 0.7.10 while the prose still said "1.4% from the filters. 3.0% with
-/// the ledger", along with three other figures from the previous corpus run.
+/// the ledger", along with four other figures from the previous corpus run.
 ///
-/// Coupled to the sentence's shape on purpose. That is the claim, and it has worn
-/// the same shape for three releases; a rewording that breaks this test is a
-/// rewording of the claim, which is exactly when someone should look at it.
+/// Scoped to the headline, not to the page. The page is an archive and carries
+/// `0.0% from the filters` and `69.6% with the ledger` from older runs, so a
+/// whole-page search would pass on a historical sentence while the current one
+/// stayed stale (PR #843 review).
+///
+/// All five figures, not the two that happened to be in the artifact. The other
+/// three are recorded there now for this, because a test that holds half a
+/// sentence lets the other half drift exactly the way this one did.
 #[test]
-fn the_benchmarks_prose_states_the_current_artifact() {
+fn the_benchmarks_headline_states_the_current_artifact() {
     let data = artifact();
     let page = read(&root().join("docs/website/src/develop/benchmarks.md"));
+    // The page is organised one section per run, so the current run's section is
+    // everything after the last `## ` heading before the generated table. Taking
+    // the nearest paragraph instead picks whichever note was added last, and the
+    // whole page matches a retired sentence from a section two runs old.
+    let above = page
+        .split_once("<!-- omni:corpus-table:start -->")
+        .expect("benchmarks.md carries the generated region")
+        .0;
+    let headline = above
+        .rsplit("\n## ")
+        .next()
+        .expect("a section heading above the table");
+
     let agg = &data["result"]["by_class"]["aggregate"];
-    for (pct, tail) in [
-        (
+    let r = &data["result"];
+    let mut claims = vec![
+        format!(
+            "{:.1}% {}",
             agg["filters_pct"].as_f64().unwrap_or(-1.0),
-            "from the filters",
+            "from the filters"
         ),
-        (
+        format!(
+            "{:.1}% {}",
             agg["with_ledger_pct"].as_f64().unwrap_or(-1.0),
-            "with the ledger",
+            "with the ledger"
         ),
-    ] {
-        let claim = format!("{pct:.1}% {tail}");
+    ];
+    // Absent from an artifact written before #842, and skipped rather than
+    // failed: an old artifact is a stale measurement, not a stale claim.
+    if let Some(v) = r["saved_nothing_pct"].as_f64() {
+        claims.push(format!("{v:.1}% of calls saved"));
+    }
+    if let Some(v) = r["shrank_pct"].as_f64() {
+        claims.push(format!("{v:.1}% shrank"));
+    }
+    if let (Some(a), Some(b)) = (r["tokens_before"].as_u64(), r["tokens_after"].as_u64()) {
+        claims.push(format!("{} to {}", commas(a), commas(b)));
+    }
+
+    for claim in claims {
         assert!(
-            page.contains(&claim),
-            "benchmarks.md does not state `{claim}`; its prose is behind the artifact"
+            headline.contains(&claim),
+            "the benchmarks headline does not state `{claim}`; its prose is behind \
+             the artifact:\n{headline}"
         );
     }
 }

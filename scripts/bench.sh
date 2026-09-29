@@ -290,6 +290,15 @@ report = {
         "traces_replayed": whole(r"corpus:\s+(\d+) traces"),
         "repeated_bytes_pct": num(r"repeated bytes handed to the ledger: \d+ \(([\d.]+)%"),
         "ledger_claimed_pct": num(r"claimed by the ledger:\s+\d+ \(([\d.]+)%"),
+        # #842. The page's hand-written headline quotes these four beside the two
+        # above, and only the two were in the artifact, so a test could hold half
+        # the sentence and the other half drifted a release without anyone seeing.
+        # Recorded here so the whole claim is checkable rather than half of it.
+        "saved_nothing_pct": num(r"saved nothing:\s+([\d.]+)%"),
+        "grew_calls": whole(r"saved nothing:.*\+ (\d+) grew"),
+        "shrank_pct": num(r"actually shrank:\s+([\d.]+)%"),
+        "tokens_before": whole(r"\ntokens:\s+(\d+) ->"),
+        "tokens_after": whole(r"\ntokens:\s+\d+ -> (\d+)"),
         # #708. Per class, and `captured` is the one that does not move with the
         # workload: on this corpus file reads save 4.5% where a week of large
         # repeated reads read 89.6%, while the share of available repetition the

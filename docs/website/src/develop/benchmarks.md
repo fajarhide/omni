@@ -139,15 +139,19 @@ a subcommand it knows, so it falls through to shrink mode and hands back the inp
 that works (#712).
 
 **On this corpus OMNI is last of the four rows that carry a ledger, and both halves are
-behind.** headroom's dedup takes 5.8% where ours takes 3.0% over identical filters and
-identical blocks, so that 2.8 points is the dedup engine alone. It read 0.9 points until
+behind.** headroom's dedup takes 5.0% where ours takes 2.4% over identical filters and
+identical blocks, so that 2.6 points is the dedup engine alone. It read 0.9 points until
 #760, which is the correction at the top of this page and not a change in the code. Our filter tier is the
-weakest of the four at 1.4%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
+weakest of the four at 0.8%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
 and that shortfall is what carries `rtk + omni's ledger` and `caveman + omni's ledger`
 above our own stack: the ledger is identical in all three rows and only the filters
 underneath it differ.
 
-lean-ctx beating our filters by 3.4 points is the largest single gap here and it is not
+Both of our rows fell from 0.7.9, where they read 3.0% and 1.4%. That is #815 and #832
+refusing folds and rewrites that were producing a wrong answer, not the engine getting
+worse, and the gap to headroom widened by the same amount.
+
+lean-ctx beating our filters by 4.0 points is the largest single gap here and it is not
 argued away. It is a deep compressor rather than a per-command filter, and the same
 shape showed up on the 0.7.5 corpus below at a much larger magnitude.
 
