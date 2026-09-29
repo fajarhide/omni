@@ -64,10 +64,25 @@ at seven days, so none of them can be re-derived. This one is a file. That is th
 of #704: a release-over-release delta was previously a code change and a corpus change
 added together, with no way to separate them.
 
-**1.4% from the filters. 3.0% with the ledger**, the second re-measured under #760;
-this section first published 5.1%. 98.4% of calls saved nothing, 1.6%
-shrank, and **no call came back larger**. Tokens, `cl100k_base` as a proxy for a
-vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
+**0.8% from the filters. 2.4% with the ledger**, on 0.7.10. 98.8% of calls saved
+nothing, 1.2% shrank, and **no call came back larger**. Tokens, `cl100k_base` as a
+proxy for a vocabulary Anthropic does not publish: 2,404,625 to 2,384,061, 0.9%.
+
+Both numbers fell from 0.7.9, where they read 1.4% and 3.0%, and that is the
+release rather than a regression: 0.7.10 closed thirteen classes of false claim,
+and every point given up was being earned by a fold that should not have been
+made. The ledger arm was itself re-measured under #760, and this section first
+published 5.1%.
+
+**`search` reads 0.0% captured, and that is a refusal rather than a failure.** The
+class was 10.2% on 0.7.9. #814 reported what those folds were: a `grep` reply with
+9 of its 11 matches behind a handle, which reads as a file with two matches. #815
+made a `grep` reply fold whole or not at all, and a whole fold needs the identical
+reply to have been printed before. This corpus contains no repeat of a `grep`
+command inside one session, across 1,069 `grep`, `rg` and `ag` traces, so nothing
+in it qualifies any more. The refusal cost 4.6 KB over 810 calls, 0.054% of
+the corpus. Checked against the 0.7.10 binary, an identical re-run still folds to
+one marker and a partially-seen reply now folds nothing.
 
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
@@ -124,15 +139,21 @@ a subcommand it knows, so it falls through to shrink mode and hands back the inp
 that works (#712).
 
 **On this corpus OMNI is last of the four rows that carry a ledger, and both halves are
-behind.** headroom's dedup takes 5.8% where ours takes 3.0% over identical filters and
-identical blocks, so that 2.8 points is the dedup engine alone. It read 0.9 points until
+behind.** headroom's dedup takes 5.0% where ours takes 2.4% over identical filters and
+identical blocks, so that 2.6 points is the dedup engine alone. It read 0.9 points until
 #760, which is the correction at the top of this page and not a change in the code. Our filter tier is the
-weakest of the four at 1.4%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
+weakest of the four at 0.8%, against 2.1% for rtk and caveman and 4.8% for lean-ctx,
 and that shortfall is what carries `rtk + omni's ledger` and `caveman + omni's ledger`
 above our own stack: the ledger is identical in all three rows and only the filters
 underneath it differ.
 
-lean-ctx beating our filters by 3.4 points is the largest single gap here and it is not
+Both of our rows fell from 0.7.9, where they read 3.0% and 1.4%. That is #815 and #832
+refusing folds and rewrites that were producing a wrong answer, rather than the engine
+getting worse. headroom's row fell with them, 5.8% to 5.0%, because that arm runs its
+dedup over our filters, so the gap between the two ledgers narrowed slightly, 2.8 points
+to 2.6.
+
+lean-ctx beating our filters by 4.0 points is the largest single gap here and it is not
 argued away. It is a deep compressor rather than a per-command filter, and the same
 shape showed up on the 0.7.5 corpus below at a much larger magnitude.
 

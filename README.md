@@ -236,7 +236,11 @@ sessions, frozen and hashed as `0b63218ef78a1edb` so it survives the pruning:
   not a promise, and some sessions did not fall at all.
 
 Per class, with what the filters take, what the ledger adds, and how much of the
-repetition that was there it actually took:
+repetition that was there it actually took. `search` captures **0.0%** and that is
+a refusal, not a failure: a `grep` reply folds whole or not at all since
+[#815](https://github.com/fajarhide/omni/issues/815), because folding 9 of 11
+matches reads as a file with two, and nothing in this corpus is an identical
+re-run. It cost 4.6 KB across 810 calls.
 
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |

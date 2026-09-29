@@ -93,7 +93,7 @@ mkdir -p "$OUT_DIR"
 # to read is the failure mode this whole ticket is about.
 python3 - "$LOG" "$MANIFEST" "$VERSION" "$COMMIT" "$OUT_DIR" "$DIRTY" "${ARMS_RUN[*]:-}" \
   "${ARMS_ABSENT[*]:-}" "$SUFFIX" <<'PY'
-import json, re, sys
+import json, os, re, sys
 
 log, manifest_path, version, commit, out_dir, dirty, arms_run, arms_absent = sys.argv[1:9]
 # The corpus names the file, never the version: `OMNI 0.7.9-swebench-corpus` read
@@ -290,6 +290,15 @@ report = {
         "traces_replayed": whole(r"corpus:\s+(\d+) traces"),
         "repeated_bytes_pct": num(r"repeated bytes handed to the ledger: \d+ \(([\d.]+)%"),
         "ledger_claimed_pct": num(r"claimed by the ledger:\s+\d+ \(([\d.]+)%"),
+        # #842. The page's hand-written headline quotes these four beside the two
+        # above, and only the two were in the artifact, so a test could hold half
+        # the sentence and the other half drifted a release without anyone seeing.
+        # Recorded here so the whole claim is checkable rather than half of it.
+        "saved_nothing_pct": num(r"saved nothing:\s+([\d.]+)%"),
+        "grew_calls": whole(r"saved nothing:.*\+ (\d+) grew"),
+        "shrank_pct": num(r"actually shrank:\s+([\d.]+)%"),
+        "tokens_before": whole(r"\ntokens:\s+(\d+) ->"),
+        "tokens_after": whole(r"\ntokens:\s+\d+ -> (\d+)"),
         # #708. Per class, and `captured` is the one that does not move with the
         # workload: on this corpus file reads save 4.5% where a week of large
         # repeated reads read 89.6%, while the share of available repetition the
@@ -311,6 +320,13 @@ required = dict(report["result"])
 # than a failed read. Required whenever an arm was asked for, and only then.
 if not arms_run.split():
     required.pop("arms", None)
+# `OMNI_BENCH_NO_TOKENS=1` tells the replay to skip tokenization, which is the slow
+# half and a documented way to run this. Absent totals are the correct answer there,
+# and requiring them aborted the whole bench without writing an artifact, for a
+# measurement that is about bytes (PR #843 review).
+if os.environ.get("OMNI_BENCH_NO_TOKENS"):
+    required.pop("tokens_before", None)
+    required.pop("tokens_after", None)
 missing = [k for k, v in required.items() if v is None or v == {}]
 if missing:
     sys.exit(f"replay output did not carry: {', '.join(missing)}")

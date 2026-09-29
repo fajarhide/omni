@@ -1,5 +1,5 @@
 {
-  "commit": "01f3320",
+  "commit": "6dcb7d1",
   "corpus": {
     "buckets": [
       [
@@ -149,9 +149,14 @@
         "with_ledger_pct": 3.4
       }
     },
+    "grew_calls": 0,
     "ledger_claimed_pct": 1.6,
     "net_savings_pct": 0.8,
     "repeated_bytes_pct": 15.6,
+    "saved_nothing_pct": 98.8,
+    "shrank_pct": 1.2,
+    "tokens_after": 2384061,
+    "tokens_before": 2404625,
     "traces_replayed": 9478
   },
   "version": "0.7.10"
