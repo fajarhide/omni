@@ -314,6 +314,37 @@ fn region_matches_its_artifact(data: &serde_json::Value, start: &str, end: &str)
     );
 }
 
+/// #842. The benchmarks page regenerates its table from the artifact and hand
+/// writes the sentence above it, so the two drifted a whole release apart: the
+/// table said 0.7.10 while the prose still said "1.4% from the filters. 3.0% with
+/// the ledger", along with three other figures from the previous corpus run.
+///
+/// Coupled to the sentence's shape on purpose. That is the claim, and it has worn
+/// the same shape for three releases; a rewording that breaks this test is a
+/// rewording of the claim, which is exactly when someone should look at it.
+#[test]
+fn the_benchmarks_prose_states_the_current_artifact() {
+    let data = artifact();
+    let page = read(&root().join("docs/website/src/develop/benchmarks.md"));
+    let agg = &data["result"]["by_class"]["aggregate"];
+    for (pct, tail) in [
+        (
+            agg["filters_pct"].as_f64().unwrap_or(-1.0),
+            "from the filters",
+        ),
+        (
+            agg["with_ledger_pct"].as_f64().unwrap_or(-1.0),
+            "with the ledger",
+        ),
+    ] {
+        let claim = format!("{pct:.1}% {tail}");
+        assert!(
+            page.contains(&claim),
+            "benchmarks.md does not state `{claim}`; its prose is behind the artifact"
+        );
+    }
+}
+
 /// `1056` as `1,056`, matching how the generator writes a count.
 fn commas(n: u64) -> String {
     let digits = n.to_string();

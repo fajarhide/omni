@@ -64,10 +64,25 @@ at seven days, so none of them can be re-derived. This one is a file. That is th
 of #704: a release-over-release delta was previously a code change and a corpus change
 added together, with no way to separate them.
 
-**1.4% from the filters. 3.0% with the ledger**, the second re-measured under #760;
-this section first published 5.1%. 98.4% of calls saved nothing, 1.6%
-shrank, and **no call came back larger**. Tokens, `cl100k_base` as a proxy for a
-vocabulary Anthropic does not publish: 2,404,625 to 2,372,043, also 1.4%.
+**0.8% from the filters. 2.4% with the ledger**, on 0.7.10. 98.8% of calls saved
+nothing, 1.2% shrank, and **no call came back larger**. Tokens, `cl100k_base` as a
+proxy for a vocabulary Anthropic does not publish: 2,404,625 to 2,384,061, 0.9%.
+
+Both numbers fell from 0.7.9, where they read 1.4% and 3.0%, and that is the
+release rather than a regression: 0.7.10 closed thirteen classes of false claim,
+and every point given up was being earned by a fold that should not have been
+made. The ledger arm was itself re-measured under #760, and this section first
+published 5.1%.
+
+**`search` reads 0.0% captured, and that is a refusal rather than a failure.** The
+class was 10.2% on 0.7.9. #814 reported what those folds were: a `grep` reply with
+9 of its 11 matches behind a handle, which reads as a file with two matches. #815
+made a `grep` reply fold whole or not at all, and a whole fold needs the identical
+reply to have been printed before. This corpus contains no repeat of a `grep`
+command inside one session, across 1,069 `grep`, `rg` and `ag` traces, so nothing
+in it qualifies any more. The refusal cost 4.6 KB over 810 calls, 0.054% of
+the corpus. Checked against the 0.7.10 binary, an identical re-run still folds to
+one marker and a partially-seen reply now folds nothing.
 
 <!-- omni:corpus-table:start -->
 | Class | Calls | Input | Filters | + ledger | Available | Captured |
