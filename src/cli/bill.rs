@@ -89,15 +89,29 @@ pub fn read(root: &Path, since: i64) -> Bill {
             if record["isSidechain"].as_bool() == Some(true) {
                 continue;
             }
+            let message = &record["message"];
+            if !message.is_object() {
+                continue;
+            }
             if record["timestamp"]
                 .as_str()
                 .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                 .is_some_and(|t| t.timestamp() < since)
             {
-                continue;
-            }
-            let message = &record["message"];
-            if !message.is_object() {
+                // Outside the window, so nothing here is counted. A call that
+                // started before the window can still finish inside it, and its
+                // result is matched against these two ids.
+                if let Some(id) = record["requestId"].as_str() {
+                    seen_requests.insert(id.to_string());
+                }
+                for block in message["content"].as_array().into_iter().flatten() {
+                    if block["type"] == "tool_use"
+                        && let (Some(id), Some(name)) =
+                            (block["id"].as_str(), block["name"].as_str())
+                    {
+                        tool_of.insert(id.to_string(), name.to_string());
+                    }
+                }
                 continue;
             }
             if let Some(id) = record["sessionId"].as_str() {
@@ -298,6 +312,38 @@ mod tests {
 
         assert_eq!(bill.requests, 1);
         assert_eq!(bill.text_bytes, 4);
+    }
+
+    #[test]
+    fn a_call_that_straddles_the_window_keeps_its_name_and_is_not_billed_twice() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let before = "2026-01-01T00:00:00.000Z";
+        let call = r#"{"type":"tool_use","id":"t1","name":"Read","input":{}}"#;
+        transcript(
+            dir.path(),
+            "a.jsonl",
+            &[
+                assistant("r1", call, "").replace(NOW, before),
+                // The same request, written again after the boundary.
+                assistant("r1", r#"{"type":"text","text":"late"}"#, ""),
+                tool_result("t1", "0123456789"),
+            ],
+        );
+        let since = chrono::DateTime::parse_from_rfc3339("2026-10-01T00:00:00Z")
+            .expect("a literal date")
+            .timestamp();
+        let bill = read(dir.path(), since);
+
+        assert_eq!(bill.requests, 0, "the request was made before the window");
+        assert_eq!(
+            bill.tools,
+            vec![ToolRow {
+                name: "Read".into(),
+                calls: 0,
+                result_bytes: 10
+            }],
+            "the result landed in the window, under the tool the transcript names"
+        );
     }
 
     #[test]

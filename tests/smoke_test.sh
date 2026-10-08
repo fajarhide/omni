@@ -340,7 +340,9 @@ check "folds view says why it is empty" "$FOLDS_OUT" "No marker recorded"
 check "calibration is accepted too" "$($OMNI stats --view calibration 2>&1 || true)" "OMNI . folds"
 # #859. Pointed at an empty config dir so the run reads no real transcript: the
 # check is that the arm dispatches and says why it is empty, in under a second.
-BILL_OUT="$(CLAUDE_CONFIG_DIR="$(mktemp -d)" $OMNI stats --view bill 2>&1 || true)"
+BILL_HOME="$(mktemp -d)"
+BILL_OUT="$(CLAUDE_CONFIG_DIR="$BILL_HOME" $OMNI stats --view bill 2>&1 || true)"
+rm -rf "$BILL_HOME"
 check "bill view renders" "$BILL_OUT" "OMNI . bill"
 check "bill view says why it is empty" "$BILL_OUT" "No host transcript"
 
