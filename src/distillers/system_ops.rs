@@ -827,8 +827,52 @@ fn quoted_value(value: &str) -> Option<(char, &str, &str)> {
 fn redact_line(line: &str) -> Option<(String, u32)> {
     match redact_shell_words(line) {
         Some(words) => words,
-        None => redact_whole_value(line),
+        None => redact_whole_value(line).or_else(|| redact_later_credential(line)),
     }
+}
+
+/// A credential behind an ordinary assignment, on a line the word rule would
+/// not split. Hidden from its `=` to the end of the line.
+///
+/// When a quote or an escaped space stops the word rule, the whole-value rule
+/// takes over, and it reads only the first `=`. So
+/// `APP_ROOT=/tmp APP_TOKEN=abc ./app a\ b &` was delivered whole (review of
+/// #865). Nothing here ends a value at whitespace, so it can only hide more.
+///
+/// Two narrowings, both against a false positive this file has shipped before:
+///
+/// - **The line has to open with an assignment.** A log line such as
+///   `INFO done token=abc user=bob` is not this rule's to judge, and was never
+///   redacted.
+/// - **The word alone has to read as a credential first.** Judged on the rest
+///   of the line, `pass=3 fail=0` is no longer a count, which is #559 again.
+///
+/// The offsets are sums of whole pieces from `split_inclusive`, and the key is
+/// ASCII by `shell_assignment`, so each slice sits on a char boundary.
+#[allow(clippy::string_slice)]
+fn redact_later_credential(line: &str) -> Option<(String, u32)> {
+    let first = line.split_whitespace().find(|w| *w != "export")?;
+    shell_assignment(first)?;
+
+    let mut offset = 0;
+    let mut first = true;
+    for piece in line.split_inclusive(char::is_whitespace) {
+        let assignment = shell_assignment(piece.trim_end());
+        let later = !first;
+        first &= assignment.is_none();
+        if let Some((key, value)) = assignment
+            && !(later && is_status_like(value))
+            && redact_assignment(key, value).is_some()
+        {
+            let lead = piece.len() - piece.trim_start().len();
+            let value_at = offset + lead + key.len() + 1;
+            let hidden = redact_assignment(key, &line[value_at..])
+                .unwrap_or_else(|| "[REDACTED]".to_string());
+            return Some((format!("{}{hidden}", &line[..value_at]), 1));
+        }
+        offset += piece.len();
+    }
+    None
 }
 
 /// The rule for a line that is one assignment: everything after the first `=`
@@ -895,11 +939,12 @@ fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
     // Rebuilt piece by piece so the spacing between words survives as written.
     let mut out = String::with_capacity(line.len());
     let mut redacted = 0u32;
+    let mut first = true;
     for piece in line.split_inclusive(char::is_whitespace) {
         let word = piece.trim_end();
-        match shell_assignment(word)
-            .and_then(|(key, value)| Some((key, redact_assignment(key, value)?)))
-        {
+        let found = shell_assignment(word).filter(|(_, value)| first || !is_status_like(value));
+        first &= shell_assignment(word).is_none();
+        match found.and_then(|(key, value)| Some((key, redact_assignment(key, value)?))) {
             Some((key, replacement)) => {
                 redacted += 1;
                 out.push_str(key);
@@ -911,6 +956,18 @@ fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
         }
     }
     Some((redacted > 0).then_some((out, redacted)))
+}
+
+/// A status code or a small count, which is what `auth=302` holds on a line
+/// such as `front=200 auth=302`.
+///
+/// Both rules below look at assignments the whole-value rule never reached,
+/// and over 3,756 recorded traces the only lines that changed were three of
+/// that shape, each losing the status it was printed for. Three digits is the
+/// whole exemption: `APP_TOKEN=1234` stays hidden, and the first assignment on
+/// a line is judged as it always was.
+fn is_status_like(value: &str) -> bool {
+    (1..=3).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `NAME=value` as the shell reads a word: a name, an `=`, and whatever follows.
@@ -1135,6 +1192,46 @@ mod tests {
         let out = distill_env_output("HOME=/root\nDB_PASSWORD=correct B=horse &\n");
         assert!(out.contains("DB_PASSWORD=[REDACTED]"), "{out}");
         assert!(!out.contains("horse"), "{out}");
+    }
+
+    /// Review of #865. A line the word rule will not split still has to hide a
+    /// credential that sits behind an ordinary assignment.
+    #[test]
+    fn a_later_credential_is_hidden_on_a_line_that_cannot_be_split() {
+        for line in [
+            "APP_ROOT=/tmp APP_TOKEN=abc12345 ./app a\\ b &",
+            "APP_ROOT=/tmp APP_TOKEN=\"abc12345 def\" ./app",
+        ] {
+            let out = redact_sensitive_assignments(line).expect("the token is a credential");
+            assert!(!out.contains("abc12345"), "{line} came back as {out}");
+            assert!(out.contains("APP_ROOT=/tmp APP_TOKEN="), "{out}");
+        }
+        // Not a count once the rest of the line is read as its value (#559).
+        assert_eq!(
+            redact_sensitive_assignments("name=\"x y\" pass=3 fail=0"),
+            None
+        );
+        // A log line does not open with an assignment and is not this rule's.
+        assert_eq!(
+            redact_sensitive_assignments("INFO done token=abc12345 user=bob"),
+            None
+        );
+    }
+
+    /// Found by replaying the recorded corpus: a status behind an ordinary
+    /// assignment is not a credential, and four digits still is.
+    #[test]
+    fn a_status_code_behind_another_assignment_is_delivered() {
+        assert_eq!(redact_sensitive_assignments("front=200 auth=302"), None);
+        assert_eq!(
+            redact_sensitive_assignments("  name=\"x y\" auth=302 ok"),
+            None
+        );
+        let out = redact_sensitive_assignments("APP_ROOT=/x APP_TOKEN=1234 ./a")
+            .expect("four digits is a credential");
+        assert!(!out.contains("1234"), "{out}");
+        // The first assignment on a line is judged as it always was.
+        assert!(redact_sensitive_assignments("auth=302 front=200").is_some());
     }
 
     /// The word rule must not hand back half of a value that holds a space. A
