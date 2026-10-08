@@ -40,7 +40,7 @@ OMNI installed therefore gets raw tool output, with no error and no warning. Loa
 user settings to switch the hooks on:
 
 ```python
-ClaudeAgentOptions(setting_sources=["user"], ...)
+ClaudeAgentOptions(setting_sources=["user"])
 ```
 
 Checked on claude-agent-sdk 0.2.164 by reading one file twice. With the default options

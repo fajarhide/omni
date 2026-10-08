@@ -41,7 +41,7 @@ SDK di mesin yang sudah memasang OMNI karena itu menerima output tool mentah, ta
 dan tanpa peringatan. Muat settings pengguna untuk menyalakan hook-nya:
 
 ```python
-ClaudeAgentOptions(setting_sources=["user"], ...)
+ClaudeAgentOptions(setting_sources=["user"])
 ```
 
 Diperiksa pada claude-agent-sdk 0.2.164 dengan membaca satu berkas dua kali. Dengan opsi
