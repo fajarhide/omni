@@ -29,6 +29,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      # openclaw 2026.9.8 depends on npm itself, and npm's bundled packages
+      # opened seven alerts that `overrides` cannot reach (#868). Remove this
+      # once a release drops that dependency.
+      - dependency-name: "openclaw"
     reviewers:
       - "fajarhide"
 
