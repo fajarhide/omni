@@ -14,7 +14,7 @@ model. Umur sesi, perintah teratas, rute dan agent pindah ke `--view detail`.
 | flag | efeknya |
 |---|---|
 | `--since <jendela>` | `hour`, `today`, `week`, `month` (bawaan), `all` |
-| `--view <nama>` | `summary` (bawaan), `detail`, `commands`, `projects`, `context`, `rerun`, `folds`, `share` |
+| `--view <nama>` | `summary` (bawaan), `detail`, `commands`, `projects`, `context`, `rerun`, `folds`, `bill`, `share` |
 | `--limit <n>` | Jumlah baris di tampilan tabel, bawaan 10, `0` untuk semua |
 | `--json` | Bisa dibaca mesin, ikut jendela `--since` |
 | `--card` | Tulis ringkasan sebagai gambar, berukuran untuk unggahan media sosial |
@@ -50,6 +50,27 @@ Tidak ada ambang dan tidak ada warna vonis di dalamnya. Belum ada batas yang per
 diukur, dan angka yang tampak sudah dinilai padahal belum adalah cacat yang justru
 diperangi proyek ini. Penyimpanan yang ditulis sebelum penanda mulai direkam akan
 mengatakannya, bukan mencetak nol yang terkesan sempurna.
+
+## `--view bill` adalah pembukuan dari sisi host
+
+Tampilan lain melaporkan apa yang OMNI kerjakan, dari tabel OMNI sendiri. Yang ini
+membaca transkrip Claude Code, yang ditulis host dan bukan OMNI: token tertagih per
+kelas, byte konteks per sumber, dan byte hasil tool per tool.
+
+```sh
+omni stats --view bill               # 30 hari terakhir
+omni stats --view bill --since week --limit 0
+```
+
+Satu request dihitung sekali berdasarkan id-nya, karena host mengulang `usage` di setiap
+record milik request itu. Konteks subagent ditagih terpisah dari sesinya dan tidak
+dihitung. Tidak ada angka dolar: harganya bergantung pada model di balik tiap request,
+dan tampilan ini hanya mencetak apa yang dibawa transkripnya.
+
+Paragraf terakhir keluarannya adalah angka OMNI sendiri untuk jendela yang sama, diberi
+label sebagai klaimnya, supaya kedua sisi ada di satu layar tanpa tercampur. `--json`
+tidak membawa tampilan ini. Ia membaca setiap transkrip di jendelanya, yang makan waktu
+beberapa detik, sedangkan laporan untuk mesin dimaksudkan tetap murah.
 
 ## `--rerun` yang wajib diketahui
 
