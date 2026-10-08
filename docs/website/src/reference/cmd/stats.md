@@ -20,8 +20,8 @@ period.
 | flag | effect |
 |---|---|
 | `--since <window>` | `hour`, `today`, `week`, `month` (default), `all` |
-| `--view <name>` | `summary` (default), `detail`, `projects`, `context`, `rerun`, `folds`, `share` |
-| `--limit <n>` | Rows in a table view, default 10, `0` for all. Read by `detail`, `projects` and `rerun`; a table it cuts says how many rows it hid |
+| `--view <name>` | `summary` (default), `detail`, `projects`, `context`, `rerun`, `folds`, `bill`, `share` |
+| `--limit <n>` | Rows in a table view, default 10, `0` for all. Read by `detail`, `projects`, `rerun` and `bill`; a table it cuts says how many rows it hid |
 | `--json` | Machine readable, scoped by `--since` |
 | `--card` | Write the summary as an image, sized for social posts |
 | `--help`, `-h` | Help |
@@ -55,6 +55,27 @@ There is no threshold and no verdict colour in it. No bar has been measured yet,
 number that looks judged when nothing judged it is the defect this project exists to
 fight. A store written before markers were recorded says so rather than printing a
 confident zero.
+
+## `--view bill` is the host's side of the books
+
+Every other view reports what OMNI did, from OMNI's own tables. This one reads Claude
+Code's transcripts, which the host writes and OMNI does not: billed tokens by class,
+context bytes by source, and tool result bytes by tool.
+
+```sh
+omni stats --view bill               # the last 30 days
+omni stats --view bill --since week --limit 0
+```
+
+A request is counted once by its id, because the host repeats `usage` on every record
+of a request. Subagent contexts are billed apart from the session and are left out.
+There is no dollar figure: the price depends on the model behind each request, and the
+view prints only what the transcript carries.
+
+The last paragraph of the output is OMNI's own figure for the same window, labelled as
+its claim, so the two sides sit on one screen without being mixed. `--json` does not
+carry this view. It reads every transcript in the window, which takes seconds, and the
+machine-readable report is meant to stay cheap.
 
 ## `--rerun` is the one to know
 

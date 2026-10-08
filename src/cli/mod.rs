@@ -1,3 +1,4 @@
+pub mod bill;
 pub mod context;
 pub mod dashboard;
 pub mod diff;

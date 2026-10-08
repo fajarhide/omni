@@ -291,7 +291,7 @@ const FLAGS: super::Flags = &[
     ),
     (
         "--view <name>",
-        "summary | detail | projects | context | rerun | folds | share",
+        "summary | detail | projects | context | rerun | folds | bill | share",
     ),
     (
         "--limit <n>",
@@ -417,6 +417,7 @@ fn view(args: &[String]) -> &'static str {
             // The ledger's own calibration. `calibration` is accepted too,
             // because that is the word a reader reaches for first (#816).
             "folds" | "calibration" => "folds",
+            "bill" => "bill",
             "share" => "share",
             _ => "summary",
         };
@@ -491,6 +492,7 @@ fn renderer(view: &str, json: bool, card: bool) -> &'static str {
     match (view, json, card) {
         (_, _, true) => "card",
         (_, true, _) => "json",
+        ("bill", ..) => "bill",
         ("share", ..) => "share",
         ("rerun", ..) => "rerun",
         ("folds", ..) => "folds",
@@ -530,6 +532,10 @@ fn print_help() {
         "#".bright_black()
     );
     println!(
+        "  omni stats --view bill   {} What the host billed, from its own transcripts",
+        "#".bright_black()
+    );
+    println!(
         "  omni stats --json        {} Machine-readable for CI/CD",
         "#".bright_black()
     );
@@ -551,6 +557,7 @@ pub fn run(args: &[String], store: &Store) -> Result<()> {
         "share" => run_share(args, store),
         "rerun" => run_rerun(args, store),
         "folds" => run_folds(args, store),
+        "bill" => run_bill(args, store),
         "context" => run_context_stats(store),
         "project" => run_project_stats(args, store),
         "detail" => run_detail(args, store),
@@ -2100,6 +2107,106 @@ fn run_folds(args: &[String], store: &Store) -> Result<()> {
     Ok(())
 }
 
+/// What the host billed and what its context was made of (#859).
+///
+/// Read from the host's transcripts, which the host writes and OMNI does not, so
+/// nothing above the last paragraph of this view rests on OMNI's own tables. No
+/// dollar figure: the price depends on the model behind each request, and a
+/// number that looks priced when nothing priced it is `est_cost_usd` again.
+fn run_bill(args: &[String], store: &Store) -> Result<()> {
+    let (period_label, since) = scope(args);
+    super::print_header(Some("bill"), Some(period_label));
+
+    let bill = super::bill::transcripts_root()
+        .map(|root| super::bill::read(&root, since))
+        .unwrap_or_default();
+    if bill.requests == 0 {
+        println!("  No host transcript in this window.");
+        println!("  This view reads Claude Code's transcripts, so a machine that has not run");
+        println!("  Claude Code in the window has nothing to show here.");
+        print_separator();
+        println!();
+        return Ok(());
+    }
+
+    let share = |part: u64, whole: u64| 100.0 * part as f64 / whole.max(1) as f64;
+
+    println!(
+        "  From the host's transcripts: {} sessions, {} requests.",
+        format_number(bill.sessions),
+        format_number(bill.requests)
+    );
+
+    println!();
+    println!(" {:<24} {:>18} {:>7}", "Billed tokens", "tokens", "share");
+    for (label, tokens) in [
+        ("cache read", bill.cache_read_tokens),
+        ("cache write", bill.cache_creation_tokens),
+        ("output", bill.output_tokens),
+        ("fresh input", bill.input_tokens),
+    ] {
+        println!(
+            " {:<24} {:>18} {:>6.1}%",
+            label,
+            format_number(tokens),
+            share(tokens, bill.tokens())
+        );
+    }
+
+    println!();
+    println!(
+        " {:<24} {:>18} {:>7}",
+        "Context by source", "bytes", "share"
+    );
+    for (label, bytes) in [
+        ("tool results", bill.tool_result_bytes),
+        ("tool inputs", bill.tool_input_bytes),
+        ("text", bill.text_bytes),
+    ] {
+        println!(
+            " {:<24} {:>18} {:>6.1}%",
+            label,
+            format_number(bytes),
+            share(bytes, bill.context_bytes())
+        );
+    }
+
+    println!();
+    println!(
+        " {:<32} {:>8} {:>14} {:>7}",
+        "Tool results by tool", "calls", "bytes", "share"
+    );
+    let shown = row_limit(args).map_or(bill.tools.len(), |n| n.min(bill.tools.len()));
+    for tool in bill.tools.iter().take(shown) {
+        println!(
+            " {:<32} {:>8} {:>14} {:>6.1}%",
+            tool.name.chars().take(32).collect::<String>(),
+            format_number(tool.calls),
+            format_number(tool.result_bytes),
+            share(tool.result_bytes, bill.tool_result_bytes)
+        );
+    }
+    print_hidden_rows(shown, bill.tools.len());
+
+    if let Ok(totals) = store.engine_totals(since)
+        && totals.total_saved() > 0
+    {
+        println!();
+        println!(
+            "  OMNI's own tables say it kept {} out of tool results in this window,",
+            format_bytes(totals.total_saved())
+        );
+        println!("  across every host it ran on. That line is OMNI's claim. Everything above");
+        println!("  it is the host's record.");
+    }
+
+    println!();
+    println!("  Subagent contexts are billed apart from the session and are not counted.");
+    print_separator();
+    println!();
+    Ok(())
+}
+
 /// Retrieved as a share of folds, zero when there were none, so an empty shape
 /// reads as nothing happened rather than as a perfect score.
 fn rate_pct(folds: i64, retrieved: i64) -> f64 {
@@ -2309,6 +2416,7 @@ mod tests {
         assert_eq!(view(&args(&[])), "summary");
         // #816. The calibration view, under both spellings.
         assert_eq!(view(&args(&["--view", "folds"])), "folds");
+        assert_eq!(view(&args(&["--view", "bill"])), "bill");
         assert_eq!(view(&args(&["--view", "calibration"])), "folds");
         assert_eq!(view(&args(&["--view", "detail"])), "detail");
         assert_eq!(view(&args(&["--view=projects"])), "project");
@@ -2364,6 +2472,9 @@ mod tests {
         assert_eq!(renderer("summary", false, false), "summary");
         // A view of its own, and the two formats still outrank it (#816).
         assert_eq!(renderer("folds", false, false), "folds");
+        assert_eq!(renderer("bill", false, false), "bill");
+        // One machine-readable report, not one per view, so `--json` still wins.
+        assert_eq!(renderer("bill", true, false), "json");
         assert_eq!(renderer("folds", true, false), "json");
         assert_eq!(renderer("folds", false, true), "card");
         assert_eq!(renderer("detail", true, false), "json");
