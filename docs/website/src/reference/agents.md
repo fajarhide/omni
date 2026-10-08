@@ -34,6 +34,18 @@ omni init --all
 
 ## Host-specific notes
 
+**Claude Agent SDK** runs Claude Code's hooks only when the session loads the settings
+file they are registered in, and by default it loads none. An SDK app on a machine with
+OMNI installed therefore gets raw tool output, with no error and no warning. Load the
+user settings to switch the hooks on:
+
+```python
+ClaudeAgentOptions(setting_sources=["user"], ...)
+```
+
+Checked on claude-agent-sdk 0.2.164 by reading one file twice. With the default options
+both reads came back whole. With user settings loaded the second read came back folded.
+
 **Codex CLI** runs only hooks it has been told to trust, and skips the rest without a
 word. After `omni init --codex`, start `codex` once and approve them under "Hooks need
 review". `omni doctor` fails until you do. This has bitten before: Codex ran zero
