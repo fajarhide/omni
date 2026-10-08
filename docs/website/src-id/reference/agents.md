@@ -35,6 +35,19 @@ omni init --all
 
 ## Catatan khusus per host
 
+**Claude Agent SDK** menjalankan hook Claude Code hanya ketika sesinya memuat berkas
+settings tempat hook itu terdaftar, dan secara bawaan ia tidak memuat satu pun. Aplikasi
+SDK di mesin yang sudah memasang OMNI karena itu menerima output tool mentah, tanpa galat
+dan tanpa peringatan. Muat settings pengguna untuk menyalakan hook-nya:
+
+```python
+ClaudeAgentOptions(setting_sources=["user"])
+```
+
+Diperiksa pada claude-agent-sdk 0.2.164 dengan membaca satu berkas dua kali. Dengan opsi
+bawaan kedua pembacaan kembali utuh. Dengan settings pengguna dimuat, pembacaan kedua
+kembali dalam bentuk lipatan.
+
 **Codex CLI** hanya menjalankan hook yang sudah dinyatakan tepercaya, dan
 melewati sisanya tanpa sepatah kata. Setelah `omni init --codex`, jalankan
 `codex` sekali lalu setujui di bagian "Hooks need review". `omni doctor` gagal
