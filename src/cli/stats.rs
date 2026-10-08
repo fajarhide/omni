@@ -2120,7 +2120,7 @@ fn run_bill(args: &[String], store: &Store) -> Result<()> {
     let bill = super::bill::transcripts_root()
         .map(|root| super::bill::read(&root, since))
         .unwrap_or_default();
-    if bill.requests == 0 {
+    if bill.is_empty() {
         println!("  No host transcript in this window.");
         println!("  This view reads Claude Code's transcripts, so a machine that has not run");
         println!("  Claude Code in the window has nothing to show here.");

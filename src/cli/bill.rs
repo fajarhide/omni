@@ -45,6 +45,13 @@ impl Bill {
     pub fn context_bytes(&self) -> u64 {
         self.tool_result_bytes + self.tool_input_bytes + self.text_bytes
     }
+
+    /// Nothing billed and nothing delivered. A window can hold bytes and no
+    /// request, when a request made before it lands its results inside it, so
+    /// the request count alone would hide real content.
+    pub fn is_empty(&self) -> bool {
+        self.requests == 0 && self.context_bytes() == 0
+    }
 }
 
 /// Where Claude Code keeps its transcripts. `CLAUDE_CONFIG_DIR` is the host's own
@@ -335,6 +342,11 @@ mod tests {
         let bill = read(dir.path(), since);
 
         assert_eq!(bill.requests, 0, "the request was made before the window");
+        assert!(
+            !bill.is_empty(),
+            "bytes landed in the window, so it is not empty"
+        );
+        assert!(Bill::default().is_empty());
         assert_eq!(
             bill.tools,
             vec![ToolRow {
