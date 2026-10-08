@@ -824,17 +824,23 @@ fn quoted_value(value: &str) -> Option<(char, &str, &str)> {
 /// One line with its credentials replaced, and how many were. `None` means
 /// deliver the line as written. Both callers go through here, so they cannot
 /// disagree about where a value ends.
+fn redact_line(line: &str) -> Option<(String, u32)> {
+    match redact_shell_words(line) {
+        Some(words) => words,
+        None => redact_whole_value(line),
+    }
+}
+
+/// The rule for a line that is one assignment: everything after the first `=`
+/// is the value. `env` and `printenv` print exactly that, so their distiller
+/// asks for this rule alone and never splits a value on whitespace.
 ///
 /// Slices here are proven to sit on a char boundary rather than assumed to.
 /// A file-level allow used to cover them and hid a real panic elsewhere (#619),
-/// so the exemption is per function and says why.
-///
-/// `find('=')` returns a boundary and `+1` steps past one ASCII byte.
+/// so the exemption is per function and says why. `find('=')` returns a
+/// boundary and `+1` steps past one ASCII byte.
 #[allow(clippy::string_slice)]
-fn redact_line(line: &str) -> Option<(String, u32)> {
-    if let Some(words) = redact_shell_words(line) {
-        return words;
-    }
+fn redact_whole_value(line: &str) -> Option<(String, u32)> {
     let eq = line.find('=')?;
     let replacement = redact_assignment(&line[..eq], &line[eq + 1..])?;
     Some((format!("{}={replacement}", &line[..eq]), 1))
@@ -848,17 +854,19 @@ fn redact_line(line: &str) -> Option<(String, u32)> {
 /// `APP_ROOT=/tmp APP_TOKEN=x ./bin/app` was delivered whole because only the
 /// first assignment was looked at.
 ///
-/// The outer `None` means this is not such a line and the whole-line rule
-/// decides. That is the answer whenever the reading is in doubt:
+/// The outer `None` means this is not such a line and the whole-value rule
+/// decides. Ending a value at whitespace delivers what follows it, so the line
+/// has to prove it is a shell line first, and in doubt it is not:
 ///
-/// - **A quote anywhere.** A quoted value can hold whitespace, and splitting
-///   inside one hands back half of it.
-/// - **One assignment followed by a bare word.** `API_TOKEN=abc npm start` and
-///   `PASSWORD=correct horse` are the same shape, so the command is lost rather
-///   than half a passphrase delivered. Two assignments, or a word that can only
-///   start a command, are what make the line a shell line.
+/// - **A quote or an escaped space anywhere.** Either can put whitespace inside
+///   a value, and splitting there hands back half of it.
+/// - **One assignment with nothing closing the line.** `API_TOKEN=abc ./run`
+///   and `PASSWORD=correct /horse` are the same shape, and the first version of
+///   this rule delivered `/horse` (review of #865). One assignment counts only
+///   when the line ends in a shell operator or a continuation, which a value
+///   does not. Two or more assignments count on their own.
 fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
-    if line.contains(['"', '\'', '`']) {
+    if line.contains(['"', '\'', '`']) || line.contains("\\ ") || line.contains("\\\t") {
         return None;
     }
 
@@ -871,13 +879,13 @@ fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
         words.next();
         assignments += 1;
     }
-    let starts_a_command = |w: &str| {
-        matches!(w, "\\" | "&" | "&&" | ";")
-            || ["./", "../", "/", "~/"].iter().any(|p| w.starts_with(p))
-    };
+    let closed = matches!(
+        line.split_whitespace().next_back(),
+        Some("\\" | "&" | "&&" | ";" | "|" | "||")
+    );
     let shell_line = match (assignments, words.next()) {
         (0, _) | (1, None) => false,
-        (1, Some(next)) => starts_a_command(next),
+        (1, Some(_)) => closed,
         _ => true,
     };
     if !shell_line {
@@ -999,9 +1007,10 @@ pub fn distill_env_output(input: &str) -> String {
             continue;
         }
         parsed_any = true;
-        // One rule, not two: `redact_line` is the same call the other path makes,
-        // which is what #408 and #486 were each one half of.
-        if let Some((rewritten, count)) = redact_line(trimmed) {
+        // The same predicate the other path uses, which is what #408 and #486
+        // were each one half of. The whole-value form, because a line of `env`
+        // output is one assignment however many spaces its value holds.
+        if let Some((rewritten, count)) = redact_whole_value(trimmed) {
             redacted_count += count;
             out.push_str(&rewritten);
             out.push('\n');
@@ -1119,12 +1128,27 @@ mod tests {
         );
     }
 
+    /// `env` prints one assignment per line and the value runs to the end of it,
+    /// so its distiller never splits one, whatever the line looks like.
+    #[test]
+    fn env_output_is_never_split_into_words() {
+        let out = distill_env_output("HOME=/root\nDB_PASSWORD=correct B=horse &\n");
+        assert!(out.contains("DB_PASSWORD=[REDACTED]"), "{out}");
+        assert!(!out.contains("horse"), "{out}");
+    }
+
     /// The word rule must not hand back half of a value that holds a space. A
     /// bare word after the value could be a command or the rest of a passphrase,
     /// and the direction of doubt in this file is to redact.
     #[test]
     fn a_value_followed_by_a_bare_word_is_still_redacted_whole() {
-        for line in ["PASSWORD=correct horse battery", "API_TOKEN=abc npm start"] {
+        for line in [
+            "PASSWORD=correct horse battery",
+            "API_TOKEN=abc npm start",
+            // Review of #865: a path after the value proves nothing either.
+            "PASSWORD=correct /horse",
+            "API_TOKEN=abc ./run --fast",
+        ] {
             let out = redact_sensitive_assignments(line).expect("a credential");
             let body = out.lines().nth(1).expect("the redacted line");
             assert!(body.ends_with("=[REDACTED]"), "{line} came back as {body}");
@@ -1132,8 +1156,12 @@ mod tests {
         // A quote can hold whitespace, so a quoted line is never split into words.
         // Split, this one reads as a token followed by a command, and `./b` is
         // half of the value.
-        let out = redact_sensitive_assignments("API_TOKEN=\"a ./b\"").expect("a credential");
+        let out = redact_sensitive_assignments("API_TOKEN=\"a ./b\" &").expect("a credential");
         assert!(!out.contains("./b"), "{out}");
+        // An escaped space belongs to the value, operator at the end or not.
+        let out =
+            redact_sensitive_assignments("API_TOKEN=abc\\ /suffix ./app &").expect("a credential");
+        assert!(!out.contains("/suffix"), "{out}");
     }
 
     #[test]
