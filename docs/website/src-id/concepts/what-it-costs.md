@@ -72,6 +72,35 @@ bolak-balik yang tidak perlu ia bayar seandainya byte-nya tiba langsung.
 Pelipatan bercakupan proyek memikul ambang keuntungan tiga kali lipat persis
 karena alasan itu.
 
+## Prompt cache
+
+Alat yang menulis ulang prompt merusak cache milik penyedia, karena cache mencocokkan
+awalan. OMNI hanya menulis ulang hasil tool yang paling baru, yaitu ekornya, sehingga
+semua yang ada sebelumnya tetap sama byte demi byte.
+
+Diukur, bukan diperdebatkan: uji berpasangan di Claude Code dengan omni 0.7.10, 20
+pasangan, workload enam perintah yang sama dengan hook menyala dan dengan
+`OMNI_PASSTHROUGH=1`, satu mesin.
+
+| | dengan OMNI | tanpa | |
+|---|---|---|---|
+| byte hasil tool | 965.414 | 1.585.160 | -39,1% |
+| token cache-write | 1.014.764 | 1.238.503 | -18,1% |
+| token output | 22.617 | 11.748 | +92,5% |
+| biaya tertagih | $4,26 | $4,78 | -11,0% |
+
+Baris output melawan OMNI. Model memakai token untuk membaca marker, yang tidak ia
+keluarkan untuk output mentah. Di sini output hanya 0,3% dari seluruh token dan
+tagihannya tetap turun. Pada workload yang sedikit lipatannya, biaya itu bisa menjadi
+sisi yang lebih besar.
+
+```sh
+python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json
+python3 scripts/ab_cache.py report arms.json
+```
+
+Ini memakai token sungguhan, sekitar setengah dolar per pasangan.
+
 ## Ongkos yang bukan tanggungan OMNI
 
 Pada paket berlangganan tetap, kompresi sama sekali tidak mengurangi tagihan.

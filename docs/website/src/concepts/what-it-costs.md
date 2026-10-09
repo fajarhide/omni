@@ -67,6 +67,33 @@ content behind a handle, it pays a round trip it would not have paid if the byte
 simply arrived. Project-scope folds carry three times the profitability bar for
 exactly that reason.
 
+## The prompt cache
+
+A tool that rewrites a prompt breaks the provider's cache, because the cache matches on
+the prefix. OMNI rewrites only the newest tool result, which is the tail, so everything
+before it stays byte for byte.
+
+Measured, not argued: a paired run on Claude Code with omni 0.7.10, 20 pairs, the same
+six-command workload with the hook on and with `OMNI_PASSTHROUGH=1`, one machine.
+
+| | with OMNI | without | |
+|---|---|---|---|
+| tool result bytes | 965,414 | 1,585,160 | -39.1% |
+| cache-write tokens | 1,014,764 | 1,238,503 | -18.1% |
+| output tokens | 22,617 | 11,748 | +92.5% |
+| billed cost | $4.26 | $4.78 | -11.0% |
+
+The output row goes against OMNI. The model spends tokens reading markers that it does
+not spend on raw output. Here output is 0.3% of the tokens and the bill still falls. On
+a workload with little to fold, that cost could be the larger side.
+
+```sh
+python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json
+python3 scripts/ab_cache.py report arms.json
+```
+
+It spends real tokens, about half a dollar a pair.
+
 ## The cost that is not OMNI's to pay
 
 On a flat-rate plan, compression does not reduce a bill at all. What it buys is

@@ -247,6 +247,9 @@ Có, ở mức đo được, và chi phí lớn dần theo lịch sử. Bản th
 **Tôi có thể thêm bộ lọc của riêng mình không?**  
 Không, và đó là chủ ý từ 0.7.0. Bộ lọc được biên dịch vào binary, nên tập đang chạy đúng bằng tập mà kiểm thử bao phủ, và không có tệp nào trên đĩa đổi được thứ agent của bạn nhìn thấy. Nếu một công cụ cần signal, hãy mở issue; nó sẽ đi kèm binary cho tất cả mọi người.
 
+**Nó có làm hỏng prompt cache không?**
+OMNI chỉ viết lại kết quả công cụ mới nhất. Mọi thứ đứng trước nó giữ nguyên từng byte, và đó là phần cache đem ra so khớp. Trong một lần chạy theo cặp trên Claude Code với omni 0.7.10 (20 cặp, một workload sáu lệnh, một máy), các phiên có OMNI ghi ít hơn 18,1% token cache và bị tính tiền thấp hơn 11,0%. Token đầu ra tăng 92,5%, vì mô hình tốn token để đọc các marker. Tự chạy: `python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json`, rồi `python3 scripts/ab_cache.py report arms.json`.
+
 **Lấy lại thứ OMNI đã gấp bằng cách nào?**
 `omni retrieve <handle>`, với handle là 16 ký tự bên trong marker. Nó chạy trên mọi host, có hay không có MCP.
 

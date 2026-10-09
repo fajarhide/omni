@@ -225,6 +225,9 @@ npx skills add fajarhide/skills --skill omni
 **我能加自己的过滤器吗？**  
 不能，这是 0.7.0 起的有意决定。过滤器被编译进二进制文件，所以运行的集合就是测试覆盖的集合，磁盘上的任何文件都无法改变你的 agent 看到的内容。如果某个工具需要 signal，请提 issue，它会随二进制发给所有人。
 
+**它会破坏提示缓存吗？**
+OMNI 只改写最新的那条工具结果。它之前的内容逐字节保持不变，而缓存比对的正是这一部分。在 Claude Code 上用 omni 0.7.10 做的成对实验中（20 对，一个由六条命令组成的工作负载，一台机器），开启 OMNI 的会话写入的缓存 token 少 18.1%，账单低 11.0%。输出 token 增加了 92.5%，因为模型要花 token 去读标记。自己跑一遍：`python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json`，然后 `python3 scripts/ab_cache.py report arms.json`。
+
 **怎么取回 OMNI 折叠掉的内容？**
 `omni retrieve <handle>`，handle 就是标记里的 16 个字符。它在所有 host 上都能用，无论有没有 MCP。
 
