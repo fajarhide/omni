@@ -861,7 +861,7 @@ fn redact_later_credential(line: &str) -> Option<(String, u32)> {
         let later = !first;
         first &= assignment.is_none();
         if let Some((key, value)) = assignment
-            && !(later && is_status_like(value))
+            && !(later && is_status_like(key, value))
             && redact_assignment(key, value).is_some()
         {
             let lead = piece.len() - piece.trim_start().len();
@@ -942,7 +942,8 @@ fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
     let mut first = true;
     for piece in line.split_inclusive(char::is_whitespace) {
         let word = piece.trim_end();
-        let found = shell_assignment(word).filter(|(_, value)| first || !is_status_like(value));
+        let found =
+            shell_assignment(word).filter(|(key, value)| first || !is_status_like(key, value));
         first &= shell_assignment(word).is_none();
         match found.and_then(|(key, value)| Some((key, redact_assignment(key, value)?))) {
             Some((key, replacement)) => {
@@ -958,16 +959,21 @@ fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
     Some((redacted > 0).then_some((out, redacted)))
 }
 
-/// A status code or a small count, which is what `auth=302` holds on a line
-/// such as `front=200 auth=302`.
+/// A status code, which is what `auth=302` holds on a line such as
+/// `front=200 auth=302`.
 ///
 /// Both rules below look at assignments the whole-value rule never reached,
 /// and over 3,756 recorded traces the only lines that changed were three of
-/// that shape, each losing the status it was printed for. Three digits is the
-/// whole exemption: `APP_TOKEN=1234` stays hidden, and the first assignment on
-/// a line is judged as it always was.
-fn is_status_like(value: &str) -> bool {
-    (1..=3).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit())
+/// that shape, each losing the status it was printed for.
+///
+/// The key has to be `auth` on its own, the way #559 exempts a bare `pass`. The
+/// first version looked at the value alone and waved `APP_TOKEN=123` through
+/// (review of #865): three digits under a name that says credential is a
+/// credential. The first assignment on a line is judged as it always was.
+fn is_status_like(key: &str, value: &str) -> bool {
+    key.eq_ignore_ascii_case("auth")
+        && (1..=3).contains(&value.len())
+        && value.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `NAME=value` as the shell reads a word: a name, an `=`, and whatever follows.
@@ -1227,9 +1233,19 @@ mod tests {
             redact_sensitive_assignments("  name=\"x y\" auth=302 ok"),
             None
         );
-        let out = redact_sensitive_assignments("APP_ROOT=/x APP_TOKEN=1234 ./a")
+        let out = redact_sensitive_assignments("APP_ROOT=/x auth=1234 ./a")
             .expect("four digits is a credential");
         assert!(!out.contains("1234"), "{out}");
+        // Review of #865: the exemption is the key `auth`, not any short number.
+        for line in [
+            "APP_ROOT=/tmp APP_TOKEN=123 ./app",
+            "A=1 DB_AUTH=302 B=2",
+            "x=\"a b\" API_KEY=77",
+        ] {
+            let out =
+                redact_sensitive_assignments(line).expect("a credential under a credential's name");
+            assert!(out.contains("[REDACTED]"), "{line} came back as {out}");
+        }
         // The first assignment on a line is judged as it always was.
         assert!(redact_sensitive_assignments("auth=302 front=200").is_some());
     }
