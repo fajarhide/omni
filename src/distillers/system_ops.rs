@@ -984,18 +984,54 @@ fn shell_assignment(word: &str) -> Option<(&str, &str)> {
     named.then_some((key, value))
 }
 
+/// Credentials that carry their issuer's prefix, at the length the issuer
+/// writes them (#862).
+///
+/// The assignment rule keys on the name left of `=`, so a token with no name
+/// beside it was delivered: `. ~/.keyfile` on a file holding a bare key prints
+/// the key in the shell's own `command not found` line.
+///
+/// The floors are the rule. Over 3,860 recorded traces the prefixes matched 25
+/// times, and 23 of those were fixture-sized strings such as `sk-ant-abc123`.
+/// Of the two at full length, one was a real key and one a test fixture.
+static BARE_TOKEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(concat!(
+        r"sk-ant-[A-Za-z0-9_\-]{32,}",
+        r"|\bgh[pousr]_[A-Za-z0-9]{36,}",
+        r"|\bgithub_pat_[A-Za-z0-9_]{36,}",
+        r"|\bAKIA[0-9A-Z]{16}\b",
+        r"|\bxox[bpas]-[A-Za-z0-9\-]{20,}",
+    ))
+    .expect("a literal pattern")
+});
+
 pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
     let mut out = String::with_capacity(input.len());
     let mut redacted = 0u32;
+    // One scan of the payload decides whether any line is looked at twice, so
+    // the common case, no token anywhere, costs nothing per line.
+    let holds_a_token = BARE_TOKEN.is_match(input);
 
     for line in input.lines() {
         let trimmed = line.trim_end();
-        match redact_line(trimmed) {
-            Some((rewritten, count)) => {
-                redacted += count;
-                out.push_str(&rewritten);
-            }
-            None => out.push_str(trimmed),
+        let assigned = redact_line(trimmed);
+        let (text, count) = assigned
+            .as_ref()
+            .map_or((trimmed, 0), |(rewritten, count)| {
+                (rewritten.as_str(), *count)
+            });
+        redacted += count;
+        // After the assignment rule, so a token it already hid is counted once.
+        let tokens = if holds_a_token {
+            BARE_TOKEN.find_iter(text).count()
+        } else {
+            0
+        };
+        if tokens > 0 {
+            redacted += tokens as u32;
+            out.push_str(&BARE_TOKEN.replace_all(text, "[REDACTED]"));
+        } else {
+            out.push_str(text);
         }
         out.push('\n');
     }
@@ -1248,6 +1284,54 @@ mod tests {
         }
         // The first assignment on a line is judged as it always was.
         assert!(redact_sensitive_assignments("auth=302 front=200").is_some());
+    }
+
+    /// #862. A credential that carries its issuer's prefix needs no name beside
+    /// it. The case that found it: sourcing a file that holds a bare key prints
+    /// the key in the shell's own error line.
+    #[test]
+    fn a_bare_provider_token_is_hidden_without_a_name_beside_it() {
+        let body = "A1b2C3d4".repeat(12);
+        for token in [
+            format!("sk-ant-usr-{body}"),
+            format!("ghp_{}", "A1b2C3d4e".repeat(4)),
+            format!("github_pat_{body}"),
+            "AKIAIOSFODNN7EXAMPLE".to_string(),
+            format!("xoxb-{}", "A1b2C3d4".repeat(3)),
+        ] {
+            let line = format!("/home/dev/.keyfile:1: command not found: {token}");
+            let out = redact_sensitive_assignments(&line).expect("a credential");
+            assert!(!out.contains(&token), "{token} was delivered");
+            assert_eq!(
+                out,
+                "[OMNI: 1 sensitive value(s) redacted]\n/home/dev/.keyfile:1: command not found: [REDACTED]\n"
+            );
+        }
+    }
+
+    /// The length floor is the rule. Without it, 23 fixture-sized strings in
+    /// 3,860 recorded traces would have been rewritten to hide one real key.
+    #[test]
+    fn a_prefix_shorter_than_a_real_token_is_left_alone() {
+        for line in [
+            "see sk-ant-abc123 in the docs",
+            "the ghp_ prefix marks a GitHub token",
+            "AKIAIOSFODNN7 is three short",
+            "xoxb-1234 is not a token",
+        ] {
+            assert_eq!(redact_sensitive_assignments(line), None, "{line}");
+        }
+    }
+
+    /// One credential, one marker, whichever rule reached it first.
+    #[test]
+    fn a_token_already_hidden_by_its_assignment_is_counted_once() {
+        let line = format!("ANTHROPIC_API_KEY=sk-ant-api03-{}", "A1b2C3d4".repeat(12));
+        let out = redact_sensitive_assignments(&line).expect("a credential");
+        assert_eq!(
+            out,
+            "[OMNI: 1 sensitive value(s) redacted]\nANTHROPIC_API_KEY=[REDACTED]\n"
+        );
     }
 
     /// The word rule must not hand back half of a value that holds a space. A

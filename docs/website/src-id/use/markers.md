@@ -122,8 +122,13 @@ tanpa handle pun penandanya tetap menyebut apa yang dibuang.
 ```
 
 Redaksi kredensial pada keluaran perintah. Baris yang memberi nilai ke nama yang sensitif
-nilainya diganti `[REDACTED]`, dan penanda ini menghitung barisnya. Tanda kutip dan tanda
+nilainya diganti `[REDACTED]`, dan penanda ini menghitung nilainya. Tanda kutip dan tanda
 baca di sekitar nilai tetap ada, jadi baris yang diredaksi masih bisa di-parse.
+
+Token yang membawa prefiks penerbitnya disembunyikan tanpa perlu nama di sebelahnya, pada
+panjang yang ditulis penerbitnya: `sk-ant-`, `ghp_` dan kerabatnya, `github_pat_`, `AKIA`,
+`xoxb-` dan kerabatnya. String yang lebih pendek dengan prefiks yang sama, seperti
+`sk-ant-abc123` di sebuah dokumen, dibiarkan.
 
 Namanya yang menentukan, dicocokkan per kata yang dipisah garis bawah sehingga `PASSED` dan
 `AUTHORS` tidak ikut: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`,

@@ -115,8 +115,13 @@ the dropped part was archived; without one, the marker still says what was remov
 ```
 
 Credential redaction on command output. A line that assigns a value to a sensitive name
-had that value replaced with `[REDACTED]`, and this counts the lines. Quotes and the
+had that value replaced with `[REDACTED]`, and this counts the values. Quotes and the
 punctuation around the value stay, so a redacted line still parses.
+
+A token that carries its issuer's prefix is hidden with no name beside it, at the length
+the issuer writes it: `sk-ant-`, `ghp_` and its siblings, `github_pat_`, `AKIA`, `xoxb-` and
+its siblings. A shorter string with the same prefix, such as `sk-ant-abc123` in a document,
+is left alone.
 
 The name decides, matched per underscore-separated word so `PASSED` and `AUTHORS` are not
 caught: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`, `CREDENTIAL`,
