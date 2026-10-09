@@ -723,8 +723,14 @@ pub(crate) fn wraps_another_command(command: &str) -> bool {
         Some("kubectl") | Some("docker") | Some("podman") => command
             .split_whitespace()
             .any(|t| t == "exec" || t == "run"),
-        // `az aks command invoke -c '<cmd>'`.
-        Some("az") => command.contains("command invoke"),
+        // `az aks command invoke -c '<cmd>'`, and `az ssh vm|arc … -- <cmd>`,
+        // which is ssh behind another binary. Judged as az output, the remote
+        // command's 21 lines were cut and the two ssh client warnings kept (#858).
+        // `az ssh config` only writes a file, so it stays az's own.
+        Some("az") => {
+            command.contains("command invoke")
+                || (tokens.next() == Some("ssh") && matches!(tokens.next(), Some("vm" | "arc")))
+        }
         _ => false,
     }
 }
@@ -1337,6 +1343,16 @@ mod tests {
         assert!(wraps_another_command("kubectl exec pod -- ls"));
         assert!(wraps_another_command("az aks command invoke -c 'ls'"));
         assert!(wraps_another_command("ssh host 'ls'"));
+        // #858. `az ssh vm -- <cmd>` is ssh behind another binary, and its
+        // stdout is the remote command's.
+        assert!(wraps_another_command(
+            "az ssh vm --ip 10.0.0.5 -- -o BatchMode=yes 'sudo du -xsh /data'"
+        ));
+        assert!(wraps_another_command("az ssh arc -n box -g rg-a -- uptime"));
+        // `az ssh config` writes a file and prints az's own output.
+        assert!(!wraps_another_command(
+            "az ssh config --ip 10.0.0.5 -f ./cfg"
+        ));
 
         // `run` creates the container first and then hands back the program's
         // stdout, which is the same thing `exec` does (#497). The reported case

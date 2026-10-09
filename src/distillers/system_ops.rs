@@ -821,34 +821,183 @@ fn quoted_value(value: &str) -> Option<(char, &str, &str)> {
     })
 }
 
+/// One line with its credentials replaced, and how many were. `None` means
+/// deliver the line as written. Both callers go through here, so they cannot
+/// disagree about where a value ends.
+fn redact_line(line: &str) -> Option<(String, u32)> {
+    match redact_shell_words(line) {
+        Some(words) => words,
+        None => redact_whole_value(line).or_else(|| redact_later_credential(line)),
+    }
+}
+
+/// A credential behind an ordinary assignment, on a line the word rule would
+/// not split. Hidden from its `=` to the end of the line.
+///
+/// When a quote or an escaped space stops the word rule, the whole-value rule
+/// takes over, and it reads only the first `=`. So
+/// `APP_ROOT=/tmp APP_TOKEN=abc ./app a\ b &` was delivered whole (review of
+/// #865). Nothing here ends a value at whitespace, so it can only hide more.
+///
+/// Two narrowings, both against a false positive this file has shipped before:
+///
+/// - **The line has to open with an assignment.** A log line such as
+///   `INFO done token=abc user=bob` is not this rule's to judge, and was never
+///   redacted.
+/// - **The word alone has to read as a credential first.** Judged on the rest
+///   of the line, `pass=3 fail=0` is no longer a count, which is #559 again.
+///
+/// The offsets are sums of whole pieces from `split_inclusive`, and the key is
+/// ASCII by `shell_assignment`, so each slice sits on a char boundary.
+#[allow(clippy::string_slice)]
+fn redact_later_credential(line: &str) -> Option<(String, u32)> {
+    let first = line.split_whitespace().find(|w| *w != "export")?;
+    shell_assignment(first)?;
+
+    let mut offset = 0;
+    let mut first = true;
+    for piece in line.split_inclusive(char::is_whitespace) {
+        let assignment = shell_assignment(piece.trim_end());
+        let later = !first;
+        first &= assignment.is_none();
+        if let Some((key, value)) = assignment
+            && !(later && is_status_like(key, value))
+            && redact_assignment(key, value).is_some()
+        {
+            let lead = piece.len() - piece.trim_start().len();
+            let value_at = offset + lead + key.len() + 1;
+            let hidden = redact_assignment(key, &line[value_at..])
+                .unwrap_or_else(|| "[REDACTED]".to_string());
+            return Some((format!("{}{hidden}", &line[..value_at]), 1));
+        }
+        offset += piece.len();
+    }
+    None
+}
+
+/// The rule for a line that is one assignment: everything after the first `=`
+/// is the value. `env` and `printenv` print exactly that, so their distiller
+/// asks for this rule alone and never splits a value on whitespace.
+///
 /// Slices here are proven to sit on a char boundary rather than assumed to.
 /// A file-level allow used to cover them and hid a real panic elsewhere (#619),
-/// so the exemption is per function and says why.
-///
-/// `find('=')` returns a boundary and `+1` steps past one ASCII byte.
+/// so the exemption is per function and says why. `find('=')` returns a
+/// boundary and `+1` steps past one ASCII byte.
 #[allow(clippy::string_slice)]
+fn redact_whole_value(line: &str) -> Option<(String, u32)> {
+    let eq = line.find('=')?;
+    let replacement = redact_assignment(&line[..eq], &line[eq + 1..])?;
+    Some((format!("{}={replacement}", &line[..eq]), 1))
+}
+
+/// A shell command line that opens with `NAME=value` words, redacted one word
+/// at a time (#851).
+///
+/// Everything after the first `=` used to be the value, so
+/// `APP_TOKEN=x ./bin/app serve &` lost its command with nothing saying so, and
+/// `APP_ROOT=/tmp APP_TOKEN=x ./bin/app` was delivered whole because only the
+/// first assignment was looked at.
+///
+/// The outer `None` means this is not such a line and the whole-value rule
+/// decides. Ending a value at whitespace delivers what follows it, so the line
+/// has to prove it is a shell line first, and in doubt it is not:
+///
+/// - **A quote or an escaped space anywhere.** Either can put whitespace inside
+///   a value, and splitting there hands back half of it.
+/// - **One assignment with nothing closing the line.** `API_TOKEN=abc ./run`
+///   and `PASSWORD=correct /horse` are the same shape, and the first version of
+///   this rule delivered `/horse` (review of #865). One assignment counts only
+///   when the line ends in a shell operator or a continuation, which a value
+///   does not. Two or more assignments count on their own.
+fn redact_shell_words(line: &str) -> Option<Option<(String, u32)>> {
+    if line.contains(['"', '\'', '`']) || line.contains("\\ ") || line.contains("\\\t") {
+        return None;
+    }
+
+    let mut words = line.split_whitespace().peekable();
+    if words.peek() == Some(&"export") {
+        words.next();
+    }
+    let mut assignments = 0;
+    while words.peek().is_some_and(|w| shell_assignment(w).is_some()) {
+        words.next();
+        assignments += 1;
+    }
+    let closed = matches!(
+        line.split_whitespace().next_back(),
+        Some("\\" | "&" | "&&" | ";" | "|" | "||")
+    );
+    let shell_line = match (assignments, words.next()) {
+        (0, _) | (1, None) => false,
+        (1, Some(_)) => closed,
+        _ => true,
+    };
+    if !shell_line {
+        return None;
+    }
+
+    // Rebuilt piece by piece so the spacing between words survives as written.
+    let mut out = String::with_capacity(line.len());
+    let mut redacted = 0u32;
+    let mut first = true;
+    for piece in line.split_inclusive(char::is_whitespace) {
+        let word = piece.trim_end();
+        let found =
+            shell_assignment(word).filter(|(key, value)| first || !is_status_like(key, value));
+        first &= shell_assignment(word).is_none();
+        match found.and_then(|(key, value)| Some((key, redact_assignment(key, value)?))) {
+            Some((key, replacement)) => {
+                redacted += 1;
+                out.push_str(key);
+                out.push('=');
+                out.push_str(&replacement);
+                out.push_str(piece.strip_prefix(word).unwrap_or(""));
+            }
+            None => out.push_str(piece),
+        }
+    }
+    Some((redacted > 0).then_some((out, redacted)))
+}
+
+/// A status code, which is what `auth=302` holds on a line such as
+/// `front=200 auth=302`.
+///
+/// Both rules below look at assignments the whole-value rule never reached,
+/// and over 3,756 recorded traces the only lines that changed were three of
+/// that shape, each losing the status it was printed for.
+///
+/// The key has to be `auth` on its own, the way #559 exempts a bare `pass`. The
+/// first version looked at the value alone and waved `APP_TOKEN=123` through
+/// (review of #865): three digits under a name that says credential is a
+/// credential. The first assignment on a line is judged as it always was.
+fn is_status_like(key: &str, value: &str) -> bool {
+    key.eq_ignore_ascii_case("auth")
+        && (1..=3).contains(&value.len())
+        && value.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `NAME=value` as the shell reads a word: a name, an `=`, and whatever follows.
+fn shell_assignment(word: &str) -> Option<(&str, &str)> {
+    let (key, value) = word.split_once('=')?;
+    let named = key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    named.then_some((key, value))
+}
+
 pub fn redact_sensitive_assignments(input: &str) -> Option<String> {
     let mut out = String::with_capacity(input.len());
     let mut redacted = 0u32;
 
     for line in input.lines() {
         let trimmed = line.trim_end();
-        match trimmed.find('=') {
-            Some(eq)
-                if let Some(replacement) =
-                    redact_assignment(&trimmed[..eq], &trimmed[eq + 1..]) =>
-            {
-                redacted += 1;
-                out.push_str(&trimmed[..eq]);
-                out.push('=');
-                out.push_str(&replacement);
-                out.push('\n');
+        match redact_line(trimmed) {
+            Some((rewritten, count)) => {
+                redacted += count;
+                out.push_str(&rewritten);
             }
-            _ => {
-                out.push_str(trimmed);
-                out.push('\n');
-            }
+            None => out.push_str(trimmed),
         }
+        out.push('\n');
     }
     // Anything dropped leaves a marker, which this path never emitted, so a
     // reader who did not already know the file had no signal that a value had
@@ -913,23 +1062,20 @@ pub fn distill_env_output(input: &str) -> String {
 
     for line in input.lines() {
         let trimmed = line.trim_end();
-        let Some(eq_pos) = trimmed.find('=') else {
+        if !trimmed.contains('=') {
             // grep headers, blank separators, a shell's own notice. Not ours to
             // reshape, and dropping them is how a command's context disappears.
             out.push_str(trimmed);
             out.push('\n');
             continue;
-        };
+        }
         parsed_any = true;
-        let key = &trimmed[..eq_pos];
-        // One predicate, not two. This arm carried its own copy of the substring
-        // match, so fixing only `is_sensitive_key` would have left `env` output
-        // redacting `passed=` while every other command stopped (#408).
-        if let Some(replacement) = redact_assignment(key, &trimmed[eq_pos + 1..]) {
-            redacted_count += 1;
-            out.push_str(key);
-            out.push('=');
-            out.push_str(&replacement);
+        // The same predicate the other path uses, which is what #408 and #486
+        // were each one half of. The whole-value form, because a line of `env`
+        // output is one assignment however many spaces its value holds.
+        if let Some((rewritten, count)) = redact_whole_value(trimmed) {
+            redacted_count += count;
+            out.push_str(&rewritten);
             out.push('\n');
         } else {
             out.push_str(trimmed);
@@ -1011,6 +1157,126 @@ mod tests {
     /// #408. `upper.contains(p)` made every one of these a credential and deleted
     /// its value, on every command's output rather than only on `env`. The one that
     /// surfaced it was a `make ci` timing line reading `passed=3208`.
+    /// #851. The value of an unquoted shell assignment ends at whitespace, and
+    /// what follows it is the command.
+    #[test]
+    fn a_shell_line_keeps_the_command_after_a_redacted_value() {
+        let input = "run: |\n  APP_ROOT=/tmp/x APP_LISTEN=tcp:127.0.0.1:7777 \\\n    APP_TOKEN=demo-token ./bin/app serve &\n  APP_TOKEN=demo-token APP_BACKEND=container \\\n    ./bin/app serve &\n  echo done\n";
+        let out = redact_sensitive_assignments(input).expect("two tokens are redacted");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                "[OMNI: 2 sensitive value(s) redacted]",
+                "run: |",
+                "  APP_ROOT=/tmp/x APP_LISTEN=tcp:127.0.0.1:7777 \\",
+                "    APP_TOKEN=[REDACTED] ./bin/app serve &",
+                "  APP_TOKEN=[REDACTED] APP_BACKEND=container \\",
+                "    ./bin/app serve &",
+                "  echo done",
+            ]
+        );
+    }
+
+    /// Only the first `=` on a line used to be inspected, so a credential behind
+    /// an ordinary assignment was delivered as printed.
+    #[test]
+    fn a_later_assignment_on_a_shell_line_is_redacted_too() {
+        let out = redact_sensitive_assignments("APP_ROOT=/tmp/x APP_TOKEN=demo-token ./bin/app\n")
+            .expect("the second assignment holds a credential");
+        assert!(!out.contains("demo-token"), "{out}");
+        assert!(
+            out.contains("APP_ROOT=/tmp/x APP_TOKEN=[REDACTED] ./bin/app"),
+            "{out}"
+        );
+    }
+
+    /// `env` prints one assignment per line and the value runs to the end of it,
+    /// so its distiller never splits one, whatever the line looks like.
+    #[test]
+    fn env_output_is_never_split_into_words() {
+        let out = distill_env_output("HOME=/root\nDB_PASSWORD=correct B=horse &\n");
+        assert!(out.contains("DB_PASSWORD=[REDACTED]"), "{out}");
+        assert!(!out.contains("horse"), "{out}");
+    }
+
+    /// Review of #865. A line the word rule will not split still has to hide a
+    /// credential that sits behind an ordinary assignment.
+    #[test]
+    fn a_later_credential_is_hidden_on_a_line_that_cannot_be_split() {
+        for line in [
+            "APP_ROOT=/tmp APP_TOKEN=abc12345 ./app a\\ b &",
+            "APP_ROOT=/tmp APP_TOKEN=\"abc12345 def\" ./app",
+        ] {
+            let out = redact_sensitive_assignments(line).expect("the token is a credential");
+            assert!(!out.contains("abc12345"), "{line} came back as {out}");
+            assert!(out.contains("APP_ROOT=/tmp APP_TOKEN="), "{out}");
+        }
+        // Not a count once the rest of the line is read as its value (#559).
+        assert_eq!(
+            redact_sensitive_assignments("name=\"x y\" pass=3 fail=0"),
+            None
+        );
+        // A log line does not open with an assignment and is not this rule's.
+        assert_eq!(
+            redact_sensitive_assignments("INFO done token=abc12345 user=bob"),
+            None
+        );
+    }
+
+    /// Found by replaying the recorded corpus: a status behind an ordinary
+    /// assignment is not a credential, and four digits still is.
+    #[test]
+    fn a_status_code_behind_another_assignment_is_delivered() {
+        assert_eq!(redact_sensitive_assignments("front=200 auth=302"), None);
+        assert_eq!(
+            redact_sensitive_assignments("  name=\"x y\" auth=302 ok"),
+            None
+        );
+        let out = redact_sensitive_assignments("APP_ROOT=/x auth=1234 ./a")
+            .expect("four digits is a credential");
+        assert!(!out.contains("1234"), "{out}");
+        // Review of #865: the exemption is the key `auth`, not any short number.
+        for line in [
+            "APP_ROOT=/tmp APP_TOKEN=123 ./app",
+            "A=1 DB_AUTH=302 B=2",
+            "x=\"a b\" API_KEY=77",
+        ] {
+            let out =
+                redact_sensitive_assignments(line).expect("a credential under a credential's name");
+            assert!(out.contains("[REDACTED]"), "{line} came back as {out}");
+        }
+        // The first assignment on a line is judged as it always was.
+        assert!(redact_sensitive_assignments("auth=302 front=200").is_some());
+    }
+
+    /// The word rule must not hand back half of a value that holds a space. A
+    /// bare word after the value could be a command or the rest of a passphrase,
+    /// and the direction of doubt in this file is to redact.
+    #[test]
+    fn a_value_followed_by_a_bare_word_is_still_redacted_whole() {
+        for line in [
+            "PASSWORD=correct horse battery",
+            "API_TOKEN=abc npm start",
+            // Review of #865: a path after the value proves nothing either.
+            "PASSWORD=correct /horse",
+            "API_TOKEN=abc ./run --fast",
+        ] {
+            let out = redact_sensitive_assignments(line).expect("a credential");
+            let body = out.lines().nth(1).expect("the redacted line");
+            assert!(body.ends_with("=[REDACTED]"), "{line} came back as {body}");
+        }
+        // A quote can hold whitespace, so a quoted line is never split into words.
+        // Split, this one reads as a token followed by a command, and `./b` is
+        // half of the value.
+        let out = redact_sensitive_assignments("API_TOKEN=\"a ./b\" &").expect("a credential");
+        assert!(!out.contains("./b"), "{out}");
+        // An escaped space belongs to the value, operator at the end or not.
+        let out =
+            redact_sensitive_assignments("API_TOKEN=abc\\ /suffix ./app &").expect("a credential");
+        assert!(!out.contains("/suffix"), "{out}");
+    }
+
     #[test]
     fn leaves_ordinary_words_that_merely_contain_a_pattern() {
         for key in [
