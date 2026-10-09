@@ -89,9 +89,10 @@ pasangan, workload enam perintah yang sama dengan hook menyala dan dengan
 | token output | 22.617 | 11.748 | +92,5% |
 | biaya tertagih | $4,26 | $4,78 | -11,0% |
 
-Baris output melawan OMNI. Model memakai token untuk membaca marker, yang tidak ia
-keluarkan untuk output mentah. Di sini output hanya 0,3% dari seluruh token dan
-tagihannya tetap turun. Pada workload yang sedikit lipatannya, biaya itu bisa menjadi
+Baris output melawan OMNI. Uji ini mengukur kenaikannya dan tidak menetapkan
+penyebabnya. Sesi dengan OMNI memuat 41 blok thinking, lawan 5, dan di situlah tempat
+pertama untuk melihat. Di sini output hanya 0,3% dari seluruh token dan tagihannya tetap
+turun. Pada workload yang sedikit lipatannya, biaya itu bisa menjadi
 sisi yang lebih besar.
 
 ```sh

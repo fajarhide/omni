@@ -83,9 +83,10 @@ six-command workload with the hook on and with `OMNI_PASSTHROUGH=1`, one machine
 | output tokens | 22,617 | 11,748 | +92.5% |
 | billed cost | $4.26 | $4.78 | -11.0% |
 
-The output row goes against OMNI. The model spends tokens reading markers that it does
-not spend on raw output. Here output is 0.3% of the tokens and the bill still falls. On
-a workload with little to fold, that cost could be the larger side.
+The output row goes against OMNI. The run measures the increase and does not establish
+its cause. The sessions with OMNI held 41 thinking blocks against 5, which is where to
+look first. Here output is 0.3% of the tokens and the bill still falls. On a workload
+with little to fold, that cost could be the larger side.
 
 ```sh
 python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json

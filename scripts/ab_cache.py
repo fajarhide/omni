@@ -15,6 +15,10 @@ It spends real tokens: about half a dollar a pair on a mid-size model.
 Run it from a clone of this repository, with OMNI installed for Claude Code. The
 workload reads two files twice each, because a workload with no repetition gives
 the ledger nothing to do and measures nothing about it.
+
+Both arms start the way a session starts for a user, so each resumes whatever
+session state OMNI kept. That is the same for both arms of a pair. `--fresh`
+switches it off for both, which isolates the tool-result rewrite from it.
 """
 
 import argparse
@@ -40,10 +44,15 @@ PROMPT = (
 TOKENS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
 
 
-def run_arm(pair, arm, model, timeout):
-    env = dict(os.environ)
+def run_arm(pair, arm, model, timeout, fresh):
+    # Set for the control and removed for the other arm, whatever the caller's
+    # shell holds: an inherited OMNI_PASSTHROUGH would switch both arms off and
+    # the run would still spend its tokens.
+    env = {k: v for k, v in os.environ.items() if k.upper() != "OMNI_PASSTHROUGH"}
     if arm == "off":
         env["OMNI_PASSTHROUGH"] = "1"
+    if fresh:
+        env["OMNI_FRESH"] = "1"
     cmd = ["claude", "-p", "--output-format", "json"] + (["--model", model] if model else []) + [PROMPT]
     started = time.time()
     try:
@@ -70,7 +79,7 @@ def run(args):
     arms = []
     for pair in range(1, args.pairs + 1):
         for arm in ("on", "off") if pair % 2 else ("off", "on"):
-            row = run_arm(pair, arm, args.model, args.timeout)
+            row = run_arm(pair, arm, args.model, args.timeout, args.fresh)
             if row:
                 arms.append(row)
             with open(args.out, "w") as fh:
@@ -100,9 +109,11 @@ def read_arm(path):
             if record.get("isSidechain") or not isinstance(message, dict):
                 continue
             # The host repeats `usage` on every record of a request.
+            # A record with no id cannot be matched to another, so it counts.
             request = record.get("requestId")
-            if isinstance(message.get("usage"), dict) and request not in seen:
-                seen.add(request)
+            if isinstance(message.get("usage"), dict) and (request is None or request not in seen):
+                if request is not None:
+                    seen.add(request)
                 row["requests"] += 1
                 for key in TOKENS:
                     row[key] += message["usage"].get(key) or 0
@@ -165,6 +176,8 @@ def main():
     runner.add_argument("--model", default=None, help="pin the model so the run can be repeated")
     runner.add_argument("--out", default="arms.json")
     runner.add_argument("--timeout", type=int, default=600)
+    runner.add_argument("--fresh", action="store_true",
+                        help="set OMNI_FRESH=1 on both arms, so no arm resumes state an earlier one left")
     runner.set_defaults(func=run)
     reporter = sub.add_parser("report", help="read each arm's transcript and print the paired table")
     reporter.add_argument("arms")
