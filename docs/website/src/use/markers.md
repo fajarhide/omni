@@ -123,6 +123,9 @@ the issuer writes it: `sk-ant-`, `ghp_` and its siblings, `github_pat_`, `AKIA`,
 its siblings. A shorter string with the same prefix, such as `sk-ant-abc123` in a document,
 is left alone.
 
+Redaction runs on output OMNI rewrites. A command that failed is handed back untouched,
+and so is a payload read as structured, so a credential in either is delivered as printed.
+
 The name decides, matched per underscore-separated word so `PASSED` and `AUTHORS` are not
 caught: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`, `CREDENTIAL`,
 `CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, `MONGO_URL`, `CLIENT_SECRET`, `ACCESS_KEY`,

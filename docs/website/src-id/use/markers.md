@@ -130,6 +130,10 @@ panjang yang ditulis penerbitnya: `sk-ant-`, `ghp_` dan kerabatnya, `github_pat_
 `xoxb-` dan kerabatnya. String yang lebih pendek dengan prefiks yang sama, seperti
 `sk-ant-abc123` di sebuah dokumen, dibiarkan.
 
+Redaksi berjalan pada keluaran yang ditulis ulang OMNI. Perintah yang gagal dikembalikan
+tanpa disentuh, begitu juga payload yang terbaca sebagai terstruktur, jadi kredensial di
+dalam keduanya terkirim apa adanya.
+
 Namanya yang menentukan, dicocokkan per kata yang dipisah garis bawah sehingga `PASSED` dan
 `AUTHORS` tidak ikut: `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `PASS`, `AUTH`, `CREDS`,
 `CREDENTIAL`, `CREDENTIALS`, `DATABASE_URL`, `REDIS_URL`, `MONGO_URL`, `CLIENT_SECRET`,
