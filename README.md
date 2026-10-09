@@ -369,6 +369,13 @@ without it. What remains is the Rust distillers and the ledger, both compiled in
 set that runs is the set the tests cover. If a tool needs handling, open an issue and it
 ships in the binary for everyone.
 
+**Does it break the prompt cache?**
+OMNI rewrites only the newest tool result. Everything before it stays byte for byte, which
+is what the cache matches on. In a paired run on Claude Code with omni 0.7.10 (20 pairs,
+one six-command workload, one machine), sessions with OMNI wrote 18.1% fewer cache tokens
+and were billed 11.0% less. Output tokens rose 92.5%. The run measures that
+and not its cause. Run it yourself: `python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json`, then `python3 scripts/ab_cache.py report arms.json`.
+
 **How do I get back something OMNI folded?**
 `omni retrieve <handle>`, where the handle is the 16 characters inside the marker. It works
 on every host, with or without MCP. Agents that have the MCP server wired can call

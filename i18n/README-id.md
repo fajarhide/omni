@@ -251,6 +251,9 @@ Ya, terukur, dan biayanya tumbuh bersama riwayat Anda. Pipeline distilasinya sen
 **Bisakah saya menambahkan filter sendiri?**  
 Tidak, dan itu disengaja sejak 0.7.0. Filter dikompilasi ke dalam binary, jadi yang berjalan adalah yang diuji, dan tidak ada file di disk yang bisa mengubah apa yang dilihat agent Anda. Kalau sebuah tool butuh signal, buka issue dan filternya ikut terkirim di binary untuk semua orang.
 
+**Apakah ini merusak prompt cache?**
+OMNI hanya menulis ulang hasil tool yang paling baru. Semua yang ada sebelumnya tetap sama byte demi byte, dan itulah yang dicocokkan cache. Dalam uji berpasangan di Claude Code dengan omni 0.7.10 (20 pasangan, satu workload enam perintah, satu mesin), sesi dengan OMNI menulis 18,1% lebih sedikit token cache dan ditagih 11,0% lebih rendah. Token output naik 92,5%. Uji ini mengukur kenaikannya, bukan penyebabnya. Jalankan sendiri: `python3 scripts/ab_cache.py run --pairs 20 --model sonnet --out arms.json`, lalu `python3 scripts/ab_cache.py report arms.json`.
+
 **Bagaimana mengambil kembali sesuatu yang dilipat OMNI?**
 `omni retrieve <handle>`, dengan handle adalah 16 karakter di dalam marker. Ini jalan di semua host, dengan atau tanpa MCP.
 
